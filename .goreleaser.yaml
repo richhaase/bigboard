@@ -1,0 +1,139 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: bigboard
+    main: ./cmd/bigboard
+    binary: bigboard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+archives:
+  - id: bigboard-archive
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^style:'
+      - '^refactor:'
+      - '^perf:'
+      - '^ci:'
+  groups:
+    - title: Features
+      regexp: '^feat'
+    - title: Bug Fixes
+      regexp: '^fix'
+    - title: Security
+      regexp: '^sec'
+    - title: Breaking Changes
+      regexp: '^.*!:'
+    - title: Other Changes
+
+release:
+  github:
+    owner: richhaase
+    name: bigboard
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    ## Big Board v{{.Version}}
+
+    Cyberpunk-themed TUI for assessing contributor volumes across git repositories.
+  footer: |
+    ---
+
+    **Full Changelog**: https://github.com/richhaase/bigboard/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ## Installation
+
+    ### Homebrew (Recommended)
+    ```bash
+    brew install --cask richhaase/tap/bigboard
+    ```
+
+    ### Direct Download
+    Download the appropriate archive from the assets below and extract the `bigboard` binary.
+
+    ### From Source
+    ```bash
+    go install github.com/richhaase/bigboard/cmd/bigboard@v{{ .Version }}
+    ```
+
+homebrew_casks:
+  - name: bigboard
+    repository:
+      owner: richhaase
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/richhaase/bigboard"
+    description: "Cyberpunk-themed TUI for assessing contributor volumes across git repositories"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Cask update for {{ .ProjectName }} version {{ .Tag }}"
+    caveats: |
+      Big Board has been installed! Get started with:
+        bigboard --help
+        bigboard ~/src/
+
+      Documentation: https://github.com/richhaase/bigboard#readme
+
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "QUILL_SIGN_P12" }}'
+      ids:
+        - bigboard
+      sign:
+        certificate: "{{.Env.QUILL_SIGN_P12}}"
+        password: "{{.Env.QUILL_SIGN_PASSWORD}}"
+      notarize:
+        issuer_id: "{{.Env.QUILL_NOTARY_ISSUER}}"
+        key_id: "{{.Env.QUILL_NOTARY_KEY_ID}}"
+        key: "{{.Env.QUILL_NOTARY_KEY}}"
+        wait: true
+        timeout: 20m
+
+announce:
+  skip: true
