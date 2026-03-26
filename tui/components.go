@@ -59,16 +59,67 @@ func RenderTimePicker(activeIdx int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// RenderRepoTags renders repo tag pills with focus styling.
-func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool) string {
-	parts := make([]string, len(repos))
+// RenderRepoTags renders repo tag pills constrained to maxWidth.
+// Scrolls horizontally to keep the focused tag visible.
+func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int) string {
+	if len(repos) == 0 {
+		return ""
+	}
+
+	// Pre-render all tags to measure widths
+	rendered := make([]string, len(repos))
+	widths := make([]int, len(repos))
 	for i, r := range repos {
 		if hasFocus && i == focusedIdx {
-			parts[i] = StyleRepoTagActive.Render(r)
+			rendered[i] = StyleRepoTagActive.Render(r)
 		} else {
-			parts[i] = StyleRepoTag.Render(r)
+			rendered[i] = StyleRepoTag.Render(r)
+		}
+		widths[i] = lipgloss.Width(rendered[i])
+	}
+
+	// Find a window of tags that fits within maxWidth, centered on focusedIdx
+	start := focusedIdx
+	end := focusedIdx + 1
+	used := widths[focusedIdx]
+
+	// Expand window outward from focused tag
+	for {
+		expanded := false
+		if start > 0 && used+widths[start-1] <= maxWidth {
+			start--
+			used += widths[start]
+			expanded = true
+		}
+		if end < len(repos) && used+widths[end] <= maxWidth {
+			used += widths[end]
+			end++
+			expanded = true
+		}
+		if !expanded {
+			break
 		}
 	}
+
+	var parts []string
+
+	// Left overflow indicator
+	if start > 0 {
+		indicator := StyleDimWhite.Render(fmt.Sprintf("◂ %d ", start))
+		parts = append(parts, indicator)
+	}
+
+	for i := start; i < end; i++ {
+		parts = append(parts, rendered[i])
+	}
+
+	// Right overflow indicator
+	if end < len(repos) {
+		remaining := len(repos) - end
+		indicator := StyleDimWhite.Render(fmt.Sprintf(" %d ▸", remaining))
+		parts = append(parts, indicator)
+	}
+
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 

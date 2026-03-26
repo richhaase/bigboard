@@ -275,7 +275,7 @@ func (m Model) renderAggregateView() string {
 
 	// Repo tags
 	hasFocus := m.focus == FocusRepos
-	sections = append(sections, RenderRepoTags(m.repoNames, m.selectedRepo, hasFocus))
+	sections = append(sections, RenderRepoTags(m.repoNames, m.selectedRepo, hasFocus, m.width))
 
 	// Aggregate table
 	sections = append(sections, AggregateView{}.RenderTable(m.authors, m.selectedRow, m.sortField, m.width))
