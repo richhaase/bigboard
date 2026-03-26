@@ -61,6 +61,7 @@ func RenderTimePicker(activeIdx int) string {
 
 // RenderRepoTags renders repo tag pills constrained to maxWidth.
 // Scrolls horizontally to keep the focused tag visible.
+// Always shows overflow indicators when there are hidden repos.
 func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int) string {
 	if len(repos) == 0 {
 		return ""
@@ -78,20 +79,41 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 		widths[i] = lipgloss.Width(rendered[i])
 	}
 
-	// Find a window of tags that fits within maxWidth, centered on focusedIdx
+	// Reserve space for overflow indicators on both sides
+	leftIndicatorW := 0
+	rightIndicatorW := 0
+	// Measure worst-case indicator widths so we always have room
+	sampleLeft := lipgloss.Width(StyleCyan.Render(fmt.Sprintf("◂ %d  ", len(repos))))
+	sampleRight := lipgloss.Width(StyleCyan.Render(fmt.Sprintf("  %d ▸", len(repos))))
+
+	// First pass: see if everything fits
+	totalWidth := 0
+	for _, w := range widths {
+		totalWidth += w
+	}
+	if totalWidth <= maxWidth {
+		// Everything fits — no indicators needed
+		return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+	}
+
+	// We need scrolling — reserve indicator space
+	leftIndicatorW = sampleLeft
+	rightIndicatorW = sampleRight
+	availableWidth := maxWidth - leftIndicatorW - rightIndicatorW
+
+	// Find a window of tags that fits, centered on focusedIdx
 	start := focusedIdx
 	end := focusedIdx + 1
 	used := widths[focusedIdx]
 
-	// Expand window outward from focused tag
 	for {
 		expanded := false
-		if start > 0 && used+widths[start-1] <= maxWidth {
+		if start > 0 && used+widths[start-1] <= availableWidth {
 			start--
 			used += widths[start]
 			expanded = true
 		}
-		if end < len(repos) && used+widths[end] <= maxWidth {
+		if end < len(repos) && used+widths[end] <= availableWidth {
 			used += widths[end]
 			end++
 			expanded = true
@@ -103,21 +125,24 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 
 	var parts []string
 
-	// Left overflow indicator
+	// Left indicator — always shown when scrolling is active
 	if start > 0 {
-		indicator := StyleDimWhite.Render(fmt.Sprintf("◂ %d ", start))
-		parts = append(parts, indicator)
+		parts = append(parts, StyleCyan.Render(fmt.Sprintf("◂ %d  ", start)))
+	} else {
+		// Pad to keep alignment stable
+		parts = append(parts, strings.Repeat(" ", leftIndicatorW))
 	}
 
 	for i := start; i < end; i++ {
 		parts = append(parts, rendered[i])
 	}
 
-	// Right overflow indicator
+	// Right indicator — always shown when scrolling is active
 	if end < len(repos) {
 		remaining := len(repos) - end
-		indicator := StyleDimWhite.Render(fmt.Sprintf(" %d ▸", remaining))
-		parts = append(parts, indicator)
+		parts = append(parts, StyleCyan.Render(fmt.Sprintf("  %d ▸", remaining)))
+	} else {
+		parts = append(parts, strings.Repeat(" ", rightIndicatorW))
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
