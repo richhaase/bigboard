@@ -1,0 +1,298 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"sync"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/rdh/bigboard/git"
+	"github.com/rdh/bigboard/stats"
+)
+
+// ViewMode controls whether we show aggregate or a single repo drill-down.
+type ViewMode int
+
+const (
+	ViewAggregate ViewMode = iota
+	ViewRepo
+)
+
+// FocusArea controls which UI region has keyboard focus.
+type FocusArea int
+
+const (
+	FocusTable FocusArea = iota
+	FocusRepos
+)
+
+// Model is the root Bubble Tea model.
+type Model struct {
+	allRecords   []git.CommitRecord
+	authors      []stats.AuthorStats
+	repoNames    []string
+	viewMode     ViewMode
+	focus        FocusArea
+	selectedRow  int
+	selectedRepo int
+	activeRepo   string
+	sortField    stats.SortField
+	timeIdx      int
+	width        int
+	height       int
+	loading      bool
+	err          error
+}
+
+// DataLoadedMsg is sent after background data collection completes.
+// Exported so main.go can construct it.
+type DataLoadedMsg struct {
+	Records   []git.CommitRecord
+	RepoNames []string
+	Err       error
+}
+
+// NewModel creates an initial Model ready to display the loading state.
+func NewModel(repoPaths []string, initialSort stats.SortField) Model {
+	return Model{
+		sortField: initialSort,
+		timeIdx:   3, // ALL
+		loading:   true,
+	}
+}
+
+// LoadDataCmd returns a Cmd that concurrently collects commits from all repos.
+func LoadDataCmd(repoPaths []string) tea.Cmd {
+	return func() tea.Msg {
+		type result struct {
+			records  []git.CommitRecord
+			repoName string
+		}
+
+		ch := make(chan result, len(repoPaths))
+		var wg sync.WaitGroup
+
+		for _, path := range repoPaths {
+			wg.Add(1)
+			go func(p string) {
+				defer wg.Done()
+				ref := git.DetectDefaultBranch(p)
+				records, err := git.CollectCommits(p, ref)
+				if err != nil {
+					ch <- result{}
+					return
+				}
+				repoName := ""
+				if len(records) > 0 {
+					repoName = records[0].RepoName
+				}
+				ch <- result{records: records, repoName: repoName}
+			}(path)
+		}
+
+		wg.Wait()
+		close(ch)
+
+		var allRecords []git.CommitRecord
+		repoSet := make(map[string]struct{})
+		var repoNames []string
+
+		for r := range ch {
+			allRecords = append(allRecords, r.records...)
+			if r.repoName != "" {
+				if _, seen := repoSet[r.repoName]; !seen {
+					repoSet[r.repoName] = struct{}{}
+					repoNames = append(repoNames, r.repoName)
+				}
+			}
+		}
+
+		return DataLoadedMsg{
+			Records:   allRecords,
+			RepoNames: repoNames,
+		}
+	}
+}
+
+// Init satisfies tea.Model; data loading is kicked off by the caller via Cmd.
+func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles all incoming messages.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+	case DataLoadedMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			m.loading = false
+			return m, nil
+		}
+		m.allRecords = msg.Records
+		m.repoNames = msg.RepoNames
+		m.loading = false
+		m.recomputeAuthors()
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	return m, nil
+}
+
+// handleKey processes keyboard input.
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "esc":
+		if m.viewMode == ViewRepo {
+			m.viewMode = ViewAggregate
+			m.selectedRow = 0
+		} else {
+			return m, tea.Quit
+		}
+
+	case "up", "k":
+		if m.focus == FocusTable && m.selectedRow > 0 {
+			m.selectedRow--
+		}
+
+	case "down", "j":
+		if m.focus == FocusTable {
+			maxRow := len(m.authors) - 1
+			if maxRow > 19 {
+				maxRow = 19
+			}
+			if m.selectedRow < maxRow {
+				m.selectedRow++
+			}
+		}
+
+	case "left", "h":
+		if m.focus == FocusRepos {
+			if m.selectedRepo > 0 {
+				m.selectedRepo--
+			}
+		} else {
+			if m.timeIdx > 0 {
+				m.timeIdx--
+				m.recomputeAuthors()
+			}
+		}
+
+	case "right", "l":
+		if m.focus == FocusRepos {
+			if m.selectedRepo < len(m.repoNames)-1 {
+				m.selectedRepo++
+			}
+		} else {
+			if m.timeIdx < len(TimePresets)-1 {
+				m.timeIdx++
+				m.recomputeAuthors()
+			}
+		}
+
+	case "s":
+		m.sortField = (m.sortField + 1) % 5
+		stats.Sort(m.authors, m.sortField)
+		m.selectedRow = 0
+
+	case "tab":
+		if m.viewMode == ViewAggregate {
+			if m.focus == FocusTable {
+				m.focus = FocusRepos
+			} else {
+				m.focus = FocusTable
+			}
+		}
+
+	case "enter":
+		if m.viewMode == ViewAggregate && m.focus == FocusRepos && len(m.repoNames) > 0 {
+			m.activeRepo = m.repoNames[m.selectedRepo]
+			m.viewMode = ViewRepo
+			m.selectedRow = 0
+		}
+	}
+
+	return m, nil
+}
+
+// recomputeAuthors re-filters and re-aggregates from allRecords.
+func (m *Model) recomputeAuthors() {
+	filtered := stats.FilterByTime(m.allRecords, TimePresets[m.timeIdx].Duration)
+	m.authors = stats.Aggregate(filtered)
+	stats.Sort(m.authors, m.sortField)
+}
+
+// View renders the current UI state.
+func (m Model) View() string {
+	if m.loading {
+		title := StyleTitle.Render("⟐ BIG BOARD ⟐")
+		scanning := StyleSubtitle.Render("// SCANNING REPOSITORIES...")
+		return lipgloss.JoinVertical(lipgloss.Left, title, scanning)
+	}
+
+	if m.err != nil {
+		return lipgloss.NewStyle().Foreground(ColorMagenta).Render(
+			fmt.Sprintf("error: %v", m.err),
+		)
+	}
+
+	if m.viewMode == ViewRepo {
+		return m.renderRepoView()
+	}
+
+	return m.renderAggregateView()
+}
+
+// renderAggregateView composes the full aggregate screen.
+func (m Model) renderAggregateView() string {
+	var sections []string
+
+	// Header
+	sections = append(sections, RenderHeader(m.width))
+
+	// Time picker + repo count on the same line
+	timePicker := RenderTimePicker(m.timeIdx)
+	repoCount := StyleSubtitle.Render(fmt.Sprintf("  %d repos", len(m.repoNames)))
+	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, timePicker, repoCount))
+
+	// Stat boxes
+	var totalCommits, totalAdded, totalRemoved int
+	for _, a := range m.authors {
+		totalCommits += a.Commits
+		totalAdded += a.Added
+		totalRemoved += a.Removed
+	}
+	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved))
+
+	// Repo tags
+	hasFocus := m.focus == FocusRepos
+	sections = append(sections, RenderRepoTags(m.repoNames, m.selectedRepo, hasFocus))
+
+	// Aggregate table
+	sections = append(sections, AggregateView{}.RenderTable(m.authors, m.selectedRow, m.sortField, m.width))
+
+	// Help bar
+	sections = append(sections, RenderHelpBar())
+
+	// Footer
+	sections = append(sections, RenderFooter(len(m.repoNames), m.width))
+
+	return strings.Join(sections, "\n")
+}
+
+// renderRepoView composes the repo drill-down screen.
+func (m Model) renderRepoView() string {
+	table := RepoView{}.RenderRepoTable(m.activeRepo, m.authors, m.selectedRow, m.sortField, m.width)
+	helpBar := RenderHelpBar()
+	footer := RenderFooter(len(m.repoNames), m.width)
+	return strings.Join([]string{table, helpBar, footer}, "\n")
+}
