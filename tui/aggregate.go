@@ -38,7 +38,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 	colAdded := "ADDED"
 	colRemoved := "REMOVED"
 	colNet := "NET"
-	colImpact := "IMPACT"
+	colImpact := "+/- IMPACT"
 
 	switch sortField {
 	case stats.SortByTotal:
@@ -83,7 +83,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		added := FormatNumber(a.Added)
 		removed := FormatNumber(a.Removed)
 		net := FormatNumber(a.Net)
-		bar := RenderImpactBar(a.TotalChange, maxTotal, barW)
+		bar := RenderImpactBar(a.Added, a.Removed, maxTotal, barW)
 
 		// Cursor indicator for selected row
 		cursor := "  "

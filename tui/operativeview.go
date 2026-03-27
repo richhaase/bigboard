@@ -112,7 +112,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Added)))
 		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Removed)))
 		net := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Net)))
-		bar := RenderImpactBar(e.rc.TotalChange, maxTotal, barW)
+		bar := RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW)
 
 		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
 

@@ -140,14 +140,16 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// RenderImpactBar renders a gradient bar: cyan → cyan-mid → magenta-dim → magenta.
-// Uses block characters for a smooth gradient feel.
-func RenderImpactBar(value, maxValue, barWidth int) string {
-	if value <= 0 || maxValue <= 0 {
+// RenderImpactBar renders a bar showing added (cyan) vs removed (magenta) proportionally.
+// Total bar width represents totalChange relative to maxValue.
+// Within the bar, cyan portion = added, magenta portion = removed.
+func RenderImpactBar(added, removed, maxValue, barWidth int) string {
+	total := added + removed
+	if total <= 0 || maxValue <= 0 {
 		return strings.Repeat(" ", barWidth)
 	}
 
-	filled := value * barWidth / maxValue
+	filled := total * barWidth / maxValue
 	if filled < 1 {
 		filled = 1
 	}
@@ -155,20 +157,22 @@ func RenderImpactBar(value, maxValue, barWidth int) string {
 		filled = barWidth
 	}
 
-	// 4-stop gradient
+	// Split filled portion proportionally between added and removed
+	addedFill := filled
+	if total > 0 {
+		addedFill = added * filled / total
+	}
+	removedFill := filled - addedFill
+	if removedFill < 0 {
+		removedFill = 0
+	}
+
 	var sb strings.Builder
-	for i := 0; i < filled; i++ {
-		pos := float64(i) / float64(max(filled-1, 1))
-		switch {
-		case pos < 0.3:
-			sb.WriteString(StyleBarCyan.Render("█"))
-		case pos < 0.55:
-			sb.WriteString(StyleBarCyanMid.Render("█"))
-		case pos < 0.8:
-			sb.WriteString(StyleBarMagentaDm.Render("█"))
-		default:
-			sb.WriteString(StyleBarMagenta.Render("█"))
-		}
+	for i := 0; i < addedFill; i++ {
+		sb.WriteString(StyleBarCyan.Render("█"))
+	}
+	for i := 0; i < removedFill; i++ {
+		sb.WriteString(StyleBarMagenta.Render("█"))
 	}
 	for i := filled; i < barWidth; i++ {
 		sb.WriteString(" ")

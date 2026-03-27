@@ -6,20 +6,20 @@ import (
 )
 
 func TestRenderImpactBar(t *testing.T) {
-	// Max value produces blocks
-	result := RenderImpactBar(100, 100, 20)
+	// Full bar produces blocks
+	result := RenderImpactBar(80, 20, 100, 20)
 	if !strings.Contains(result, "█") {
 		t.Errorf("expected blocks in full bar, got: %q", result)
 	}
 
 	// Zero value has no blocks
-	empty := RenderImpactBar(0, 100, 20)
+	empty := RenderImpactBar(0, 0, 100, 20)
 	if strings.Contains(empty, "█") {
 		t.Errorf("expected no blocks for zero value, got: %q", empty)
 	}
 
-	// Positive value has at least one block (min 1)
-	small := RenderImpactBar(1, 1000000, 20)
+	// Small positive value has at least one block
+	small := RenderImpactBar(1, 0, 1000000, 20)
 	if !strings.Contains(small, "█") {
 		t.Errorf("expected at least one block for small positive value, got: %q", small)
 	}
