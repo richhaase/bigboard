@@ -59,87 +59,6 @@ func RenderTimePicker(activeIdx int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// RenderRepoTags renders repo tag pills constrained to maxWidth.
-// Scrolls horizontally to keep the focused tag visible.
-// Always shows overflow indicators when there are hidden repos.
-func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int) string {
-	if len(repos) == 0 {
-		return ""
-	}
-
-	// Pre-render all tags to measure widths
-	rendered := make([]string, len(repos))
-	widths := make([]int, len(repos))
-	for i, r := range repos {
-		if hasFocus && i == focusedIdx {
-			rendered[i] = StyleRepoTagActive.Render(r)
-		} else {
-			rendered[i] = StyleRepoTag.Render(r)
-		}
-		widths[i] = lipgloss.Width(rendered[i])
-	}
-
-	// First pass: see if everything fits without indicators
-	totalWidth := 0
-	for _, w := range widths {
-		totalWidth += w
-	}
-	if totalWidth <= maxWidth {
-		return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
-	}
-
-	// We need scrolling — use fixed-width indicator zones
-	const indicatorW = 6 // e.g. "◂ 12 " or " 12 ▸"
-	availableWidth := maxWidth - (indicatorW * 2)
-
-	// Find a window of tags that fits, centered on focusedIdx
-	start := focusedIdx
-	end := focusedIdx + 1
-	used := widths[focusedIdx]
-
-	for {
-		expanded := false
-		if start > 0 && used+widths[start-1] <= availableWidth {
-			start--
-			used += widths[start]
-			expanded = true
-		}
-		if end < len(repos) && used+widths[end] <= availableWidth {
-			used += widths[end]
-			end++
-			expanded = true
-		}
-		if !expanded {
-			break
-		}
-	}
-
-	// Render fixed-width indicators using lipgloss.Width for stable layout
-	leftStyle := lipgloss.NewStyle().Width(indicatorW).Foreground(ColorCyan)
-	rightStyle := lipgloss.NewStyle().Width(indicatorW).Align(lipgloss.Right).Foreground(ColorCyan)
-
-	var parts []string
-
-	if start > 0 {
-		parts = append(parts, leftStyle.Render(fmt.Sprintf("◂ %d", start)))
-	} else {
-		parts = append(parts, leftStyle.Render(""))
-	}
-
-	for i := start; i < end; i++ {
-		parts = append(parts, rendered[i])
-	}
-
-	if end < len(repos) {
-		remaining := len(repos) - end
-		parts = append(parts, rightStyle.Render(fmt.Sprintf("%d ▸", remaining)))
-	} else {
-		parts = append(parts, rightStyle.Render(""))
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
-}
-
 // RenderImpactBar renders a bar showing added (cyan) vs removed (magenta) proportionally.
 // Total bar width represents totalChange relative to maxValue.
 // Within the bar, cyan portion = added, magenta portion = removed.
@@ -196,8 +115,7 @@ func RenderFooter(repoCount int, width int) string {
 
 // HelpContext describes the current UI state for context-aware help.
 type HelpContext struct {
-	View  string // "aggregate", "repo", "operative"
-	Focus string // "table", "repos"
+	View string // "aggregate", "operative"
 }
 
 // RenderHelpBar renders context-aware key binding hints.
@@ -211,30 +129,12 @@ func RenderHelpBar(ctx HelpContext) string {
 			{"[←→]", "time"},
 			{"[q]", "uit"},
 		}
-	case "repo":
+	default: // aggregate
 		bindings = []struct{ key, desc string }{
-			{"[esc]", "back"},
+			{"[q]", "uit"},
 			{"[s]", "ort"},
 			{"[↵]", "detail"},
 			{"[←→]", "time"},
-			{"[q]", "uit"},
-		}
-	default: // aggregate
-		if ctx.Focus == "repos" {
-			bindings = []struct{ key, desc string }{
-				{"[q]", "uit"},
-				{"[↵]", "drill"},
-				{"[←→]", "scroll"},
-				{"[tab]", "table"},
-			}
-		} else {
-			bindings = []struct{ key, desc string }{
-				{"[q]", "uit"},
-				{"[s]", "ort"},
-				{"[↵]", "detail"},
-				{"[←→]", "time"},
-				{"[tab]", "repos"},
-			}
 		}
 	}
 

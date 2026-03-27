@@ -11,40 +11,28 @@ import (
 	"github.com/rdh/bigboard/stats"
 )
 
-// ViewMode controls whether we show aggregate or a single repo drill-down.
+// ViewMode controls which screen is displayed.
 type ViewMode int
 
 const (
 	ViewAggregate ViewMode = iota
-	ViewRepo
 	ViewOperative
-)
-
-// FocusArea controls which UI region has keyboard focus.
-type FocusArea int
-
-const (
-	FocusTable FocusArea = iota
-	FocusRepos
 )
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	allRecords   []git.CommitRecord
-	authors      []stats.AuthorStats
-	repoNames    []string
-	viewMode     ViewMode
-	focus        FocusArea
-	selectedRow  int
-	selectedRepo int
-	activeRepo      string
+	allRecords      []git.CommitRecord
+	authors         []stats.AuthorStats
+	repoNames       []string
+	viewMode        ViewMode
+	selectedRow     int
 	activeOperative string
-	sortField    stats.SortField
-	timeIdx      int
-	width        int
-	height       int
-	loading      bool
-	err          error
+	sortField       stats.SortField
+	timeIdx         int
+	width           int
+	height          int
+	loading         bool
+	err             error
 }
 
 // DataLoadedMsg is sent after background data collection completes.
@@ -154,77 +142,48 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
-		switch m.viewMode {
-		case ViewOperative:
+		if m.viewMode == ViewOperative {
 			m.viewMode = ViewAggregate
 			m.activeOperative = ""
-		case ViewRepo:
-			m.viewMode = ViewAggregate
-			m.selectedRow = 0
-		default:
+		} else {
 			return m, tea.Quit
 		}
 
 	case "up", "k":
-		if m.focus == FocusTable && m.selectedRow > 0 {
+		if m.selectedRow > 0 {
 			m.selectedRow--
 		}
 
 	case "down", "j":
-		if m.focus == FocusTable {
-			maxRow := len(m.authors) - 1
-			if maxRow > 19 {
-				maxRow = 19
-			}
-			if m.selectedRow < maxRow {
-				m.selectedRow++
-			}
+		maxRow := len(m.authors) - 1
+		if maxRow > 19 {
+			maxRow = 19
+		}
+		if m.selectedRow < maxRow {
+			m.selectedRow++
 		}
 
 	case "left", "h":
-		if m.focus == FocusRepos {
-			if m.selectedRepo > 0 {
-				m.selectedRepo--
-			}
-		} else {
-			if m.timeIdx > 0 {
-				m.timeIdx--
-				m.recomputeAuthors()
-			}
+		if m.timeIdx > 0 {
+			m.timeIdx--
+			m.recomputeAuthors()
 		}
 
 	case "right", "l":
-		if m.focus == FocusRepos {
-			if m.selectedRepo < len(m.repoNames)-1 {
-				m.selectedRepo++
-			}
-		} else {
-			if m.timeIdx < len(TimePresets)-1 {
-				m.timeIdx++
-				m.recomputeAuthors()
-			}
+		if m.timeIdx < len(TimePresets)-1 {
+			m.timeIdx++
+			m.recomputeAuthors()
 		}
 
 	case "s":
-		m.sortField = (m.sortField + 1) % 5
-		stats.Sort(m.authors, m.sortField)
-		m.selectedRow = 0
-
-	case "tab":
 		if m.viewMode == ViewAggregate {
-			if m.focus == FocusTable {
-				m.focus = FocusRepos
-			} else {
-				m.focus = FocusTable
-			}
+			m.sortField = (m.sortField + 1) % 5
+			stats.Sort(m.authors, m.sortField)
+			m.selectedRow = 0
 		}
 
 	case "enter":
-		if m.focus == FocusRepos && m.viewMode == ViewAggregate && len(m.repoNames) > 0 {
-			m.activeRepo = m.repoNames[m.selectedRepo]
-			m.viewMode = ViewRepo
-			m.selectedRow = 0
-		} else if m.focus == FocusTable && m.selectedRow < len(m.authors) {
+		if m.viewMode == ViewAggregate && m.selectedRow < len(m.authors) {
 			m.activeOperative = m.authors[m.selectedRow].Name
 			m.viewMode = ViewOperative
 		}
@@ -254,14 +213,11 @@ func (m Model) View() string {
 		)
 	}
 
-	switch m.viewMode {
-	case ViewOperative:
+	if m.viewMode == ViewOperative {
 		return m.renderOperativeView()
-	case ViewRepo:
-		return m.renderRepoView()
-	default:
-		return m.renderAggregateView()
 	}
+
+	return m.renderAggregateView()
 }
 
 // renderAggregateView composes the full aggregate screen.
@@ -285,19 +241,11 @@ func (m Model) renderAggregateView() string {
 	}
 	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved))
 
-	// Repo tags
-	hasFocus := m.focus == FocusRepos
-	sections = append(sections, RenderRepoTags(m.repoNames, m.selectedRepo, hasFocus, m.width))
-
 	// Aggregate table
 	sections = append(sections, AggregateView{}.RenderTable(m.authors, m.selectedRow, m.sortField, m.width))
 
 	// Help bar
-	focusStr := "table"
-	if m.focus == FocusRepos {
-		focusStr = "repos"
-	}
-	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Focus: focusStr}))
+	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate"}))
 
 	// Footer
 	sections = append(sections, RenderFooter(len(m.repoNames), m.width))
@@ -326,12 +274,4 @@ func (m Model) renderOperativeView() string {
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
 	footer := RenderFooter(len(m.repoNames), m.width)
 	return strings.Join([]string{timePicker, detail, "", helpBar, footer}, "\n")
-}
-
-// renderRepoView composes the repo drill-down screen.
-func (m Model) renderRepoView() string {
-	table := RepoView{}.RenderRepoTable(m.activeRepo, m.authors, m.selectedRow, m.sortField, m.width)
-	helpBar := RenderHelpBar(HelpContext{View: "repo"})
-	footer := RenderFooter(len(m.repoNames), m.width)
-	return strings.Join([]string{table, helpBar, footer}, "\n")
 }
