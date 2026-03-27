@@ -47,7 +47,7 @@ type DataLoadedMsg struct {
 func NewModel(repoPaths []string, initialSort stats.SortField) Model {
 	return Model{
 		sortField: initialSort,
-		timeIdx:   3, // ALL
+		timeIdx:   len(TimePresets) - 1, // ALL
 		loading:   true,
 	}
 }

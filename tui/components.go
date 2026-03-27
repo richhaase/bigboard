@@ -15,6 +15,9 @@ type TimePreset struct {
 }
 
 var TimePresets = []TimePreset{
+	{Label: "1d", Duration: 24 * time.Hour},
+	{Label: "7d", Duration: 7 * 24 * time.Hour},
+	{Label: "14d", Duration: 14 * 24 * time.Hour},
 	{Label: "30d", Duration: 30 * 24 * time.Hour},
 	{Label: "90d", Duration: 90 * 24 * time.Hour},
 	{Label: "1y", Duration: 365 * 24 * time.Hour},
