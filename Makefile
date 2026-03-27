@@ -5,7 +5,7 @@
 help:
 	@echo "Available targets:"
 	@echo "  build        - Build the bigboard binary with version information"
-	@echo "  install      - Build and install bigboard to ~/.bin"
+	@echo "  install      - Install bigboard to GOBIN/GOPATH"
 	@echo "  test         - Run all unit tests"
 	@echo "  test-coverage - Run tests with coverage"
 	@echo "  fmt          - Format Go source code"
@@ -28,10 +28,13 @@ build:
 	fi; \
 	echo "Built bigboard binary to bin/ (version: $$VERSION)"
 
-install: build
-	@echo "Installing bigboard to ~/.bin..."
-	@cp bin/bigboard ~/.bin/bigboard
-	@echo "Installed bigboard to ~/.bin/bigboard"
+install:
+	@echo "Installing bigboard..."
+	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "none"); \
+	DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+	go install -ldflags "-X main.version=$$VERSION -X main.commit=$$COMMIT -X main.date=$$DATE" ./cmd/bigboard
+	@echo "Installed bigboard to $$(go env GOPATH)/bin/bigboard"
 
 test:
 	@echo "Running unit tests..."
