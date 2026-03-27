@@ -82,4 +82,5 @@ var (
 
 	StyleDimWhite = lipgloss.NewStyle().Foreground(ColorDimWhite)
 	StyleCyan     = lipgloss.NewStyle().Foreground(ColorCyan)
+	StyleMagenta  = lipgloss.NewStyle().Foreground(ColorMagenta)
 )

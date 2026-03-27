@@ -47,6 +47,7 @@ func (v OperativeView) RenderOperativeDetail(
 	// Per-repo breakdown table
 	if authorStats != nil && len(authorStats.PerRepo) > 0 {
 		sections = append(sections, "")
+		sections = append(sections, StyleTableHeader.Render("REPO CONTRIBUTIONS"))
 		sections = append(sections, v.renderRepoBreakdown(authorStats, width))
 	}
 
@@ -62,20 +63,10 @@ func (v OperativeView) RenderOperativeDetail(
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// renderRepoBreakdown renders a table of per-repo contributions.
+// renderRepoBreakdown renders a compact table of per-repo contributions.
 func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) string {
-	var rows []string
-
-	// Header
-	header := fmt.Sprintf("  %-30s %10s %10s %10s %10s",
-		StyleTableHeader.Render("REPO"),
-		StyleTableHeader.Render("COMMITS"),
-		StyleTableHeader.Render("ADDED"),
-		StyleTableHeader.Render("REMOVED"),
-		StyleTableHeader.Render("NET"),
-	)
-	rows = append(rows, header)
-	rows = append(rows, StyleGlitchLine.Render(strings.Repeat("─", width)))
+	nameW := 30
+	numW := 10
 
 	// Sort repos by total change descending
 	type repoEntry struct {
@@ -90,14 +81,40 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		return entries[i].rc.TotalChange > entries[j].rc.TotalChange
 	})
 
-	for i, e := range entries {
-		repoName := StyleRepoTag.Render(Truncate(e.name, 28))
-		commits := StyleNumeric.Render(fmt.Sprintf("%10s", FormatNumber(e.rc.Commits)))
-		added := StyleNumeric.Render(fmt.Sprintf("%10s", FormatNumber(e.rc.Added)))
-		removed := StyleNumeric.Render(fmt.Sprintf("%10s", FormatNumber(e.rc.Removed)))
-		net := StyleNumeric.Render(fmt.Sprintf("%10s", FormatNumber(e.rc.Net)))
+	// Find max total for impact bar
+	maxTotal := 0
+	for _, e := range entries {
+		if e.rc.TotalChange > maxTotal {
+			maxTotal = e.rc.TotalChange
+		}
+	}
 
-		row := fmt.Sprintf("  %s %s %s %s %s", repoName, commits, added, removed, net)
+	barW := 15
+	rowFmt := fmt.Sprintf("  %%-%ds %%%ds %%%ds %%%ds %%%ds  %%s", nameW, numW, numW, numW, numW)
+
+	var rows []string
+
+	// Header
+	header := fmt.Sprintf(rowFmt,
+		StyleTableHeader.Render(fmt.Sprintf("%-*s", nameW, "REPO")),
+		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "COMMITS")),
+		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "ADDED")),
+		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "REMOVED")),
+		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "NET")),
+		"",
+	)
+	rows = append(rows, header)
+	rows = append(rows, StyleGlitchLine.Render(strings.Repeat("─", width)))
+
+	for i, e := range entries {
+		name := StyleMagenta.Render(fmt.Sprintf("%-*s", nameW, Truncate(e.name, nameW)))
+		commits := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits)))
+		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Added)))
+		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Removed)))
+		net := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Net)))
+		bar := RenderImpactBar(e.rc.TotalChange, maxTotal, barW)
+
+		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
 
 		var rowStyle lipgloss.Style
 		if i%2 == 0 {
