@@ -185,15 +185,49 @@ func RenderFooter(repoCount int, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// RenderHelpBar renders key binding hints.
-func RenderHelpBar() string {
-	bindings := []struct{ key, desc string }{
-		{"[q]", "uit"},
-		{"[s]", "ort"},
-		{"[↵]", "drill"},
-		{"[←→]", "time"},
-		{"[tab]", "focus"},
+// HelpContext describes the current UI state for context-aware help.
+type HelpContext struct {
+	View  string // "aggregate", "repo", "operative"
+	Focus string // "table", "repos"
+}
+
+// RenderHelpBar renders context-aware key binding hints.
+func RenderHelpBar(ctx HelpContext) string {
+	var bindings []struct{ key, desc string }
+
+	switch ctx.View {
+	case "operative":
+		bindings = []struct{ key, desc string }{
+			{"[esc]", "back"},
+			{"[q]", "uit"},
+		}
+	case "repo":
+		bindings = []struct{ key, desc string }{
+			{"[esc]", "back"},
+			{"[s]", "ort"},
+			{"[↵]", "detail"},
+			{"[←→]", "time"},
+			{"[q]", "uit"},
+		}
+	default: // aggregate
+		if ctx.Focus == "repos" {
+			bindings = []struct{ key, desc string }{
+				{"[q]", "uit"},
+				{"[↵]", "drill"},
+				{"[←→]", "scroll"},
+				{"[tab]", "table"},
+			}
+		} else {
+			bindings = []struct{ key, desc string }{
+				{"[q]", "uit"},
+				{"[s]", "ort"},
+				{"[↵]", "detail"},
+				{"[←→]", "time"},
+				{"[tab]", "repos"},
+			}
+		}
 	}
+
 	parts := make([]string, len(bindings))
 	for i, b := range bindings {
 		parts[i] = StyleHelpKey.Render(b.key) + StyleHelpDesc.Render(b.desc)

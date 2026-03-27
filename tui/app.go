@@ -17,6 +17,7 @@ type ViewMode int
 const (
 	ViewAggregate ViewMode = iota
 	ViewRepo
+	ViewOperative
 )
 
 // FocusArea controls which UI region has keyboard focus.
@@ -36,7 +37,8 @@ type Model struct {
 	focus        FocusArea
 	selectedRow  int
 	selectedRepo int
-	activeRepo   string
+	activeRepo      string
+	activeOperative string
 	sortField    stats.SortField
 	timeIdx      int
 	width        int
@@ -152,10 +154,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
-		if m.viewMode == ViewRepo {
+		switch m.viewMode {
+		case ViewOperative:
+			m.viewMode = ViewAggregate
+			m.activeOperative = ""
+		case ViewRepo:
 			m.viewMode = ViewAggregate
 			m.selectedRow = 0
-		} else {
+		default:
 			return m, tea.Quit
 		}
 
@@ -214,10 +220,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		if m.viewMode == ViewAggregate && m.focus == FocusRepos && len(m.repoNames) > 0 {
+		if m.focus == FocusRepos && m.viewMode == ViewAggregate && len(m.repoNames) > 0 {
 			m.activeRepo = m.repoNames[m.selectedRepo]
 			m.viewMode = ViewRepo
 			m.selectedRow = 0
+		} else if m.focus == FocusTable && m.selectedRow < len(m.authors) {
+			m.activeOperative = m.authors[m.selectedRow].Name
+			m.viewMode = ViewOperative
 		}
 	}
 
@@ -245,11 +254,14 @@ func (m Model) View() string {
 		)
 	}
 
-	if m.viewMode == ViewRepo {
+	switch m.viewMode {
+	case ViewOperative:
+		return m.renderOperativeView()
+	case ViewRepo:
 		return m.renderRepoView()
+	default:
+		return m.renderAggregateView()
 	}
-
-	return m.renderAggregateView()
 }
 
 // renderAggregateView composes the full aggregate screen.
@@ -281,7 +293,11 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, AggregateView{}.RenderTable(m.authors, m.selectedRow, m.sortField, m.width))
 
 	// Help bar
-	sections = append(sections, RenderHelpBar())
+	focusStr := "table"
+	if m.focus == FocusRepos {
+		focusStr = "repos"
+	}
+	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Focus: focusStr}))
 
 	// Footer
 	sections = append(sections, RenderFooter(len(m.repoNames), m.width))
@@ -289,10 +305,30 @@ func (m Model) renderAggregateView() string {
 	return strings.Join(sections, "\n")
 }
 
+// renderOperativeView composes the operative detail screen.
+func (m Model) renderOperativeView() string {
+	// Find the author stats for the active operative
+	var as *stats.AuthorStats
+	for i := range m.authors {
+		if m.authors[i].Name == m.activeOperative {
+			as = &m.authors[i]
+			break
+		}
+	}
+
+	// Filter records by current time range for the timeline
+	filtered := stats.FilterByTime(m.allRecords, TimePresets[m.timeIdx].Duration)
+
+	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width)
+	helpBar := RenderHelpBar(HelpContext{View: "operative"})
+	footer := RenderFooter(len(m.repoNames), m.width)
+	return strings.Join([]string{detail, "", helpBar, footer}, "\n")
+}
+
 // renderRepoView composes the repo drill-down screen.
 func (m Model) renderRepoView() string {
 	table := RepoView{}.RenderRepoTable(m.activeRepo, m.authors, m.selectedRow, m.sortField, m.width)
-	helpBar := RenderHelpBar()
+	helpBar := RenderHelpBar(HelpContext{View: "repo"})
 	footer := RenderFooter(len(m.repoNames), m.width)
 	return strings.Join([]string{table, helpBar, footer}, "\n")
 }
