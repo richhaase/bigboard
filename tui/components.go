@@ -158,12 +158,12 @@ func FormatNumber(n int) string {
 		return s
 	}
 	var result []byte
-	for i, ch := range s {
+	for i := 0; i < len(s); i++ {
 		pos := len(s) - i
 		if i > 0 && pos%3 == 0 {
 			result = append(result, ',')
 		}
-		result = append(result, byte(ch))
+		result = append(result, s[i])
 	}
 	return string(result)
 }

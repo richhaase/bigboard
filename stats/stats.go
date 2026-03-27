@@ -13,7 +13,7 @@ import (
 type SortField int
 
 const (
-	SortByTotal    SortField = iota
+	SortByTotal SortField = iota
 	SortByCommits
 	SortByAdded
 	SortByRemoved
@@ -71,10 +71,6 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 	canonical := buildCanonicalMap(allNames, commitCounts)
 
 	// Aggregate by canonical name.
-	type entry struct {
-		stats   *AuthorStats
-		commits int
-	}
 	byName := make(map[string]*AuthorStats)
 
 	for _, r := range records {
