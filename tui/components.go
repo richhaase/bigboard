@@ -208,6 +208,7 @@ func RenderHelpBar(ctx HelpContext) string {
 	case "operative":
 		bindings = []struct{ key, desc string }{
 			{"[esc]", "back"},
+			{"[←→]", "time"},
 			{"[q]", "uit"},
 		}
 	case "repo":

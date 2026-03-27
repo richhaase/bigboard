@@ -319,10 +319,13 @@ func (m Model) renderOperativeView() string {
 	// Filter records by current time range for the timeline
 	filtered := stats.FilterByTime(m.allRecords, TimePresets[m.timeIdx].Duration)
 
+	// Time picker
+	timePicker := RenderTimePicker(m.timeIdx)
+
 	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width)
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
 	footer := RenderFooter(len(m.repoNames), m.width)
-	return strings.Join([]string{detail, "", helpBar, footer}, "\n")
+	return strings.Join([]string{timePicker, detail, "", helpBar, footer}, "\n")
 }
 
 // renderRepoView composes the repo drill-down screen.
