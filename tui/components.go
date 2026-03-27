@@ -79,27 +79,18 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 		widths[i] = lipgloss.Width(rendered[i])
 	}
 
-	// Reserve space for overflow indicators on both sides
-	leftIndicatorW := 0
-	rightIndicatorW := 0
-	// Measure worst-case indicator widths so we always have room
-	sampleLeft := lipgloss.Width(StyleCyan.Render(fmt.Sprintf("◂ %d  ", len(repos))))
-	sampleRight := lipgloss.Width(StyleCyan.Render(fmt.Sprintf("  %d ▸", len(repos))))
-
-	// First pass: see if everything fits
+	// First pass: see if everything fits without indicators
 	totalWidth := 0
 	for _, w := range widths {
 		totalWidth += w
 	}
 	if totalWidth <= maxWidth {
-		// Everything fits — no indicators needed
 		return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 	}
 
-	// We need scrolling — reserve indicator space
-	leftIndicatorW = sampleLeft
-	rightIndicatorW = sampleRight
-	availableWidth := maxWidth - leftIndicatorW - rightIndicatorW
+	// We need scrolling — use fixed-width indicator zones
+	const indicatorW = 6 // e.g. "◂ 12 " or " 12 ▸"
+	availableWidth := maxWidth - (indicatorW * 2)
 
 	// Find a window of tags that fits, centered on focusedIdx
 	start := focusedIdx
@@ -123,26 +114,27 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 		}
 	}
 
+	// Render fixed-width indicators using lipgloss.Width for stable layout
+	leftStyle := lipgloss.NewStyle().Width(indicatorW).Foreground(ColorCyan)
+	rightStyle := lipgloss.NewStyle().Width(indicatorW).Align(lipgloss.Right).Foreground(ColorCyan)
+
 	var parts []string
 
-	// Left indicator — always shown when scrolling is active
 	if start > 0 {
-		parts = append(parts, StyleCyan.Render(fmt.Sprintf("◂ %d  ", start)))
+		parts = append(parts, leftStyle.Render(fmt.Sprintf("◂ %d", start)))
 	} else {
-		// Pad to keep alignment stable
-		parts = append(parts, strings.Repeat(" ", leftIndicatorW))
+		parts = append(parts, leftStyle.Render(""))
 	}
 
 	for i := start; i < end; i++ {
 		parts = append(parts, rendered[i])
 	}
 
-	// Right indicator — always shown when scrolling is active
 	if end < len(repos) {
 		remaining := len(repos) - end
-		parts = append(parts, StyleCyan.Render(fmt.Sprintf("  %d ▸", remaining)))
+		parts = append(parts, rightStyle.Render(fmt.Sprintf("%d ▸", remaining)))
 	} else {
-		parts = append(parts, strings.Repeat(" ", rightIndicatorW))
+		parts = append(parts, rightStyle.Render(""))
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
