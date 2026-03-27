@@ -55,26 +55,109 @@ func FilterByTime(records []git.CommitRecord, d time.Duration) []git.CommitRecor
 	return out
 }
 
-// Aggregate groups records by author (with fuzzy name merging) and computes totals.
+// Aggregate groups records by author and computes totals.
+// Uses a two-pass merge: first group by email, then fuzzy-match remaining names.
 func Aggregate(records []git.CommitRecord) []AuthorStats {
-	// Count commits per raw author name to determine canonical names.
+	// Pass 1: build email→canonical name map.
+	// For each email, pick the name with the most commits.
+	type nameCount struct {
+		name  string
+		count int
+	}
+	emailNames := make(map[string]*nameCount)
+	for _, r := range records {
+		email := strings.ToLower(r.Email)
+		if email == "" {
+			continue
+		}
+		nc, ok := emailNames[email]
+		if !ok {
+			emailNames[email] = &nameCount{name: r.Author, count: 1}
+		} else {
+			nc.count++
+			// Keep the longer/more complete name variant
+			if len(r.Author) > len(nc.name) {
+				nc.name = r.Author
+			}
+		}
+	}
+
+	// Build email→canonical name lookup, and group emails that share a canonical name
+	emailToCanonical := make(map[string]string)
+	for email, nc := range emailNames {
+		emailToCanonical[email] = nc.name
+	}
+
+	// Pass 2: map each record's author to a canonical name.
+	// First try email grouping, then fall back to fuzzy name matching.
+	canonicalForAuthor := make(map[string]string)
+
+	// Collect all unique (author, email) pairs
+	type authorEmail struct {
+		author string
+		email  string
+	}
+	seen := make(map[authorEmail]bool)
+	var pairs []authorEmail
+	for _, r := range records {
+		ae := authorEmail{r.Author, strings.ToLower(r.Email)}
+		if !seen[ae] {
+			seen[ae] = true
+			pairs = append(pairs, ae)
+		}
+	}
+
+	// Group by email first: all authors sharing an email get the same canonical name
+	emailGroupCanonical := make(map[string]string) // email → chosen canonical
+	for _, ae := range pairs {
+		if ae.email == "" {
+			continue
+		}
+		if _, ok := emailGroupCanonical[ae.email]; !ok {
+			emailGroupCanonical[ae.email] = emailToCanonical[ae.email]
+		}
+		canonicalForAuthor[ae.author] = emailGroupCanonical[ae.email]
+	}
+
+	// For authors without an email match, try fuzzy name matching against known canonicals
+	allCanonicals := make(map[string]bool)
+	for _, c := range canonicalForAuthor {
+		allCanonicals[c] = true
+	}
+
+	for _, ae := range pairs {
+		if _, ok := canonicalForAuthor[ae.author]; ok {
+			continue
+		}
+		// Try fuzzy match against existing canonical names
+		for c := range allCanonicals {
+			if AreSimilarNames(ae.author, c) {
+				canonicalForAuthor[ae.author] = c
+				break
+			}
+		}
+		if _, ok := canonicalForAuthor[ae.author]; !ok {
+			canonicalForAuthor[ae.author] = ae.author
+			allCanonicals[ae.author] = true
+		}
+	}
+
+	// Final pass: fuzzy-merge canonical names themselves
+	canonicalList := make([]string, 0, len(allCanonicals))
+	for c := range allCanonicals {
+		canonicalList = append(canonicalList, c)
+	}
 	commitCounts := make(map[string]int)
 	for _, r := range records {
-		commitCounts[r.Author]++
+		c := canonicalForAuthor[r.Author]
+		commitCounts[c]++
 	}
+	mergedCanonical := buildCanonicalMap(canonicalList, commitCounts)
 
-	allNames := make([]string, 0, len(commitCounts))
-	for name := range commitCounts {
-		allNames = append(allNames, name)
-	}
-
-	canonical := buildCanonicalMap(allNames, commitCounts)
-
-	// Aggregate by canonical name.
+	// Aggregate
 	byName := make(map[string]*AuthorStats)
-
 	for _, r := range records {
-		name := canonical[r.Author]
+		name := mergedCanonical[canonicalForAuthor[r.Author]]
 		as, ok := byName[name]
 		if !ok {
 			as = &AuthorStats{

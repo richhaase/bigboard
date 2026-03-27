@@ -14,6 +14,7 @@ import (
 // CommitRecord holds aggregated stats for a single commit.
 type CommitRecord struct {
 	Author   string
+	Email    string
 	Date     time.Time
 	Added    int
 	Removed  int
@@ -48,7 +49,7 @@ func DetectDefaultBranch(dir string) string {
 // CollectCommits runs git log on the repo at dir using the given ref and returns
 // one CommitRecord per commit with aggregated numstat data.
 func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
-	out, err := runGit(dir, "log", ref, "--no-merges", "--format=%aN|%aI", "--numstat")
+	out, err := runGit(dir, "log", ref, "--no-merges", "--format=%aN|%aE|%aI", "--numstat")
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}
@@ -108,16 +109,12 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 			continue
 		}
 
-		// Header line: "Author Name|2024-01-01T12:00:00+00:00"
+		// Header line: "Author Name|email@example.com|2024-01-01T12:00:00+00:00"
 		if strings.Contains(line, "|") && !strings.HasPrefix(line, "\t") {
-			// Could be a numstat line with a tab-separated format — numstat lines
-			// are "<added>\t<removed>\t<file>", so they contain tabs, not pipes.
-			// A header line has the form "name|date".
-			parts := strings.SplitN(line, "|", 2)
-			if len(parts) == 2 {
-				t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[1]))
+			parts := strings.SplitN(line, "|", 3)
+			if len(parts) == 3 {
+				t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
 				if err != nil {
-					// Not a valid date line — skip
 					continue
 				}
 				if current != nil {
@@ -125,6 +122,7 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 				}
 				current = &CommitRecord{
 					Author:   strings.TrimSpace(parts[0]),
+					Email:    strings.TrimSpace(parts[1]),
 					Date:     t,
 					RepoName: repoName,
 				}
