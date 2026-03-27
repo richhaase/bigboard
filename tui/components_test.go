@@ -64,7 +64,7 @@ func TestTruncate(t *testing.T) {
 
 func TestRenderHeader(t *testing.T) {
 	result := RenderHeader(80)
-	if !strings.Contains(result, "BIG BOARD") {
-		t.Errorf("expected 'BIG BOARD' in header output, got: %q", result)
+	if !strings.Contains(result, "INTELLIGENCE") {
+		t.Errorf("expected subtitle in header output, got: %q", result)
 	}
 }

@@ -41,7 +41,7 @@ func (v RepoView) RenderRepoTable(repoName string, authors []stats.AuthorStats, 
 	// Header
 	title := StyleTitle.Render(fmt.Sprintf("⟐ %s ⟐", strings.ToUpper(repoName)))
 	subtitle := StyleSubtitle.Render("// [ESC] back to aggregate")
-	glitch := StyleGlitchLine.Render(strings.Repeat("═", width))
+	glitch := RenderGlitchLine(width)
 	header := lipgloss.JoinVertical(lipgloss.Left, title, subtitle, glitch)
 
 	// Stat boxes

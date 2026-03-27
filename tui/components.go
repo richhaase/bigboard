@@ -21,13 +21,46 @@ var TimePresets = []TimePreset{
 	{Label: "ALL", Duration: 0},
 }
 
-// RenderHeader renders the title, subtitle, and glitch line.
+// RenderHeader renders the ASCII art title, subtitle, and glitch line.
 func RenderHeader(width int) string {
-	title := StyleTitle.Render("⟐ BIG BOARD ⟐")
-	subtitle := StyleSubtitle.Render("// CONTRIBUTOR INTELLIGENCE SYSTEM")
-	glitch := StyleGlitchLine.Render(strings.Repeat("═", width))
+	banner := []string{
+		"██████╗ ██╗ ██████╗   ██████╗  ██████╗  █████╗ ██████╗ ██████╗ ",
+		"██╔══██╗██║██╔════╝   ██╔══██╗██╔═══██╗██╔══██╗██╔══██╗██╔══██╗",
+		"██████╔╝██║██║  ███╗  ██████╔╝██║   ██║███████║██████╔╝██║  ██║",
+		"██╔══██╗██║██║   ██║  ██╔══██╗██║   ██║██╔══██║██╔══██╗██║  ██║",
+		"██████╔╝██║╚██████╔╝  ██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝",
+		"╚═════╝ ╚═╝ ╚═════╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ",
+	}
+	var styledBanner []string
+	for _, line := range banner {
+		styledBanner = append(styledBanner, StyleTitle.Render(line))
+	}
+	title := strings.Join(styledBanner, "\n")
+
+	subtitle := StyleSubtitle.Render("  // CONTRIBUTOR INTELLIGENCE SYSTEM v2.0")
+	glitch := RenderGlitchLine(width)
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, subtitle, glitch)
+}
+
+// RenderGlitchLine renders a cyberpunk-styled separator line.
+func RenderGlitchLine(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	// Pattern: mix of ═ and ─ with occasional ╪ for a glitchy look
+	var sb strings.Builder
+	for i := 0; i < width; i++ {
+		switch {
+		case i%17 == 7:
+			sb.WriteString(StyleMagenta.Render("╫"))
+		case i%23 == 11:
+			sb.WriteString(StyleMagenta.Render("┃"))
+		default:
+			sb.WriteString(StyleCyan.Render("═"))
+		}
+	}
+	return sb.String()
 }
 
 // RenderStatBoxes renders 3 bordered stat boxes horizontally joined.
@@ -140,8 +173,8 @@ func RenderRepoTags(repos []string, focusedIdx int, hasFocus bool, maxWidth int)
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// RenderImpactBar renders a gradient bar: first half cyan, second half magenta.
-// Empty for 0 value. Min 1 filled block for any positive value.
+// RenderImpactBar renders a gradient bar: cyan → cyan-mid → magenta-dim → magenta.
+// Uses block characters for a smooth gradient feel.
 func RenderImpactBar(value, maxValue, barWidth int) string {
 	if value <= 0 || maxValue <= 0 {
 		return strings.Repeat(" ", barWidth)
@@ -155,16 +188,21 @@ func RenderImpactBar(value, maxValue, barWidth int) string {
 		filled = barWidth
 	}
 
-	half := barWidth / 2
+	// 4-stop gradient
 	var sb strings.Builder
 	for i := 0; i < filled; i++ {
-		if i < half {
+		pos := float64(i) / float64(max(filled-1, 1))
+		switch {
+		case pos < 0.3:
 			sb.WriteString(StyleBarCyan.Render("█"))
-		} else {
+		case pos < 0.55:
+			sb.WriteString(StyleBarCyanMid.Render("█"))
+		case pos < 0.8:
+			sb.WriteString(StyleBarMagentaDm.Render("█"))
+		default:
 			sb.WriteString(StyleBarMagenta.Render("█"))
 		}
 	}
-	// pad remainder with spaces
 	for i := filled; i < barWidth; i++ {
 		sb.WriteString(" ")
 	}

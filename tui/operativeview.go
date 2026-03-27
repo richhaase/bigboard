@@ -35,7 +35,7 @@ func (v OperativeView) RenderOperativeDetail(
 	header := StyleTitle.Render(fmt.Sprintf("⟐ %s ⟐", strings.ToUpper(authorName)))
 	subtitle := StyleSubtitle.Render("// OPERATIVE INTELLIGENCE DOSSIER")
 	backHint := StyleSubtitle.Render("// [ESC] back")
-	glitch := StyleGlitchLine.Render(strings.Repeat("═", width))
+	glitch := RenderGlitchLine(width)
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, header, subtitle, backHint, glitch))
 
 	// Summary stat boxes
@@ -56,7 +56,7 @@ func (v OperativeView) RenderOperativeDetail(
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
 		sections = append(sections, StyleTableHeader.Render("ACTIVITY TIMELINE"))
-		sections = append(sections, StyleGlitchLine.Render(strings.Repeat("─", width)))
+		sections = append(sections, StyleDimCyan.Render(strings.Repeat("─", width)))
 		sections = append(sections, v.renderTimeline(authorRecords, width))
 	}
 
@@ -104,7 +104,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		"",
 	)
 	rows = append(rows, header)
-	rows = append(rows, StyleGlitchLine.Render(strings.Repeat("─", width)))
+	rows = append(rows, StyleDimCyan.Render(strings.Repeat("─", width)))
 
 	for i, e := range entries {
 		name := StyleMagenta.Render(fmt.Sprintf("%-*s", nameW, Truncate(e.name, nameW)))
@@ -163,7 +163,7 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		label := StyleDimWhite.Render(fmt.Sprintf("%-10s", m.Month.Format("Jan 2006")))
 		count := StyleNumeric.Render(fmt.Sprintf("%4d ", m.Commits))
 
-		// Bar
+		// Bar with gradient
 		filled := 0
 		if maxCommits > 0 {
 			filled = m.Commits * barW / maxCommits
@@ -172,10 +172,21 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 			filled = 1
 		}
 
-		bar := StyleBarCyan.Render(strings.Repeat("▓", filled)) +
-			strings.Repeat(" ", barW-filled)
+		var barSb strings.Builder
+		for i := 0; i < filled; i++ {
+			pos := float64(i) / float64(max(filled-1, 1))
+			switch {
+			case pos < 0.4:
+				barSb.WriteString(StyleBarCyan.Render("█"))
+			case pos < 0.7:
+				barSb.WriteString(StyleBarCyanMid.Render("▓"))
+			default:
+				barSb.WriteString(StyleBarMagentaDm.Render("▒"))
+			}
+		}
+		barSb.WriteString(strings.Repeat(" ", barW-filled))
 
-		rows = append(rows, fmt.Sprintf("  %s%s%s", label, count, bar))
+		rows = append(rows, fmt.Sprintf("  %s%s%s", label, count, barSb.String()))
 	}
 
 	return strings.Join(rows, "\n")

@@ -6,14 +6,17 @@ import "github.com/charmbracelet/lipgloss"
 var (
 	ColorBg        = lipgloss.Color("#050510")
 	ColorCyan      = lipgloss.Color("#00FFFF")
+	ColorCyanMid   = lipgloss.Color("#00BBDD")
 	ColorMagenta   = lipgloss.Color("#FF00FF")
+	ColorMagentaDm = lipgloss.Color("#AA00AA")
 	ColorGreen     = lipgloss.Color("#00FF88")
+	ColorYellow    = lipgloss.Color("#FFFF00")
 	ColorDimCyan   = lipgloss.Color("#005566")
 	ColorDimWhite  = lipgloss.Color("#666666")
 	ColorBrightWht = lipgloss.Color("#E0E0E0")
 	ColorRowEven   = lipgloss.Color("#0A0A18")
 	ColorRowOdd    = lipgloss.Color("#080814")
-	ColorRowSelect = lipgloss.Color("#0F1F2F")
+	ColorRowSelect = lipgloss.Color("#102030")
 )
 
 // Layout styles
@@ -53,7 +56,7 @@ var (
 
 	StyleRowEven     = lipgloss.NewStyle().Background(ColorRowEven)
 	StyleRowOdd      = lipgloss.NewStyle().Background(ColorRowOdd)
-	StyleRowSelected = lipgloss.NewStyle().Background(ColorRowSelect).Bold(true)
+	StyleRowSelected = lipgloss.NewStyle().Background(ColorRowSelect).Bold(true).Foreground(ColorCyan)
 
 	StyleRank    = lipgloss.NewStyle().Foreground(ColorDimCyan)
 	StyleAuthor  = lipgloss.NewStyle().Foreground(ColorBrightWht)
@@ -77,10 +80,15 @@ var (
 	StyleHelpKey  = lipgloss.NewStyle().Foreground(ColorCyan)
 	StyleHelpDesc = lipgloss.NewStyle().Foreground(ColorDimWhite)
 
-	StyleBarCyan    = lipgloss.NewStyle().Foreground(ColorCyan)
-	StyleBarMagenta = lipgloss.NewStyle().Foreground(ColorMagenta)
+	StyleBarCyan      = lipgloss.NewStyle().Foreground(ColorCyan)
+	StyleBarCyanMid   = lipgloss.NewStyle().Foreground(ColorCyanMid)
+	StyleBarMagenta   = lipgloss.NewStyle().Foreground(ColorMagenta)
+	StyleBarMagentaDm = lipgloss.NewStyle().Foreground(ColorMagentaDm)
 
 	StyleDimWhite = lipgloss.NewStyle().Foreground(ColorDimWhite)
 	StyleCyan     = lipgloss.NewStyle().Foreground(ColorCyan)
 	StyleMagenta  = lipgloss.NewStyle().Foreground(ColorMagenta)
+
+	StyleCursor  = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	StyleDimCyan = lipgloss.NewStyle().Foreground(ColorDimCyan)
 )

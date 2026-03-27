@@ -54,7 +54,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 	}
 
 	header := StyleTableHeader.Render(
-		fmt.Sprintf("%-4s %-*s %*s %*s %*s %*s %-*s",
+		fmt.Sprintf("  %-2s %-*s %*s %*s %*s %*s %-*s",
 			colRank,
 			nameW, colName,
 			numW, colCommits,
@@ -65,8 +65,8 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		),
 	)
 
-	totalRowWidth := 4 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + barW
-	separator := StyleGlitchLine.Render(strings.Repeat("─", totalRowWidth))
+	totalRowWidth := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + barW
+	separator := StyleDimCyan.Render(strings.Repeat("─", totalRowWidth))
 
 	// Limit to 20 rows
 	limit := len(authors)
@@ -85,7 +85,13 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		net := FormatNumber(a.Net)
 		bar := RenderImpactBar(a.TotalChange, maxTotal, barW)
 
-		rankStr := StyleRank.Render(fmt.Sprintf("%-4s", rank))
+		// Cursor indicator for selected row
+		cursor := "  "
+		if i == selectedRow {
+			cursor = StyleCursor.Render("▸ ")
+		}
+
+		rankStr := StyleRank.Render(fmt.Sprintf("%-2s", rank))
 		nameStr := StyleAuthor.Render(fmt.Sprintf("%-*s", nameW, name))
 		commitsStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, commits))
 		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, added))
@@ -93,7 +99,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		netStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, net))
 		barStr := fmt.Sprintf("%-*s", barW, bar)
 
-		line := rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + barStr
+		line := cursor + rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + barStr
 
 		var rowStyle lipgloss.Style
 		switch {
