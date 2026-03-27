@@ -135,17 +135,18 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		return StyleSubtitle.Render("  No activity data")
 	}
 
-	// Find max commits for bar scaling
-	maxCommits := 0
-	for _, m := range months {
-		if m.Commits > maxCommits {
-			maxCommits = m.Commits
-		}
-	}
-
 	// Limit to last 12 months
 	if len(months) > 12 {
 		months = months[len(months)-12:]
+	}
+
+	// Find max total change for bar scaling
+	maxTotal := 0
+	for _, m := range months {
+		total := m.Added + m.Removed
+		if total > maxTotal {
+			maxTotal = total
+		}
 	}
 
 	labelW := 10 // "Jan 2026  "
@@ -162,31 +163,9 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 	for _, m := range months {
 		label := StyleDimWhite.Render(fmt.Sprintf("%-10s", m.Month.Format("Jan 2006")))
 		count := StyleNumeric.Render(fmt.Sprintf("%4d ", m.Commits))
+		bar := RenderImpactBar(m.Added, m.Removed, maxTotal, barW)
 
-		// Bar with gradient
-		filled := 0
-		if maxCommits > 0 {
-			filled = m.Commits * barW / maxCommits
-		}
-		if filled == 0 && m.Commits > 0 {
-			filled = 1
-		}
-
-		var barSb strings.Builder
-		for i := 0; i < filled; i++ {
-			pos := float64(i) / float64(max(filled-1, 1))
-			switch {
-			case pos < 0.4:
-				barSb.WriteString(StyleBarCyan.Render("█"))
-			case pos < 0.7:
-				barSb.WriteString(StyleBarCyanMid.Render("▓"))
-			default:
-				barSb.WriteString(StyleBarMagentaDm.Render("▒"))
-			}
-		}
-		barSb.WriteString(strings.Repeat(" ", barW-filled))
-
-		rows = append(rows, fmt.Sprintf("  %s%s%s", label, count, barSb.String()))
+		rows = append(rows, fmt.Sprintf("  %s%s%s", label, count, bar))
 	}
 
 	return strings.Join(rows, "\n")
