@@ -21,46 +21,13 @@ var TimePresets = []TimePreset{
 	{Label: "ALL", Duration: 0},
 }
 
-// RenderHeader renders the ASCII art title, subtitle, and glitch line.
+// RenderHeader renders the title, subtitle, and separator line.
 func RenderHeader(width int) string {
-	banner := []string{
-		"██████╗ ██╗ ██████╗   ██████╗  ██████╗  █████╗ ██████╗ ██████╗ ",
-		"██╔══██╗██║██╔════╝   ██╔══██╗██╔═══██╗██╔══██╗██╔══██╗██╔══██╗",
-		"██████╔╝██║██║  ███╗  ██████╔╝██║   ██║███████║██████╔╝██║  ██║",
-		"██╔══██╗██║██║   ██║  ██╔══██╗██║   ██║██╔══██║██╔══██╗██║  ██║",
-		"██████╔╝██║╚██████╔╝  ██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝",
-		"╚═════╝ ╚═╝ ╚═════╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ",
-	}
-	var styledBanner []string
-	for _, line := range banner {
-		styledBanner = append(styledBanner, StyleTitle.Render(line))
-	}
-	title := strings.Join(styledBanner, "\n")
+	title := StyleTitle.Render("⟐ BIG BOARD ⟐")
+	subtitle := StyleSubtitle.Render("// CONTRIBUTOR INTELLIGENCE SYSTEM")
+	separator := StyleDimCyan.Render(strings.Repeat("─", width))
 
-	subtitle := StyleSubtitle.Render("  // CONTRIBUTOR INTELLIGENCE SYSTEM v2.0")
-	glitch := RenderGlitchLine(width)
-
-	return lipgloss.JoinVertical(lipgloss.Left, title, subtitle, glitch)
-}
-
-// RenderGlitchLine renders a cyberpunk-styled separator line.
-func RenderGlitchLine(width int) string {
-	if width <= 0 {
-		return ""
-	}
-	// Pattern: mix of ═ and ─ with occasional ╪ for a glitchy look
-	var sb strings.Builder
-	for i := 0; i < width; i++ {
-		switch {
-		case i%17 == 7:
-			sb.WriteString(StyleMagenta.Render("╫"))
-		case i%23 == 11:
-			sb.WriteString(StyleMagenta.Render("┃"))
-		default:
-			sb.WriteString(StyleCyan.Render("═"))
-		}
-	}
-	return sb.String()
+	return lipgloss.JoinVertical(lipgloss.Left, title, subtitle, separator)
 }
 
 // RenderStatBoxes renders 3 bordered stat boxes horizontally joined.

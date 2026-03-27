@@ -35,7 +35,7 @@ func (v OperativeView) RenderOperativeDetail(
 	header := StyleTitle.Render(fmt.Sprintf("⟐ %s ⟐", strings.ToUpper(authorName)))
 	subtitle := StyleSubtitle.Render("// OPERATIVE INTELLIGENCE DOSSIER")
 	backHint := StyleSubtitle.Render("// [ESC] back")
-	glitch := RenderGlitchLine(width)
+	glitch := StyleDimCyan.Render(strings.Repeat("─", width))
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, header, subtitle, backHint, glitch))
 
 	// Summary stat boxes
