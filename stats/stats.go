@@ -189,21 +189,16 @@ func buildCanonicalMap(allNames []string, commitCounts map[string]int) map[strin
 	return canonical
 }
 
-// normalizedName lowercases and collapses whitespace.
+// normalizedName lowercases and strips all whitespace, hyphens, underscores,
+// and dots so "Mario Payan", "MarioPayan", "mario.payan" all become "mariopayan".
 func normalizedName(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
-	prevSpace := false
 	for _, r := range s {
-		if unicode.IsSpace(r) {
-			if !prevSpace {
-				b.WriteRune(' ')
-			}
-			prevSpace = true
-		} else {
-			b.WriteRune(r)
-			prevSpace = false
+		if unicode.IsSpace(r) || r == '-' || r == '_' || r == '.' {
+			continue
 		}
+		b.WriteRune(r)
 	}
-	return strings.TrimSpace(b.String())
+	return b.String()
 }
