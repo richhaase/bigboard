@@ -1,10 +1,11 @@
 # Big Board development tasks
 
-.PHONY: help build test test-coverage fmt lint vet tidy clean staticcheck check
+.PHONY: help build install test test-coverage fmt lint vet tidy clean staticcheck check
 
 help:
 	@echo "Available targets:"
 	@echo "  build        - Build the bigboard binary with version information"
+	@echo "  install      - Build and install bigboard to ~/.bin"
 	@echo "  test         - Run all unit tests"
 	@echo "  test-coverage - Run tests with coverage"
 	@echo "  fmt          - Format Go source code"
@@ -26,6 +27,11 @@ build:
 		exit 1; \
 	fi; \
 	echo "Built bigboard binary to bin/ (version: $$VERSION)"
+
+install: build
+	@echo "Installing bigboard to ~/.bin..."
+	@cp bin/bigboard ~/.bin/bigboard
+	@echo "Installed bigboard to ~/.bin/bigboard"
 
 test:
 	@echo "Running unit tests..."
