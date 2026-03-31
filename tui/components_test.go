@@ -68,3 +68,17 @@ func TestRenderHeader(t *testing.T) {
 		t.Errorf("expected subtitle in header output, got: %q", result)
 	}
 }
+
+func TestRenderRepoCount(t *testing.T) {
+	// No exclusions
+	result := RenderRepoCount(15, 0)
+	if !strings.Contains(result, "15 repos") {
+		t.Errorf("expected '15 repos', got: %q", result)
+	}
+
+	// With exclusions
+	result2 := RenderRepoCount(15, 3)
+	if !strings.Contains(result2, "12/15 repos") {
+		t.Errorf("expected '12/15 repos', got: %q", result2)
+	}
+}

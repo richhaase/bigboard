@@ -232,7 +232,7 @@ func (m Model) renderAggregateView() string {
 
 	// Time picker + repo count on the same line
 	timePicker := RenderTimePicker(m.timeIdx)
-	repoCount := StyleSubtitle.Render(fmt.Sprintf("  %d repos", len(m.repoNames)))
+	repoCount := RenderRepoCount(len(m.repoNames), len(m.excludedRepos))
 	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, timePicker, repoCount))
 
 	// Stat boxes

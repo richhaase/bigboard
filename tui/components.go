@@ -62,6 +62,14 @@ func RenderTimePicker(activeIdx int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
+// RenderRepoCount renders the repo count indicator showing excluded repos if any.
+func RenderRepoCount(total, excluded int) string {
+	if excluded > 0 {
+		return StyleSubtitle.Render(fmt.Sprintf("  %d/%d repos", total-excluded, total))
+	}
+	return StyleSubtitle.Render(fmt.Sprintf("  %d repos", total))
+}
+
 // RenderImpactBar renders a bar showing added (cyan) vs removed (magenta) proportionally.
 // Total bar width represents totalChange relative to maxValue.
 // Within the bar, cyan portion = added, magenta portion = removed.
