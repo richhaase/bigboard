@@ -55,6 +55,20 @@ func FilterByTime(records []git.CommitRecord, d time.Duration) []git.CommitRecor
 	return out
 }
 
+// FilterByRepo returns records not in the excluded set. Keys are repo names.
+func FilterByRepo(records []git.CommitRecord, excluded map[string]bool) []git.CommitRecord {
+	if len(excluded) == 0 {
+		return records
+	}
+	out := make([]git.CommitRecord, 0, len(records))
+	for _, r := range records {
+		if !excluded[r.RepoName] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Aggregate groups records by author and computes totals.
 // Uses a two-pass merge: first group by email, then fuzzy-match remaining names.
 func Aggregate(records []git.CommitRecord) []AuthorStats {

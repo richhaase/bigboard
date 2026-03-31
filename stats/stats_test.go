@@ -229,3 +229,38 @@ func TestSortFieldFromString(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterByRepo(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "Alice", Date: now, Added: 10, RepoName: "repo-a"},
+		{Author: "Alice", Date: now, Added: 20, RepoName: "repo-b"},
+		{Author: "Bob", Date: now, Added: 30, RepoName: "repo-c"},
+		{Author: "Bob", Date: now, Added: 40, RepoName: "repo-a"},
+	}
+
+	excluded := map[string]bool{"repo-b": true}
+	filtered := stats.FilterByRepo(records, excluded)
+
+	if len(filtered) != 3 {
+		t.Errorf("expected 3 records, got %d", len(filtered))
+	}
+	for _, r := range filtered {
+		if r.RepoName == "repo-b" {
+			t.Error("repo-b should be excluded")
+		}
+	}
+
+	// Empty exclusion set returns all records
+	all := stats.FilterByRepo(records, nil)
+	if len(all) != 4 {
+		t.Errorf("expected 4 records with nil exclusions, got %d", len(all))
+	}
+
+	// Exclude all repos
+	allExcluded := map[string]bool{"repo-a": true, "repo-b": true, "repo-c": true}
+	none := stats.FilterByRepo(records, allExcluded)
+	if len(none) != 0 {
+		t.Errorf("expected 0 records, got %d", len(none))
+	}
+}
