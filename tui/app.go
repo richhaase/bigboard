@@ -24,6 +24,7 @@ type Model struct {
 	allRecords      []git.CommitRecord
 	authors         []stats.AuthorStats
 	repoNames       []string
+	excludedRepos   map[string]bool
 	viewMode        ViewMode
 	selectedRow     int
 	activeOperative string
@@ -44,11 +45,12 @@ type DataLoadedMsg struct {
 }
 
 // NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField) Model {
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool) Model {
 	return Model{
-		sortField: initialSort,
-		timeIdx:   2, // 14d
-		loading:   true,
+		sortField:     initialSort,
+		timeIdx:       2, // 14d
+		loading:       true,
+		excludedRepos: excluded,
 	}
 }
 
@@ -194,7 +196,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // recomputeAuthors re-filters and re-aggregates from allRecords.
 func (m *Model) recomputeAuthors() {
-	filtered := stats.FilterByTime(m.allRecords, TimePresets[m.timeIdx].Duration)
+	filtered := stats.FilterByRepo(m.allRecords, m.excludedRepos)
+	filtered = stats.FilterByTime(filtered, TimePresets[m.timeIdx].Duration)
 	m.authors = stats.Aggregate(filtered)
 	stats.Sort(m.authors, m.sortField)
 }

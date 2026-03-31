@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rdh/bigboard/git"
@@ -17,9 +19,19 @@ var (
 	date    = "unknown"
 )
 
+type excludeFlags []string
+
+func (e *excludeFlags) String() string { return strings.Join(*e, ",") }
+func (e *excludeFlags) Set(v string) error {
+	*e = append(*e, v)
+	return nil
+}
+
 func main() {
 	sortFlag := flag.String("sort", "total", "Initial sort: commits|added|removed|net|total")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	var excludes excludeFlags
+	flag.Var(&excludes, "exclude", "Repo directory name to exclude (repeatable)")
 	flag.Parse()
 
 	if *versionFlag {
@@ -38,12 +50,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build exclusion set from --exclude flags, matching against repo basenames
+	excludedRepos := make(map[string]bool)
+	for _, rp := range repoPaths {
+		base := filepath.Base(rp)
+		for _, ex := range excludes {
+			if base == ex {
+				excludedRepos[base] = true
+			}
+		}
+	}
+
 	initialSort := stats.SortFieldFromString(*sortFlag)
-	model := tui.NewModel(repoPaths, initialSort)
+	model := tui.NewModel(repoPaths, initialSort, excludedRepos)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	// Start data loading after the program starts
 	go func() {
 		p.Send(tui.LoadDataCmd(repoPaths)())
 	}()
