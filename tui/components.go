@@ -111,8 +111,12 @@ func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 }
 
 // RenderFooter renders status on the left and timestamp on the right.
-func RenderFooter(repoCount int, width int) string {
-	left := StyleFooter.Render(fmt.Sprintf("SYS.STATUS: NOMINAL // %d repos scanned", repoCount))
+func RenderFooter(repoCount, excludedCount, width int) string {
+	status := fmt.Sprintf("SYS.STATUS: NOMINAL // %d repos scanned", repoCount)
+	if excludedCount > 0 {
+		status = fmt.Sprintf("SYS.STATUS: NOMINAL // %d/%d repos active", repoCount-excludedCount, repoCount)
+	}
+	left := StyleFooter.Render(status)
 	right := StyleFooter.Render(time.Now().Format("2006-01-02 15:04:05"))
 
 	leftLen := lipgloss.Width(left)
@@ -144,6 +148,7 @@ func RenderHelpBar(ctx HelpContext) string {
 		bindings = []struct{ key, desc string }{
 			{"[q]", "uit"},
 			{"[s]", "ort"},
+			{"[r]", "epos"},
 			{"[↵]", "detail"},
 			{"[←→]", "time"},
 		}

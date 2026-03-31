@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -130,6 +131,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.allRecords = msg.Records
 		m.repoNames = msg.RepoNames
+		sort.Strings(m.repoNames)
 		m.loading = false
 		m.recomputeAuthors()
 
@@ -301,7 +303,7 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate"}))
 
 	// Footer
-	sections = append(sections, RenderFooter(len(m.repoNames), m.width))
+	sections = append(sections, RenderFooter(len(m.repoNames), len(m.excludedRepos), m.width))
 
 	return strings.Join(sections, "\n")
 }
@@ -325,6 +327,6 @@ func (m Model) renderOperativeView() string {
 
 	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width)
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
-	footer := RenderFooter(len(m.repoNames), m.width)
+	footer := RenderFooter(len(m.repoNames), len(m.excludedRepos), m.width)
 	return strings.Join([]string{timePicker, detail, "", helpBar, footer}, "\n")
 }
