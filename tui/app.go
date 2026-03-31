@@ -17,6 +17,7 @@ type ViewMode int
 const (
 	ViewAggregate ViewMode = iota
 	ViewOperative
+	ViewRepoOverlay
 )
 
 // Model is the root Bubble Tea model.
@@ -24,8 +25,10 @@ type Model struct {
 	allRecords      []git.CommitRecord
 	authors         []stats.AuthorStats
 	repoNames       []string
-	excludedRepos   map[string]bool
-	viewMode        ViewMode
+	excludedRepos    map[string]bool
+	overlayExcluded  map[string]bool // working copy while overlay is open
+	overlayCursor    int
+	viewMode         ViewMode
 	selectedRow     int
 	activeOperative string
 	sortField       stats.SortField
@@ -144,25 +147,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "esc":
-		if m.viewMode == ViewOperative {
+		switch m.viewMode {
+		case ViewRepoOverlay:
+			m.excludedRepos = m.overlayExcluded
+			m.overlayExcluded = nil
+			m.viewMode = ViewAggregate
+			m.recomputeAuthors()
+			m.selectedRow = 0
+		case ViewOperative:
 			m.viewMode = ViewAggregate
 			m.activeOperative = ""
-		} else {
+		default:
 			return m, tea.Quit
 		}
 
 	case "up", "k":
-		if m.selectedRow > 0 {
+		if m.viewMode == ViewRepoOverlay {
+			if m.overlayCursor > 0 {
+				m.overlayCursor--
+			}
+		} else if m.selectedRow > 0 {
 			m.selectedRow--
 		}
 
 	case "down", "j":
-		maxRow := len(m.authors) - 1
-		if maxRow > 19 {
-			maxRow = 19
-		}
-		if m.selectedRow < maxRow {
-			m.selectedRow++
+		if m.viewMode == ViewRepoOverlay {
+			if m.overlayCursor < len(m.repoNames)-1 {
+				m.overlayCursor++
+			}
+		} else {
+			maxRow := len(m.authors) - 1
+			if maxRow > 19 {
+				maxRow = 19
+			}
+			if m.selectedRow < maxRow {
+				m.selectedRow++
+			}
 		}
 
 	case "left", "h":
@@ -184,8 +204,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedRow = 0
 		}
 
+	case "r":
+		if m.viewMode == ViewAggregate {
+			m.overlayExcluded = make(map[string]bool)
+			for k, v := range m.excludedRepos {
+				m.overlayExcluded[k] = v
+			}
+			m.overlayCursor = 0
+			m.viewMode = ViewRepoOverlay
+		}
+
+	case " ":
+		if m.viewMode == ViewRepoOverlay && m.overlayCursor < len(m.repoNames) {
+			name := m.repoNames[m.overlayCursor]
+			if m.overlayExcluded[name] {
+				delete(m.overlayExcluded, name)
+			} else {
+				m.overlayExcluded[name] = true
+			}
+		}
+
 	case "enter":
-		if m.viewMode == ViewAggregate && m.selectedRow < len(m.authors) {
+		if m.viewMode == ViewRepoOverlay {
+			m.excludedRepos = m.overlayExcluded
+			m.overlayExcluded = nil
+			m.viewMode = ViewAggregate
+			m.recomputeAuthors()
+			m.selectedRow = 0
+		} else if m.viewMode == ViewAggregate && m.selectedRow < len(m.authors) {
 			m.activeOperative = m.authors[m.selectedRow].Name
 			m.viewMode = ViewOperative
 		}
@@ -214,6 +260,10 @@ func (m Model) View() string {
 		return lipgloss.NewStyle().Foreground(ColorMagenta).Render(
 			fmt.Sprintf("error: %v", m.err),
 		)
+	}
+
+	if m.viewMode == ViewRepoOverlay {
+		return m.renderRepoOverlay()
 	}
 
 	if m.viewMode == ViewOperative {
