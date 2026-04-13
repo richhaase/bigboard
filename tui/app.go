@@ -26,10 +26,10 @@ type Model struct {
 	allRecords      []git.CommitRecord
 	authors         []stats.AuthorStats
 	repoNames       []string
-	excludedRepos    map[string]bool
-	overlayExcluded  map[string]bool // working copy while overlay is open
-	overlayCursor    int
-	viewMode         ViewMode
+	excludedRepos   map[string]bool
+	overlayExcluded map[string]bool // working copy while overlay is open
+	overlayCursor   int
+	viewMode        ViewMode
 	selectedRow     int
 	activeOperative string
 	sortField       stats.SortField
