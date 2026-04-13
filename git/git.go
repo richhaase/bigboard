@@ -75,7 +75,9 @@ func DiscoverRepos(paths []string) []string {
 	for _, p := range paths {
 		abs := absPath(p)
 		if isGitRepo(abs) {
-			add(abs)
+			if !isWorktree(abs) {
+				add(abs)
+			}
 			continue
 		}
 		// Scan one level deep
@@ -88,7 +90,7 @@ func DiscoverRepos(paths []string) []string {
 				continue
 			}
 			candidate := filepath.Join(abs, e.Name())
-			if isGitRepo(candidate) {
+			if isGitRepo(candidate) && !isWorktree(candidate) {
 				add(candidate)
 			}
 		}
@@ -177,6 +179,21 @@ func repoNameFromPath(dir string) string {
 func isGitRepo(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil
+}
+
+// isWorktree returns true if dir is a git worktree (as opposed to a main repo).
+// Worktrees have a .git *file* containing "gitdir: <path>" instead of a .git directory.
+func isWorktree(dir string) bool {
+	p := filepath.Join(dir, ".git")
+	fi, err := os.Lstat(p)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(string(data), "gitdir:")
 }
 
 func absPath(p string) string {

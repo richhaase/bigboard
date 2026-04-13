@@ -109,6 +109,39 @@ func TestCollectCommitsInvalidRepo(t *testing.T) {
 	}
 }
 
+func TestDiscoverReposSkipsWorktrees(t *testing.T) {
+	parent := t.TempDir()
+
+	// Create a main repo
+	mainRepo := filepath.Join(parent, "main-repo")
+	if err := os.MkdirAll(mainRepo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	makeTestRepo(t, mainRepo)
+	writeAndCommit(t, mainRepo, "a.go", "package a\n", "init")
+
+	// Create a worktree of that repo
+	wt := filepath.Join(parent, "main-repo-wt")
+	cmd := exec.Command("git", "worktree", "add", "-b", "feature", wt, "HEAD")
+	cmd.Dir = mainRepo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git worktree add failed: %v\n%s", err, out)
+	}
+
+	// Discover from parent — should find 1 repo (skip worktree)
+	found := git.DiscoverRepos([]string{parent})
+	if len(found) != 1 {
+		t.Errorf("expected 1 repo (worktree skipped), got %d: %v", len(found), found)
+	}
+
+	// Discover from direct worktree path — should find nothing
+	direct := git.DiscoverRepos([]string{wt})
+	if len(direct) != 0 {
+		t.Errorf("expected 0 repos for worktree path, got %d: %v", len(direct), direct)
+	}
+}
+
 func TestDiscoverRepos(t *testing.T) {
 	parent := t.TempDir()
 
