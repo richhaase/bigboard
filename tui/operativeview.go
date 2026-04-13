@@ -28,15 +28,28 @@ func (v OperativeView) RenderOperativeDetail(
 	authorStats *stats.AuthorStats,
 	records []git.CommitRecord,
 	width int,
+	timeIdx int,
+	repoCount int,
+	excludedCount int,
 ) string {
 	var sections []string
 
-	// Header
-	header := StyleTitle.Render(fmt.Sprintf("⟐ %s ⟐", strings.ToUpper(authorName)))
-	subtitle := StyleSubtitle.Render("// OPERATIVE INTELLIGENCE DOSSIER")
-	backHint := StyleSubtitle.Render("// [ESC] back")
-	glitch := StyleDimCyan.Render(strings.Repeat("─", width))
-	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, header, subtitle, backHint, glitch))
+	// Header banner
+	if width >= 82 {
+		for i, line := range bannerLines {
+			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
+			sections = append(sections, "  "+style.Render(line))
+		}
+		sections = append(sections, "")
+	}
+
+	// Status line + time picker
+	sections = append(sections, RenderFooter(repoCount, excludedCount, width))
+	sections = append(sections, RenderTimePicker(timeIdx))
+	sections = append(sections, "")
+
+	// Operative name as section header
+	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
 	// Summary stat boxes
 	if authorStats != nil {
@@ -47,7 +60,8 @@ func (v OperativeView) RenderOperativeDetail(
 	// Per-repo breakdown table
 	if authorStats != nil && len(authorStats.PerRepo) > 0 {
 		sections = append(sections, "")
-		sections = append(sections, StyleTableHeader.Render("REPO CONTRIBUTIONS"))
+		sections = append(sections, RenderSectionHeader("REPO CONTRIBUTIONS", width))
+		sections = append(sections, "")
 		sections = append(sections, v.renderRepoBreakdown(authorStats, width))
 	}
 
@@ -55,8 +69,8 @@ func (v OperativeView) RenderOperativeDetail(
 	authorRecords := filterRecordsByAuthor(records, authorName)
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
-		sections = append(sections, StyleTableHeader.Render("ACTIVITY TIMELINE"))
-		sections = append(sections, StyleDimCyan.Render(strings.Repeat("─", width)))
+		sections = append(sections, RenderSectionHeader("ACTIVITY TIMELINE", width))
+		sections = append(sections, "")
 		sections = append(sections, v.renderTimeline(authorRecords, width))
 	}
 
@@ -104,7 +118,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		"",
 	)
 	rows = append(rows, header)
-	rows = append(rows, StyleDimCyan.Render(strings.Repeat("─", width)))
+	rows = append(rows, "  "+StyleDimCyan.Render(strings.Repeat("━", width-4)))
 
 	for i, e := range entries {
 		name := StyleMagenta.Render(fmt.Sprintf("%-*s", nameW, Truncate(e.name, nameW)))
@@ -151,7 +165,7 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 
 	labelW := 10 // "Jan 2026  "
 	numW := 6    // " 123 "
-	barW := width - labelW - numW - 4
+	barW := width - labelW - numW - 6
 	if barW < 10 {
 		barW = 10
 	}
@@ -171,8 +185,7 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 	return strings.Join(rows, "\n")
 }
 
-// filterRecordsByAuthor returns records matching the given author name
-// (using the same fuzzy matching as stats.AreSimilarNames).
+// filterRecordsByAuthor returns records matching the given author name.
 func filterRecordsByAuthor(records []git.CommitRecord, authorName string) []git.CommitRecord {
 	var result []git.CommitRecord
 	for _, r := range records {

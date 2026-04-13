@@ -11,10 +11,16 @@ func (m Model) renderRepoOverlay() string {
 	var sections []string
 
 	// Header
-	title := StyleTitle.Render("⟐ REPOSITORIES ⟐")
-	subtitle := StyleSubtitle.Render("// TOGGLE REPO INCLUSION")
-	separator := StyleDimCyan.Render(strings.Repeat("─", m.width))
-	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, title, subtitle, separator))
+	if m.width >= 82 {
+		for i, line := range bannerLines {
+			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
+			sections = append(sections, "  "+style.Render(line))
+		}
+		sections = append(sections, "")
+	}
+
+	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
+	sections = append(sections, "")
 
 	// Repo list with checkboxes
 	for i, name := range m.repoNames {
@@ -35,7 +41,7 @@ func (m Model) renderRepoOverlay() string {
 			nameStyle = StyleDimWhite
 		}
 
-		line := cursor + checkStyle.Render(checkbox) + " " + nameStyle.Render(name)
+		line := "  " + cursor + checkStyle.Render(checkbox) + " " + nameStyle.Render(name)
 
 		var rowStyle lipgloss.Style
 		switch {
@@ -58,9 +64,9 @@ func (m Model) renderRepoOverlay() string {
 
 	// Help bar
 	sections = append(sections, "")
-	help := StyleHelpKey.Render("[space]") + StyleHelpDesc.Render("toggle") + " " +
-		StyleHelpKey.Render("[enter/esc]") + StyleHelpDesc.Render("done") + " " +
-		StyleHelpKey.Render("[↑↓]") + StyleHelpDesc.Render("navigate")
+	help := StyleDimCyan.Render("  ▐") + StyleHelpKey.Render("space") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("toggle") + "  " +
+		StyleDimCyan.Render("▐") + StyleHelpKey.Render("enter/esc") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("done") + "  " +
+		StyleDimCyan.Render("▐") + StyleHelpKey.Render("↑↓") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("navigate")
 	sections = append(sections, help)
 
 	return strings.Join(sections, "\n")

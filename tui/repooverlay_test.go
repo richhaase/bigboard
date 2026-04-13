@@ -17,8 +17,8 @@ func TestRenderRepoOverlayContent(t *testing.T) {
 	result := m.renderRepoOverlay()
 
 	// Should contain the title
-	if !strings.Contains(result, "REPOSITORIES") {
-		t.Error("expected REPOSITORIES title in overlay")
+	if !strings.Contains(result, "REPOSITORY") {
+		t.Error("expected REPOSITORY title in overlay")
 	}
 
 	// Should show repo-a as included (checkbox checked)

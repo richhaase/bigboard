@@ -253,8 +253,19 @@ func (m *Model) recomputeAuthors() {
 // View renders the current UI state.
 func (m Model) View() string {
 	if m.loading {
-		title := StyleTitle.Render("⟐ BIG BOARD ⟐")
-		scanning := StyleSubtitle.Render("// SCANNING REPOSITORIES...")
+		// Show banner during loading if wide enough
+		if m.width >= 82 {
+			var lines []string
+			for i, line := range bannerLines {
+				style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
+				lines = append(lines, "  "+style.Render(line))
+			}
+			lines = append(lines, "")
+			lines = append(lines, StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES..."))
+			return lipgloss.JoinVertical(lipgloss.Left, lines...)
+		}
+		title := StyleTitle.Render("  ░▒▓█  B I G   B O A R D  █▓▒░")
+		scanning := StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES...")
 		return lipgloss.JoinVertical(lipgloss.Left, title, scanning)
 	}
 
@@ -279,13 +290,13 @@ func (m Model) View() string {
 func (m Model) renderAggregateView() string {
 	var sections []string
 
-	// Header
-	sections = append(sections, RenderHeader(m.width))
+	// Header (banner + status + separator)
+	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos)))
+	sections = append(sections, "")
 
-	// Time picker + repo count on the same line
-	timePicker := RenderTimePicker(m.timeIdx)
-	repoCount := RenderRepoCount(len(m.repoNames), len(m.excludedRepos))
-	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, timePicker, repoCount))
+	// Time picker
+	sections = append(sections, RenderTimePicker(m.timeIdx))
+	sections = append(sections, "")
 
 	// Stat boxes
 	var totalCommits, totalAdded, totalRemoved int
@@ -295,15 +306,14 @@ func (m Model) renderAggregateView() string {
 		totalRemoved += a.Removed
 	}
 	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved))
+	sections = append(sections, "")
 
-	// Aggregate table
+	// Aggregate table (includes its own section header)
 	sections = append(sections, AggregateView{}.RenderTable(m.authors, m.selectedRow, m.sortField, m.width))
 
-	// Help bar
+	// Help bar at bottom
+	sections = append(sections, "")
 	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate"}))
-
-	// Footer
-	sections = append(sections, RenderFooter(len(m.repoNames), len(m.excludedRepos), m.width))
 
 	return strings.Join(sections, "\n")
 }
@@ -322,11 +332,7 @@ func (m Model) renderOperativeView() string {
 	// Filter records by current time range for the timeline
 	filtered := stats.FilterByTime(m.allRecords, TimePresets[m.timeIdx].Duration)
 
-	// Time picker
-	timePicker := RenderTimePicker(m.timeIdx)
-
-	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width)
+	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width, m.timeIdx, len(m.repoNames), len(m.excludedRepos))
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
-	footer := RenderFooter(len(m.repoNames), len(m.excludedRepos), m.width)
-	return strings.Join([]string{timePicker, detail, "", helpBar, footer}, "\n")
+	return strings.Join([]string{detail, "", helpBar}, "\n")
 }

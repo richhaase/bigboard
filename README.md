@@ -30,6 +30,9 @@ bigboard ~/src/
 
 # Set initial sort column
 bigboard --sort commits ~/src/
+
+# Exclude specific repos
+bigboard --exclude vendor-lib ~/src/
 ```
 
 ## Controls
@@ -37,12 +40,22 @@ bigboard --sort commits ~/src/
 | Key | Action |
 |-----|--------|
 | `↑/↓` `j/k` | Navigate rows |
-| `←/→` `h/l` | Cycle time range (30d / 90d / 1y / all) |
-| `Enter` | Drill into selected repo |
+| `←/→` `h/l` | Cycle time range (1d / 7d / 14d / 30d / 90d / 1y / all) |
+| `Enter` | Drill into selected contributor |
 | `Esc` | Back / Quit |
 | `s` | Cycle sort column |
-| `Tab` | Toggle focus (table / repo tags) |
+| `r` | Open repo inclusion/exclusion overlay |
 | `q` | Quit |
+
+## Features
+
+- ASCII art banner with vertical color gradient
+- Gradient impact bars with trailing glow effect
+- Gold/silver/bronze rank styling for top 3 contributors
+- Per-contributor drill-down with repo breakdown and activity timeline
+- Interactive repo inclusion/exclusion overlay
+- Time range filtering (1d through all-time)
+- Git worktree detection (automatically skipped during repo discovery)
 
 ## License
 

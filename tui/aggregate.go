@@ -14,7 +14,7 @@ type AggregateView struct{}
 // RenderTable returns a styled leaderboard string for the given authors.
 func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int, sortField stats.SortField, width int) string {
 	if len(authors) == 0 {
-		return "No commit data found."
+		return StyleDimWhite.Render("  No commit data found.")
 	}
 
 	const (
@@ -33,7 +33,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 
 	// Column headers with active sort indicator
 	colRank := "#"
-	colName := "OPERATIVE"
+	colName := "CONTRIBUTOR"
 	colCommits := "COMMITS"
 	colAdded := "ADDED"
 	colRemoved := "REMOVED"
@@ -66,7 +66,10 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 	)
 
 	totalRowWidth := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + barW
-	separator := StyleDimCyan.Render(strings.Repeat("─", totalRowWidth))
+	separator := StyleDimCyan.Render("  " + strings.Repeat("━", totalRowWidth))
+
+	// Section header
+	sectionHdr := StyleDimCyan.Render("  " + strings.Repeat("━", width-4))
 
 	// Limit to 20 rows
 	limit := len(authors)
@@ -91,12 +94,33 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 			cursor = StyleCursor.Render("▸ ")
 		}
 
-		rankStr := StyleRank.Render(fmt.Sprintf("%-2s", rank))
+		// Rank styling: gold/silver/bronze for top 3
+		var rankStyle lipgloss.Style
+		switch i {
+		case 0:
+			rankStyle = StyleRankGold
+		case 1:
+			rankStyle = StyleRankSilver
+		case 2:
+			rankStyle = StyleRankBronze
+		default:
+			rankStyle = StyleRank
+		}
+		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", rank))
+
 		nameStr := StyleAuthor.Render(fmt.Sprintf("%-*s", nameW, name))
 		commitsStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, commits))
 		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, added))
 		removedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, removed))
-		netStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, net))
+
+		// Net gets red treatment when negative
+		var netStr string
+		if a.Net < 0 {
+			netStr = lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("%*s", numW, net))
+		} else {
+			netStr = StyleNumeric.Render(fmt.Sprintf("%*s", numW, net))
+		}
+
 		barStr := fmt.Sprintf("%-*s", barW, bar)
 
 		line := cursor + rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + barStr
@@ -114,7 +138,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		rows = append(rows, rowStyle.Render(line))
 	}
 
-	parts := []string{header, separator}
+	parts := []string{sectionHdr, "", header, separator}
 	parts = append(parts, rows...)
 	return strings.Join(parts, "\n")
 }

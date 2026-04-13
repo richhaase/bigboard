@@ -24,29 +24,61 @@ var TimePresets = []TimePreset{
 	{Label: "ALL", Duration: 0},
 }
 
-// RenderHeader renders the title, subtitle, and separator line.
-func RenderHeader(width int) string {
-	title := StyleTitle.Render("⟐ BIG BOARD ⟐")
-	subtitle := StyleSubtitle.Render("// CONTRIBUTOR INTELLIGENCE SYSTEM")
-	separator := StyleDimCyan.Render(strings.Repeat("─", width))
+// ── ASCII art banner (figlet banner3, # → █) ────────────────────────────
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, subtitle, separator)
+var bannerLines = [7]string{
+	`████████  ████  ██████      ████████   ███████     ███    ████████  ████████`,
+	`██     ██  ██  ██    ██     ██     ██ ██     ██   ██ ██   ██     ██ ██     ██`,
+	`██     ██  ██  ██           ██     ██ ██     ██  ██   ██  ██     ██ ██     ██`,
+	`████████   ██  ██   ████    ████████  ██     ██ ██     ██ ████████  ██     ██`,
+	`██     ██  ██  ██    ██     ██     ██ ██     ██ █████████ ██   ██   ██     ██`,
+	`██     ██  ██  ██    ██     ██     ██ ██     ██ ██     ██ ██    ██  ██     ██`,
+	`████████  ████  ██████      ████████   ███████  ██     ██ ██     ██ ████████`,
 }
 
-// RenderStatBoxes renders 3 bordered stat boxes horizontally joined.
+// RenderHeader renders the ASCII banner with a vertical color gradient,
+// subtitle, classification stamp, and a heavy separator.
+func RenderHeader(width, repoCount, excludedCount int) string {
+	var sections []string
+
+	// Render banner with vertical gradient if terminal is wide enough
+	if width >= 82 {
+		for i, line := range bannerLines {
+			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
+			sections = append(sections, "  "+style.Render(line))
+		}
+	} else {
+		// Compact fallback
+		title := StyleTitle.Render("  ░▒▓█  B I G   B O A R D  █▓▒░")
+		sections = append(sections, title)
+	}
+
+	sections = append(sections, "")
+
+	// Status line
+	sections = append(sections, RenderFooter(repoCount, excludedCount, width))
+
+	// Heavy separator
+	sections = append(sections, StyleDimCyan.Render("  "+strings.Repeat("━", width-4)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// RenderStatBoxes renders 3 heavy-bordered stat boxes.
 func RenderStatBoxes(commits, added, removed int) string {
-	box := func(value, label string) string {
-		v := StyleStatValue.Render(value)
+	box := func(value, label string, valColor lipgloss.Color) string {
+		v := lipgloss.NewStyle().Foreground(valColor).Bold(true).Render(value)
 		l := StyleStatLabel.Render(label)
 		inner := lipgloss.JoinVertical(lipgloss.Center, v, l)
 		return StyleStatBox.Render(inner)
 	}
 
-	c := box(FormatNumber(commits), "COMMITS")
-	a := box("+"+FormatNumber(added), "ADDED")
-	r := box("-"+FormatNumber(removed), "REMOVED")
+	c := box(FormatNumber(commits), "COMMITS", ColorCyan)
+	a := box("+"+FormatNumber(added), "ADDED", ColorGreen)
+	r := box("-"+FormatNumber(removed), "REMOVED", ColorMagenta)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, c, a, r)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, c, " ", a, " ", r)
+	return lipgloss.NewStyle().MarginLeft(2).Render(joined)
 }
 
 // RenderTimePicker renders time presets with the active one styled differently.
@@ -54,15 +86,15 @@ func RenderTimePicker(activeIdx int) string {
 	parts := make([]string, len(TimePresets))
 	for i, p := range TimePresets {
 		if i == activeIdx {
-			parts[i] = StyleTimePickerActive.Render(p.Label)
+			parts[i] = StyleDimCyan.Render("▐") + StyleTimePickerActive.Render(p.Label) + StyleDimCyan.Render("▌")
 		} else {
-			parts[i] = StyleTimePickerInactive.Render(p.Label)
+			parts[i] = " " + StyleTimePickerInactive.Render(p.Label) + " "
 		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	return "  " + strings.Join(parts, " ")
 }
 
-// RenderRepoCount renders the repo count indicator showing excluded repos if any.
+// RenderRepoCount renders the repo count indicator.
 func RenderRepoCount(total, excluded int) string {
 	if excluded > 0 {
 		return StyleSubtitle.Render(fmt.Sprintf("  %d/%d repos", total-excluded, total))
@@ -70,9 +102,8 @@ func RenderRepoCount(total, excluded int) string {
 	return StyleSubtitle.Render(fmt.Sprintf("  %d repos", total))
 }
 
-// RenderImpactBar renders a bar showing added (cyan) vs removed (magenta) proportionally.
-// Total bar width represents totalChange relative to maxValue.
-// Within the bar, cyan portion = added, magenta portion = removed.
+// RenderImpactBar renders a gradient bar: solid core fading to ▓▒░ at the edge.
+// Cyan for added, magenta for removed.
 func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 	total := added + removed
 	if total <= 0 || maxValue <= 0 {
@@ -87,7 +118,7 @@ func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 		filled = barWidth
 	}
 
-	// Split filled portion proportionally between added and removed
+	// Split proportionally
 	addedFill := filled
 	if total > 0 {
 		addedFill = added * filled / total
@@ -98,67 +129,102 @@ func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 	}
 
 	var sb strings.Builder
-	for i := 0; i < addedFill; i++ {
-		sb.WriteString(StyleBarCyan.Render("█"))
-	}
-	for i := 0; i < removedFill; i++ {
-		sb.WriteString(StyleBarMagenta.Render("█"))
-	}
+	writeGradientBar(&sb, addedFill, StyleBarCyan, StyleBarCyanMid, StyleBarCyanDim)
+	writeGradientBar(&sb, removedFill, StyleBarMagenta, StyleBarMagentaMid, StyleBarMagentaDim)
 	for i := filled; i < barWidth; i++ {
 		sb.WriteString(" ")
 	}
 	return sb.String()
 }
 
-// RenderFooter renders status on the left and timestamp on the right.
-func RenderFooter(repoCount, excludedCount, width int) string {
-	status := fmt.Sprintf("SYS.STATUS: NOMINAL // %d repos scanned", repoCount)
-	if excludedCount > 0 {
-		status = fmt.Sprintf("SYS.STATUS: NOMINAL // %d/%d repos active", repoCount-excludedCount, repoCount)
+// writeGradientBar writes a section of the impact bar with a trailing glow fade.
+func writeGradientBar(sb *strings.Builder, width int, bright, mid, dim lipgloss.Style) {
+	if width <= 0 {
+		return
 	}
-	left := StyleFooter.Render(status)
-	right := StyleFooter.Render(time.Now().Format("2006-01-02 15:04:05"))
 
-	leftLen := lipgloss.Width(left)
-	rightLen := lipgloss.Width(right)
-	gap := width - leftLen - rightLen
-	if gap < 1 {
-		gap = 1
+	// Gradient tail: up to 3 chars (▓▒░), only if bar is wide enough
+	glyphs := []struct {
+		ch    string
+		style lipgloss.Style
+	}{
+		{"▓", mid},
+		{"▒", dim},
+		{"░", dim},
 	}
-	return left + strings.Repeat(" ", gap) + right
+
+	tail := len(glyphs)
+	if width < 6 {
+		tail = 0 // too short for gradient — solid fill
+	} else if tail > width {
+		tail = width
+	}
+	core := width - tail
+
+	for i := 0; i < core; i++ {
+		sb.WriteString(bright.Render("█"))
+	}
+	for i := 0; i < tail; i++ {
+		sb.WriteString(glyphs[i].style.Render(glyphs[i].ch))
+	}
 }
+
+// RenderSectionHeader renders a labeled separator line: ── LABEL ──────────
+func RenderSectionHeader(label string, width int) string {
+	prefix := "──╸ "
+	suffix := " ╺"
+	labelStr := StyleCyan.Render(label)
+	fillLen := width - 4 - lipgloss.Width(prefix) - lipgloss.Width(labelStr) - lipgloss.Width(suffix)
+	if fillLen < 2 {
+		fillLen = 2
+	}
+	return "  " + StyleDimCyan.Render(prefix) + labelStr + StyleDimCyan.Render(suffix+strings.Repeat("─", fillLen))
+}
+
+// RenderFooter renders the repo count and timestamp status line.
+// The timestamp right-aligns to the separator width (width - 4).
+func RenderFooter(repoCount, excludedCount, width int) string {
+	repos := fmt.Sprintf("%d repos", repoCount)
+	if excludedCount > 0 {
+		repos = fmt.Sprintf("%d/%d repos", repoCount-excludedCount, repoCount)
+	}
+	return "  " + StyleFooter.Render(repos)
+}
+
+// StyleGreen is used for status indicators.
+var StyleGreen = lipgloss.NewStyle().Foreground(ColorGreen)
 
 // HelpContext describes the current UI state for context-aware help.
 type HelpContext struct {
 	View string // "aggregate", "operative"
 }
 
-// RenderHelpBar renders context-aware key binding hints.
+// RenderHelpBar renders context-aware key binding hints with bracket styling.
 func RenderHelpBar(ctx HelpContext) string {
 	var bindings []struct{ key, desc string }
 
 	switch ctx.View {
 	case "operative":
 		bindings = []struct{ key, desc string }{
-			{"[esc]", "back"},
-			{"[←→]", "time"},
-			{"[q]", "uit"},
+			{"esc", "back"},
+			{"←→", "time"},
+			{"q", "quit"},
 		}
 	default: // aggregate
 		bindings = []struct{ key, desc string }{
-			{"[q]", "uit"},
-			{"[s]", "ort"},
-			{"[r]", "epos"},
-			{"[↵]", "detail"},
-			{"[←→]", "time"},
+			{"q", "quit"},
+			{"s", "sort"},
+			{"r", "repos"},
+			{"↵", "detail"},
+			{"←→", "time"},
 		}
 	}
 
 	parts := make([]string, len(bindings))
 	for i, b := range bindings {
-		parts[i] = StyleHelpKey.Render(b.key) + StyleHelpDesc.Render(b.desc)
+		parts[i] = StyleDimCyan.Render("▐") + StyleHelpKey.Render(b.key) + StyleDimCyan.Render("▌") + StyleHelpDesc.Render(b.desc)
 	}
-	return strings.Join(parts, " ")
+	return "  " + strings.Join(parts, "  ")
 }
 
 // FormatNumber formats an integer with thousand separators.
