@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rdh/bigboard/git"
+	"github.com/richhaase/bigboard/git"
 )
 
 // makeTestRepo initializes a git repo in dir with the given name/email config.

@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rdh/bigboard/git"
-	"github.com/rdh/bigboard/stats"
-	"github.com/rdh/bigboard/tui"
+	"github.com/richhaase/bigboard/git"
+	"github.com/richhaase/bigboard/stats"
+	"github.com/richhaase/bigboard/tui"
 )
 
 var (

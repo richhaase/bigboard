@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rdh/bigboard/stats"
+	"github.com/richhaase/bigboard/stats"
 )
 
 // AggregateView renders the aggregate leaderboard table.

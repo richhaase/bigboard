@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rdh/bigboard/git"
-	"github.com/rdh/bigboard/stats"
+	"github.com/richhaase/bigboard/git"
+	"github.com/richhaase/bigboard/stats"
 )
 
 // MonthActivity holds commit stats for a single month.

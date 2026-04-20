@@ -4,12 +4,6 @@ A cyberpunk-themed TUI for assessing contributor volumes across git repositories
 
 ## Install
 
-### Homebrew
-
-```bash
-brew install --cask richhaase/tap/bigboard
-```
-
 ### From Source
 
 ```bash

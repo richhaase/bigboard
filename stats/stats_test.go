@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rdh/bigboard/git"
-	"github.com/rdh/bigboard/stats"
+	"github.com/richhaase/bigboard/git"
+	"github.com/richhaase/bigboard/stats"
 )
 
 func TestMergeAuthors(t *testing.T) {

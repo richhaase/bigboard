@@ -1,4 +1,4 @@
-module github.com/rdh/bigboard
+module github.com/richhaase/bigboard
 
 go 1.26.1
 

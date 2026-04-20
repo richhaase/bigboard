@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/rdh/bigboard/git"
+	"github.com/richhaase/bigboard/git"
 )
 
 // SortField controls which metric is used for sorting AuthorStats.
