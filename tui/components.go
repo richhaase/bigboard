@@ -36,6 +36,8 @@ var bannerLines = [7]string{
 	`████████  ████  ██████      ████████   ███████  ██     ██ ██     ██ ████████`,
 }
 
+var bannerWidth = lipgloss.Width(bannerLines[0])
+
 // RenderHeader renders the ASCII banner with a vertical color gradient,
 // subtitle, classification stamp, and a heavy separator.
 func RenderHeader(width, repoCount, excludedCount int, version string) string {
@@ -189,11 +191,11 @@ func RenderFooter(repoCount, excludedCount, width int, version string) string {
 		repos = fmt.Sprintf("%d/%d repos", repoCount-excludedCount, repoCount)
 	}
 	left := "  " + StyleFooter.Render(repos)
-	if version == "" {
+	if version == "" || bannerWidth == 0 {
 		return left
 	}
 	ver := StyleDimCyan.Render(version)
-	pad := width - lipgloss.Width(left) - lipgloss.Width(ver) - 2
+	pad := bannerWidth + 2 - lipgloss.Width(left) - lipgloss.Width(ver)
 	if pad < 2 {
 		pad = 2
 	}
