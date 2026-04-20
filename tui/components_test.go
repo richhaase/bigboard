@@ -63,7 +63,7 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestRenderHeader(t *testing.T) {
-	result := RenderHeader(80, 15, 0)
+	result := RenderHeader(80, 15, 0, "v0.1.0")
 	if !strings.Contains(result, "repos") {
 		t.Errorf("expected repo count in header output, got: %q", result)
 	}

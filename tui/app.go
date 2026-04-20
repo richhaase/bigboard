@@ -34,6 +34,7 @@ type Model struct {
 	activeOperative string
 	sortField       stats.SortField
 	timeIdx         int
+	version         string
 	width           int
 	height          int
 	loading         bool
@@ -49,12 +50,13 @@ type DataLoadedMsg struct {
 }
 
 // NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool) Model {
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string) Model {
 	return Model{
 		sortField:     initialSort,
 		timeIdx:       2, // 14d
 		loading:       true,
 		excludedRepos: excluded,
+		version:       version,
 	}
 }
 
@@ -291,7 +293,7 @@ func (m Model) renderAggregateView() string {
 	var sections []string
 
 	// Header (banner + status + separator)
-	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos)))
+	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version))
 	sections = append(sections, "")
 
 	// Time picker

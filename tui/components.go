@@ -38,7 +38,7 @@ var bannerLines = [7]string{
 
 // RenderHeader renders the ASCII banner with a vertical color gradient,
 // subtitle, classification stamp, and a heavy separator.
-func RenderHeader(width, repoCount, excludedCount int) string {
+func RenderHeader(width, repoCount, excludedCount int, version string) string {
 	var sections []string
 
 	// Render banner with vertical gradient if terminal is wide enough
@@ -55,8 +55,8 @@ func RenderHeader(width, repoCount, excludedCount int) string {
 
 	sections = append(sections, "")
 
-	// Status line
-	sections = append(sections, RenderFooter(repoCount, excludedCount, width))
+	// Status line with version right-aligned
+	sections = append(sections, RenderFooter(repoCount, excludedCount, width, version))
 
 	// Heavy separator
 	sections = append(sections, StyleDimCyan.Render("  "+strings.Repeat("━", width-4)))
@@ -183,12 +183,21 @@ func RenderSectionHeader(label string, width int) string {
 
 // RenderFooter renders the repo count and timestamp status line.
 // The timestamp right-aligns to the separator width (width - 4).
-func RenderFooter(repoCount, excludedCount, width int) string {
+func RenderFooter(repoCount, excludedCount, width int, version string) string {
 	repos := fmt.Sprintf("%d repos", repoCount)
 	if excludedCount > 0 {
 		repos = fmt.Sprintf("%d/%d repos", repoCount-excludedCount, repoCount)
 	}
-	return "  " + StyleFooter.Render(repos)
+	left := "  " + StyleFooter.Render(repos)
+	if version == "" {
+		return left
+	}
+	ver := StyleDimCyan.Render(version)
+	pad := width - lipgloss.Width(left) - lipgloss.Width(ver) - 2
+	if pad < 2 {
+		pad = 2
+	}
+	return left + strings.Repeat(" ", pad) + ver
 }
 
 // StyleGreen is used for status indicators.

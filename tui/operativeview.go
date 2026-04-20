@@ -44,7 +44,7 @@ func (v OperativeView) RenderOperativeDetail(
 	}
 
 	// Status line + time picker
-	sections = append(sections, RenderFooter(repoCount, excludedCount, width))
+	sections = append(sections, RenderFooter(repoCount, excludedCount, width, ""))
 	sections = append(sections, RenderTimePicker(timeIdx))
 	sections = append(sections, "")
 

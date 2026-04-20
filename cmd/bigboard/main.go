@@ -84,7 +84,7 @@ func main() {
 	}
 
 	initialSort := stats.SortFieldFromString(*sortFlag)
-	model := tui.NewModel(repoPaths, initialSort, excludedRepos)
+	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
