@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +19,27 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
+
+func init() {
+	if version != "dev" {
+		return
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		version = info.Main.Version
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if len(s.Value) > 7 {
+					commit = s.Value[:7]
+				} else {
+					commit = s.Value
+				}
+			case "vcs.time":
+				date = s.Value
+			}
+		}
+	}
+}
 
 type excludeFlags []string
 
