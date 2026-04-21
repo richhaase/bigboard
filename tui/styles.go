@@ -109,6 +109,7 @@ var (
 	StyleDimCyan  = lipgloss.NewStyle().Foreground(ColorDimCyan)
 	StyleCursor   = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
 
+	StyleAmber      = lipgloss.NewStyle().Foreground(ColorAmber)
 	StyleGlitchLine = lipgloss.NewStyle().Foreground(ColorCyan)
 
 	// Repo overlay tags (kept for compatibility)

@@ -31,7 +31,6 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		}
 	}
 
-	// Column headers with active sort indicator
 	colRank := "#"
 	colName := "CONTRIBUTOR"
 	colCommits := "COMMITS"
@@ -88,13 +87,11 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		net := FormatNumber(a.Net)
 		bar := RenderImpactBar(a.Added, a.Removed, maxTotal, barW)
 
-		// Cursor indicator for selected row
 		cursor := "  "
 		if i == selectedRow {
 			cursor = StyleCursor.Render("▸ ")
 		}
 
-		// Rank styling: gold/silver/bronze for top 3
 		var rankStyle lipgloss.Style
 		switch i {
 		case 0:
@@ -113,7 +110,6 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, added))
 		removedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, removed))
 
-		// Net gets red treatment when negative
 		var netStr string
 		if a.Net < 0 {
 			netStr = lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("%*s", numW, net))
