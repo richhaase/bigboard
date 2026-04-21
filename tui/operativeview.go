@@ -54,7 +54,7 @@ func (v OperativeView) RenderOperativeDetail(
 	// Summary stat boxes
 	if authorStats != nil {
 		sections = append(sections, "")
-		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed))
+		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits))
 	}
 
 	// Per-repo breakdown table

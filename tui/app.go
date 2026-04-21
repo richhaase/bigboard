@@ -301,13 +301,14 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, "")
 
 	// Stat boxes
-	var totalCommits, totalAdded, totalRemoved int
+	var totalCommits, totalAdded, totalRemoved, totalAI int
 	for _, a := range m.authors {
 		totalCommits += a.Commits
 		totalAdded += a.Added
 		totalRemoved += a.Removed
+		totalAI += a.AICommits
 	}
-	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved))
+	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI))
 	sections = append(sections, "")
 
 	// Aggregate table (includes its own section header)

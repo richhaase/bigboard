@@ -28,6 +28,7 @@ type AuthorStats struct {
 	Removed     int
 	Net         int
 	TotalChange int
+	AICommits   int
 	PerRepo     map[string]*RepoContribution
 }
 
@@ -38,6 +39,7 @@ type RepoContribution struct {
 	Removed     int
 	Net         int
 	TotalChange int
+	AICommits   int
 }
 
 // FilterByTime returns records within d from now. d == 0 returns all records.
@@ -185,6 +187,9 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		as.Removed += r.Removed
 		as.Net += r.Added - r.Removed
 		as.TotalChange += r.Added + r.Removed
+		if r.AIAssisted {
+			as.AICommits++
+		}
 
 		rc, ok := as.PerRepo[r.RepoName]
 		if !ok {
@@ -196,6 +201,9 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		rc.Removed += r.Removed
 		rc.Net += r.Added - r.Removed
 		rc.TotalChange += r.Added + r.Removed
+		if r.AIAssisted {
+			rc.AICommits++
+		}
 	}
 
 	result := make([]AuthorStats, 0, len(byName))

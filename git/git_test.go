@@ -101,6 +101,58 @@ func TestCollectCommits(t *testing.T) {
 	}
 }
 
+func writeAndCommitWithMessage(t *testing.T, dir, filename, content, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	cmd := exec.Command("git", "add", filename)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", message)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+}
+
+func TestCollectCommitsAIAttribution(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+
+	writeAndCommit(t, dir, "a.go", "package a\n", "plain commit")
+
+	writeAndCommitWithMessage(t, dir, "b.go", "package b\n",
+		"ai commit\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	writeAndCommitWithMessage(t, dir, "c.go", "package c\n",
+		"copilot commit\n\nCo-Authored-By: GitHub Copilot <copilot@github.com>")
+
+	writeAndCommit(t, dir, "d.go", "package d\n", "another plain commit")
+
+	ref := git.DetectDefaultBranch(dir)
+	records, err := git.CollectCommits(dir, ref)
+	if err != nil {
+		t.Fatalf("CollectCommits: %v", err)
+	}
+
+	if len(records) != 4 {
+		t.Fatalf("expected 4 records, got %d", len(records))
+	}
+
+	aiCount := 0
+	for _, r := range records {
+		if r.AIAssisted {
+			aiCount++
+		}
+	}
+	if aiCount != 2 {
+		t.Errorf("expected 2 AI-assisted commits, got %d", aiCount)
+	}
+}
+
 func TestCollectCommitsInvalidRepo(t *testing.T) {
 	dir := t.TempDir() // not a git repo
 	_, err := git.CollectCommits(dir, "main")

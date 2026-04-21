@@ -2,24 +2,24 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"os"
 )
 
 // CommitRecord holds aggregated stats for a single commit.
 type CommitRecord struct {
-	Author   string
-	Email    string
-	Date     time.Time
-	Added    int
-	Removed  int
-	Files    int
-	RepoName string
+	Author     string
+	Email      string
+	Date       time.Time
+	Added      int
+	Removed    int
+	Files      int
+	RepoName   string
+	AIAssisted bool
 }
 
 // DetectDefaultBranch tries to determine the default branch of the repo at dir.
@@ -49,7 +49,7 @@ func DetectDefaultBranch(dir string) string {
 // CollectCommits runs git log on the repo at dir using the given ref and returns
 // one CommitRecord per commit with aggregated numstat data.
 func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
-	out, err := runGit(dir, "log", ref, "--no-merges", "--format=%aN|%aE|%aI", "--numstat")
+	out, err := runGit(dir, "log", ref, "--no-merges", "--format=%aN|%aE|%aI|%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat")
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}
@@ -111,10 +111,9 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 			continue
 		}
 
-		// Header line: "Author Name|email@example.com|2024-01-01T12:00:00+00:00"
 		if strings.Contains(line, "|") && !strings.HasPrefix(line, "\t") {
-			parts := strings.SplitN(line, "|", 3)
-			if len(parts) == 3 {
+			parts := strings.SplitN(line, "|", 4)
+			if len(parts) >= 3 {
 				t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
 				if err != nil {
 					continue
@@ -123,10 +122,11 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 					records = append(records, *current)
 				}
 				current = &CommitRecord{
-					Author:   strings.TrimSpace(parts[0]),
-					Email:    strings.TrimSpace(parts[1]),
-					Date:     t,
-					RepoName: repoName,
+					Author:     strings.TrimSpace(parts[0]),
+					Email:      strings.TrimSpace(parts[1]),
+					Date:       t,
+					RepoName:   repoName,
+					AIAssisted: len(parts) == 4 && isAICoAuthor(parts[3]),
 				}
 				continue
 			}
@@ -159,6 +159,35 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 	}
 
 	return records, nil
+}
+
+var aiEmailDomains = []string{
+	"@anthropic.com",
+	"@cursor.com",
+	"@cursor.sh",
+}
+
+var aiEmailAddresses = []string{
+	"copilot@github.com",
+	"devin@cognition.ai",
+}
+
+func isAICoAuthor(trailerValue string) bool {
+	v := strings.ToLower(strings.TrimSpace(trailerValue))
+	if v == "" {
+		return false
+	}
+	for _, domain := range aiEmailDomains {
+		if strings.Contains(v, domain) {
+			return true
+		}
+	}
+	for _, addr := range aiEmailAddresses {
+		if strings.Contains(v, addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func runGit(dir string, args ...string) (string, error) {

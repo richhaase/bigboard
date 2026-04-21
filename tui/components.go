@@ -66,8 +66,8 @@ func RenderHeader(width, repoCount, excludedCount int, version string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// RenderStatBoxes renders 3 heavy-bordered stat boxes.
-func RenderStatBoxes(commits, added, removed int) string {
+// RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics.
+func RenderStatBoxes(commits, added, removed, aiCommits int) string {
 	box := func(value, label string, valColor lipgloss.Color) string {
 		v := lipgloss.NewStyle().Foreground(valColor).Bold(true).Render(value)
 		l := StyleStatLabel.Render(label)
@@ -79,7 +79,21 @@ func RenderStatBoxes(commits, added, removed int) string {
 	a := box("+"+FormatNumber(added), "ADDED", ColorGreen)
 	r := box("-"+FormatNumber(removed), "REMOVED", ColorMagenta)
 
-	joined := lipgloss.JoinHorizontal(lipgloss.Top, c, " ", a, " ", r)
+	boxes := []string{c, " ", a, " ", r}
+
+	if aiCommits > 0 {
+		var aiVal string
+		if commits > 0 {
+			pct := aiCommits * 100 / commits
+			aiVal = fmt.Sprintf("%d%% (%d)", pct, aiCommits)
+		} else {
+			aiVal = FormatNumber(aiCommits)
+		}
+		ai := box(aiVal, "AI CO-AUTHORED", ColorAmber)
+		boxes = append(boxes, " ", ai)
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
 	return lipgloss.NewStyle().MarginLeft(2).Render(joined)
 }
 

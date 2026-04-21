@@ -151,6 +151,47 @@ func TestAggregate(t *testing.T) {
 	}
 }
 
+func TestAggregateAICommits(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "Alice", Email: "alice@example.com", Date: now, Added: 10, RepoName: "repo-a", AIAssisted: true},
+		{Author: "Alice", Email: "alice@example.com", Date: now, Added: 20, RepoName: "repo-a", AIAssisted: false},
+		{Author: "Alice", Email: "alice@example.com", Date: now, Added: 30, RepoName: "repo-b", AIAssisted: true},
+		{Author: "Bob", Email: "bob@example.com", Date: now, Added: 40, RepoName: "repo-a", AIAssisted: false},
+		{Author: "Bob", Email: "bob@example.com", Date: now, Added: 50, RepoName: "repo-a", AIAssisted: true},
+	}
+
+	result := stats.Aggregate(records)
+
+	var alice, bob *stats.AuthorStats
+	for i := range result {
+		switch result[i].Name {
+		case "Alice":
+			alice = &result[i]
+		case "Bob":
+			bob = &result[i]
+		}
+	}
+
+	if alice == nil || bob == nil {
+		t.Fatal("expected both Alice and Bob in results")
+	}
+
+	if alice.AICommits != 2 {
+		t.Errorf("Alice AICommits: expected 2, got %d", alice.AICommits)
+	}
+	if bob.AICommits != 1 {
+		t.Errorf("Bob AICommits: expected 1, got %d", bob.AICommits)
+	}
+
+	if alice.PerRepo["repo-a"].AICommits != 1 {
+		t.Errorf("Alice repo-a AICommits: expected 1, got %d", alice.PerRepo["repo-a"].AICommits)
+	}
+	if alice.PerRepo["repo-b"].AICommits != 1 {
+		t.Errorf("Alice repo-b AICommits: expected 1, got %d", alice.PerRepo["repo-b"].AICommits)
+	}
+}
+
 func TestFilterByTime(t *testing.T) {
 	now := time.Now()
 	records := []git.CommitRecord{
