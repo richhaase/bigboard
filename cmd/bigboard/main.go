@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
@@ -52,6 +53,7 @@ func (e *excludeFlags) Set(v string) error {
 func main() {
 	sortFlag := flag.String("sort", "total", "Initial sort: commits|added|removed|net|total")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	themeFlag := flag.String("theme", "auto", "Color theme: auto|light|dark")
 	var excludes excludeFlags
 	flag.Var(&excludes, "exclude", "Repo directory name to exclude (repeatable)")
 	flag.Parse()
@@ -59,6 +61,18 @@ func main() {
 	if *versionFlag {
 		fmt.Printf("bigboard %s (commit: %s, built: %s)\n", version, commit, date)
 		os.Exit(0)
+	}
+
+	switch strings.ToLower(*themeFlag) {
+	case "light":
+		lipgloss.SetHasDarkBackground(false)
+	case "dark":
+		lipgloss.SetHasDarkBackground(true)
+	case "", "auto":
+		// Let lipgloss auto-detect from the terminal.
+	default:
+		fmt.Fprintf(os.Stderr, "Error: invalid --theme %q (want auto|light|dark)\n", *themeFlag)
+		os.Exit(1)
 	}
 
 	paths := flag.Args()

@@ -68,7 +68,7 @@ func RenderHeader(width, repoCount, excludedCount int, version string) string {
 
 // RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics.
 func RenderStatBoxes(commits, added, removed, aiCommits int) string {
-	box := func(value, label string, valColor lipgloss.Color) string {
+	box := func(value, label string, valColor lipgloss.TerminalColor) string {
 		v := lipgloss.NewStyle().Foreground(valColor).Bold(true).Render(value)
 		l := StyleStatLabel.Render(label)
 		inner := lipgloss.JoinVertical(lipgloss.Center, v, l)
