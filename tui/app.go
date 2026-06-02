@@ -361,12 +361,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		if m.viewMode == ViewRepoOverlay {
+		switch m.viewMode {
+		case ViewRepoOverlay:
 			m.excludedRepos = m.overlayExcluded
 			m.overlayExcluded = nil
 			m.viewMode = ViewAggregate
 			m.recomputeAuthors()
-		} else if m.viewMode == ViewAggregate {
+		case ViewAggregate:
 			disp := m.displayedAuthors()
 			if m.selectedRow < len(disp) {
 				m.activeOperative = disp[m.selectedRow].Name
