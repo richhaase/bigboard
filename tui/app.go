@@ -64,7 +64,7 @@ func watchTick(d time.Duration) tea.Cmd {
 }
 
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
-// can stream a "JACKING IN" boot log instead of blocking on the whole set.
+// can stream a live scan log instead of blocking on the whole set.
 type RepoLoadedMsg struct {
 	RepoName string
 	Records  []git.CommitRecord
