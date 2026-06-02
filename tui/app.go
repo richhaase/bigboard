@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,8 +27,7 @@ type Model struct {
 	authors         []stats.AuthorStats
 	repoNames       []string
 	failedRepos     []string
-	repoPaths       []string // retained so refresh/watch can re-scan
-	watchInterval   time.Duration
+	repoPaths       []string // retained so refresh can re-scan
 	excludedRepos   map[string]bool
 	overlayExcluded map[string]bool // working copy while overlay is open
 	overlayCursor   int
@@ -56,13 +54,6 @@ type Model struct {
 	bootLines        []string
 }
 
-// watchTickMsg fires on the --watch interval to trigger a background refresh.
-type watchTickMsg struct{}
-
-func watchTick(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return watchTickMsg{} })
-}
-
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
 // can stream a live scan log instead of blocking on the whole set.
 type RepoLoadedMsg struct {
@@ -72,10 +63,9 @@ type RepoLoadedMsg struct {
 }
 
 // NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, watchInterval time.Duration) Model {
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string) Model {
 	return Model{
 		repoPaths:        repoPaths,
-		watchInterval:    watchInterval,
 		sortField:        initialSort,
 		timeIdx:          2, // 14d
 		loading:          true,
@@ -153,13 +143,9 @@ func bootLine(repo string, ok bool) string {
 	return "  " + red.Render("▸ ") + StyleAuthor.Render(repo) + red.Render("  ✗ unreadable")
 }
 
-// Init kicks off the initial concurrent load and arms the watch timer.
+// Init kicks off the initial concurrent load.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.loadCmds()}
-	if m.watchInterval > 0 {
-		cmds = append(cmds, watchTick(m.watchInterval))
-	}
-	return tea.Batch(cmds...)
+	return m.loadCmds()
 }
 
 // Update handles all incoming messages.
@@ -168,11 +154,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-	case watchTickMsg:
-		// Background refresh: re-scan silently (no boot splash), then re-arm.
-		m.resetPending()
-		return m, tea.Batch(m.loadCmds(), watchTick(m.watchInterval))
 
 	case RepoLoadedMsg:
 		if msg.Err != nil {

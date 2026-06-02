@@ -35,9 +35,8 @@ bigboard --depth 2 ~/src/
 bigboard --export json --since 90d ~/src/ > board.json
 bigboard --export md --since 1y ~/src/   # also csv
 
-# Use a named group from your config, and auto-refresh
+# Use a named group from your config
 bigboard --group backend
-bigboard --watch 30s ~/src/
 
 # Force a color theme (default: auto-detect from terminal)
 bigboard --theme dark ~/src/
@@ -104,7 +103,7 @@ Select a group with `--group backend`. Author identities can also be canonicaliz
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %
 - Per-contributor drill-down: repo breakdown, monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)
 - Scrollable, height-aware leaderboard with incremental `/` search — every contributor reachable
-- Headless `--export json|csv|md`, config file with named `--group`s, glob `--exclude`, recursive `--depth`, and `--watch`
+- Headless `--export json|csv|md`, config file with named `--group`s, glob `--exclude`, and recursive `--depth`
 - Accurate-by-default: native `.mailmap`, generated/vendored files excluded, deterministic ordering, rename/copy-aware churn
 - Git worktree detection (automatically skipped during repo discovery)
 

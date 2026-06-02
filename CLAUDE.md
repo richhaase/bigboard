@@ -24,7 +24,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 
 1. `main.go` resolves config + flags, picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees).
 2. `--export` runs the pipeline headlessly and exits; otherwise the TUI launches.
-3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R` or `--watch`).
+3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R`).
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` → `Sort` (with ascending toggle).
 5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 
