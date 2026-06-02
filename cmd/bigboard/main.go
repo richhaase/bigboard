@@ -84,7 +84,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve settings: an explicitly-set flag wins, else config, else default.
 	sortStr := pick(setFlags["sort"], *sortFlag, cfg.Sort, "total")
 	themeStr := pick(setFlags["theme"], *themeFlag, cfg.Theme, "auto")
 	stats.FuzzyMatching = *fuzzyFlag || (!setFlags["fuzzy"] && cfg.Fuzzy)
@@ -108,13 +107,11 @@ func main() {
 	case "dark":
 		lipgloss.SetHasDarkBackground(true)
 	case "", "auto":
-		// Let lipgloss auto-detect from the terminal.
 	default:
 		fmt.Fprintf(os.Stderr, "Error: invalid theme %q (want auto|light|dark)\n", themeStr)
 		os.Exit(1)
 	}
 
-	// Resolve scan paths: --group > CLI args > config paths > ".".
 	var paths []string
 	switch {
 	case *groupFlag != "":
@@ -145,7 +142,6 @@ func main() {
 	excludedRepos := buildExcludeSet(repoPaths, excludePatterns)
 	initialSort := stats.SortFieldFromString(sortStr)
 
-	// Headless export mode: run the pipeline and exit without the TUI.
 	if *exportFlag != "" {
 		since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
 		if err != nil {
@@ -161,7 +157,6 @@ func main() {
 
 	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version)
 
-	// The model's Init kicks off the concurrent per-repo load.
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -169,8 +164,6 @@ func main() {
 	}
 }
 
-// pick resolves a string setting: an explicitly-set flag wins, then a non-empty
-// config value, then the default.
 func pick(setByFlag bool, flagVal, cfgVal, def string) string {
 	if setByFlag {
 		return flagVal
@@ -181,8 +174,6 @@ func pick(setByFlag bool, flagVal, cfgVal, def string) string {
 	return def
 }
 
-// buildExcludeSet returns the set of repo basenames matching any exclude
-// pattern (exact match or filepath glob).
 func buildExcludeSet(repoPaths, patterns []string) map[string]bool {
 	ex := make(map[string]bool)
 	for _, rp := range repoPaths {
@@ -201,7 +192,6 @@ func buildExcludeSet(repoPaths, patterns []string) map[string]bool {
 	return ex
 }
 
-// expandHome expands a leading ~ to the user's home directory.
 func expandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {

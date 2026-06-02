@@ -11,7 +11,7 @@ import (
 // TimePreset represents a time range filter option.
 type TimePreset struct {
 	Label    string
-	Duration time.Duration // 0 means "all time"
+	Duration time.Duration
 }
 
 var TimePresets = []TimePreset{
@@ -23,8 +23,6 @@ var TimePresets = []TimePreset{
 	{Label: "1y", Duration: 365 * 24 * time.Hour},
 	{Label: "ALL", Duration: 0},
 }
-
-// ── ASCII art banner (figlet banner3, # → █) ────────────────────────────
 
 var bannerLines = [7]string{
 	`████████  ████  ██████      ████████   ███████     ███    ████████  ████████`,
@@ -38,14 +36,11 @@ var bannerLines = [7]string{
 
 var bannerWidth = lipgloss.Width(bannerLines[0])
 
-// Layout constants. Previously these were magic numbers scattered across views.
 const (
-	bannerMinWidth = 82 // below this, the figlet banner falls back to a compact title
-	chromeInset    = 4  // left+right margin reserved around full-width rules
+	bannerMinWidth = 82
+	chromeInset    = 4
 )
 
-// hrule returns a heavy horizontal rule of n cells, clamped at zero so a tiny
-// or not-yet-sized terminal width can't trigger a negative strings.Repeat.
 func hrule(n int) string {
 	if n < 0 {
 		n = 0
@@ -53,10 +48,6 @@ func hrule(n int) string {
 	return strings.Repeat("━", n)
 }
 
-// renderBanner returns the header banner as lines: the figlet banner with a
-// vertical color gradient when the terminal is wide enough, or a compact title
-// otherwise. Centralizing this keeps the four call sites (loading, header,
-// operative, overlay) identical and gives narrow terminals a title everywhere.
 func renderBanner(width int) []string {
 	if width >= bannerMinWidth {
 		lines := make([]string, len(bannerLines))
@@ -76,10 +67,8 @@ func RenderHeader(width, repoCount, excludedCount int, version string) string {
 
 	sections = append(sections, "")
 
-	// Status line with version right-aligned
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, version))
 
-	// Heavy separator
 	sections = append(sections, StyleDimCyan.Render("  "+hrule(width-chromeInset)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -153,7 +142,6 @@ func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 		filled = barWidth
 	}
 
-	// Split proportionally
 	addedFill := filled
 	if total > 0 {
 		addedFill = added * filled / total
@@ -172,13 +160,11 @@ func RenderImpactBar(added, removed, maxValue, barWidth int) string {
 	return sb.String()
 }
 
-// writeGradientBar writes a section of the impact bar with a trailing glow fade.
 func writeGradientBar(sb *strings.Builder, width int, bright, mid, dim lipgloss.Style) {
 	if width <= 0 {
 		return
 	}
 
-	// Gradient tail: up to 3 chars (▓▒░), only if bar is wide enough
 	glyphs := []struct {
 		ch    string
 		style lipgloss.Style
@@ -190,7 +176,7 @@ func writeGradientBar(sb *strings.Builder, width int, bright, mid, dim lipgloss.
 
 	tail := len(glyphs)
 	if width < 6 {
-		tail = 0 // too short for gradient — solid fill
+		tail = 0
 	} else if tail > width {
 		tail = width
 	}
@@ -235,13 +221,12 @@ func RenderFooter(repoCount, excludedCount, width int, version string) string {
 	return left + strings.Repeat(" ", pad) + ver
 }
 
-// StyleGreen is used for status indicators.
 var StyleGreen = lipgloss.NewStyle().Foreground(ColorGreen)
 
 // HelpContext describes the current UI state for context-aware help.
 type HelpContext struct {
-	View string // "aggregate", "operative"
-	Sort string // current sort label, appended to the 's' hint when set
+	View string
+	Sort string
 }
 
 // RenderHelpBar renders context-aware key binding hints with bracket styling.
@@ -256,7 +241,7 @@ func RenderHelpBar(ctx HelpContext) string {
 			{"←→", "time"},
 			{"q", "quit"},
 		}
-	default: // aggregate
+	default:
 		sortDesc := "sort"
 		if ctx.Sort != "" {
 			sortDesc = "sort:" + ctx.Sort
@@ -318,7 +303,6 @@ func Truncate(s string, width int) string {
 	return cutToWidth(s, width-len(ellipsis)) + ellipsis
 }
 
-// cutToWidth returns the longest prefix of s whose display width is <= w.
 func cutToWidth(s string, w int) string {
 	if w <= 0 {
 		return ""
@@ -336,9 +320,6 @@ func cutToWidth(s string, w int) string {
 	return b.String()
 }
 
-// padRight pads s on the right with spaces to a display width of w. Unlike
-// fmt's %-*s (which counts bytes), this aligns columns containing multibyte or
-// wide glyphs correctly.
 func padRight(s string, w int) string {
 	diff := w - lipgloss.Width(s)
 	if diff <= 0 {

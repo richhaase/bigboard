@@ -36,19 +36,15 @@ func (v OperativeView) RenderOperativeDetail(
 	var sections []string
 	now := time.Now()
 
-	// Header banner
 	sections = append(sections, renderBanner(width)...)
 	sections = append(sections, "")
 
-	// Status line + time picker
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, ""))
 	sections = append(sections, RenderTimePicker(timeIdx))
 	sections = append(sections, "")
 
-	// Operative name as section header
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
-	// Summary stat boxes + derived-metrics line
 	if authorStats != nil {
 		sections = append(sections, "")
 		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits))
@@ -56,7 +52,6 @@ func (v OperativeView) RenderOperativeDetail(
 		sections = append(sections, renderMetricsLine(authorStats))
 	}
 
-	// Per-repo breakdown table
 	if authorStats != nil && len(authorStats.PerRepo) > 0 {
 		sections = append(sections, "")
 		sections = append(sections, RenderSectionHeader("REPO CONTRIBUTIONS", width))
@@ -64,7 +59,6 @@ func (v OperativeView) RenderOperativeDetail(
 		sections = append(sections, v.renderRepoBreakdown(authorStats, width))
 	}
 
-	// Monthly activity timeline
 	authorRecords := filterRecordsByAuthor(records, authorStats, authorName)
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
@@ -72,7 +66,6 @@ func (v OperativeView) RenderOperativeDetail(
 		sections = append(sections, "")
 		sections = append(sections, v.renderTimeline(authorRecords, width))
 
-		// Neon contribution heatmap (weekday × week grid).
 		sections = append(sections, "")
 		sections = append(sections, RenderSectionHeader("ACTIVITY MATRIX", width))
 		sections = append(sections, "")
@@ -82,9 +75,6 @@ func (v OperativeView) RenderOperativeDetail(
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// heatmapRamp is the 5-step neon intensity ramp (none → hottest). Hottest is
-// magenta for a cyberpunk "Metaverse activity matrix" feel; it uses adaptive
-// palette styles so light/dark both read well.
 func heatmapRamp() []struct {
 	ch    string
 	style lipgloss.Style
@@ -101,9 +91,6 @@ func heatmapRamp() []struct {
 	}
 }
 
-// renderHeatmap renders a GitHub-style contribution calendar — 7 weekday rows ×
-// N week columns — with each cell's churn quantized onto the neon ramp. now is
-// passed in so the layout is deterministic and testable.
 func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now time.Time) string {
 	totals := make(map[string]int)
 	maxV := 0
@@ -126,7 +113,6 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 		weeks = 53
 	}
 
-	// Sunday of the earliest visible week.
 	firstCol := now.AddDate(0, 0, -7*(weeks-1))
 	startSunday := firstCol.AddDate(0, 0, -int(firstCol.Weekday()))
 
@@ -136,7 +122,8 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 	var rows []string
 	for wd := 0; wd < 7; wd++ {
 		var b strings.Builder
-		b.WriteString("  " + StyleDimWhite.Render(fmt.Sprintf("%-4s", weekdays[wd])))
+		b.WriteString("  ")
+		b.WriteString(StyleDimWhite.Render(fmt.Sprintf("%-4s", weekdays[wd])))
 		for col := 0; col < weeks; col++ {
 			cellDate := startSunday.AddDate(0, 0, col*7+wd)
 			if cellDate.After(now) {
@@ -163,12 +150,10 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 	return strings.Join(rows, "\n")
 }
 
-// renderRepoBreakdown renders a compact table of per-repo contributions.
 func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) string {
 	nameW := 30
 	numW := 10
 
-	// Sort repos by total change descending
 	type repoEntry struct {
 		name string
 		rc   *stats.RepoContribution
@@ -177,8 +162,6 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 	for name, rc := range as.PerRepo {
 		entries = append(entries, repoEntry{name, rc})
 	}
-	// Total-order sort (tiebreak by repo name) so equal-change repos keep a
-	// stable order across re-renders instead of reshuffling.
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].rc.TotalChange != entries[j].rc.TotalChange {
 			return entries[i].rc.TotalChange > entries[j].rc.TotalChange
@@ -186,7 +169,6 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		return entries[i].name < entries[j].name
 	})
 
-	// Find max total for impact bar
 	maxTotal := 0
 	for _, e := range entries {
 		if e.rc.TotalChange > maxTotal {
@@ -199,7 +181,6 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 
 	var rows []string
 
-	// Header
 	header := fmt.Sprintf(rowFmt,
 		StyleTableHeader.Render(fmt.Sprintf("%-*s", nameW, "REPO")),
 		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "COMMITS")),
@@ -236,19 +217,16 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 	return strings.Join(rows, "\n")
 }
 
-// renderTimeline renders a monthly activity bar chart.
 func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) string {
 	months := aggregateByMonth(records)
 	if len(months) == 0 {
 		return StyleSubtitle.Render("  No activity data")
 	}
 
-	// Limit to last 12 months
 	if len(months) > 12 {
 		months = months[len(months)-12:]
 	}
 
-	// Find max total change for bar scaling
 	maxTotal := 0
 	for _, m := range months {
 		total := m.Added + m.Removed
@@ -257,8 +235,8 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		}
 	}
 
-	labelW := 10 // "Jan 2026  "
-	numW := 6    // " 123 "
+	labelW := 10
+	numW := 6
 	barW := width - labelW - numW - 6
 	if barW < 10 {
 		barW = 10
@@ -283,8 +261,6 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 	return strings.Join(rows, "\n")
 }
 
-// renderMetricsLine renders a one-line summary of derived metrics under the
-// stat boxes: active days, first/last commit, churn ratio, and AI share.
 func renderMetricsLine(as *stats.AuthorStats) string {
 	var parts []string
 	if as.ActiveDays > 0 {
@@ -302,10 +278,6 @@ func renderMetricsLine(as *stats.AuthorStats) string {
 	return "  " + StyleDimCyan.Render(strings.Join(parts, "  ·  "))
 }
 
-// filterRecordsByAuthor returns records belonging to the given contributor.
-// When the aggregated stats are available it matches on the exact set of raw
-// author-name spellings that merged into this identity (so email-grouped
-// aliases are included); otherwise it falls back to name matching.
 func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string) []git.CommitRecord {
 	var result []git.CommitRecord
 	for _, r := range records {
@@ -322,7 +294,6 @@ func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, au
 	return result
 }
 
-// aggregateByMonth groups records into monthly buckets, sorted chronologically.
 func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
 	byMonth := make(map[string]*MonthActivity)
 

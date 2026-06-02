@@ -27,16 +27,16 @@ type Model struct {
 	authors         []stats.AuthorStats
 	repoNames       []string
 	failedRepos     []string
-	repoPaths       []string // retained so refresh can re-scan
+	repoPaths       []string
 	excludedRepos   map[string]bool
-	overlayExcluded map[string]bool // working copy while overlay is open
+	overlayExcluded map[string]bool
 	overlayCursor   int
 	viewMode        ViewMode
 	selectedRow     int
-	scrollOffset    int    // index of the first visible leaderboard row
-	filterQuery     string // active incremental author filter ("" = none)
-	searching       bool   // true while the '/' search input is open
-	sortAsc         bool   // false = descending (default), true = ascending
+	scrollOffset    int
+	filterQuery     string
+	searching       bool
+	sortAsc         bool
 	activeOperative string
 	sortField       stats.SortField
 	timeIdx         int
@@ -46,7 +46,6 @@ type Model struct {
 	loading         bool
 	err             error
 
-	// Streaming load state (accumulated as per-repo results arrive).
 	pendingRecords   []git.CommitRecord
 	pendingNames     []string
 	pendingFailed    []string
@@ -62,12 +61,14 @@ type RepoLoadedMsg struct {
 	Err      error
 }
 
+const defaultTimeIdx = 2
+
 // NewModel creates an initial Model ready to display the loading state.
 func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string) Model {
 	return Model{
 		repoPaths:        repoPaths,
 		sortField:        initialSort,
-		timeIdx:          2, // 14d
+		timeIdx:          defaultTimeIdx,
 		loading:          true,
 		pendingRemaining: len(repoPaths),
 		excludedRepos:    excluded,
@@ -75,11 +76,8 @@ func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[stri
 	}
 }
 
-// loadRepoCmd scans one repository and returns its result.
 func loadRepoCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		// Derive the repo name from the path, not from records[0], so a repo
-		// with zero non-merge commits still registers in the overlay.
 		name := filepath.Base(path)
 		ref := git.DetectDefaultBranch(path)
 		records, err := git.CollectCommits(path, ref)
@@ -87,8 +85,6 @@ func loadRepoCmd(path string) tea.Cmd {
 	}
 }
 
-// loadCmds returns one scan command per repo; they run concurrently and stream
-// RepoLoadedMsg results back. (Pure — does not mutate m.)
 func (m Model) loadCmds() tea.Cmd {
 	if len(m.repoPaths) == 0 {
 		return nil
@@ -100,7 +96,6 @@ func (m Model) loadCmds() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// resetPending clears the streaming accumulator ahead of a (re)load.
 func (m *Model) resetPending() {
 	m.pendingRemaining = len(m.repoPaths)
 	m.pendingRecords = nil
@@ -109,8 +104,6 @@ func (m *Model) resetPending() {
 	m.bootLines = nil
 }
 
-// finalizeLoad swaps the accumulated scan results into the live model once all
-// repos have reported, then re-aggregates.
 func (m *Model) finalizeLoad() {
 	seen := map[string]bool{}
 	var names []string
@@ -134,7 +127,6 @@ func (m *Model) finalizeLoad() {
 	m.recomputeAuthors()
 }
 
-// bootLine formats one repo's line in the streaming scan log.
 func bootLine(repo string, ok bool) string {
 	if ok {
 		return "  " + StyleGreen.Render("▸ ") + StyleAuthor.Render(repo) + StyleGreen.Render("  ✓")
@@ -180,9 +172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleKey processes keyboard input.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// While the search prompt is open, all input feeds the filter query.
 	if m.searching {
 		return m.handleSearchKey(msg)
 	}
@@ -192,7 +182,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "q":
-		// In aggregate, q quits; an active filter is cleared first.
 		if m.viewMode == ViewAggregate && m.filterQuery != "" {
 			m.filterQuery = ""
 			m.clampScroll()
@@ -201,7 +190,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "R":
-		// Manual refresh: re-scan all repos and show the boot splash.
 		if !m.loading {
 			m.loading = true
 			m.resetPending()
@@ -332,23 +320,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// filteredRecords returns allRecords with the current repo-exclusion and
-// time-range filters applied, in that order. Both the leaderboard and the
-// operative detail view derive from this single helper so they can never drift.
 func (m *Model) filteredRecords() []git.CommitRecord {
 	filtered := stats.FilterByRepo(m.allRecords, m.excludedRepos)
 	return stats.FilterByTime(filtered, TimePresets[m.timeIdx].Duration)
 }
 
-// recomputeAuthors re-filters and re-aggregates from allRecords.
 func (m *Model) recomputeAuthors() {
 	m.authors = stats.Aggregate(m.filteredRecords())
 	m.sortAuthors()
-	// Keep the cursor and scroll window in range when the list changes.
 	m.clampScroll()
 }
 
-// sortAuthors sorts by the active field, reversing for ascending order.
 func (m *Model) sortAuthors() {
 	stats.Sort(m.authors, m.sortField)
 	if m.sortAsc {
@@ -358,7 +340,6 @@ func (m *Model) sortAuthors() {
 	}
 }
 
-// displayedAuthors applies the active incremental filter to the sorted authors.
 func (m Model) displayedAuthors() []stats.AuthorStats {
 	if m.filterQuery == "" {
 		return m.authors
@@ -373,8 +354,8 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 	return out
 }
 
-// tableViewport returns how many leaderboard rows fit given the terminal height,
-// by measuring the surrounding chrome so the table never overflows the screen.
+const tableChromeLines = 6
+
 func (m Model) tableViewport() int {
 	above := []string{RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version)}
 	if len(m.failedRepos) > 0 {
@@ -382,17 +363,13 @@ func (m Model) tableViewport() int {
 	}
 	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(0, 0, 0, 0), "")
 	help := RenderHelpBar(HelpContext{View: "aggregate"})
-	// 6 = table-internal chrome (section header, blank, column header, rule) +
-	// the blank before the help bar + the count/status footer line.
-	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - 6
+	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
 		budget = 3
 	}
 	return budget
 }
 
-// clampScroll keeps selectedRow in range and scrolls the window so the cursor
-// stays visible.
 func (m *Model) clampScroll() {
 	n := len(m.displayedAuthors())
 	if m.selectedRow > n-1 {
@@ -416,7 +393,6 @@ func (m *Model) clampScroll() {
 	}
 }
 
-// stepOperative moves the active contributor by delta within the displayed list.
 func (m *Model) stepOperative(delta int) {
 	list := m.displayedAuthors()
 	if len(list) == 0 {
@@ -441,7 +417,6 @@ func (m *Model) stepOperative(delta int) {
 	m.clampScroll()
 }
 
-// handleSearchKey processes input while the '/' filter prompt is open.
 func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -495,7 +470,6 @@ func (m Model) View() string {
 	return m.renderAggregateView()
 }
 
-// renderBootSequence renders the streaming repository-scan loader.
 func (m Model) renderBootSequence() string {
 	lines := renderBanner(m.width)
 	lines = append(lines, "", StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES"), "")
@@ -514,25 +488,20 @@ func (m Model) renderBootSequence() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// renderAggregateView composes the full aggregate screen.
 func (m Model) renderAggregateView() string {
 	var sections []string
 
-	// Header (banner + status + separator)
 	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version))
 
-	// Surface repos that failed to scan so the totals aren't silently incomplete.
 	if len(m.failedRepos) > 0 {
 		sections = append(sections, StyleAmber.Render(
 			fmt.Sprintf("  ⚠ %d repo(s) unreadable: %s", len(m.failedRepos), strings.Join(m.failedRepos, ", "))))
 	}
 	sections = append(sections, "")
 
-	// Time picker
 	sections = append(sections, RenderTimePicker(m.timeIdx))
 	sections = append(sections, "")
 
-	// Stat boxes
 	var totalCommits, totalAdded, totalRemoved, totalAI int
 	for _, a := range m.authors {
 		totalCommits += a.Commits
@@ -543,7 +512,6 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI))
 	sections = append(sections, "")
 
-	// Aggregate table (includes its own section header + status footer)
 	sections = append(sections, AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
 		SelectedRow:  m.selectedRow,
 		ScrollOffset: m.scrollOffset,
@@ -555,7 +523,6 @@ func (m Model) renderAggregateView() string {
 		Query:        m.filterQuery,
 	}))
 
-	// Help bar at bottom
 	sections = append(sections, "")
 	sortLabel := strings.ToLower(stats.SortFieldLabel(m.sortField))
 	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel}))
@@ -563,9 +530,7 @@ func (m Model) renderAggregateView() string {
 	return strings.Join(sections, "\n")
 }
 
-// renderOperativeView composes the operative detail screen.
 func (m Model) renderOperativeView() string {
-	// Find the author stats for the active operative
 	var as *stats.AuthorStats
 	for i := range m.authors {
 		if m.authors[i].Name == m.activeOperative {
@@ -574,8 +539,6 @@ func (m Model) renderOperativeView() string {
 		}
 	}
 
-	// Use the same repo+time filter as the leaderboard so the timeline and the
-	// summary boxes agree when repos are excluded.
 	filtered := m.filteredRecords()
 
 	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width, m.timeIdx, len(m.repoNames), len(m.excludedRepos))

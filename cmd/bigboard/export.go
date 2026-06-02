@@ -13,9 +13,6 @@ import (
 	"github.com/richhaase/bigboard/stats"
 )
 
-// runExport collects, filters, aggregates, and writes the contributor table to
-// w in the requested format (json|csv|md) without launching the TUI. Per-repo
-// scan failures are reported to errw and skipped.
 func runExport(w, errw io.Writer, format string, repoPaths []string, excluded map[string]bool, since time.Duration, sortField stats.SortField) error {
 	var all []git.CommitRecord
 	failed := 0

@@ -47,7 +47,7 @@ func TestFullPipeline(t *testing.T) {
 	}
 
 	// Run pipeline
-	repoPaths := git.DiscoverRepos([]string{dir})
+	repoPaths := git.DiscoverReposDepth([]string{dir}, 1)
 	if len(repoPaths) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(repoPaths))
 	}

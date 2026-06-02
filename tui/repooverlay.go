@@ -6,18 +6,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// renderRepoOverlay renders the full-screen repo toggle overlay.
 func (m Model) renderRepoOverlay() string {
 	var sections []string
 
-	// Header
 	sections = append(sections, renderBanner(m.width)...)
 	sections = append(sections, "")
 
 	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
 	sections = append(sections, "")
 
-	// Repo list with checkboxes
 	for i, name := range m.repoNames {
 		checkbox := "[x]"
 		if m.overlayExcluded[name] {
@@ -50,14 +47,12 @@ func (m Model) renderRepoOverlay() string {
 		sections = append(sections, rowStyle.Render(line))
 	}
 
-	// Summary
 	sections = append(sections, "")
 	excluded := len(m.overlayExcluded)
 	total := len(m.repoNames)
 	summary := RenderRepoCount(total, excluded)
 	sections = append(sections, summary)
 
-	// Help bar
 	sections = append(sections, "")
 	help := StyleDimCyan.Render("  ▐") + StyleHelpKey.Render("space") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("toggle") + "  " +
 		StyleDimCyan.Render("▐") + StyleHelpKey.Render("enter/esc") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("done") + "  " +

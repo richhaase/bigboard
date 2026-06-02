@@ -11,23 +11,13 @@ import (
 	"time"
 )
 
-// fieldSep separates the header fields emitted by git log --format. It is the
-// ASCII record-separator (0x1e), which cannot appear in an author name, email,
-// or date — unlike '|', which silently corrupted parsing when a name contained
-// one. The co-author trailer list uses 0x1f (unit-separator) internally.
-const fieldSep = "\x1e"
+const (
+	fieldSep    = "\x1e"
+	coAuthorSep = "\x1f"
+)
 
-// gitTimeout bounds a single git invocation so a hung or pathological repo
-// (huge history, stuck credential helper, network-mounted .git) cannot block
-// the whole concurrent load indefinitely. Generous so legitimate large repos
-// still complete; a timeout surfaces as a per-repo failure, not a crash.
 const gitTimeout = 120 * time.Second
 
-// Path filtering. When FilterGeneratedPaths is true, churn from generated or
-// vendored files (which inflate line counts without representing authored work)
-// is not counted. The lists are exported so config/flags can extend or replace
-// them. IgnoredDirs matches any path segment; IgnoredFileGlobs matches the
-// basename via filepath.Match.
 var (
 	FilterGeneratedPaths = true
 
@@ -44,7 +34,6 @@ var (
 	}
 )
 
-// shouldCountPath reports whether a numstat path's churn should be counted.
 func shouldCountPath(path string) bool {
 	if !FilterGeneratedPaths {
 		return true
@@ -69,9 +58,6 @@ func shouldCountPath(path string) bool {
 	return true
 }
 
-// effectivePath resolves the post-change path from a numstat path field, which
-// for a rename/copy looks like "old => new", "{old => new}", or
-// "pre/{old => new}/post". We only need a representative path to match against.
 func effectivePath(p string) string {
 	p = strings.TrimSpace(p)
 	if !strings.Contains(p, "=>") {
@@ -107,7 +93,6 @@ type CommitRecord struct {
 // DetectDefaultBranch tries to determine the default branch of the repo at dir.
 // It tries origin/HEAD, then main, then master, then falls back to HEAD.
 func DetectDefaultBranch(dir string) string {
-	// Try origin/HEAD symbolic ref
 	out, err := runGit(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err == nil {
 		parts := strings.SplitN(strings.TrimSpace(out), "/", 2)
@@ -117,7 +102,6 @@ func DetectDefaultBranch(dir string) string {
 		return strings.TrimSpace(out)
 	}
 
-	// Try local branches
 	for _, branch := range []string{"main", "master"} {
 		_, err := runGit(dir, "rev-parse", "--verify", branch)
 		if err == nil {
@@ -131,10 +115,6 @@ func DetectDefaultBranch(dir string) string {
 // CollectCommits runs git log on the repo at dir using the given ref and returns
 // one CommitRecord per commit with aggregated numstat data.
 func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
-	// -M / -C make rename and copy detection explicit rather than inheriting
-	// the user's ambient diff.renames config, so churn counts are reproducible
-	// across machines (a pure rename counts as 0 added/0 removed instead of a
-	// full delete+add). Fields are 0x1e-separated; co-authors 0x1f-separated.
 	out, err := runGit(dir, "log", ref, "--no-merges", "-M", "-C",
 		"--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat")
 	if err != nil {
@@ -147,17 +127,10 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 	return parseGitLog(out, repoName)
 }
 
-// DiscoverRepos takes a list of paths. If a path is a git repo, it's used
-// directly. If it's a plain directory, it scans one level deep for git repos.
-// Results are deduplicated by absolute path.
-func DiscoverRepos(paths []string) []string {
-	return DiscoverReposDepth(paths, 1)
-}
-
-// DiscoverReposDepth is like DiscoverRepos but scans up to maxDepth directory
-// levels below each plain directory (1 = immediate children, the default).
-// Descent stops at any git repo and skips dot-directories. Worktrees are
-// skipped; results are deduplicated by absolute path.
+// DiscoverReposDepth scans paths for git repositories, descending up to maxDepth
+// directory levels below each plain directory (1 = immediate children). Descent
+// stops at any git repo and skips dot-directories. Worktrees are skipped;
+// results are deduplicated by absolute path.
 func DiscoverReposDepth(paths []string, maxDepth int) []string {
 	seen := map[string]struct{}{}
 	var result []string
@@ -175,7 +148,7 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 			if !isWorktree(dir) {
 				add(dir)
 			}
-			return // never descend into a repo
+			return
 		}
 		if depth >= maxDepth {
 			return
@@ -206,8 +179,6 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 	return result
 }
 
-// --- internal helpers ---
-
 func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 	var records []CommitRecord
 	var current *CommitRecord
@@ -223,9 +194,6 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 			if len(parts) >= 3 {
 				t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
 				if err != nil {
-					// Unparseable header: finalize the prior commit and clear
-					// current so this commit's numstat lines are dropped rather
-					// than misattributed to the previous commit.
 					if current != nil {
 						records = append(records, *current)
 						current = nil
@@ -236,8 +204,6 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 					records = append(records, *current)
 				}
 				email := strings.TrimSpace(parts[1])
-				// AI-assisted if a Co-authored-by trailer names an AI identity,
-				// or if the commit's own author IS an AI identity.
 				aiAssisted := isAIIdentity(email) || (len(parts) == 4 && isAICoAuthor(parts[3]))
 				current = &CommitRecord{
 					Author:     strings.TrimSpace(parts[0]),
@@ -250,17 +216,14 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 			}
 		}
 
-		// Numstat line: "<added>\t<removed>\t<file>"
 		if current != nil {
 			fields := strings.SplitN(line, "\t", 3)
 			if len(fields) == 3 {
 				addedStr := fields[0]
 				removedStr := fields[1]
-				// Skip binary files (shown as "-")
 				if addedStr == "-" || removedStr == "-" {
 					continue
 				}
-				// Skip generated/vendored files so they don't inflate scores.
 				if !shouldCountPath(fields[2]) {
 					continue
 				}
@@ -283,10 +246,6 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 	return records, nil
 }
 
-// aiEmailDomains / aiEmailAddresses are the single source of truth for AI
-// authorship detection. Keep entries specific (full domains / exact addresses)
-// to avoid false-positiving on human contributors who happen to work at these
-// companies — match on the commit-bot identity, not the org.
 var aiEmailDomains = []string{
 	"@anthropic.com",
 	"@cursor.com",
@@ -302,8 +261,6 @@ var aiEmailAddresses = []string{
 	"bot@codium.ai",
 }
 
-// isAIIdentity reports whether a single name<email> or bare email string refers
-// to a known AI agent. Shared by the author check and the co-author check.
 func isAIIdentity(value string) bool {
 	v := strings.ToLower(strings.TrimSpace(value))
 	if v == "" {
@@ -322,10 +279,8 @@ func isAIIdentity(value string) bool {
 	return false
 }
 
-// isAICoAuthor reports whether a Co-authored-by trailer value (one or more
-// 0x1f-separated entries) names an AI agent.
 func isAICoAuthor(trailerValue string) bool {
-	for _, entry := range strings.Split(trailerValue, "\x1f") {
+	for _, entry := range strings.Split(trailerValue, coAuthorSep) {
 		if isAIIdentity(entry) {
 			return true
 		}
@@ -367,8 +322,6 @@ func isEmptyRepo(dir string) bool {
 	return err != nil
 }
 
-// isWorktree returns true if dir is a git worktree (as opposed to a main repo).
-// Worktrees have a .git *file* containing "gitdir: <path>" instead of a .git directory.
 func isWorktree(dir string) bool {
 	p := filepath.Join(dir, ".git")
 	fi, err := os.Lstat(p)
