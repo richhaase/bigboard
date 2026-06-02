@@ -98,8 +98,8 @@ Select a group with `--group backend`. Author identities can also be canonicaliz
 
 ## Features
 
-- ASCII art banner with vertical color gradient and an animated neon glitch line (`--no-anim` to disable)
-- Streaming "JACKING IN" boot sequence that surfaces unreadable repos
+- ASCII art banner with vertical color gradient
+- Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %
 - Per-contributor drill-down: repo breakdown, monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)

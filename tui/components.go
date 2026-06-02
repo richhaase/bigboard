@@ -70,9 +70,8 @@ func renderBanner(width int) []string {
 }
 
 // RenderHeader renders the ASCII banner with a vertical color gradient, a status
-// line, and a separator. When frame >= 0 the separator becomes an animated neon
-// "glitch line" sweep driven by that frame counter; frame < 0 renders it static.
-func RenderHeader(width, repoCount, excludedCount, frame int, version string) string {
+// line, and a heavy separator.
+func RenderHeader(width, repoCount, excludedCount int, version string) string {
 	sections := renderBanner(width)
 
 	sections = append(sections, "")
@@ -80,42 +79,10 @@ func RenderHeader(width, repoCount, excludedCount, frame int, version string) st
 	// Status line with version right-aligned
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, version))
 
-	// Separator / glitch line
-	sections = append(sections, glitchSeparator(width, frame))
+	// Heavy separator
+	sections = append(sections, StyleDimCyan.Render("  "+hrule(width-chromeInset)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
-}
-
-// glitchSeparator renders the divider under the banner. With frame < 0 it is a
-// static heavy rule; otherwise a bright cyan "sweep" head with a mid/dim trail
-// travels across it and sparse magenta glitch glyphs flicker — the spec's
-// long-promised animated glitch line, finally wired to StyleGlitchLine.
-func glitchSeparator(width, frame int) string {
-	n := width - chromeInset
-	if n < 1 {
-		return StyleDimCyan.Render("  ")
-	}
-	if frame < 0 {
-		return StyleGlitchLine.Render("  " + hrule(n))
-	}
-	sweep := frame % (n + 16) // travel across, then a short gap before repeating
-	var b strings.Builder
-	b.WriteString("  ")
-	for i := 0; i < n; i++ {
-		switch d := i - sweep; {
-		case d == 0:
-			b.WriteString(StyleBarCyan.Render("━"))
-		case d == -1 || d == 1:
-			b.WriteString(StyleBarCyanMid.Render("━"))
-		case d == -2 || d == 2:
-			b.WriteString(StyleBarCyanDim.Render("━"))
-		case (i*7+frame*13)%89 == 0:
-			b.WriteString(StyleMagenta.Render("▚"))
-		default:
-			b.WriteString(StyleDimCyan.Render("━"))
-		}
-	}
-	return b.String()
 }
 
 // RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics.
