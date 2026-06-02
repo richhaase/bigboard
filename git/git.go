@@ -138,6 +138,9 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 	out, err := runGit(dir, "log", ref, "--no-merges", "-M", "-C",
 		"--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat")
 	if err != nil {
+		if isEmptyRepo(dir) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}
 	repoName := repoNameFromPath(dir)
@@ -354,6 +357,14 @@ func repoNameFromPath(dir string) string {
 func isGitRepo(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil
+}
+
+func isEmptyRepo(dir string) bool {
+	if _, err := runGit(dir, "rev-parse", "--git-dir"); err != nil {
+		return false
+	}
+	_, err := runGit(dir, "rev-parse", "--verify", "--quiet", "HEAD")
+	return err != nil
 }
 
 // isWorktree returns true if dir is a git worktree (as opposed to a main repo).
