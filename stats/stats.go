@@ -18,28 +18,63 @@ const (
 	SortByAdded
 	SortByRemoved
 	SortByNet
+	SortByAI
 )
+
+// numSortFields is the number of SortField values, used for cycling.
+const numSortFields = 6
+
+// FuzzyMatching enables substring-based name merging across different emails
+// (e.g. "Christopher" into "Christopher Lee"). It is OFF by default because it
+// over-merges genuinely distinct people (Daniel/Daniela, Martin/Martinez).
+// Enable via the --fuzzy flag. With it off, identities merge only when they
+// share an email or have an exactly-equal normalized name.
+var FuzzyMatching = false
 
 // AuthorStats holds aggregated contribution data for a single author.
 type AuthorStats struct {
-	Name        string
-	Commits     int
-	Added       int
-	Removed     int
-	Net         int
-	TotalChange int
-	AICommits   int
-	PerRepo     map[string]*RepoContribution
+	Name        string                       `json:"name"`
+	Commits     int                          `json:"commits"`
+	Added       int                          `json:"added"`
+	Removed     int                          `json:"removed"`
+	Net         int                          `json:"net"`
+	TotalChange int                          `json:"total_change"`
+	AICommits   int                          `json:"ai_commits"`
+	FirstCommit time.Time                    `json:"first_commit"`
+	LastCommit  time.Time                    `json:"last_commit"`
+	ActiveDays  int                          `json:"active_days"`
+	PerRepo     map[string]*RepoContribution `json:"per_repo,omitempty"`
+	// Aliases is the set of raw author-name spellings that merged into this
+	// canonical identity, so consumers can match raw records back to it.
+	Aliases map[string]bool `json:"-"`
+}
+
+// ChurnRatio reports removed lines as a fraction of added lines (0 when no
+// additions). High churn means a lot of the author's added code was later
+// rewritten or deleted.
+func (a AuthorStats) ChurnRatio() float64 {
+	if a.Added == 0 {
+		return 0
+	}
+	return float64(a.Removed) / float64(a.Added)
+}
+
+// AIPercent reports the share of this author's commits that are AI-assisted.
+func (a AuthorStats) AIPercent() int {
+	if a.Commits == 0 {
+		return 0
+	}
+	return a.AICommits * 100 / a.Commits
 }
 
 // RepoContribution holds per-repository stats for an author.
 type RepoContribution struct {
-	Commits     int
-	Added       int
-	Removed     int
-	Net         int
-	TotalChange int
-	AICommits   int
+	Commits     int `json:"commits"`
+	Added       int `json:"added"`
+	Removed     int `json:"removed"`
+	Net         int `json:"net"`
+	TotalChange int `json:"total_change"`
+	AICommits   int `json:"ai_commits"`
 }
 
 // FilterByTime returns records within d from now. d == 0 returns all records.
@@ -145,9 +180,16 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		if _, ok := canonicalForAuthor[ae.author]; ok {
 			continue
 		}
-		// Try fuzzy match against existing canonical names
+		// Try fuzzy match against existing canonical names. Iterate candidates
+		// in sorted order (not map order) so that when more than one canonical
+		// is similar, the chosen match is deterministic across runs.
+		cands := make([]string, 0, len(allCanonicals))
 		for c := range allCanonicals {
-			if AreSimilarNames(ae.author, c) {
+			cands = append(cands, c)
+		}
+		sort.Strings(cands)
+		for _, c := range cands {
+			if NamesMatch(ae.author, c) {
 				canonicalForAuthor[ae.author] = c
 				break
 			}
@@ -172,6 +214,7 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 
 	// Aggregate
 	byName := make(map[string]*AuthorStats)
+	activeDays := make(map[string]map[string]bool) // canonical name → set of yyyy-mm-dd
 	for _, r := range records {
 		name := mergedCanonical[canonicalForAuthor[r.Author]]
 		as, ok := byName[name]
@@ -179,6 +222,7 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 			as = &AuthorStats{
 				Name:    name,
 				PerRepo: make(map[string]*RepoContribution),
+				Aliases: make(map[string]bool),
 			}
 			byName[name] = as
 		}
@@ -187,6 +231,17 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		as.Removed += r.Removed
 		as.Net += r.Added - r.Removed
 		as.TotalChange += r.Added + r.Removed
+		as.Aliases[r.Author] = true
+		if as.FirstCommit.IsZero() || r.Date.Before(as.FirstCommit) {
+			as.FirstCommit = r.Date
+		}
+		if r.Date.After(as.LastCommit) {
+			as.LastCommit = r.Date
+		}
+		if activeDays[name] == nil {
+			activeDays[name] = make(map[string]bool)
+		}
+		activeDays[name][r.Date.Format("2006-01-02")] = true
 		if r.AIAssisted {
 			as.AICommits++
 		}
@@ -208,26 +263,49 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 
 	result := make([]AuthorStats, 0, len(byName))
 	for _, as := range byName {
+		as.ActiveDays = len(activeDays[as.Name])
 		result = append(result, *as)
 	}
+	// Return in a stable order (by name) so callers that don't sort, and the
+	// tie-handling in Sort, never depend on Go's randomized map iteration.
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
-// Sort sorts stats descending by the given field.
+// metricValue returns the value of the sort field for one author.
+func metricValue(s AuthorStats, field SortField) int {
+	switch field {
+	case SortByCommits:
+		return s.Commits
+	case SortByAdded:
+		return s.Added
+	case SortByRemoved:
+		return s.Removed
+	case SortByNet:
+		return s.Net
+	case SortByAI:
+		return s.AICommits
+	default: // SortByTotal
+		return s.TotalChange
+	}
+}
+
+// Sort sorts stats descending by the given field. Ties are broken
+// deterministically (TotalChange, then Commits, then Name) so the leaderboard
+// — and which contributors survive the top-N cap — never reshuffle run-to-run.
 func Sort(stats []AuthorStats, field SortField) {
 	sort.SliceStable(stats, func(i, j int) bool {
-		switch field {
-		case SortByCommits:
-			return stats[i].Commits > stats[j].Commits
-		case SortByAdded:
-			return stats[i].Added > stats[j].Added
-		case SortByRemoved:
-			return stats[i].Removed > stats[j].Removed
-		case SortByNet:
-			return stats[i].Net > stats[j].Net
-		default: // SortByTotal
-			return stats[i].TotalChange > stats[j].TotalChange
+		a, b := stats[i], stats[j]
+		if va, vb := metricValue(a, field), metricValue(b, field); va != vb {
+			return va > vb
 		}
+		if a.TotalChange != b.TotalChange {
+			return a.TotalChange > b.TotalChange
+		}
+		if a.Commits != b.Commits {
+			return a.Commits > b.Commits
+		}
+		return a.Name < b.Name
 	})
 }
 
@@ -242,8 +320,48 @@ func SortFieldFromString(s string) SortField {
 		return SortByRemoved
 	case "net":
 		return SortByNet
+	case "ai":
+		return SortByAI
 	default:
 		return SortByTotal
+	}
+}
+
+// NamesMatch reports whether two raw author names should be treated as the same
+// identity under the current merge policy: exact normalized-name equality
+// always, plus substring similarity when FuzzyMatching is enabled. This is the
+// predicate the merge logic and the operative-view fallback both use, so the
+// leaderboard and a contributor's timeline agree on who-is-who.
+func NamesMatch(a, b string) bool {
+	if normalizedName(a) == normalizedName(b) {
+		return true
+	}
+	if FuzzyMatching {
+		return AreSimilarNames(a, b)
+	}
+	return false
+}
+
+// NextSortField returns the next sort field in the cycle, wrapping around.
+func NextSortField(f SortField) SortField {
+	return (f + 1) % numSortFields
+}
+
+// SortFieldLabel returns a short human label for a sort field.
+func SortFieldLabel(f SortField) string {
+	switch f {
+	case SortByCommits:
+		return "COMMITS"
+	case SortByAdded:
+		return "ADDED"
+	case SortByRemoved:
+		return "REMOVED"
+	case SortByNet:
+		return "NET"
+	case SortByAI:
+		return "AI"
+	default:
+		return "IMPACT"
 	}
 }
 
@@ -274,7 +392,7 @@ func MergeAuthorName(name string, allNames []string, commitCounts map[string]int
 		if candidate == name {
 			continue
 		}
-		if AreSimilarNames(name, candidate) {
+		if NamesMatch(name, candidate) {
 			count := commitCounts[candidate]
 			if count > bestCount {
 				bestCount = count

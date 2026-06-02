@@ -17,23 +17,47 @@ func TestMergeAuthors(t *testing.T) {
 		"Bob Jones":   5,
 	}
 
-	// "alice smith" should resolve to "Alice Smith" (highest commit count among similar names)
+	// Exact normalized-name equality always merges, regardless of fuzzy setting.
 	canonical := stats.MergeAuthorName("alice smith", allNames, commitCounts)
 	if canonical != "Alice Smith" {
 		t.Errorf("expected canonical name 'Alice Smith', got %q", canonical)
-	}
-
-	// "Alice S" is short (<=5 chars after normalization? no — "alices" is 6, so it should match)
-	// "Alice S" normalized = "alice s" — length 7, substring check: "alice s" in "alice smith"? yes
-	canonical2 := stats.MergeAuthorName("Alice S", allNames, commitCounts)
-	if canonical2 != "Alice Smith" {
-		t.Errorf("expected canonical name 'Alice Smith' for 'Alice S', got %q", canonical2)
 	}
 
 	// "Bob Jones" should return itself
 	canonical3 := stats.MergeAuthorName("Bob Jones", allNames, commitCounts)
 	if canonical3 != "Bob Jones" {
 		t.Errorf("expected 'Bob Jones', got %q", canonical3)
+	}
+
+	// Substring merging ("Alice S" → "Alice Smith") is gated behind FuzzyMatching.
+	if got := stats.MergeAuthorName("Alice S", allNames, commitCounts); got != "Alice S" {
+		t.Errorf("with fuzzy off, 'Alice S' should stay separate, got %q", got)
+	}
+	stats.FuzzyMatching = true
+	t.Cleanup(func() { stats.FuzzyMatching = false })
+	if got := stats.MergeAuthorName("Alice S", allNames, commitCounts); got != "Alice Smith" {
+		t.Errorf("with fuzzy on, 'Alice S' should merge to 'Alice Smith', got %q", got)
+	}
+}
+
+// TestAggregateNoOverMerge guards the headline accuracy fix: distinct people
+// with distinct emails and merely similar names must NOT collapse into one row
+// under the default (fuzzy-off) policy.
+func TestAggregateNoOverMerge(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "Daniel", Email: "daniel@x.com", Date: now, Added: 10, RepoName: "r"},
+		{Author: "Daniela", Email: "daniela@y.com", Date: now, Added: 20, RepoName: "r"},
+		{Author: "Martin", Email: "martin@x.com", Date: now, Added: 5, RepoName: "r"},
+		{Author: "Martinez", Email: "martinez@y.com", Date: now, Added: 7, RepoName: "r"},
+	}
+	result := stats.Aggregate(records)
+	if len(result) != 4 {
+		names := make([]string, len(result))
+		for i, a := range result {
+			names[i] = a.Name
+		}
+		t.Fatalf("expected 4 distinct authors with fuzzy off, got %d: %v", len(result), names)
 	}
 }
 
@@ -303,5 +327,66 @@ func TestFilterByRepo(t *testing.T) {
 	none := stats.FilterByRepo(records, allExcluded)
 	if len(none) != 0 {
 		t.Errorf("expected 0 records, got %d", len(none))
+	}
+}
+
+func TestSortTiebreakerDeterministic(t *testing.T) {
+	// Three authors tied on Commits; ties must break by TotalChange then Name.
+	authors := []stats.AuthorStats{
+		{Name: "Charlie", Commits: 5, TotalChange: 10},
+		{Name: "Alice", Commits: 5, TotalChange: 30},
+		{Name: "Bob", Commits: 5, TotalChange: 30},
+	}
+	stats.Sort(authors, stats.SortByCommits)
+	// TotalChange 30 (Alice, Bob) before 10 (Charlie); Alice before Bob by name.
+	got := []string{authors[0].Name, authors[1].Name, authors[2].Name}
+	want := []string{"Alice", "Bob", "Charlie"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tiebreak order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestAggregateDeterministicOrder(t *testing.T) {
+	now := time.Now()
+	mk := func() []git.CommitRecord {
+		return []git.CommitRecord{
+			{Author: "Zoe", Email: "zoe@x.com", Date: now, Added: 1, RepoName: "r"},
+			{Author: "Amy", Email: "amy@x.com", Date: now, Added: 1, RepoName: "r"},
+			{Author: "Max", Email: "max@x.com", Date: now, Added: 1, RepoName: "r"},
+		}
+	}
+	first := stats.Aggregate(mk())
+	// Aggregate output is name-sorted regardless of input/map order.
+	for i := 0; i < 20; i++ {
+		again := stats.Aggregate(mk())
+		if len(again) != len(first) {
+			t.Fatalf("length varied: %d vs %d", len(again), len(first))
+		}
+		for j := range first {
+			if again[j].Name != first[j].Name {
+				t.Fatalf("Aggregate order non-deterministic at %d: %q vs %q", j, again[j].Name, first[j].Name)
+			}
+		}
+	}
+	if first[0].Name != "Amy" || first[2].Name != "Zoe" {
+		t.Errorf("expected name-sorted order, got %q..%q", first[0].Name, first[2].Name)
+	}
+}
+
+func TestAggregateMergesSameNameDifferentEmail(t *testing.T) {
+	now := time.Now()
+	// Same person, two emails (work + personal), identical name → one row.
+	records := []git.CommitRecord{
+		{Author: "Rich Haase", Email: "rich@work.com", Date: now, Added: 10, RepoName: "r"},
+		{Author: "Rich Haase", Email: "rich@personal.com", Date: now, Added: 20, RepoName: "r"},
+	}
+	result := stats.Aggregate(records)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 merged author, got %d", len(result))
+	}
+	if result[0].Added != 30 {
+		t.Errorf("expected merged Added=30, got %d", result[0].Added)
 	}
 }

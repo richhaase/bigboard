@@ -11,13 +11,8 @@ func (m Model) renderRepoOverlay() string {
 	var sections []string
 
 	// Header
-	if m.width >= 82 {
-		for i, line := range bannerLines {
-			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
-			sections = append(sections, "  "+style.Render(line))
-		}
-		sections = append(sections, "")
-	}
+	sections = append(sections, renderBanner(m.width)...)
+	sections = append(sections, "")
 
 	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
 	sections = append(sections, "")

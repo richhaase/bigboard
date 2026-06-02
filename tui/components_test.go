@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRenderImpactBar(t *testing.T) {
@@ -62,8 +65,55 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+func TestTruncateMultibyte(t *testing.T) {
+	// CJK (double-width) and accented Latin must never be split mid-rune into
+	// invalid UTF-8, and the result's display width must respect the limit.
+	cases := []struct {
+		input string
+		width int
+	}{
+		{"日本語テスト名前あいうえお", 10},
+		{"日本語テスト名前あいうえお", 5},
+		{"Łukasz Kowalski Świątek", 8},
+		{"日本語", 2},
+	}
+	for _, tc := range cases {
+		got := Truncate(tc.input, tc.width)
+		if !utf8.ValidString(got) {
+			t.Errorf("Truncate(%q, %d) = %q is not valid UTF-8", tc.input, tc.width, got)
+		}
+		if w := lipgloss.Width(got); w > tc.width {
+			t.Errorf("Truncate(%q, %d) display width = %d, exceeds %d", tc.input, tc.width, w, tc.width)
+		}
+	}
+}
+
+func TestTruncateNonPositiveWidth(t *testing.T) {
+	// Must not panic on zero or negative width (latent slice-bounds bug).
+	if got := Truncate("hello", 0); got != "" {
+		t.Errorf("Truncate(_, 0) = %q, want empty", got)
+	}
+	if got := Truncate("hello", -3); got != "" {
+		t.Errorf("Truncate(_, -3) = %q, want empty", got)
+	}
+}
+
+func TestPadRight(t *testing.T) {
+	if got := padRight("ab", 5); got != "ab   " {
+		t.Errorf("padRight(\"ab\", 5) = %q, want %q", got, "ab   ")
+	}
+	// Already at/over width: returned unchanged.
+	if got := padRight("abcdef", 4); got != "abcdef" {
+		t.Errorf("padRight over width changed string: %q", got)
+	}
+	// Wide glyphs are padded by display width, not byte count.
+	if got := padRight("日本", 6); lipgloss.Width(got) != 6 {
+		t.Errorf("padRight(\"日本\", 6) display width = %d, want 6", lipgloss.Width(got))
+	}
+}
+
 func TestRenderHeader(t *testing.T) {
-	result := RenderHeader(80, 15, 0, "v0.1.0")
+	result := RenderHeader(80, 15, 0, -1, "v0.1.0")
 	if !strings.Contains(result, "repos") {
 		t.Errorf("expected repo count in header output, got: %q", result)
 	}
@@ -80,5 +130,16 @@ func TestRenderRepoCount(t *testing.T) {
 	result2 := RenderRepoCount(15, 3)
 	if !strings.Contains(result2, "12/15 repos") {
 		t.Errorf("expected '12/15 repos', got: %q", result2)
+	}
+}
+
+func TestGlitchSeparator(t *testing.T) {
+	static := glitchSeparator(80, -1)
+	if !strings.Contains(static, "━") {
+		t.Errorf("static separator should be a heavy rule: %q", static)
+	}
+	// Animated frames should differ from each other as the sweep moves.
+	if glitchSeparator(80, 0) == glitchSeparator(80, 10) {
+		t.Errorf("animated separator should change between frames")
 	}
 }
