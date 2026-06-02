@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -62,7 +61,6 @@ func main() {
 	groupFlag := flag.String("group", "", "Use a named repo group from the config file")
 	depthFlag := flag.Int("depth", 0, "Directory levels to scan for repos (default 1)")
 	configFlag := flag.String("config", "", "Config file path (default ~/.config/bigboard/config.json)")
-	watchFlag := flag.String("watch", "", "Auto-refresh interval, e.g. 30s or 5m (default off)")
 	var excludes excludeFlags
 	flag.Var(&excludes, "exclude", "Repo basename or glob to exclude (repeatable)")
 	flag.Parse()
@@ -161,16 +159,7 @@ func main() {
 		return
 	}
 
-	var watchInterval time.Duration
-	if *watchFlag != "" {
-		watchInterval, err = time.ParseDuration(*watchFlag)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid --watch interval %q: %v\n", *watchFlag, err)
-			os.Exit(1)
-		}
-	}
-
-	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version, watchInterval)
+	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version)
 
 	// The model's Init kicks off the concurrent per-repo load.
 	p := tea.NewProgram(model, tea.WithAltScreen())

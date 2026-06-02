@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,5 +140,87 @@ func TestDiscoverReposDepth(t *testing.T) {
 	d2 := git.DiscoverReposDepth([]string{root}, 2)
 	if len(d2) != 3 {
 		t.Errorf("depth 2: expected 3 repos, got %d: %v", len(d2), d2)
+	}
+}
+
+func initRepoWithCommit(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "config", "user.email", "ada@x.com"},
+		{"git", "config", "user.name", "Ada"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s %v", args, out, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("l1\nl2\nl3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"git", "add", "."}, {"git", "commit", "-m", "init"}} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s %v", args, out, err)
+		}
+	}
+}
+
+func TestExportMarkdownEscapesPipes(t *testing.T) {
+	authors := []stats.AuthorStats{{Name: "Foo | Bar", Commits: 1}}
+	var md bytes.Buffer
+	if err := exportMarkdown(&md, authors); err != nil {
+		t.Fatalf("exportMarkdown: %v", err)
+	}
+	out := md.String()
+	if strings.Contains(out, "Foo | Bar") {
+		t.Errorf("unescaped pipe in name would inject a table column:\n%s", out)
+	}
+	if !strings.Contains(out, "Foo \\| Bar") {
+		t.Errorf("expected escaped pipe:\n%s", out)
+	}
+}
+
+func TestRunExportRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	initRepoWithCommit(t, dir)
+
+	for _, format := range []string{"json", "csv", "md"} {
+		var out, errw bytes.Buffer
+		if err := runExport(&out, &errw, format, []string{dir}, nil, 0, stats.SortByTotal); err != nil {
+			t.Fatalf("runExport(%s): %v", format, err)
+		}
+		if out.Len() == 0 {
+			t.Errorf("runExport(%s) produced no output", format)
+		}
+	}
+
+	var out, errw bytes.Buffer
+	if err := runExport(&out, &errw, "json", []string{dir}, nil, 0, stats.SortByTotal); err != nil {
+		t.Fatalf("runExport json: %v", err)
+	}
+	var authors []stats.AuthorStats
+	if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
+		t.Fatalf("json decode: %v", err)
+	}
+	if len(authors) != 1 || authors[0].Name != "Ada" || authors[0].Added != 3 {
+		t.Errorf("unexpected json round-trip: %+v", authors)
+	}
+
+	if err := runExport(&out, &errw, "xml", []string{dir}, nil, 0, stats.SortByTotal); err == nil {
+		t.Error("invalid format should error")
+	}
+}
+
+func TestRunExportAllReposFail(t *testing.T) {
+	var out, errw bytes.Buffer
+	notRepo := t.TempDir()
+	if err := runExport(&out, &errw, "json", []string{notRepo}, nil, 0, stats.SortByTotal); err == nil {
+		t.Error("expected error when all repos fail to scan")
+	}
+	if out.Len() != 0 {
+		t.Errorf("no output should be written when all repos fail, got:\n%s", out.String())
 	}
 }

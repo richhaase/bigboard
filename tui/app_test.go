@@ -271,7 +271,7 @@ func TestScrollReachesAllContributors(t *testing.T) {
 
 func TestStreamingLoadFinalizes(t *testing.T) {
 	now := time.Now()
-	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v", 0)
+	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v")
 	if !m.loading || m.pendingRemaining != 2 {
 		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
 	}
@@ -296,7 +296,7 @@ func TestStreamingLoadFinalizes(t *testing.T) {
 }
 
 func TestInitReturnsLoadCmd(t *testing.T) {
-	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v", 0)
+	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v")
 	if m.Init() == nil {
 		t.Error("Init should return a load command")
 	}

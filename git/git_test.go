@@ -306,3 +306,16 @@ func TestCollectCommitsIgnoresNonASCIIVendoredPath(t *testing.T) {
 		t.Errorf("non-ASCII vendored path counted: total Added = %d, want 1", total)
 	}
 }
+
+func TestCollectCommitsEmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	ref := git.DetectDefaultBranch(dir)
+	records, err := git.CollectCommits(dir, ref)
+	if err != nil {
+		t.Fatalf("empty repo should be a silent no-op, got error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected 0 records from empty repo, got %d", len(records))
+	}
+}

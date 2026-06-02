@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/richhaase/bigboard/git"
@@ -17,14 +18,19 @@ import (
 // scan failures are reported to errw and skipped.
 func runExport(w, errw io.Writer, format string, repoPaths []string, excluded map[string]bool, since time.Duration, sortField stats.SortField) error {
 	var all []git.CommitRecord
+	failed := 0
 	for _, p := range repoPaths {
 		ref := git.DetectDefaultBranch(p)
 		recs, err := git.CollectCommits(p, ref)
 		if err != nil {
 			fmt.Fprintf(errw, "warning: skipping %s: %v\n", p, err)
+			failed++
 			continue
 		}
 		all = append(all, recs...)
+	}
+	if failed > 0 && failed == len(repoPaths) {
+		return fmt.Errorf("all %d repositories failed to scan", failed)
 	}
 	all = stats.FilterByRepo(all, excluded)
 	all = stats.FilterByTime(all, since)
@@ -83,7 +89,7 @@ func exportMarkdown(w io.Writer, authors []stats.AuthorStats) error {
 	}
 	for i, a := range authors {
 		if _, err := fmt.Fprintf(w, "| %d | %s | %d | %d | %d | %d | %d%% | %d |\n",
-			i+1, a.Name, a.Commits, a.Added, a.Removed, a.Net, a.AIPercent(), a.ActiveDays); err != nil {
+			i+1, mdCell(a.Name), a.Commits, a.Added, a.Removed, a.Net, a.AIPercent(), a.ActiveDays); err != nil {
 			return err
 		}
 	}
@@ -95,4 +101,10 @@ func dateOrEmpty(t time.Time) string {
 		return ""
 	}
 	return t.Format("2006-01-02")
+}
+
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "|", "\\|")
 }
