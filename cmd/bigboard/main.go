@@ -63,7 +63,6 @@ func main() {
 	depthFlag := flag.Int("depth", 0, "Directory levels to scan for repos (default 1)")
 	configFlag := flag.String("config", "", "Config file path (default ~/.config/bigboard/config.json)")
 	watchFlag := flag.String("watch", "", "Auto-refresh interval, e.g. 30s or 5m (default off)")
-	noAnimFlag := flag.Bool("no-anim", false, "Disable the animated glitch line")
 	var excludes excludeFlags
 	flag.Var(&excludes, "exclude", "Repo basename or glob to exclude (repeatable)")
 	flag.Parse()
@@ -171,7 +170,7 @@ func main() {
 		}
 	}
 
-	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version, watchInterval, !*noAnimFlag)
+	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version, watchInterval)
 
 	// The model's Init kicks off the concurrent per-repo load.
 	p := tea.NewProgram(model, tea.WithAltScreen())

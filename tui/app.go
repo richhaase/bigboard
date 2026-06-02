@@ -47,8 +47,6 @@ type Model struct {
 	height          int
 	loading         bool
 	err             error
-	animate         bool // run the glitch-line animation
-	frame           int  // animation frame counter
 
 	// Streaming load state (accumulated as per-repo results arrive).
 	pendingRecords   []git.CommitRecord
@@ -65,21 +63,6 @@ func watchTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return watchTickMsg{} })
 }
 
-// animTickMsg drives the glitch-line animation frame counter.
-type animTickMsg struct{}
-
-func animTick() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return animTickMsg{} })
-}
-
-// animFrame returns the current frame when animating, or -1 for a static render.
-func (m Model) animFrame() int {
-	if m.animate {
-		return m.frame
-	}
-	return -1
-}
-
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
 // can stream a "JACKING IN" boot log instead of blocking on the whole set.
 type RepoLoadedMsg struct {
@@ -89,11 +72,10 @@ type RepoLoadedMsg struct {
 }
 
 // NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, watchInterval time.Duration, animate bool) Model {
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, watchInterval time.Duration) Model {
 	return Model{
 		repoPaths:        repoPaths,
 		watchInterval:    watchInterval,
-		animate:          animate,
 		sortField:        initialSort,
 		timeIdx:          2, // 14d
 		loading:          true,
@@ -162,23 +144,20 @@ func (m *Model) finalizeLoad() {
 	m.recomputeAuthors()
 }
 
-// bootLine formats one repo's line in the JACKING IN boot log.
+// bootLine formats one repo's line in the streaming scan log.
 func bootLine(repo string, ok bool) string {
-	red := lipgloss.NewStyle().Foreground(ColorRed)
 	if ok {
-		return "  " + StyleGreen.Render("▸ JACKING IN ") + StyleAuthor.Render(repo) + StyleGreen.Render(" … ✓")
+		return "  " + StyleGreen.Render("▸ ") + StyleAuthor.Render(repo) + StyleGreen.Render("  ✓")
 	}
-	return "  " + red.Render("▸ JACKING IN ") + StyleAuthor.Render(repo) + red.Render(" … ✗ LINK SEVERED")
+	red := lipgloss.NewStyle().Foreground(ColorRed)
+	return "  " + red.Render("▸ ") + StyleAuthor.Render(repo) + red.Render("  ✗ unreadable")
 }
 
-// Init kicks off the initial concurrent load and arms the watch/animation timers.
+// Init kicks off the initial concurrent load and arms the watch timer.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.loadCmds()}
 	if m.watchInterval > 0 {
 		cmds = append(cmds, watchTick(m.watchInterval))
-	}
-	if m.animate {
-		cmds = append(cmds, animTick())
 	}
 	return tea.Batch(cmds...)
 }
@@ -189,13 +168,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-	case animTickMsg:
-		if !m.animate {
-			return m, nil
-		}
-		m.frame++
-		return m, animTick()
 
 	case watchTickMsg:
 		// Background refresh: re-scan silently (no boot splash), then re-arm.
@@ -423,7 +395,7 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 // tableViewport returns how many leaderboard rows fit given the terminal height,
 // by measuring the surrounding chrome so the table never overflows the screen.
 func (m Model) tableViewport() int {
-	above := []string{RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), -1, m.version)}
+	above := []string{RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version)}
 	if len(m.failedRepos) > 0 {
 		above = append(above, "warn")
 	}
@@ -522,11 +494,11 @@ func (m Model) View() string {
 		lines := renderBanner(m.width)
 		lines = append(lines,
 			"",
-			StyleClassification.Render("  ◈ SYSTEM FAULT // CONNECTION SEVERED"),
+			lipgloss.NewStyle().Foreground(ColorRed).Bold(true).Render("  ◈ ERROR"),
 			"",
 			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+m.err.Error()),
 			"",
-			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("disconnect"),
+			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit"),
 		)
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
@@ -542,10 +514,10 @@ func (m Model) View() string {
 	return m.renderAggregateView()
 }
 
-// renderBootSequence renders the streaming "JACKING IN" loader.
+// renderBootSequence renders the streaming repository-scan loader.
 func (m Model) renderBootSequence() string {
 	lines := renderBanner(m.width)
-	lines = append(lines, "", StyleClassification.Render("  ◈ JACKING INTO THE METAVERSE"), "")
+	lines = append(lines, "", StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES"), "")
 
 	done := len(m.bootLines)
 	total := done + m.pendingRemaining
@@ -553,11 +525,11 @@ func (m Model) renderBootSequence() string {
 	const maxShown = 14
 	shown := m.bootLines
 	if len(shown) > maxShown {
-		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  … %d earlier nodes", len(shown)-maxShown)))
+		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  … %d earlier", len(shown)-maxShown)))
 		shown = shown[len(shown)-maxShown:]
 	}
 	lines = append(lines, shown...)
-	lines = append(lines, "", StyleDimCyan.Render(fmt.Sprintf("  ▐ linking %d/%d nodes ▌", done, total)))
+	lines = append(lines, "", StyleDimCyan.Render(fmt.Sprintf("  ▐ %d/%d repos ▌", done, total)))
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
@@ -565,8 +537,8 @@ func (m Model) renderBootSequence() string {
 func (m Model) renderAggregateView() string {
 	var sections []string
 
-	// Header (banner + status + glitch line)
-	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.animFrame(), m.version))
+	// Header (banner + status + separator)
+	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version))
 
 	// Surface repos that failed to scan so the totals aren't silently incomplete.
 	if len(m.failedRepos) > 0 {

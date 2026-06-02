@@ -177,8 +177,13 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 	for name, rc := range as.PerRepo {
 		entries = append(entries, repoEntry{name, rc})
 	}
+	// Total-order sort (tiebreak by repo name) so equal-change repos keep a
+	// stable order across re-renders instead of reshuffling.
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].rc.TotalChange > entries[j].rc.TotalChange
+		if entries[i].rc.TotalChange != entries[j].rc.TotalChange {
+			return entries[i].rc.TotalChange > entries[j].rc.TotalChange
+		}
+		return entries[i].name < entries[j].name
 	})
 
 	// Find max total for impact bar

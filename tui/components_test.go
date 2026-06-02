@@ -113,7 +113,7 @@ func TestPadRight(t *testing.T) {
 }
 
 func TestRenderHeader(t *testing.T) {
-	result := RenderHeader(80, 15, 0, -1, "v0.1.0")
+	result := RenderHeader(80, 15, 0, "v0.1.0")
 	if !strings.Contains(result, "repos") {
 		t.Errorf("expected repo count in header output, got: %q", result)
 	}
@@ -130,16 +130,5 @@ func TestRenderRepoCount(t *testing.T) {
 	result2 := RenderRepoCount(15, 3)
 	if !strings.Contains(result2, "12/15 repos") {
 		t.Errorf("expected '12/15 repos', got: %q", result2)
-	}
-}
-
-func TestGlitchSeparator(t *testing.T) {
-	static := glitchSeparator(80, -1)
-	if !strings.Contains(static, "━") {
-		t.Errorf("static separator should be a heavy rule: %q", static)
-	}
-	// Animated frames should differ from each other as the sweep moves.
-	if glitchSeparator(80, 0) == glitchSeparator(80, 10) {
-		t.Errorf("animated separator should change between frames")
 	}
 }

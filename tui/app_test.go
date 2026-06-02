@@ -91,7 +91,7 @@ func TestHandleKeySortCycles(t *testing.T) {
 func TestViewStatesRender(t *testing.T) {
 	t.Run("loading", func(t *testing.T) {
 		out := Model{loading: true, width: 100, pendingRemaining: 3}.View()
-		if !strings.Contains(out, "JACKING") || !strings.Contains(out, "0/3") {
+		if !strings.Contains(out, "SCANNING REPOSITORIES") || !strings.Contains(out, "0/3 repos") {
 			t.Errorf("loading view missing boot markers:\n%s", out)
 		}
 	})
@@ -100,7 +100,7 @@ func TestViewStatesRender(t *testing.T) {
 		m := Model{loading: true, width: 100, pendingRemaining: 1}
 		m.bootLines = []string{bootLine("engine", true), bootLine("compiler", false)}
 		out := m.View()
-		if !strings.Contains(out, "engine") || !strings.Contains(out, "SEVERED") {
+		if !strings.Contains(out, "engine") || !strings.Contains(out, "unreadable") {
 			t.Errorf("boot log should show ok + failed repos:\n%s", out)
 		}
 	})
@@ -114,8 +114,8 @@ func TestViewStatesRender(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		out := Model{err: errors.New("boom"), width: 100}.View()
-		if !strings.Contains(out, "SYSTEM FAULT") || !strings.Contains(out, "boom") {
-			t.Errorf("error view missing fault stamp or message:\n%s", out)
+		if !strings.Contains(out, "ERROR") || !strings.Contains(out, "boom") {
+			t.Errorf("error view missing error header or message:\n%s", out)
 		}
 	})
 
@@ -271,7 +271,7 @@ func TestScrollReachesAllContributors(t *testing.T) {
 
 func TestStreamingLoadFinalizes(t *testing.T) {
 	now := time.Now()
-	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v", 0, false)
+	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v", 0)
 	if !m.loading || m.pendingRemaining != 2 {
 		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
 	}
@@ -296,25 +296,35 @@ func TestStreamingLoadFinalizes(t *testing.T) {
 }
 
 func TestInitReturnsLoadCmd(t *testing.T) {
-	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v", 0, false)
+	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v", 0)
 	if m.Init() == nil {
 		t.Error("Init should return a load command")
 	}
 }
 
-func TestAnimTickAdvancesFrame(t *testing.T) {
-	m := Model{animate: true}
-	u, cmd := m.Update(animTickMsg{})
-	if u.(Model).frame != 1 {
-		t.Errorf("anim tick should advance frame, got %d", u.(Model).frame)
+// TestRepoBreakdownStableOrder guards that equal-change repos keep a stable
+// order across renders (no arbitrary reshuffling in the detail view).
+func TestRepoBreakdownStableOrder(t *testing.T) {
+	as := &stats.AuthorStats{
+		Name: "Dev",
+		PerRepo: map[string]*stats.RepoContribution{
+			"zeta":  {TotalChange: 100},
+			"alpha": {TotalChange: 100}, // tie with zeta
+			"mid":   {TotalChange: 100}, // tie
+		},
 	}
-	if cmd == nil {
-		t.Error("anim tick should re-arm")
+	v := OperativeView{}
+	first := v.renderRepoBreakdown(as, 100)
+	for i := 0; i < 20; i++ {
+		if v.renderRepoBreakdown(as, 100) != first {
+			t.Fatal("repo breakdown order is not stable across renders")
+		}
 	}
-	// With animation off, frame stays put and no re-arm.
-	off := Model{animate: false}
-	u2, cmd2 := off.Update(animTickMsg{})
-	if u2.(Model).frame != 0 || cmd2 != nil {
-		t.Error("anim off should not advance or re-arm")
+	// Ties resolve by name, so alpha precedes mid precedes zeta.
+	ai := strings.Index(first, "alpha")
+	mi := strings.Index(first, "mid")
+	zi := strings.Index(first, "zeta")
+	if ai >= mi || mi >= zi {
+		t.Errorf("expected name-sorted tie order alpha<mid<zeta, got %d/%d/%d", ai, mi, zi)
 	}
 }
