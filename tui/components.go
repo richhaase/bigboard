@@ -38,32 +38,84 @@ var bannerLines = [7]string{
 
 var bannerWidth = lipgloss.Width(bannerLines[0])
 
-// RenderHeader renders the ASCII banner with a vertical color gradient,
-// subtitle, classification stamp, and a heavy separator.
-func RenderHeader(width, repoCount, excludedCount int, version string) string {
-	var sections []string
+// Layout constants. Previously these were magic numbers scattered across views.
+const (
+	bannerMinWidth = 82 // below this, the figlet banner falls back to a compact title
+	chromeInset    = 4  // left+right margin reserved around full-width rules
+)
 
-	// Render banner with vertical gradient if terminal is wide enough
-	if width >= 82 {
+// hrule returns a heavy horizontal rule of n cells, clamped at zero so a tiny
+// or not-yet-sized terminal width can't trigger a negative strings.Repeat.
+func hrule(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	return strings.Repeat("━", n)
+}
+
+// renderBanner returns the header banner as lines: the figlet banner with a
+// vertical color gradient when the terminal is wide enough, or a compact title
+// otherwise. Centralizing this keeps the four call sites (loading, header,
+// operative, overlay) identical and gives narrow terminals a title everywhere.
+func renderBanner(width int) []string {
+	if width >= bannerMinWidth {
+		lines := make([]string, len(bannerLines))
 		for i, line := range bannerLines {
 			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
-			sections = append(sections, "  "+style.Render(line))
+			lines[i] = "  " + style.Render(line)
 		}
-	} else {
-		// Compact fallback
-		title := StyleTitle.Render("  ░▒▓█  B I G   B O A R D  █▓▒░")
-		sections = append(sections, title)
+		return lines
 	}
+	return []string{StyleTitle.Render("  ░▒▓█  B I G   B O A R D  █▓▒░")}
+}
+
+// RenderHeader renders the ASCII banner with a vertical color gradient, a status
+// line, and a separator. When frame >= 0 the separator becomes an animated neon
+// "glitch line" sweep driven by that frame counter; frame < 0 renders it static.
+func RenderHeader(width, repoCount, excludedCount, frame int, version string) string {
+	sections := renderBanner(width)
 
 	sections = append(sections, "")
 
 	// Status line with version right-aligned
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, version))
 
-	// Heavy separator
-	sections = append(sections, StyleDimCyan.Render("  "+strings.Repeat("━", width-4)))
+	// Separator / glitch line
+	sections = append(sections, glitchSeparator(width, frame))
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// glitchSeparator renders the divider under the banner. With frame < 0 it is a
+// static heavy rule; otherwise a bright cyan "sweep" head with a mid/dim trail
+// travels across it and sparse magenta glitch glyphs flicker — the spec's
+// long-promised animated glitch line, finally wired to StyleGlitchLine.
+func glitchSeparator(width, frame int) string {
+	n := width - chromeInset
+	if n < 1 {
+		return StyleDimCyan.Render("  ")
+	}
+	if frame < 0 {
+		return StyleGlitchLine.Render("  " + hrule(n))
+	}
+	sweep := frame % (n + 16) // travel across, then a short gap before repeating
+	var b strings.Builder
+	b.WriteString("  ")
+	for i := 0; i < n; i++ {
+		switch d := i - sweep; {
+		case d == 0:
+			b.WriteString(StyleBarCyan.Render("━"))
+		case d == -1 || d == 1:
+			b.WriteString(StyleBarCyanMid.Render("━"))
+		case d == -2 || d == 2:
+			b.WriteString(StyleBarCyanDim.Render("━"))
+		case (i*7+frame*13)%89 == 0:
+			b.WriteString(StyleMagenta.Render("▚"))
+		default:
+			b.WriteString(StyleDimCyan.Render("━"))
+		}
+	}
+	return b.String()
 }
 
 // RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics.
@@ -222,6 +274,7 @@ var StyleGreen = lipgloss.NewStyle().Foreground(ColorGreen)
 // HelpContext describes the current UI state for context-aware help.
 type HelpContext struct {
 	View string // "aggregate", "operative"
+	Sort string // current sort label, appended to the 's' hint when set
 }
 
 // RenderHelpBar renders context-aware key binding hints with bracket styling.
@@ -231,17 +284,25 @@ func RenderHelpBar(ctx HelpContext) string {
 	switch ctx.View {
 	case "operative":
 		bindings = []struct{ key, desc string }{
+			{"↑↓", "prev/next"},
 			{"esc", "back"},
 			{"←→", "time"},
 			{"q", "quit"},
 		}
 	default: // aggregate
+		sortDesc := "sort"
+		if ctx.Sort != "" {
+			sortDesc = "sort:" + ctx.Sort
+		}
 		bindings = []struct{ key, desc string }{
-			{"q", "quit"},
-			{"s", "sort"},
-			{"r", "repos"},
+			{"↑↓", "nav"},
 			{"↵", "detail"},
 			{"←→", "time"},
+			{"/", "find"},
+			{"s", sortDesc},
+			{"r", "repos"},
+			{"R", "refresh"},
+			{"q", "quit"},
 		}
 	}
 
@@ -272,13 +333,49 @@ func FormatNumber(n int) string {
 	return string(result)
 }
 
-// Truncate truncates s to width, adding "..." if needed.
+// Truncate shortens s to a display width of at most width cells, appending
+// "..." when it has to cut. It measures and slices on display-width / rune
+// boundaries (via lipgloss.Width) so multibyte names (CJK, accented Latin) are
+// never split mid-rune into invalid UTF-8 and wide glyphs are counted correctly.
 func Truncate(s string, width int) string {
-	if len(s) <= width {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
 		return s
 	}
-	if width <= 3 {
-		return s[:width]
+	const ellipsis = "..."
+	if width <= len(ellipsis) {
+		return cutToWidth(s, width)
 	}
-	return s[:width-3] + "..."
+	return cutToWidth(s, width-len(ellipsis)) + ellipsis
+}
+
+// cutToWidth returns the longest prefix of s whose display width is <= w.
+func cutToWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	cur := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if cur+rw > w {
+			break
+		}
+		b.WriteRune(r)
+		cur += rw
+	}
+	return b.String()
+}
+
+// padRight pads s on the right with spaces to a display width of w. Unlike
+// fmt's %-*s (which counts bytes), this aligns columns containing multibyte or
+// wide glyphs correctly.
+func padRight(s string, w int) string {
+	diff := w - lipgloss.Width(s)
+	if diff <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", diff)
 }

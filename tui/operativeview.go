@@ -17,6 +17,7 @@ type MonthActivity struct {
 	Commits int
 	Added   int
 	Removed int
+	AI      int
 }
 
 // OperativeView renders a contributor detail screen.
@@ -33,15 +34,11 @@ func (v OperativeView) RenderOperativeDetail(
 	excludedCount int,
 ) string {
 	var sections []string
+	now := time.Now()
 
 	// Header banner
-	if width >= 82 {
-		for i, line := range bannerLines {
-			style := lipgloss.NewStyle().Foreground(ColorBannerGrad[i])
-			sections = append(sections, "  "+style.Render(line))
-		}
-		sections = append(sections, "")
-	}
+	sections = append(sections, renderBanner(width)...)
+	sections = append(sections, "")
 
 	// Status line + time picker
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, ""))
@@ -51,10 +48,12 @@ func (v OperativeView) RenderOperativeDetail(
 	// Operative name as section header
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
-	// Summary stat boxes
+	// Summary stat boxes + derived-metrics line
 	if authorStats != nil {
 		sections = append(sections, "")
 		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits))
+		sections = append(sections, "")
+		sections = append(sections, renderMetricsLine(authorStats))
 	}
 
 	// Per-repo breakdown table
@@ -66,15 +65,102 @@ func (v OperativeView) RenderOperativeDetail(
 	}
 
 	// Monthly activity timeline
-	authorRecords := filterRecordsByAuthor(records, authorName)
+	authorRecords := filterRecordsByAuthor(records, authorStats, authorName)
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
 		sections = append(sections, RenderSectionHeader("ACTIVITY TIMELINE", width))
 		sections = append(sections, "")
 		sections = append(sections, v.renderTimeline(authorRecords, width))
+
+		// Neon contribution heatmap (weekday × week grid).
+		sections = append(sections, "")
+		sections = append(sections, RenderSectionHeader("ACTIVITY MATRIX", width))
+		sections = append(sections, "")
+		sections = append(sections, v.renderHeatmap(authorRecords, width, now))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// heatmapRamp is the 5-step neon intensity ramp (none → hottest). Hottest is
+// magenta for a cyberpunk "Metaverse activity matrix" feel; it uses adaptive
+// palette styles so light/dark both read well.
+func heatmapRamp() []struct {
+	ch    string
+	style lipgloss.Style
+} {
+	return []struct {
+		ch    string
+		style lipgloss.Style
+	}{
+		{"·", StyleDimWhite},
+		{"░", StyleBarCyanDim},
+		{"▒", StyleBarCyanMid},
+		{"▓", StyleCyan},
+		{"█", StyleMagenta},
+	}
+}
+
+// renderHeatmap renders a GitHub-style contribution calendar — 7 weekday rows ×
+// N week columns — with each cell's churn quantized onto the neon ramp. now is
+// passed in so the layout is deterministic and testable.
+func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now time.Time) string {
+	totals := make(map[string]int)
+	maxV := 0
+	for _, r := range records {
+		k := r.Date.Format("2006-01-02")
+		totals[k] += r.Added + r.Removed
+		if totals[k] > maxV {
+			maxV = totals[k]
+		}
+	}
+	if maxV == 0 {
+		maxV = 1
+	}
+
+	weeks := width - chromeInset - 6
+	if weeks < 12 {
+		weeks = 12
+	}
+	if weeks > 53 {
+		weeks = 53
+	}
+
+	// Sunday of the earliest visible week.
+	firstCol := now.AddDate(0, 0, -7*(weeks-1))
+	startSunday := firstCol.AddDate(0, 0, -int(firstCol.Weekday()))
+
+	ramp := heatmapRamp()
+	weekdays := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+	var rows []string
+	for wd := 0; wd < 7; wd++ {
+		var b strings.Builder
+		b.WriteString("  " + StyleDimWhite.Render(fmt.Sprintf("%-4s", weekdays[wd])))
+		for col := 0; col < weeks; col++ {
+			cellDate := startSunday.AddDate(0, 0, col*7+wd)
+			if cellDate.After(now) {
+				b.WriteString(" ")
+				continue
+			}
+			level := 0
+			if val := totals[cellDate.Format("2006-01-02")]; val > 0 {
+				level = 1 + (val*3)/maxV
+				if level > 4 {
+					level = 4
+				}
+			}
+			b.WriteString(ramp[level].style.Render(ramp[level].ch))
+		}
+		rows = append(rows, b.String())
+	}
+
+	legend := "  " + StyleDimWhite.Render("less ") +
+		ramp[1].style.Render(ramp[1].ch) + ramp[2].style.Render(ramp[2].ch) +
+		ramp[3].style.Render(ramp[3].ch) + ramp[4].style.Render(ramp[4].ch) +
+		StyleDimWhite.Render(" more")
+	rows = append(rows, "", legend)
+	return strings.Join(rows, "\n")
 }
 
 // renderRepoBreakdown renders a compact table of per-repo contributions.
@@ -118,10 +204,10 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		"",
 	)
 	rows = append(rows, header)
-	rows = append(rows, "  "+StyleDimCyan.Render(strings.Repeat("━", width-4)))
+	rows = append(rows, "  "+StyleDimCyan.Render(hrule(width-chromeInset)))
 
 	for i, e := range entries {
-		name := StyleMagenta.Render(fmt.Sprintf("%-*s", nameW, Truncate(e.name, nameW)))
+		name := StyleMagenta.Render(padRight(Truncate(e.name, nameW), nameW))
 		commits := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits)))
 		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Added)))
 		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Removed)))
@@ -129,6 +215,9 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		bar := RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW)
 
 		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
+		if e.rc.AICommits > 0 && e.rc.Commits > 0 {
+			row += "  " + StyleAmber.Render(fmt.Sprintf("ai %d%%", e.rc.AICommits*100/e.rc.Commits))
+		}
 
 		var rowStyle lipgloss.Style
 		if i%2 == 0 {
@@ -179,17 +268,49 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		count := StyleNumeric.Render(fmt.Sprintf("%4d ", m.Commits))
 		bar := RenderImpactBar(m.Added, m.Removed, maxTotal, barW)
 
-		rows = append(rows, fmt.Sprintf("  %s%s%s", label, count, bar))
+		row := fmt.Sprintf("  %s%s%s", label, count, bar)
+		if m.AI > 0 {
+			row += " " + StyleAmber.Render(fmt.Sprintf("◆%d", m.AI))
+		}
+		rows = append(rows, row)
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-// filterRecordsByAuthor returns records matching the given author name.
-func filterRecordsByAuthor(records []git.CommitRecord, authorName string) []git.CommitRecord {
+// renderMetricsLine renders a one-line summary of derived metrics under the
+// stat boxes: active days, first/last commit, churn ratio, and AI share.
+func renderMetricsLine(as *stats.AuthorStats) string {
+	var parts []string
+	if as.ActiveDays > 0 {
+		parts = append(parts, fmt.Sprintf("ACTIVE %d days", as.ActiveDays))
+	}
+	if !as.FirstCommit.IsZero() {
+		parts = append(parts,
+			"FIRST "+as.FirstCommit.Format("2006-01-02"),
+			"LAST "+as.LastCommit.Format("2006-01-02"))
+	}
+	parts = append(parts, fmt.Sprintf("CHURN %.2f", as.ChurnRatio()))
+	if as.AICommits > 0 {
+		parts = append(parts, fmt.Sprintf("AI %d%%", as.AIPercent()))
+	}
+	return "  " + StyleDimCyan.Render(strings.Join(parts, "  ·  "))
+}
+
+// filterRecordsByAuthor returns records belonging to the given contributor.
+// When the aggregated stats are available it matches on the exact set of raw
+// author-name spellings that merged into this identity (so email-grouped
+// aliases are included); otherwise it falls back to name matching.
+func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string) []git.CommitRecord {
 	var result []git.CommitRecord
 	for _, r := range records {
-		if r.Author == authorName || stats.AreSimilarNames(r.Author, authorName) {
+		match := false
+		if as != nil && len(as.Aliases) > 0 {
+			match = as.Aliases[r.Author]
+		} else {
+			match = r.Author == authorName || stats.NamesMatch(r.Author, authorName)
+		}
+		if match {
 			result = append(result, r)
 		}
 	}
@@ -213,6 +334,9 @@ func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
 		ma.Commits++
 		ma.Added += r.Added
 		ma.Removed += r.Removed
+		if r.AIAssisted {
+			ma.AI++
+		}
 	}
 
 	result := make([]MonthActivity, 0, len(byMonth))

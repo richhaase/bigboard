@@ -11,19 +11,36 @@ import (
 // AggregateView renders the aggregate leaderboard table.
 type AggregateView struct{}
 
-// RenderTable returns a styled leaderboard string for the given authors.
-func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int, sortField stats.SortField, width int) string {
+// TableState carries the scroll/sort/filter state into RenderTable.
+type TableState struct {
+	SelectedRow  int
+	ScrollOffset int
+	VisibleRows  int
+	SortField    stats.SortField
+	SortAsc      bool
+	Width        int
+	Searching    bool
+	Query        string
+}
+
+// RenderTable returns a styled leaderboard for the given authors, showing only
+// the scroll window [ScrollOffset, ScrollOffset+VisibleRows) plus a status
+// footer. Ranks, the podium styling, and the cursor track absolute position.
+func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) string {
 	if len(authors) == 0 {
-		return StyleDimWhite.Render("  No commit data found.")
+		if ts.Searching || ts.Query != "" {
+			return StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", ts.Query))
+		}
+		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→.")
 	}
 
 	const (
 		nameW = 22
 		numW  = 10
-		barW  = 20
+		aiW   = 5
+		barW  = 16
 	)
 
-	// Find max TotalChange for impact bar scaling
 	maxTotal := 0
 	for _, a := range authors {
 		if a.TotalChange > maxTotal {
@@ -31,64 +48,52 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		}
 	}
 
-	colRank := "#"
-	colName := "CONTRIBUTOR"
-	colCommits := "COMMITS"
-	colAdded := "ADDED"
-	colRemoved := "REMOVED"
-	colNet := "NET"
-	colImpact := "+/- IMPACT"
-
-	switch sortField {
-	case stats.SortByTotal:
-		colImpact += " ▼"
+	arrow := " ▼"
+	if ts.SortAsc {
+		arrow = " ▲"
+	}
+	colCommits, colAdded, colRemoved, colNet, colAI, colImpact := "COMMITS", "ADDED", "REMOVED", "NET", "AI%", "+/- IMPACT"
+	switch ts.SortField {
 	case stats.SortByCommits:
-		colCommits += " ▼"
+		colCommits += arrow
 	case stats.SortByAdded:
-		colAdded += " ▼"
+		colAdded += arrow
 	case stats.SortByRemoved:
-		colRemoved += " ▼"
+		colRemoved += arrow
 	case stats.SortByNet:
-		colNet += " ▼"
+		colNet += arrow
+	case stats.SortByAI:
+		colAI += arrow
+	default: // SortByTotal
+		colImpact += arrow
 	}
 
 	header := StyleTableHeader.Render(
-		fmt.Sprintf("  %-2s %-*s %*s %*s %*s %*s %-*s",
-			colRank,
-			nameW, colName,
-			numW, colCommits,
-			numW, colAdded,
-			numW, colRemoved,
-			numW, colNet,
-			barW, colImpact,
+		fmt.Sprintf("  %-2s %-*s %*s %*s %*s %*s %*s %-*s",
+			"#", nameW, "CONTRIBUTOR",
+			numW, colCommits, numW, colAdded, numW, colRemoved, numW, colNet,
+			aiW, colAI, barW, colImpact,
 		),
 	)
 
-	totalRowWidth := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + barW
+	totalRowWidth := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + aiW + 1 + barW
 	separator := StyleDimCyan.Render("  " + strings.Repeat("━", totalRowWidth))
+	sectionHdr := StyleDimCyan.Render("  " + hrule(ts.Width-chromeInset))
 
-	// Section header
-	sectionHdr := StyleDimCyan.Render("  " + strings.Repeat("━", width-4))
-
-	// Limit to 20 rows
-	limit := len(authors)
-	if limit > 20 {
-		limit = 20
+	start := ts.ScrollOffset
+	if start < 0 {
+		start = 0
+	}
+	end := start + ts.VisibleRows
+	if end > len(authors) {
+		end = len(authors)
 	}
 
 	var rows []string
-	for i := 0; i < limit; i++ {
+	for i := start; i < end; i++ {
 		a := authors[i]
-		rank := fmt.Sprintf("%02d", i+1)
-		name := Truncate(a.Name, nameW)
-		commits := FormatNumber(a.Commits)
-		added := FormatNumber(a.Added)
-		removed := FormatNumber(a.Removed)
-		net := FormatNumber(a.Net)
-		bar := RenderImpactBar(a.Added, a.Removed, maxTotal, barW)
-
 		cursor := "  "
-		if i == selectedRow {
+		if i == ts.SelectedRow {
 			cursor = StyleCursor.Render("▸ ")
 		}
 
@@ -103,38 +108,57 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, selectedRow int,
 		default:
 			rankStyle = StyleRank
 		}
-		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", rank))
+		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", fmt.Sprintf("%02d", i+1)))
 
-		nameStr := StyleAuthor.Render(fmt.Sprintf("%-*s", nameW, name))
-		commitsStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, commits))
-		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, added))
-		removedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, removed))
+		nameStr := StyleAuthor.Render(padRight(Truncate(a.Name, nameW), nameW))
+		commitsStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Commits)))
+		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Added)))
+		removedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Removed)))
 
 		var netStr string
 		if a.Net < 0 {
-			netStr = lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("%*s", numW, net))
+			netStr = lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Net)))
 		} else {
-			netStr = StyleNumeric.Render(fmt.Sprintf("%*s", numW, net))
+			netStr = StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Net)))
 		}
 
-		barStr := fmt.Sprintf("%-*s", barW, bar)
+		aiCell := strings.Repeat(" ", aiW)
+		if a.AICommits > 0 {
+			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", aiW, fmt.Sprintf("%d%%", a.AIPercent())))
+		}
 
-		line := cursor + rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + barStr
+		barStr := fmt.Sprintf("%-*s", barW, RenderImpactBar(a.Added, a.Removed, maxTotal, barW))
+
+		line := cursor + rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + aiCell + " " + barStr
 
 		var rowStyle lipgloss.Style
 		switch {
-		case i == selectedRow:
+		case i == ts.SelectedRow:
 			rowStyle = StyleRowSelected
 		case i%2 == 0:
 			rowStyle = StyleRowEven
 		default:
 			rowStyle = StyleRowOdd
 		}
-
 		rows = append(rows, rowStyle.Render(line))
 	}
 
 	parts := []string{sectionHdr, "", header, separator}
 	parts = append(parts, rows...)
+	parts = append(parts, renderTableFooter(ts, start, end, len(authors)))
 	return strings.Join(parts, "\n")
+}
+
+// renderTableFooter shows the visible range, an active filter, or the live
+// search prompt.
+func renderTableFooter(ts TableState, start, end, total int) string {
+	if ts.Searching {
+		return "  " + StyleCyan.Render("/") + StyleAuthor.Render(ts.Query) + StyleCursor.Render("▌") +
+			StyleDimWhite.Render("   (enter to apply · esc to clear)")
+	}
+	rng := fmt.Sprintf("showing %d–%d of %d", start+1, end, total)
+	if ts.Query != "" {
+		return "  " + StyleDimCyan.Render(fmt.Sprintf("filter %q · %s · esc clears", ts.Query, rng))
+	}
+	return "  " + StyleDimCyan.Render(rng)
 }
