@@ -19,16 +19,12 @@ const (
 	SortByRemoved
 	SortByNet
 	SortByAI
+	numSortFields
 )
 
-// numSortFields is the number of SortField values, used for cycling.
-const numSortFields = 6
-
-// FuzzyMatching enables substring-based name merging across different emails
-// (e.g. "Christopher" into "Christopher Lee"). It is OFF by default because it
-// over-merges genuinely distinct people (Daniel/Daniela, Martin/Martinez).
-// Enable via the --fuzzy flag. With it off, identities merge only when they
-// share an email or have an exactly-equal normalized name.
+// FuzzyMatching enables substring-based name merging across different emails.
+// Off by default because it over-merges distinct people (Daniel/Daniela);
+// enable via the --fuzzy flag.
 var FuzzyMatching = false
 
 // AuthorStats holds aggregated contribution data for a single author.
@@ -49,9 +45,8 @@ type AuthorStats struct {
 	Aliases map[string]bool `json:"-"`
 }
 
-// ChurnRatio reports removed lines as a fraction of added lines (0 when no
-// additions). High churn means a lot of the author's added code was later
-// rewritten or deleted.
+// ChurnRatio reports removed lines as a fraction of added lines (0 when there
+// are no additions).
 func (a AuthorStats) ChurnRatio() float64 {
 	if a.Added == 0 {
 		return 0
@@ -106,44 +101,30 @@ func FilterByRepo(records []git.CommitRecord, excluded map[string]bool) []git.Co
 	return out
 }
 
-// Aggregate groups records by author and computes totals.
-// Uses a two-pass merge: first group by email, then fuzzy-match remaining names.
+// Aggregate groups records by contributor identity and computes per-author
+// totals, returned in a deterministic name-sorted order.
 func Aggregate(records []git.CommitRecord) []AuthorStats {
-	// Pass 1: build email→canonical name map.
-	// For each email, pick the name with the most commits.
-	type nameCount struct {
-		name  string
-		count int
-	}
-	emailNames := make(map[string]*nameCount)
+	emailToCanonical := canonicalNameByEmail(records)
+	canonicalForAuthor := assignCanonicalNames(records, emailToCanonical)
+	mergedCanonical := mergeSimilarCanonicals(records, canonicalForAuthor)
+	return aggregateByCanonical(records, canonicalForAuthor, mergedCanonical)
+}
+
+func canonicalNameByEmail(records []git.CommitRecord) map[string]string {
+	longest := make(map[string]string)
 	for _, r := range records {
 		email := strings.ToLower(r.Email)
 		if email == "" {
 			continue
 		}
-		nc, ok := emailNames[email]
-		if !ok {
-			emailNames[email] = &nameCount{name: r.Author, count: 1}
-		} else {
-			nc.count++
-			// Keep the longer/more complete name variant
-			if len(r.Author) > len(nc.name) {
-				nc.name = r.Author
-			}
+		if len(r.Author) > len(longest[email]) {
+			longest[email] = r.Author
 		}
 	}
+	return longest
+}
 
-	// Build email→canonical name lookup, and group emails that share a canonical name
-	emailToCanonical := make(map[string]string)
-	for email, nc := range emailNames {
-		emailToCanonical[email] = nc.name
-	}
-
-	// Pass 2: map each record's author to a canonical name.
-	// First try email grouping, then fall back to fuzzy name matching.
-	canonicalForAuthor := make(map[string]string)
-
-	// Collect all unique (author, email) pairs
+func assignCanonicalNames(records []git.CommitRecord, emailToCanonical map[string]string) map[string]string {
 	type authorEmail struct {
 		author string
 		email  string
@@ -158,37 +139,27 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		}
 	}
 
-	// Group by email first: all authors sharing an email get the same canonical name
-	emailGroupCanonical := make(map[string]string) // email → chosen canonical
+	canonicalForAuthor := make(map[string]string)
 	for _, ae := range pairs {
-		if ae.email == "" {
-			continue
+		if ae.email != "" {
+			canonicalForAuthor[ae.author] = emailToCanonical[ae.email]
 		}
-		if _, ok := emailGroupCanonical[ae.email]; !ok {
-			emailGroupCanonical[ae.email] = emailToCanonical[ae.email]
-		}
-		canonicalForAuthor[ae.author] = emailGroupCanonical[ae.email]
 	}
 
-	// For authors without an email match, try fuzzy name matching against known canonicals
-	allCanonicals := make(map[string]bool)
+	known := make(map[string]bool)
 	for _, c := range canonicalForAuthor {
-		allCanonicals[c] = true
+		known[c] = true
 	}
-
 	for _, ae := range pairs {
 		if _, ok := canonicalForAuthor[ae.author]; ok {
 			continue
 		}
-		// Try fuzzy match against existing canonical names. Iterate candidates
-		// in sorted order (not map order) so that when more than one canonical
-		// is similar, the chosen match is deterministic across runs.
-		cands := make([]string, 0, len(allCanonicals))
-		for c := range allCanonicals {
-			cands = append(cands, c)
+		candidates := make([]string, 0, len(known))
+		for c := range known {
+			candidates = append(candidates, c)
 		}
-		sort.Strings(cands)
-		for _, c := range cands {
+		sort.Strings(candidates)
+		for _, c := range candidates {
 			if NamesMatch(ae.author, c) {
 				canonicalForAuthor[ae.author] = c
 				break
@@ -196,26 +167,33 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		}
 		if _, ok := canonicalForAuthor[ae.author]; !ok {
 			canonicalForAuthor[ae.author] = ae.author
-			allCanonicals[ae.author] = true
+			known[ae.author] = true
 		}
 	}
+	return canonicalForAuthor
+}
 
-	// Final pass: fuzzy-merge canonical names themselves
-	canonicalList := make([]string, 0, len(allCanonicals))
-	for c := range allCanonicals {
+func mergeSimilarCanonicals(records []git.CommitRecord, canonicalForAuthor map[string]string) map[string]string {
+	unique := make(map[string]bool)
+	for _, c := range canonicalForAuthor {
+		unique[c] = true
+	}
+	canonicalList := make([]string, 0, len(unique))
+	for c := range unique {
 		canonicalList = append(canonicalList, c)
 	}
 	sort.Strings(canonicalList)
+
 	commitCounts := make(map[string]int)
 	for _, r := range records {
-		c := canonicalForAuthor[r.Author]
-		commitCounts[c]++
+		commitCounts[canonicalForAuthor[r.Author]]++
 	}
-	mergedCanonical := buildCanonicalMap(canonicalList, commitCounts)
+	return buildCanonicalMap(canonicalList, commitCounts)
+}
 
-	// Aggregate
+func aggregateByCanonical(records []git.CommitRecord, canonicalForAuthor, mergedCanonical map[string]string) []AuthorStats {
 	byName := make(map[string]*AuthorStats)
-	activeDays := make(map[string]map[string]bool) // canonical name → set of yyyy-mm-dd
+	activeDays := make(map[string]map[string]bool)
 	for _, r := range records {
 		name := mergedCanonical[canonicalForAuthor[r.Author]]
 		as, ok := byName[name]
@@ -267,13 +245,10 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 		as.ActiveDays = len(activeDays[as.Name])
 		result = append(result, *as)
 	}
-	// Return in a stable order (by name) so callers that don't sort, and the
-	// tie-handling in Sort, never depend on Go's randomized map iteration.
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
-// metricValue returns the value of the sort field for one author.
 func metricValue(s AuthorStats, field SortField) int {
 	switch field {
 	case SortByCommits:
@@ -286,14 +261,14 @@ func metricValue(s AuthorStats, field SortField) int {
 		return s.Net
 	case SortByAI:
 		return s.AIPercent()
-	default: // SortByTotal
+	default:
 		return s.TotalChange
 	}
 }
 
 // Sort sorts stats descending by the given field. Ties are broken
-// deterministically (TotalChange, then Commits, then Name) so the leaderboard
-// — and which contributors survive the top-N cap — never reshuffle run-to-run.
+// deterministically (TotalChange, then Commits, then Name) so the leaderboard —
+// and which contributors survive the top-N cap — never reshuffle run-to-run.
 func Sort(stats []AuthorStats, field SortField) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		a, b := stats[i], stats[j]
@@ -328,11 +303,9 @@ func SortFieldFromString(s string) SortField {
 	}
 }
 
-// NamesMatch reports whether two raw author names should be treated as the same
-// identity under the current merge policy: exact normalized-name equality
-// always, plus substring similarity when FuzzyMatching is enabled. This is the
-// predicate the merge logic and the operative-view fallback both use, so the
-// leaderboard and a contributor's timeline agree on who-is-who.
+// NamesMatch reports whether two raw author names are the same identity under
+// the current merge policy: normalized-name equality always, plus substring
+// similarity when FuzzyMatching is enabled.
 func NamesMatch(a, b string) bool {
 	if normalizedName(a) == normalizedName(b) {
 		return true
@@ -366,8 +339,9 @@ func SortFieldLabel(f SortField) string {
 	}
 }
 
-// AreSimilarNames returns true if names match case-insensitively with whitespace
-// normalization, or if one is a substring of the other (only for names longer than 5 chars).
+// AreSimilarNames reports whether two names match case-insensitively with
+// whitespace normalization, or one is a substring of the other (for names
+// longer than 5 characters).
 func AreSimilarNames(a, b string) bool {
 	na := normalizedName(a)
 	nb := normalizedName(b)
@@ -411,7 +385,6 @@ func preferCanonical(a, b string) bool {
 	return a < b
 }
 
-// buildCanonicalMap builds a map from each raw author name to its canonical name.
 func buildCanonicalMap(allNames []string, commitCounts map[string]int) map[string]string {
 	canonical := make(map[string]string, len(allNames))
 	for _, name := range allNames {
@@ -420,8 +393,6 @@ func buildCanonicalMap(allNames []string, commitCounts map[string]int) map[strin
 	return canonical
 }
 
-// normalizedName lowercases and strips all whitespace, hyphens, underscores,
-// and dots so "Mario Payan", "MarioPayan", "mario.payan" all become "mariopayan".
 func normalizedName(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder

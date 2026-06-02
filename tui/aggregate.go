@@ -64,7 +64,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		colNet += arrow
 	case stats.SortByAI:
 		colAI += arrow
-	default: // SortByTotal
+	default:
 		colImpact += arrow
 	}
 
@@ -149,8 +149,6 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 	return strings.Join(parts, "\n")
 }
 
-// renderTableFooter shows the visible range, an active filter, or the live
-// search prompt.
 func renderTableFooter(ts TableState, start, end, total int) string {
 	if ts.Searching {
 		return "  " + StyleCyan.Render("/") + StyleAuthor.Render(ts.Query) + StyleCursor.Render("▌") +

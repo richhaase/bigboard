@@ -182,13 +182,13 @@ func TestDiscoverReposSkipsWorktrees(t *testing.T) {
 	}
 
 	// Discover from parent — should find 1 repo (skip worktree)
-	found := git.DiscoverRepos([]string{parent})
+	found := git.DiscoverReposDepth([]string{parent}, 1)
 	if len(found) != 1 {
 		t.Errorf("expected 1 repo (worktree skipped), got %d: %v", len(found), found)
 	}
 
 	// Discover from direct worktree path — should find nothing
-	direct := git.DiscoverRepos([]string{wt})
+	direct := git.DiscoverReposDepth([]string{wt}, 1)
 	if len(direct) != 0 {
 		t.Errorf("expected 0 repos for worktree path, got %d: %v", len(direct), direct)
 	}
@@ -213,19 +213,19 @@ func TestDiscoverRepos(t *testing.T) {
 	writeAndCommit(t, repo2, "b.go", "package b\n", "init")
 
 	// Discover from parent — should find 2 repos
-	found := git.DiscoverRepos([]string{parent})
+	found := git.DiscoverReposDepth([]string{parent}, 1)
 	if len(found) < 2 {
 		t.Errorf("expected at least 2 repos from parent scan, got %d: %v", len(found), found)
 	}
 
 	// Discover from direct path — should find exactly that repo
-	direct := git.DiscoverRepos([]string{repo1})
+	direct := git.DiscoverReposDepth([]string{repo1}, 1)
 	if len(direct) != 1 {
 		t.Errorf("expected 1 repo from direct path, got %d: %v", len(direct), direct)
 	}
 
 	// Mixed: parent + direct repo2 — deduplicated, should find at least 2
-	mixed := git.DiscoverRepos([]string{parent, repo2})
+	mixed := git.DiscoverReposDepth([]string{parent, repo2}, 1)
 	if len(mixed) < 2 {
 		t.Errorf("expected at least 2 repos from mixed input, got %d: %v", len(mixed), mixed)
 	}
