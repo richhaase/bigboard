@@ -24,6 +24,28 @@ var TimePresets = []TimePreset{
 	{Label: "ALL", Duration: 0},
 }
 
+// TimePresetIndex returns the index of the preset whose window best matches d;
+// d <= 0 selects ALL. It never returns out of range.
+func TimePresetIndex(d time.Duration) int {
+	if d <= 0 {
+		return len(TimePresets) - 1
+	}
+	best, bestDiff := DefaultTimeIndex, time.Duration(1<<62)
+	for i, p := range TimePresets {
+		if p.Duration <= 0 {
+			continue
+		}
+		diff := p.Duration - d
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < bestDiff {
+			best, bestDiff = i, diff
+		}
+	}
+	return best
+}
+
 var bannerLines = [7]string{
 	`████████  ████  ██████      ████████   ███████     ███    ████████  ████████`,
 	`██     ██  ██  ██    ██     ██     ██ ██     ██   ██ ██   ██     ██ ██     ██`,
@@ -74,8 +96,66 @@ func RenderHeader(width, repoCount, excludedCount int, version string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics.
-func RenderStatBoxes(commits, added, removed, aiCommits int) string {
+func aiBoxValue(commits, aiCommits int) string {
+	if commits <= 0 {
+		return FormatNumber(aiCommits)
+	}
+	pct := aiCommits * 100 / commits
+	if pct == 0 {
+		return fmt.Sprintf("<1%% (%d)", aiCommits)
+	}
+	return fmt.Sprintf("%d%% (%d)", pct, aiCommits)
+}
+
+func renderStatLineCompact(commits, added, removed, aiCommits, width int) string {
+	color := func(c lipgloss.TerminalColor, s string) string {
+		return lipgloss.NewStyle().Foreground(c).Bold(true).Render(s)
+	}
+	commitsPlain := "COMMITS " + FormatNumber(commits)
+	segs := []struct{ plain, styled string }{
+		{commitsPlain, StyleStatLabel.Render("COMMITS ") + color(ColorCyan, FormatNumber(commits))},
+		{"+" + FormatNumber(added), color(ColorGreen, "+"+FormatNumber(added))},
+		{"-" + FormatNumber(removed), color(ColorMagenta, "-"+FormatNumber(removed))},
+	}
+	if aiCommits > 0 {
+		ai := aiBoxValue(commits, aiCommits)
+		segs = append(segs, struct{ plain, styled string }{"AI " + ai, StyleStatLabel.Render("AI ") + color(ColorAmber, ai)})
+	}
+
+	const sep = "  ·  "
+	sepW := lipgloss.Width(sep)
+	avail := width - 2
+	if avail < 1 {
+		avail = 1
+	}
+	out := make([]string, 0, len(segs))
+	used := 0
+	for i, s := range segs {
+		w := lipgloss.Width(s.plain)
+		if i > 0 {
+			w += sepW
+		}
+		if i > 0 && used+w > avail {
+			break
+		}
+		out = append(out, s.styled)
+		used += w
+	}
+	line := strings.Join(out, sep)
+	if lipgloss.Width(line) > avail {
+		line = StyleStatLabel.Render(Truncate(commitsPlain, avail))
+	}
+	return "  " + line
+}
+
+// RenderStatBoxes renders heavy-bordered stat boxes for aggregate metrics,
+// falling back to a stacked or compact single line so the row never overflows
+// the given terminal width.
+func RenderStatBoxes(commits, added, removed, aiCommits, width int) string {
+	if width > 0 && width < midTableWidth {
+		return renderStatLineCompact(commits, added, removed, aiCommits, width)
+	}
+
 	box := func(value, label string, valColor lipgloss.TerminalColor) string {
 		v := lipgloss.NewStyle().Foreground(valColor).Bold(true).Render(value)
 		l := StyleStatLabel.Render(label)
@@ -90,18 +170,17 @@ func RenderStatBoxes(commits, added, removed, aiCommits int) string {
 	boxes := []string{c, " ", a, " ", r}
 
 	if aiCommits > 0 {
-		var aiVal string
-		if commits > 0 {
-			pct := aiCommits * 100 / commits
-			aiVal = fmt.Sprintf("%d%% (%d)", pct, aiCommits)
-		} else {
-			aiVal = FormatNumber(aiCommits)
-		}
-		ai := box(aiVal, "AI CO-AUTHORED", ColorAmber)
+		ai := box(aiBoxValue(commits, aiCommits), "AI CO-AUTHORED", ColorAmber)
 		boxes = append(boxes, " ", ai)
 	}
 
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
+	if width > 0 && lipgloss.Width(joined)+2 > width {
+		joined = lipgloss.JoinVertical(lipgloss.Left, c, a, r)
+		if aiCommits > 0 {
+			joined = lipgloss.JoinVertical(lipgloss.Left, joined, box(aiBoxValue(commits, aiCommits), "AI CO-AUTHORED", ColorAmber))
+		}
+	}
 	return lipgloss.NewStyle().MarginLeft(2).Render(joined)
 }
 
@@ -326,4 +405,12 @@ func padRight(s string, w int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", diff)
+}
+
+func renderNet(n, width int) string {
+	s := fmt.Sprintf("%*s", width, FormatNumber(n))
+	if n < 0 {
+		return lipgloss.NewStyle().Foreground(ColorRed).Render(s)
+	}
+	return StyleNumeric.Render(s)
 }

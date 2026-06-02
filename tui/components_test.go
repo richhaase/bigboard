@@ -3,10 +3,67 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+func TestRenderStatBoxesWidth(t *testing.T) {
+	for _, width := range []int{40, 50, 60, 78, 80, 96, 120} {
+		out := RenderStatBoxes(1234567, 9876543, 1234567, 4321, width)
+		for _, line := range strings.Split(out, "\n") {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("width %d: line %q display width %d exceeds %d", width, line, w, width)
+			}
+		}
+	}
+}
+
+func TestRenderStatBoxesNonPositiveWidth(t *testing.T) {
+	if RenderStatBoxes(0, 0, 0, 0, 0) == "" {
+		t.Error("width 0 should still render")
+	}
+	if RenderStatBoxes(10, 20, 30, 0, -5) == "" {
+		t.Error("negative width should not panic and should render")
+	}
+}
+
+func TestRenderStatBoxesSubOnePercent(t *testing.T) {
+	out := RenderStatBoxes(1000, 0, 0, 3, 120)
+	if !strings.Contains(out, "<1%") {
+		t.Errorf("expected <1%% for 3/1000:\n%s", out)
+	}
+	if !strings.Contains(out, "(3)") {
+		t.Errorf("expected raw count (3):\n%s", out)
+	}
+	if strings.Contains(out, "0%") {
+		t.Errorf("should not show 0%% when count is positive:\n%s", out)
+	}
+
+	half := RenderStatBoxes(100, 0, 0, 50, 120)
+	if !strings.Contains(half, "50%") {
+		t.Errorf("expected 50%% for 50/100:\n%s", half)
+	}
+}
+
+func TestTimePresetIndex(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want int
+	}{
+		{0, len(TimePresets) - 1},
+		{-time.Hour, len(TimePresets) - 1},
+		{90 * 24 * time.Hour, 4},
+		{45 * 24 * time.Hour, 3},
+		{100 * 365 * 24 * time.Hour, 5},
+	}
+	for _, tc := range cases {
+		if got := TimePresetIndex(tc.d); got != tc.want {
+			t.Errorf("TimePresetIndex(%v) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+}
 
 func TestRenderImpactBar(t *testing.T) {
 	// Full bar produces blocks

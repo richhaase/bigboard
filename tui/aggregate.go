@@ -23,9 +23,87 @@ type TableState struct {
 	Query        string
 }
 
+const (
+	wideTableWidth = 96
+	midTableWidth  = 78
+)
+
+type tableLayout struct {
+	nameW            int
+	numW             int
+	aiW              int
+	barW             int
+	showAddedRemoved bool
+	showBar          bool
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func resolveTableLayout(width int) tableLayout {
+	const (
+		baseNameW = 22
+		numW      = 10
+		aiW       = 5
+	)
+	avail := width - chromeInset
+	switch {
+	case width >= wideTableWidth:
+		fixed := 2 + 2 + 1 + baseNameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + aiW + 1
+		return tableLayout{
+			nameW:            baseNameW,
+			numW:             numW,
+			aiW:              aiW,
+			barW:             clampInt(avail-fixed, 10, 16),
+			showAddedRemoved: true,
+			showBar:          true,
+		}
+	case width >= midTableWidth:
+		fixed := 2 + 2 + 1 + baseNameW + 1 + numW + 1 + numW + 1 + aiW + 1
+		return tableLayout{
+			nameW:            baseNameW,
+			numW:             numW,
+			aiW:              aiW,
+			barW:             clampInt(avail-fixed, 8, 16),
+			showAddedRemoved: false,
+			showBar:          true,
+		}
+	default:
+		nameW := clampInt(avail-(2+2+1+1+numW+1+numW+1+aiW), 12, baseNameW)
+		return tableLayout{
+			nameW:            nameW,
+			numW:             numW,
+			aiW:              aiW,
+			showAddedRemoved: false,
+			showBar:          false,
+		}
+	}
+}
+
+func (l tableLayout) rowWidth() int {
+	w := 2 + 2 + 1 + l.nameW + 1 + l.numW
+	if l.showAddedRemoved {
+		w += 1 + l.numW + 1 + l.numW
+	}
+	w += 1 + l.numW + 1 + l.aiW
+	if l.showBar {
+		w += 1 + l.barW
+	}
+	return w
+}
+
 // RenderTable returns a styled leaderboard for the given authors, showing only
 // the scroll window [ScrollOffset, ScrollOffset+VisibleRows) plus a status
 // footer. Ranks, the podium styling, and the cursor track absolute position.
+// Columns adapt to TableState.Width, dropping ADDED/REMOVED then the impact bar
+// as the terminal narrows.
 func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) string {
 	if len(authors) == 0 {
 		if ts.Searching || ts.Query != "" {
@@ -34,12 +112,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→.")
 	}
 
-	const (
-		nameW = 22
-		numW  = 10
-		aiW   = 5
-		barW  = 16
-	)
+	l := resolveTableLayout(ts.Width)
 
 	maxTotal := 0
 	for _, a := range authors {
@@ -68,16 +141,28 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		colImpact += arrow
 	}
 
-	header := StyleTableHeader.Render(
-		fmt.Sprintf("  %-2s %-*s %*s %*s %*s %*s %*s %-*s",
-			"#", nameW, "CONTRIBUTOR",
-			numW, colCommits, numW, colAdded, numW, colRemoved, numW, colNet,
-			aiW, colAI, barW, colImpact,
-		),
+	var headerCells []string
+	headerCells = append(headerCells,
+		fmt.Sprintf("  %-2s", "#"),
+		fmt.Sprintf("%-*s", l.nameW, "CONTRIBUTOR"),
+		fmt.Sprintf("%*s", l.numW, colCommits),
 	)
+	if l.showAddedRemoved {
+		headerCells = append(headerCells,
+			fmt.Sprintf("%*s", l.numW, colAdded),
+			fmt.Sprintf("%*s", l.numW, colRemoved),
+		)
+	}
+	headerCells = append(headerCells,
+		fmt.Sprintf("%*s", l.numW, colNet),
+		fmt.Sprintf("%*s", l.aiW, colAI),
+	)
+	if l.showBar {
+		headerCells = append(headerCells, fmt.Sprintf("%-*s", l.barW, colImpact))
+	}
+	header := StyleTableHeader.Render(strings.Join(headerCells, " "))
 
-	totalRowWidth := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + aiW + 1 + barW
-	separator := StyleDimCyan.Render("  " + strings.Repeat("━", totalRowWidth))
+	separator := StyleDimCyan.Render("  " + strings.Repeat("━", l.rowWidth()))
 	sectionHdr := StyleDimCyan.Render("  " + hrule(ts.Width-chromeInset))
 
 	start := ts.ScrollOffset
@@ -110,26 +195,31 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		}
 		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", fmt.Sprintf("%02d", i+1)))
 
-		nameStr := StyleAuthor.Render(padRight(Truncate(a.Name, nameW), nameW))
-		commitsStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Commits)))
-		addedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Added)))
-		removedStr := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Removed)))
-
-		var netStr string
-		if a.Net < 0 {
-			netStr = lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Net)))
-		} else {
-			netStr = StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(a.Net)))
+		var cells []string
+		cells = append(cells,
+			cursor+rankStr,
+			StyleAuthor.Render(padRight(Truncate(a.Name, l.nameW), l.nameW)),
+			StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Commits))),
+		)
+		if l.showAddedRemoved {
+			cells = append(cells,
+				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Added))),
+				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Removed))),
+			)
 		}
+		cells = append(cells, renderNet(a.Net, l.numW))
 
-		aiCell := strings.Repeat(" ", aiW)
+		aiCell := strings.Repeat(" ", l.aiW)
 		if a.AICommits > 0 {
-			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", aiW, fmt.Sprintf("%d%%", a.AIPercent())))
+			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", l.aiW, fmt.Sprintf("%d%%", a.AIPercent())))
+		}
+		cells = append(cells, aiCell)
+
+		if l.showBar {
+			cells = append(cells, RenderImpactBar(a.Added, a.Removed, maxTotal, l.barW))
 		}
 
-		barStr := fmt.Sprintf("%-*s", barW, RenderImpactBar(a.Added, a.Removed, maxTotal, barW))
-
-		line := cursor + rankStr + " " + nameStr + " " + commitsStr + " " + addedStr + " " + removedStr + " " + netStr + " " + aiCell + " " + barStr
+		line := strings.Join(cells, " ")
 
 		var rowStyle lipgloss.Style
 		switch {

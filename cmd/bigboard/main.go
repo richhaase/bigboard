@@ -142,12 +142,13 @@ func main() {
 	excludedRepos := buildExcludeSet(repoPaths, excludePatterns)
 	initialSort := stats.SortFieldFromString(sortStr)
 
+	since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid --since: %v\n", err)
+		os.Exit(1)
+	}
+
 	if *exportFlag != "" {
-		since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid --since: %v\n", err)
-			os.Exit(1)
-		}
 		if err := runExport(os.Stdout, os.Stderr, strings.ToLower(*exportFlag), repoPaths, excludedRepos, since, initialSort); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -155,7 +156,11 @@ func main() {
 		return
 	}
 
-	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version)
+	timeIdx := tui.DefaultTimeIndex
+	if setFlags["since"] || cfg.Since != "" {
+		timeIdx = tui.TimePresetIndex(since)
+	}
+	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version, timeIdx)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

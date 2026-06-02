@@ -6,7 +6,41 @@ import (
 	"time"
 
 	"github.com/richhaase/bigboard/git"
+	"github.com/richhaase/bigboard/stats"
 )
+
+func TestRenderOperativeDetailEmptyState(t *testing.T) {
+	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", nil, nil, 100, DefaultTimeIndex, 3, 0)
+	if !strings.Contains(out, "NO SIGNAL") {
+		t.Errorf("empty detail should show NO SIGNAL:\n%s", out)
+	}
+	if !strings.Contains(out, "ADA LOVELACE") {
+		t.Errorf("empty detail should still name the contributor:\n%s", out)
+	}
+	if strings.Contains(out, "REPO CONTRIBUTIONS") || strings.Contains(out, "ACTIVITY TIMELINE") {
+		t.Errorf("empty detail should not render a body:\n%s", out)
+	}
+}
+
+func TestRenderOperativeDetailRendersBody(t *testing.T) {
+	as := &stats.AuthorStats{
+		Name:    "Ada Lovelace",
+		Commits: 5,
+		Added:   100,
+		Removed: 10,
+		Net:     90,
+		PerRepo: map[string]*stats.RepoContribution{
+			"engine": {Commits: 5, Added: 100, Removed: 10, Net: 90, TotalChange: 110},
+		},
+	}
+	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", as, nil, 100, DefaultTimeIndex, 3, 0)
+	if !strings.Contains(out, "REPO CONTRIBUTIONS") {
+		t.Errorf("non-empty stats should render the repo breakdown:\n%s", out)
+	}
+	if strings.Contains(out, "NO SIGNAL") {
+		t.Errorf("non-empty stats should not show NO SIGNAL:\n%s", out)
+	}
+}
 
 func TestRenderHeatmap(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC) // Tuesday

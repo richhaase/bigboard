@@ -61,14 +61,15 @@ type RepoLoadedMsg struct {
 	Err      error
 }
 
-const defaultTimeIdx = 2
+// DefaultTimeIndex is the TimePresets index used when no --since/since is given.
+const DefaultTimeIndex = 2
 
 // NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string) Model {
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, initialTimeIdx int) Model {
 	return Model{
 		repoPaths:        repoPaths,
 		sortField:        initialSort,
-		timeIdx:          defaultTimeIdx,
+		timeIdx:          initialTimeIdx,
 		loading:          true,
 		pendingRemaining: len(repoPaths),
 		excludedRepos:    excluded,
@@ -190,7 +191,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "R":
-		if !m.loading {
+		if m.viewMode == ViewAggregate && !m.loading {
 			m.loading = true
 			m.resetPending()
 			return m, m.loadCmds()
@@ -254,15 +255,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "left", "h":
-		if m.timeIdx > 0 {
-			m.timeIdx--
-			m.recomputeAuthors()
+		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
+			if m.timeIdx > 0 {
+				m.timeIdx--
+				m.recomputeAuthors()
+			}
 		}
 
 	case "right", "l":
-		if m.timeIdx < len(TimePresets)-1 {
-			m.timeIdx++
-			m.recomputeAuthors()
+		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
+			if m.timeIdx < len(TimePresets)-1 {
+				m.timeIdx++
+				m.recomputeAuthors()
+			}
 		}
 
 	case "s":
@@ -356,12 +361,24 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 
 const tableChromeLines = 6
 
+func (m Model) failedReposLine() string {
+	const maxNames = 3
+	names := m.failedRepos
+	suffix := ""
+	if len(names) > maxNames {
+		suffix = fmt.Sprintf(", +%d more", len(names)-maxNames)
+		names = names[:maxNames]
+	}
+	line := fmt.Sprintf("  ⚠ %d repo(s) unreadable: %s%s", len(m.failedRepos), strings.Join(names, ", "), suffix)
+	return Truncate(line, m.width)
+}
+
 func (m Model) tableViewport() int {
 	above := []string{RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version)}
 	if len(m.failedRepos) > 0 {
-		above = append(above, "warn")
+		above = append(above, m.failedReposLine())
 	}
-	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(0, 0, 0, 0), "")
+	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(0, 0, 0, 0, m.width), "")
 	help := RenderHelpBar(HelpContext{View: "aggregate"})
 	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
@@ -494,8 +511,7 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version))
 
 	if len(m.failedRepos) > 0 {
-		sections = append(sections, StyleAmber.Render(
-			fmt.Sprintf("  ⚠ %d repo(s) unreadable: %s", len(m.failedRepos), strings.Join(m.failedRepos, ", "))))
+		sections = append(sections, StyleAmber.Render(m.failedReposLine()))
 	}
 	sections = append(sections, "")
 
@@ -509,7 +525,7 @@ func (m Model) renderAggregateView() string {
 		totalRemoved += a.Removed
 		totalAI += a.AICommits
 	}
-	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI))
+	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width))
 	sections = append(sections, "")
 
 	sections = append(sections, AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
