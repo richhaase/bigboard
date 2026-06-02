@@ -1,6 +1,8 @@
 package stats_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,4 +391,119 @@ func TestAggregateMergesSameNameDifferentEmail(t *testing.T) {
 	if result[0].Added != 30 {
 		t.Errorf("expected merged Added=30, got %d", result[0].Added)
 	}
+}
+
+func TestAggregateMergesNormalizedNameTiedCounts(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "Alice Smith", Email: "alice@work.com", Date: now, Added: 10, RepoName: "r"},
+		{Author: "alice smith", Email: "alice@home.com", Date: now, Added: 20, RepoName: "r"},
+	}
+	result := stats.Aggregate(records)
+	if len(result) != 1 {
+		names := make([]string, len(result))
+		for i, a := range result {
+			names[i] = a.Name
+		}
+		t.Fatalf("normalized-equal names with tied counts did not merge: got %d rows %v", len(result), names)
+	}
+	if result[0].Added != 30 {
+		t.Errorf("merged Added = %d, want 30", result[0].Added)
+	}
+}
+
+func TestAggregateAliases(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "Rich Haase", Email: "rich@x.com", Date: now, Added: 10, RepoName: "r"},
+		{Author: "rhaase", Email: "rich@x.com", Date: now, Added: 5, RepoName: "r"},
+	}
+	result := stats.Aggregate(records)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 merged author, got %d", len(result))
+	}
+	a := result[0]
+	if a.Name != "Rich Haase" {
+		t.Errorf("canonical name = %q, want %q", a.Name, "Rich Haase")
+	}
+	if !a.Aliases["Rich Haase"] || !a.Aliases["rhaase"] {
+		t.Errorf("aliases = %v, want both spellings", a.Aliases)
+	}
+}
+
+func TestSortByAIUsesPercentNotCount(t *testing.T) {
+	authors := []stats.AuthorStats{
+		{Name: "HighCount", Commits: 100, AICommits: 10},
+		{Name: "HighPercent", Commits: 4, AICommits: 4},
+	}
+	stats.Sort(authors, stats.SortByAI)
+	if authors[0].Name != "HighPercent" {
+		t.Errorf("SortByAI ranked by raw count: got %q first, want HighPercent", authors[0].Name)
+	}
+}
+
+func TestMergeAuthorNameDeterministicTieBreak(t *testing.T) {
+	stats.FuzzyMatching = true
+	t.Cleanup(func() { stats.FuzzyMatching = false })
+	cases := []struct {
+		name   string
+		target string
+		all    []string
+		counts map[string]int
+		want   string
+	}{
+		{
+			name:   "tied counts break lexicographically at equal length",
+			target: "Andrew",
+			all:    []string{"xAndrew", "Andrew", "Andrews"},
+			counts: map[string]int{"Andrew": 1, "Andrews": 5, "xAndrew": 5},
+			want:   "Andrews",
+		},
+		{
+			name:   "tied counts prefer the longer name",
+			target: "Stephen",
+			all:    []string{"Stephe", "Stephen", "Stephens"},
+			counts: map[string]int{"Stephen": 1, "Stephens": 5, "Stephe": 5},
+			want:   "Stephens",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stats.MergeAuthorName(tc.target, tc.all, tc.counts); got != tc.want {
+				t.Errorf("MergeAuthorName(%q) = %q, want %q", tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAggregateFuzzyDeterministic(t *testing.T) {
+	stats.FuzzyMatching = true
+	t.Cleanup(func() { stats.FuzzyMatching = false })
+	now := time.Now()
+	mk := func() []git.CommitRecord {
+		recs := []git.CommitRecord{
+			{Author: "Andrew", Email: "andrew@x.com", Date: now, Added: 1, RepoName: "r"},
+		}
+		for i := 0; i < 5; i++ {
+			recs = append(recs,
+				git.CommitRecord{Author: "Andrews", Email: "andrews@x.com", Date: now, Added: 1, RepoName: "r"},
+				git.CommitRecord{Author: "xAndrew", Email: "xandrew@x.com", Date: now, Added: 1, RepoName: "r"},
+			)
+		}
+		return recs
+	}
+	want := snapshot(stats.Aggregate(mk()))
+	for i := 0; i < 50; i++ {
+		if got := snapshot(stats.Aggregate(mk())); got != want {
+			t.Fatalf("Aggregate non-deterministic under fuzzy: run %d gave %q, want %q", i, got, want)
+		}
+	}
+}
+
+func snapshot(authors []stats.AuthorStats) string {
+	var b strings.Builder
+	for _, a := range authors {
+		fmt.Fprintf(&b, "%s=%d;", a.Name, a.Commits)
+	}
+	return b.String()
 }
