@@ -190,6 +190,46 @@ func send(m Model, keys ...string) Model {
 	return m
 }
 
+func TestGatedKeysInOverlay(t *testing.T) {
+	m := modelWithData()
+	m.viewMode = ViewRepoOverlay
+	m.overlayExcluded = map[string]bool{}
+	startIdx := m.timeIdx
+
+	m = send(m, "R")
+	if m.loading {
+		t.Error("R in overlay should not trigger a reload")
+	}
+	if m.viewMode != ViewRepoOverlay {
+		t.Errorf("R in overlay should leave view unchanged, got %v", m.viewMode)
+	}
+
+	m = send(m, "left", "right")
+	if m.timeIdx != startIdx {
+		t.Errorf("left/right in overlay should not change timeIdx, got %d want %d", m.timeIdx, startIdx)
+	}
+}
+
+func TestTimeKeysInAggregateAndOperative(t *testing.T) {
+	m := modelWithData()
+	m.timeIdx = 2
+	m = send(m, "left")
+	if m.timeIdx != 1 {
+		t.Errorf("left in aggregate should decrement timeIdx, got %d", m.timeIdx)
+	}
+	m = send(m, "right")
+	if m.timeIdx != 2 {
+		t.Errorf("right in aggregate should increment timeIdx, got %d", m.timeIdx)
+	}
+
+	m.viewMode = ViewOperative
+	m.activeOperative = m.authors[0].Name
+	m = send(m, "left")
+	if m.timeIdx != 1 {
+		t.Errorf("left in operative should decrement timeIdx, got %d", m.timeIdx)
+	}
+}
+
 func TestSearchFilter(t *testing.T) {
 	m := modelWithData() // Ada Lovelace, Grace Hopper
 	m = send(m, "/")
@@ -271,7 +311,7 @@ func TestScrollReachesAllContributors(t *testing.T) {
 
 func TestStreamingLoadFinalizes(t *testing.T) {
 	now := time.Now()
-	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v")
+	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v", DefaultTimeIndex)
 	if !m.loading || m.pendingRemaining != 2 {
 		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
 	}
@@ -296,7 +336,7 @@ func TestStreamingLoadFinalizes(t *testing.T) {
 }
 
 func TestInitReturnsLoadCmd(t *testing.T) {
-	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v")
+	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v", DefaultTimeIndex)
 	if m.Init() == nil {
 		t.Error("Init should return a load command")
 	}

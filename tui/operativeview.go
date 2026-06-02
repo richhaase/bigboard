@@ -45,9 +45,16 @@ func (v OperativeView) RenderOperativeDetail(
 
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
+	authorRecords := filterRecordsByAuthor(records, authorStats, authorName)
+	if authorStats == nil && len(authorRecords) == 0 {
+		sections = append(sections, "")
+		sections = append(sections, StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→."))
+		return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	}
+
 	if authorStats != nil {
 		sections = append(sections, "")
-		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits))
+		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits, width))
 		sections = append(sections, "")
 		sections = append(sections, renderMetricsLine(authorStats))
 	}
@@ -59,7 +66,6 @@ func (v OperativeView) RenderOperativeDetail(
 		sections = append(sections, v.renderRepoBreakdown(authorStats, width))
 	}
 
-	authorRecords := filterRecordsByAuthor(records, authorStats, authorName)
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
 		sections = append(sections, RenderSectionHeader("ACTIVITY TIMELINE", width))
@@ -197,7 +203,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		commits := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits)))
 		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Added)))
 		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Removed)))
-		net := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Net)))
+		net := renderNet(e.rc.Net, numW)
 		bar := RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW)
 
 		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
