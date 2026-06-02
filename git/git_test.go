@@ -230,3 +230,79 @@ func TestDiscoverRepos(t *testing.T) {
 		t.Errorf("expected at least 2 repos from mixed input, got %d: %v", len(mixed), mixed)
 	}
 }
+
+func gitConfig(t *testing.T, dir, key, value string) {
+	t.Helper()
+	cmd := exec.Command("git", "config", key, value)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config %s failed: %v\n%s", key, err, out)
+	}
+}
+
+func runGitInDir(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func TestCollectCommitsHonorsMailmap(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	writeAndCommit(t, dir, "a.go", "package a\n", "first")
+
+	gitConfig(t, dir, "user.name", "T. User")
+	gitConfig(t, dir, "user.email", "stray@example.com")
+	writeAndCommit(t, dir, "b.go", "package b\n", "second")
+
+	mailmap := "Test User <test@example.com> <stray@example.com>\n"
+	if err := os.WriteFile(filepath.Join(dir, ".mailmap"), []byte(mailmap), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ref := git.DetectDefaultBranch(dir)
+	records, err := git.CollectCommits(dir, ref)
+	if err != nil {
+		t.Fatalf("CollectCommits: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(records))
+	}
+	for _, r := range records {
+		if r.Author != "Test User" || r.Email != "test@example.com" {
+			t.Errorf("mailmap not honored: got %q <%s>", r.Author, r.Email)
+		}
+	}
+}
+
+func TestCollectCommitsIgnoresNonASCIIVendoredPath(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	writeAndCommit(t, dir, "main.go", "package main\n", "real code")
+
+	vendorDir := filepath.Join(dir, "vendor")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "naïve.lock"), []byte("a\nb\nc\nd\ne\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitInDir(t, dir, "add", "-A")
+	runGitInDir(t, dir, "commit", "-m", "add vendored dep")
+
+	ref := git.DetectDefaultBranch(dir)
+	records, err := git.CollectCommits(dir, ref)
+	if err != nil {
+		t.Fatalf("CollectCommits: %v", err)
+	}
+	total := 0
+	for _, r := range records {
+		total += r.Added
+	}
+	if total != 1 {
+		t.Errorf("non-ASCII vendored path counted: total Added = %d, want 1", total)
+	}
+}

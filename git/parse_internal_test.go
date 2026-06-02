@@ -165,3 +165,35 @@ func TestEffectivePath(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldCountPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"src/app.go", true},
+		{"build/x.go", false},
+		{"mybuild/x.go", true},
+		{"vendor/naïve.lock", false},
+		{"go.sum", false},
+		{"a/b/package-lock.json", false},
+		{"src/{old.go => new.go}", true},
+		{"node_modules/pkg/index.js", false},
+	}
+	for _, tc := range cases {
+		if got := shouldCountPath(tc.path); got != tc.want {
+			t.Errorf("shouldCountPath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestShouldCountPathToggle(t *testing.T) {
+	prev := FilterGeneratedPaths
+	FilterGeneratedPaths = false
+	t.Cleanup(func() { FilterGeneratedPaths = prev })
+	for _, p := range []string{"build/x.go", "go.sum", "vendor/lib.go"} {
+		if !shouldCountPath(p) {
+			t.Errorf("with filtering off, shouldCountPath(%q) = false, want true", p)
+		}
+	}
+}

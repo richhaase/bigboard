@@ -205,6 +205,7 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 	for c := range allCanonicals {
 		canonicalList = append(canonicalList, c)
 	}
+	sort.Strings(canonicalList)
 	commitCounts := make(map[string]int)
 	for _, r := range records {
 		c := canonicalForAuthor[r.Author]
@@ -284,7 +285,7 @@ func metricValue(s AuthorStats, field SortField) int {
 	case SortByNet:
 		return s.Net
 	case SortByAI:
-		return s.AICommits
+		return s.AIPercent()
 	default: // SortByTotal
 		return s.TotalChange
 	}
@@ -383,24 +384,31 @@ func AreSimilarNames(a, b string) bool {
 }
 
 // MergeAuthorName returns the canonical name for the given name from allNames,
-// choosing the name with the highest commit count among similar names.
+// choosing the highest-commit-count name among similar names. Ties break to the
+// longer name, then lexicographically, so the result is independent of allNames
+// ordering.
 func MergeAuthorName(name string, allNames []string, commitCounts map[string]int) string {
 	best := name
 	bestCount := commitCounts[name]
 
 	for _, candidate := range allNames {
-		if candidate == name {
+		if candidate == name || !NamesMatch(name, candidate) {
 			continue
 		}
-		if NamesMatch(name, candidate) {
-			count := commitCounts[candidate]
-			if count > bestCount {
-				bestCount = count
-				best = candidate
-			}
+		count := commitCounts[candidate]
+		if count > bestCount || (count == bestCount && preferCanonical(candidate, best)) {
+			bestCount = count
+			best = candidate
 		}
 	}
 	return best
+}
+
+func preferCanonical(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a < b
 }
 
 // buildCanonicalMap builds a map from each raw author name to its canonical name.
