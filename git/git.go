@@ -248,6 +248,7 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 
 var aiEmailDomains = []string{
 	"@anthropic.com",
+	"@openai.com",
 	"@cursor.com",
 	"@cursor.sh",
 	"@codeium.com",

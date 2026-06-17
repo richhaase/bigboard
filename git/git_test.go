@@ -130,6 +130,9 @@ func TestCollectCommitsAIAttribution(t *testing.T) {
 	writeAndCommitWithMessage(t, dir, "c.go", "package c\n",
 		"copilot commit\n\nCo-Authored-By: GitHub Copilot <copilot@github.com>")
 
+	writeAndCommitWithMessage(t, dir, "e.go", "package e\n",
+		"codex commit\n\nCo-authored-by: Codex <noreply@openai.com>")
+
 	writeAndCommit(t, dir, "d.go", "package d\n", "another plain commit")
 
 	ref := git.DetectDefaultBranch(dir)
@@ -138,8 +141,8 @@ func TestCollectCommitsAIAttribution(t *testing.T) {
 		t.Fatalf("CollectCommits: %v", err)
 	}
 
-	if len(records) != 4 {
-		t.Fatalf("expected 4 records, got %d", len(records))
+	if len(records) != 5 {
+		t.Fatalf("expected 5 records, got %d", len(records))
 	}
 
 	aiCount := 0
@@ -148,8 +151,8 @@ func TestCollectCommitsAIAttribution(t *testing.T) {
 			aiCount++
 		}
 	}
-	if aiCount != 2 {
-		t.Errorf("expected 2 AI-assisted commits, got %d", aiCount)
+	if aiCount != 3 {
+		t.Errorf("expected 3 AI-assisted commits, got %d", aiCount)
 	}
 }
 
