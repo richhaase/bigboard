@@ -14,7 +14,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Check formatting
@@ -33,7 +33,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run tests with coverage
@@ -51,7 +51,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run tests with race detector
@@ -64,7 +64,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run lint
@@ -77,7 +77,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run staticcheck
@@ -90,7 +90,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run vet
@@ -103,7 +103,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
     - name: Setup Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Run govulncheck
