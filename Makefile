@@ -58,7 +58,9 @@ fmt:
 
 fmt-check:
 	@echo "Checking Go source formatting..."
-	@test -z "$$(gofmt -l .)"
+	@files="$$(gofmt -l .)"; status=$$?; \
+		test $$status -eq 0 || exit $$status; \
+		test -z "$$files" || { printf '%s\n' "$$files"; exit 1; }
 	@echo "Formatting passed!"
 
 lint:

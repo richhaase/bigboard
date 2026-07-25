@@ -33,7 +33,7 @@ func TimePresetIndex(d time.Duration) int {
 	if d <= 0 {
 		return len(TimePresets) - 1
 	}
-	best, bestDiff := DefaultTimeIndex, time.Duration(1<<62)
+	best, bestDiff := DefaultTimeIndex, time.Duration(1<<63-1)
 	for i, p := range TimePresets {
 		if p.Duration <= 0 {
 			continue

@@ -212,10 +212,10 @@ func buildExcludeSet(repositories []git.Repository, patterns []string) (map[stri
 				exact = true
 			}
 		}
-		if exact {
-			continue
-		}
 		if _, err := filepath.Match(pattern, ""); err != nil {
+			if exact {
+				continue
+			}
 			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
 		}
 		for _, repo := range repositories {

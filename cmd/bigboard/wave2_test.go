@@ -73,6 +73,17 @@ func TestBuildExcludeSet(t *testing.T) {
 	if !ex[literal[0].ID] {
 		t.Error("exact repository name containing '[' was not excluded")
 	}
+
+	globAndLiteral := git.NewRepositories([]string{"/a/*", "/b/api"})
+	ex, err = buildExcludeSet(globAndLiteral, []string{"*"})
+	if err != nil {
+		t.Fatalf("valid glob matching a literal repository name failed: %v", err)
+	}
+	for _, repo := range globAndLiteral {
+		if !ex[repo.ID] {
+			t.Errorf("valid glob did not exclude %q", repo.Name)
+		}
+	}
 }
 
 func TestPick(t *testing.T) {

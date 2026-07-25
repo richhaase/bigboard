@@ -58,6 +58,7 @@ func TestTimePresetIndex(t *testing.T) {
 		{90 * 24 * time.Hour, 4},
 		{45 * 24 * time.Hour, 3},
 		{100 * 365 * 24 * time.Hour, 5},
+		{148 * 365 * 24 * time.Hour, 5},
 	}
 	for _, tc := range cases {
 		if got := TimePresetIndex(tc.d); got != tc.want {
