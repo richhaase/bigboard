@@ -15,9 +15,9 @@ func (m Model) renderRepoOverlay() string {
 	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
 	sections = append(sections, "")
 
-	for i, name := range m.repoNames {
+	for i, repo := range m.loadedRepos {
 		checkbox := "[x]"
-		if m.overlayExcluded[name] {
+		if m.overlayExcluded[repo.ID] {
 			checkbox = "[ ]"
 		}
 
@@ -28,12 +28,12 @@ func (m Model) renderRepoOverlay() string {
 
 		checkStyle := StyleCyan
 		nameStyle := StyleAuthor
-		if m.overlayExcluded[name] {
+		if m.overlayExcluded[repo.ID] {
 			checkStyle = StyleDimWhite
 			nameStyle = StyleDimWhite
 		}
 
-		line := "  " + cursor + checkStyle.Render(checkbox) + " " + nameStyle.Render(name)
+		line := "  " + cursor + checkStyle.Render(checkbox) + " " + nameStyle.Render(displayText(repo.Name))
 
 		var rowStyle lipgloss.Style
 		switch {
@@ -48,8 +48,13 @@ func (m Model) renderRepoOverlay() string {
 	}
 
 	sections = append(sections, "")
-	excluded := len(m.overlayExcluded)
-	total := len(m.repoNames)
+	excluded := 0
+	for _, repo := range m.loadedRepos {
+		if m.overlayExcluded[repo.ID] {
+			excluded++
+		}
+	}
+	total := len(m.loadedRepos)
 	summary := RenderRepoCount(total, excluded)
 	sections = append(sections, summary)
 

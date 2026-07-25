@@ -4,6 +4,8 @@ A cyberpunk-themed TUI for assessing contributor volumes across git repositories
 
 ## Install
 
+Big Board requires the `git` command-line client on `PATH`.
+
 ### From Source
 
 ```bash
@@ -48,7 +50,8 @@ bigboard --fuzzy ~/src/
 bigboard --all-files ~/src/
 ```
 
-The time range is chosen interactively (`←/→`); it defaults to 14 days and is not a flag.
+The time range is chosen interactively (`←/→`) and defaults to 14 days. Use
+`--since` to choose the initial range.
 
 ## Accuracy notes
 

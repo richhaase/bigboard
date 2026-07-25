@@ -27,6 +27,9 @@ func TestParseSince(t *testing.T) {
 		{"2w", 2 * 7 * 24 * time.Hour, false},
 		{"1y", 365 * 24 * time.Hour, false},
 		{"48h", 48 * time.Hour, false},
+		{"-1d", 0, true},
+		{"-1h", 0, true},
+		{"1000y", 0, true},
 		{"nonsense", 0, true},
 	}
 	for _, tc := range cases {
@@ -47,15 +50,19 @@ func TestParseSince(t *testing.T) {
 }
 
 func TestBuildExcludeSet(t *testing.T) {
-	repos := []string{"/a/api", "/b/web", "/c/vendor-lib", "/d/experiment-1"}
-	ex := buildExcludeSet(repos, []string{"web", "vendor-*", "experiment-*"})
-	for _, want := range []string{"web", "vendor-lib", "experiment-1"} {
-		if !ex[want] {
-			t.Errorf("expected %q excluded", want)
+	repos := git.NewRepositories([]string{"/a/api", "/b/web", "/c/vendor-lib", "/d/experiment-1"})
+	ex, err := buildExcludeSet(repos, []string{"web", "vendor-*", "experiment-*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range repos {
+		want := repo.Name != "api"
+		if ex[repo.ID] != want {
+			t.Errorf("excluded[%q] = %v, want %v", repo.ID, ex[repo.ID], want)
 		}
 	}
-	if ex["api"] {
-		t.Errorf("api should not be excluded")
+	if _, err := buildExcludeSet(repos, []string{"["}); err == nil {
+		t.Error("invalid glob should return an error")
 	}
 }
 
@@ -78,6 +85,14 @@ func TestLoadConfigMissing(t *testing.T) {
 	}
 	if _, err := loadConfig(missing, true); err == nil {
 		t.Errorf("explicit missing config should error")
+	}
+
+	unknown := filepath.Join(t.TempDir(), "unknown.json")
+	if err := os.WriteFile(unknown, []byte(`{"paths":[],"typo":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(unknown, true); err == nil {
+		t.Error("unknown config field should return an error")
 	}
 }
 
@@ -102,6 +117,17 @@ func TestExportFormats(t *testing.T) {
 	if !strings.Contains(md.String(), "| # |") || !strings.Contains(md.String(), "Grace") {
 		t.Errorf("markdown missing header or data:\n%s", md.String())
 	}
+
+	var unsafeCSV bytes.Buffer
+	if err := exportCSV(&unsafeCSV, []stats.AuthorStats{{Name: "=1+1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(unsafeCSV.String(), "'=1+1") {
+		t.Errorf("CSV formula was not neutralized:\n%s", unsafeCSV.String())
+	}
+	if got := diagnosticText("repo\x1b\nname"); strings.ContainsAny(got, "\x1b\n") {
+		t.Errorf("diagnosticText retained terminal controls: %q", got)
+	}
 }
 
 func TestExpandHome(t *testing.T) {
@@ -111,6 +137,22 @@ func TestExpandHome(t *testing.T) {
 	}
 	if got := expandHome("/abs/path"); got != "/abs/path" {
 		t.Errorf("expandHome left absolute path alone: %q", got)
+	}
+}
+
+func TestValidateScanPaths(t *testing.T) {
+	if err := validateScanPaths([]string{t.TempDir()}); err != nil {
+		t.Fatalf("valid directory: %v", err)
+	}
+	if err := validateScanPaths([]string{filepath.Join(t.TempDir(), "missing")}); err == nil {
+		t.Error("missing scan path should return an error")
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateScanPaths([]string{file}); err == nil {
+		t.Error("non-directory scan path should return an error")
 	}
 }
 
@@ -181,6 +223,9 @@ func TestExportMarkdownEscapesPipes(t *testing.T) {
 	if !strings.Contains(out, "Foo \\| Bar") {
 		t.Errorf("expected escaped pipe:\n%s", out)
 	}
+	if got := mdCell(`A\|B <tag>`); got != `A\\\|B &lt;tag&gt;` {
+		t.Errorf("mdCell adversarial escaping = %q", got)
+	}
 }
 
 func TestRunExportRoundTrip(t *testing.T) {
@@ -214,6 +259,53 @@ func TestRunExportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRunExportKeepsDuplicateBasenamesDistinct(t *testing.T) {
+	root := t.TempDir()
+	paths := []string{
+		filepath.Join(root, "org-a", "api"),
+		filepath.Join(root, "org-b", "api"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		initRepoWithCommit(t, path)
+	}
+	repositories := git.NewRepositories(paths)
+
+	var out, errw bytes.Buffer
+	if err := runExportWithOptions(&out, &errw, "json", repositories, nil, 0, stats.SortByTotal, analysisOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var authors []stats.AuthorStats
+	if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 1 || len(authors[0].PerRepo) != 2 {
+		t.Fatalf("duplicate basenames were conflated: %+v", authors)
+	}
+	for _, repo := range repositories {
+		if _, ok := authors[0].PerRepo[repo.Name]; !ok {
+			t.Errorf("missing qualified repo %q in %v", repo.Name, authors[0].PerRepo)
+		}
+	}
+
+	out.Reset()
+	if err := runExportWithOptions(&out, &errw, "json", repositories, map[string]bool{repositories[0].ID: true}, 0, stats.SortByTotal, analysisOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	authors = nil
+	if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 1 || len(authors[0].PerRepo) != 1 {
+		t.Fatalf("excluding one duplicate repo affected the wrong scope: %+v", authors)
+	}
+	if _, ok := authors[0].PerRepo[repositories[1].Name]; !ok {
+		t.Errorf("remaining repo %q missing after exclusion", repositories[1].Name)
+	}
+}
+
 func TestRunExportAllReposFail(t *testing.T) {
 	var out, errw bytes.Buffer
 	notRepo := t.TempDir()
@@ -222,5 +314,16 @@ func TestRunExportAllReposFail(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("no output should be written when all repos fail, got:\n%s", out.String())
+	}
+}
+
+func TestRunExportValidatesFormatBeforeScanning(t *testing.T) {
+	var out, errw bytes.Buffer
+	err := runExport(&out, &errw, "pdf", []string{filepath.Join(t.TempDir(), "missing")}, nil, 0, stats.SortByTotal)
+	if err == nil || !strings.Contains(err.Error(), "invalid --export format") {
+		t.Fatalf("runExport invalid format error = %v", err)
+	}
+	if errw.Len() != 0 {
+		t.Fatalf("invalid format should not scan repositories: %s", errw.String())
 	}
 }

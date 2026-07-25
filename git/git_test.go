@@ -1,9 +1,12 @@
 package git_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +57,64 @@ func TestDetectDefaultBranch(t *testing.T) {
 	branch := git.DetectDefaultBranch(dir)
 	if branch != "main" && branch != "master" {
 		t.Errorf("expected main or master, got %q", branch)
+	}
+}
+
+func TestDetectDefaultBranchKeepsRemoteRef(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	writeAndCommit(t, dir, "README.md", "hello\n", "initial commit")
+
+	for _, args := range [][]string{
+		{"git", "update-ref", "refs/remotes/origin/main", "HEAD"},
+		{"git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"},
+		{"git", "checkout", "--detach", "HEAD"},
+		{"git", "branch", "-D", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	ref := git.DetectDefaultBranch(dir)
+	if ref != "origin/main" {
+		t.Fatalf("DetectDefaultBranch = %q, want origin/main", ref)
+	}
+	if _, err := git.CollectCommits(dir, ref); err != nil {
+		t.Fatalf("CollectCommits(%q): %v", ref, err)
+	}
+}
+
+func TestNewRepositoriesUsesUniqueNamesAndStableIDs(t *testing.T) {
+	repos := git.NewRepositories([]string{
+		"/workspace/org-a/api",
+		"/workspace/org-b/api",
+		"/workspace/web",
+		"/workspace/org-a/api",
+	})
+	if len(repos) != 3 {
+		t.Fatalf("NewRepositories returned %d entries, want 3", len(repos))
+	}
+	if repos[0].Name != "org-a/api" || repos[1].Name != "org-b/api" || repos[2].Name != "web" {
+		t.Fatalf("repository names = %q, %q, %q", repos[0].Name, repos[1].Name, repos[2].Name)
+	}
+	for _, repo := range repos {
+		if !filepath.IsAbs(repo.ID) || repo.ID != repo.Path {
+			t.Errorf("repository identity is not an absolute path: %+v", repo)
+		}
+	}
+}
+
+func TestScanRepositoryHonorsCancellation(t *testing.T) {
+	repository := git.NewRepositories([]string{t.TempDir()})[0]
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := git.ScanRepository(ctx, repository, git.CollectOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanRepository error = %v, want context.Canceled", err)
 	}
 }
 
@@ -161,6 +222,9 @@ func TestCollectCommitsInvalidRepo(t *testing.T) {
 	_, err := git.CollectCommits(dir, "main")
 	if err == nil {
 		t.Error("expected error for non-git dir, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") {
+		t.Errorf("error omitted git stderr: %v", err)
 	}
 }
 

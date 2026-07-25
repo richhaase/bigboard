@@ -1,10 +1,12 @@
 package stats
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/richhaase/bigboard/git"
 )
@@ -22,10 +24,15 @@ const (
 	numSortFields
 )
 
-// FuzzyMatching enables substring-based name merging across different emails.
-// Off by default because it over-merges distinct people (Daniel/Daniela);
-// enable via the --fuzzy flag.
+// FuzzyMatching is retained for compatibility with Aggregate, NamesMatch, and
+// MergeAuthorName. New code should pass AggregateOptions to
+// AggregateWithOptions instead.
 var FuzzyMatching = false
+
+// AggregateOptions controls contributor identity resolution.
+type AggregateOptions struct {
+	FuzzyMatching bool
+}
 
 // AuthorStats holds aggregated contribution data for a single author.
 type AuthorStats struct {
@@ -87,14 +94,19 @@ func FilterByTime(records []git.CommitRecord, d time.Duration) []git.CommitRecor
 	return out
 }
 
-// FilterByRepo returns records not in the excluded set. Keys are repo names.
+// FilterByRepo returns records not in the excluded set. Keys are stable
+// repository IDs when present, falling back to names for legacy records.
 func FilterByRepo(records []git.CommitRecord, excluded map[string]bool) []git.CommitRecord {
 	if len(excluded) == 0 {
 		return records
 	}
 	out := make([]git.CommitRecord, 0, len(records))
 	for _, r := range records {
-		if !excluded[r.RepoName] {
+		key := r.RepoID
+		if key == "" {
+			key = r.RepoName
+		}
+		if !excluded[key] {
 			out = append(out, r)
 		}
 	}
@@ -104,98 +116,146 @@ func FilterByRepo(records []git.CommitRecord, excluded map[string]bool) []git.Co
 // Aggregate groups records by contributor identity and computes per-author
 // totals, returned in a deterministic name-sorted order.
 func Aggregate(records []git.CommitRecord) []AuthorStats {
-	emailToCanonical := canonicalNameByEmail(records)
-	canonicalForAuthor := assignCanonicalNames(records, emailToCanonical)
-	mergedCanonical := mergeSimilarCanonicals(records, canonicalForAuthor)
-	return aggregateByCanonical(records, canonicalForAuthor, mergedCanonical)
+	return AggregateWithOptions(records, AggregateOptions{FuzzyMatching: FuzzyMatching})
 }
 
-func canonicalNameByEmail(records []git.CommitRecord) map[string]string {
-	longest := make(map[string]string)
-	for _, r := range records {
-		email := strings.ToLower(r.Email)
-		if email == "" {
-			continue
-		}
-		if len(r.Author) > len(longest[email]) {
-			longest[email] = r.Author
-		}
-	}
-	return longest
+// AggregateWithOptions groups records by contributor identity using explicit
+// options and returns totals in deterministic name order.
+func AggregateWithOptions(records []git.CommitRecord, options AggregateOptions) []AuthorStats {
+	canonical := resolveCanonicalNames(records, options.FuzzyMatching)
+	return aggregateByCanonical(records, canonical)
 }
 
-func assignCanonicalNames(records []git.CommitRecord, emailToCanonical map[string]string) map[string]string {
-	type authorEmail struct {
-		author string
-		email  string
-	}
-	seen := make(map[authorEmail]bool)
-	var pairs []authorEmail
-	for _, r := range records {
-		ae := authorEmail{r.Author, strings.ToLower(r.Email)}
-		if !seen[ae] {
-			seen[ae] = true
-			pairs = append(pairs, ae)
-		}
-	}
+type identityKey struct {
+	author string
+	email  string
+}
 
-	canonicalForAuthor := make(map[string]string)
-	for _, ae := range pairs {
-		if ae.email != "" {
-			canonicalForAuthor[ae.author] = emailToCanonical[ae.email]
-		}
+func keyForRecord(record git.CommitRecord) identityKey {
+	return identityKey{
+		author: record.Author,
+		email:  strings.ToLower(strings.TrimSpace(record.Email)),
 	}
+}
 
-	known := make(map[string]bool)
-	for _, c := range canonicalForAuthor {
-		known[c] = true
+type disjointSet []int
+
+func newDisjointSet(n int) disjointSet {
+	set := make(disjointSet, n)
+	for i := range set {
+		set[i] = i
 	}
-	for _, ae := range pairs {
-		if _, ok := canonicalForAuthor[ae.author]; ok {
+	return set
+}
+
+func (s disjointSet) find(i int) int {
+	root := i
+	for s[root] != root {
+		root = s[root]
+	}
+	for s[i] != i {
+		parent := s[i]
+		s[i] = root
+		i = parent
+	}
+	return root
+}
+
+func (s disjointSet) union(a, b int) {
+	a, b = s.find(a), s.find(b)
+	if a == b {
+		return
+	}
+	if a < b {
+		s[b] = a
+	} else {
+		s[a] = b
+	}
+}
+
+func resolveCanonicalNames(records []git.CommitRecord, fuzzy bool) map[identityKey]string {
+	pairIndex := make(map[identityKey]int)
+	pairs := make([]identityKey, 0)
+	for _, record := range records {
+		key := keyForRecord(record)
+		if _, ok := pairIndex[key]; ok {
 			continue
 		}
-		candidates := make([]string, 0, len(known))
-		for c := range known {
-			candidates = append(candidates, c)
-		}
-		sort.Strings(candidates)
-		for _, c := range candidates {
-			if NamesMatch(ae.author, c) {
-				canonicalForAuthor[ae.author] = c
-				break
+		pairIndex[key] = len(pairs)
+		pairs = append(pairs, key)
+	}
+
+	set := newDisjointSet(len(pairs))
+	byEmail := make(map[string]int)
+	byName := make(map[string]int)
+	for i, pair := range pairs {
+		if pair.email != "" {
+			if previous, ok := byEmail[pair.email]; ok {
+				set.union(i, previous)
+			} else {
+				byEmail[pair.email] = i
 			}
 		}
-		if _, ok := canonicalForAuthor[ae.author]; !ok {
-			canonicalForAuthor[ae.author] = ae.author
-			known[ae.author] = true
+		name := normalizedName(pair.author)
+		if name == "" {
+			continue
+		}
+		if previous, ok := byName[name]; ok {
+			set.union(i, previous)
+		} else {
+			byName[name] = i
 		}
 	}
-	return canonicalForAuthor
+
+	if fuzzy {
+		names := make([]string, 0, len(byName))
+		for name := range byName {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for i, name := range names {
+			for _, candidate := range names[i+1:] {
+				if similarNormalizedNames(name, candidate) {
+					set.union(byName[name], byName[candidate])
+				}
+			}
+		}
+	}
+
+	nameCounts := make(map[int]map[string]int)
+	for _, record := range records {
+		root := set.find(pairIndex[keyForRecord(record)])
+		if nameCounts[root] == nil {
+			nameCounts[root] = make(map[string]int)
+		}
+		nameCounts[root][record.Author]++
+	}
+
+	canonicalByRoot := make(map[int]string, len(nameCounts))
+	for root, counts := range nameCounts {
+		best := ""
+		bestCount := -1
+		for name, count := range counts {
+			if count > bestCount || (count == bestCount && preferCanonical(name, best)) {
+				best = name
+				bestCount = count
+			}
+		}
+		canonicalByRoot[root] = best
+	}
+
+	canonical := make(map[identityKey]string, len(pairs))
+	for i, pair := range pairs {
+		canonical[pair] = canonicalByRoot[set.find(i)]
+	}
+	return canonical
 }
 
-func mergeSimilarCanonicals(records []git.CommitRecord, canonicalForAuthor map[string]string) map[string]string {
-	unique := make(map[string]bool)
-	for _, c := range canonicalForAuthor {
-		unique[c] = true
-	}
-	canonicalList := make([]string, 0, len(unique))
-	for c := range unique {
-		canonicalList = append(canonicalList, c)
-	}
-	sort.Strings(canonicalList)
-
-	commitCounts := make(map[string]int)
-	for _, r := range records {
-		commitCounts[canonicalForAuthor[r.Author]]++
-	}
-	return buildCanonicalMap(canonicalList, commitCounts)
-}
-
-func aggregateByCanonical(records []git.CommitRecord, canonicalForAuthor, mergedCanonical map[string]string) []AuthorStats {
+func aggregateByCanonical(records []git.CommitRecord, canonical map[identityKey]string) []AuthorStats {
 	byName := make(map[string]*AuthorStats)
 	activeDays := make(map[string]map[string]bool)
 	for _, r := range records {
-		name := mergedCanonical[canonicalForAuthor[r.Author]]
+		name := canonical[keyForRecord(r)]
 		as, ok := byName[name]
 		if !ok {
 			as = &AuthorStats{
@@ -285,33 +345,47 @@ func Sort(stats []AuthorStats, field SortField) {
 	})
 }
 
-// SortFieldFromString converts a string to a SortField. Defaults to SortByTotal.
-func SortFieldFromString(s string) SortField {
+// ParseSortField converts a string to a SortField.
+func ParseSortField(s string) (SortField, error) {
 	switch strings.ToLower(s) {
 	case "commits":
-		return SortByCommits
+		return SortByCommits, nil
 	case "added":
-		return SortByAdded
+		return SortByAdded, nil
 	case "removed":
-		return SortByRemoved
+		return SortByRemoved, nil
 	case "net":
-		return SortByNet
+		return SortByNet, nil
 	case "ai":
-		return SortByAI
-	default:
-		return SortByTotal
+		return SortByAI, nil
+	case "total", "impact":
+		return SortByTotal, nil
 	}
+	return SortByTotal, fmt.Errorf("invalid sort %q (want commits|added|removed|net|ai|total)", s)
+}
+
+// SortFieldFromString converts a string to a SortField, defaulting to
+// SortByTotal for compatibility with older callers.
+func SortFieldFromString(s string) SortField {
+	field, _ := ParseSortField(s)
+	return field
 }
 
 // NamesMatch reports whether two raw author names are the same identity under
 // the current merge policy: normalized-name equality always, plus substring
 // similarity when FuzzyMatching is enabled.
 func NamesMatch(a, b string) bool {
-	if normalizedName(a) == normalizedName(b) {
+	return namesMatch(a, b, FuzzyMatching)
+}
+
+func namesMatch(a, b string, fuzzy bool) bool {
+	normalizedA := normalizedName(a)
+	normalizedB := normalizedName(b)
+	if normalizedA == normalizedB {
 		return true
 	}
-	if FuzzyMatching {
-		return AreSimilarNames(a, b)
+	if fuzzy {
+		return similarNormalizedNames(normalizedA, normalizedB)
 	}
 	return false
 }
@@ -343,15 +417,17 @@ func SortFieldLabel(f SortField) string {
 // whitespace normalization, or one is a substring of the other (for names
 // longer than 5 characters).
 func AreSimilarNames(a, b string) bool {
-	na := normalizedName(a)
-	nb := normalizedName(b)
-	if na == nb {
+	return similarNormalizedNames(normalizedName(a), normalizedName(b))
+}
+
+func similarNormalizedNames(a, b string) bool {
+	if a == b {
 		return true
 	}
-	if len(na) > 5 && strings.Contains(nb, na) {
+	if utf8.RuneCountInString(a) > 5 && strings.Contains(b, a) {
 		return true
 	}
-	if len(nb) > 5 && strings.Contains(na, nb) {
+	if utf8.RuneCountInString(b) > 5 && strings.Contains(a, b) {
 		return true
 	}
 	return false
@@ -362,11 +438,15 @@ func AreSimilarNames(a, b string) bool {
 // longer name, then lexicographically, so the result is independent of allNames
 // ordering.
 func MergeAuthorName(name string, allNames []string, commitCounts map[string]int) string {
+	return mergeAuthorName(name, allNames, commitCounts, FuzzyMatching)
+}
+
+func mergeAuthorName(name string, allNames []string, commitCounts map[string]int, fuzzy bool) string {
 	best := name
 	bestCount := commitCounts[name]
 
 	for _, candidate := range allNames {
-		if candidate == name || !NamesMatch(name, candidate) {
+		if candidate == name || !namesMatch(name, candidate, fuzzy) {
 			continue
 		}
 		count := commitCounts[candidate]
@@ -379,18 +459,12 @@ func MergeAuthorName(name string, allNames []string, commitCounts map[string]int
 }
 
 func preferCanonical(a, b string) bool {
-	if len(a) != len(b) {
-		return len(a) > len(b)
+	aLength := utf8.RuneCountInString(a)
+	bLength := utf8.RuneCountInString(b)
+	if aLength != bLength {
+		return aLength > bLength
 	}
 	return a < b
-}
-
-func buildCanonicalMap(allNames []string, commitCounts map[string]int) map[string]string {
-	canonical := make(map[string]string, len(allNames))
-	for _, name := range allNames {
-		canonical[name] = MergeAuthorName(name, allNames, commitCounts)
-	}
-	return canonical
 }
 
 func normalizedName(s string) string {

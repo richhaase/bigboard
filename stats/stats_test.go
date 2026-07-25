@@ -82,6 +82,8 @@ func TestAreSimilarNames(t *testing.T) {
 		{"Charlie Brown", "Alice Smith", false},
 		// One is substring of other, both >5 chars
 		{"alice smith", "alice smithson", true},
+		// Short Unicode names use character count, not UTF-8 byte count
+		{"東京", "東京都", false},
 	}
 
 	for _, tc := range cases {
@@ -295,6 +297,9 @@ func TestSortFieldFromString(t *testing.T) {
 			t.Errorf("SortFieldFromString(%q) = %v, want %v", tc.s, got, tc.want)
 		}
 	}
+	if _, err := stats.ParseSortField("commit"); err == nil {
+		t.Error("ParseSortField should reject an unknown value")
+	}
 }
 
 func TestFilterByRepo(t *testing.T) {
@@ -329,6 +334,15 @@ func TestFilterByRepo(t *testing.T) {
 	none := stats.FilterByRepo(records, allExcluded)
 	if len(none) != 0 {
 		t.Errorf("expected 0 records, got %d", len(none))
+	}
+
+	sameName := []git.CommitRecord{
+		{RepoID: "/org-a/api", RepoName: "api"},
+		{RepoID: "/org-b/api", RepoName: "api"},
+	}
+	one := stats.FilterByRepo(sameName, map[string]bool{"/org-a/api": true})
+	if len(one) != 1 || one[0].RepoID != "/org-b/api" {
+		t.Errorf("stable repo ID filter returned %+v", one)
 	}
 }
 
@@ -374,6 +388,58 @@ func TestAggregateDeterministicOrder(t *testing.T) {
 	}
 	if first[0].Name != "Amy" || first[2].Name != "Zoe" {
 		t.Errorf("expected name-sorted order, got %q..%q", first[0].Name, first[2].Name)
+	}
+}
+
+func TestAggregateIndependentOfInputOrder(t *testing.T) {
+	now := time.Now()
+	records := []git.CommitRecord{
+		{Author: "A", Email: "one@example.com", Date: now, RepoName: "r"},
+		{Author: "Alice", Email: "one@example.com", Date: now, RepoName: "r"},
+		{Author: "A", Email: "two@example.com", Date: now, RepoName: "r"},
+		{Author: "Aaron", Email: "two@example.com", Date: now, RepoName: "r"},
+		{Author: "Anne", Email: "three@example.com", Date: now, RepoName: "r"},
+		{Author: "Anna", Email: "three@example.com", Date: now, RepoName: "r"},
+	}
+
+	var want string
+	permutations := 0
+	var visit func(int)
+	visit = func(index int) {
+		if index == len(records) {
+			got := snapshot(stats.Aggregate(records))
+			if want == "" {
+				want = got
+			} else if got != want {
+				t.Fatalf("Aggregate depends on input order: got %q, want %q", got, want)
+			}
+			permutations++
+			return
+		}
+		for i := index; i < len(records); i++ {
+			records[index], records[i] = records[i], records[index]
+			visit(index + 1)
+			records[index], records[i] = records[i], records[index]
+		}
+	}
+	visit(0)
+	if permutations != 720 {
+		t.Fatalf("visited %d permutations, want 720", permutations)
+	}
+}
+
+func TestAggregateWithOptionsDoesNotUseGlobalPolicy(t *testing.T) {
+	previous := stats.FuzzyMatching
+	stats.FuzzyMatching = true
+	t.Cleanup(func() { stats.FuzzyMatching = previous })
+
+	records := []git.CommitRecord{
+		{Author: "Daniel", Email: "daniel@example.com"},
+		{Author: "Daniela", Email: "daniela@example.com"},
+	}
+	got := stats.AggregateWithOptions(records, stats.AggregateOptions{})
+	if len(got) != 2 {
+		t.Fatalf("explicit fuzzy-off aggregation returned %d authors, want 2", len(got))
 	}
 }
 

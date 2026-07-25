@@ -2,10 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TimePreset represents a time range filter option.
@@ -55,8 +58,6 @@ var bannerLines = [7]string{
 	`██     ██  ██  ██    ██     ██     ██ ██     ██ ██     ██ ██    ██  ██     ██`,
 	`████████  ████  ██████      ████████   ███████  ██     ██ ██     ██ ████████`,
 }
-
-var bannerWidth = lipgloss.Width(bannerLines[0])
 
 const (
 	bannerMinWidth = 82
@@ -273,7 +274,7 @@ func writeGradientBar(sb *strings.Builder, width int, bright, mid, dim lipgloss.
 func RenderSectionHeader(label string, width int) string {
 	prefix := "──╸ "
 	suffix := " ╺"
-	labelStr := StyleCyan.Render(label)
+	labelStr := StyleCyan.Render(displayText(label))
 	fillLen := width - 4 - lipgloss.Width(prefix) - lipgloss.Width(labelStr) - lipgloss.Width(suffix)
 	if fillLen < 2 {
 		fillLen = 2
@@ -281,19 +282,27 @@ func RenderSectionHeader(label string, width int) string {
 	return "  " + StyleDimCyan.Render(prefix) + labelStr + StyleDimCyan.Render(suffix+strings.Repeat("─", fillLen))
 }
 
-// RenderFooter renders the repo count and timestamp status line.
-// The timestamp right-aligns to the separator width (width - 4).
+// RenderFooter renders the repo count and version status line.
+// The version right-aligns within the available terminal width.
 func RenderFooter(repoCount, excludedCount, width int, version string) string {
 	repos := fmt.Sprintf("%d repos", repoCount)
 	if excludedCount > 0 {
 		repos = fmt.Sprintf("%d/%d repos", repoCount-excludedCount, repoCount)
 	}
 	left := "  " + StyleFooter.Render(repos)
-	if version == "" || bannerWidth == 0 {
+	if version == "" {
+		return left
+	}
+	targetWidth := width - 2
+	if targetWidth < lipgloss.Width(left) {
+		targetWidth = lipgloss.Width(left)
+	}
+	version = Truncate(displayText(version), targetWidth-lipgloss.Width(left)-2)
+	if version == "" {
 		return left
 	}
 	ver := StyleDimCyan.Render(version)
-	pad := bannerWidth + 2 - lipgloss.Width(left) - lipgloss.Width(ver)
+	pad := targetWidth - lipgloss.Width(left) - lipgloss.Width(ver)
 	if pad < 2 {
 		pad = 2
 	}
@@ -346,22 +355,26 @@ func RenderHelpBar(ctx HelpContext) string {
 
 // FormatNumber formats an integer with thousand separators.
 func FormatNumber(n int) string {
-	if n < 0 {
-		return "-" + FormatNumber(-n)
+	s := strconv.FormatInt(int64(n), 10)
+	sign := ""
+	if strings.HasPrefix(s, "-") {
+		sign = "-"
+		s = s[1:]
 	}
-	s := fmt.Sprintf("%d", n)
 	if len(s) <= 3 {
-		return s
+		return sign + s
 	}
-	var result []byte
+	var result strings.Builder
+	result.Grow(len(sign) + len(s) + (len(s)-1)/3)
+	result.WriteString(sign)
 	for i := 0; i < len(s); i++ {
 		pos := len(s) - i
 		if i > 0 && pos%3 == 0 {
-			result = append(result, ',')
+			result.WriteByte(',')
 		}
-		result = append(result, s[i])
+		result.WriteByte(s[i])
 	}
-	return string(result)
+	return result.String()
 }
 
 // Truncate shortens s to a display width of at most width cells, appending
@@ -372,6 +385,7 @@ func Truncate(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	s = displayText(s)
 	if lipgloss.Width(s) <= width {
 		return s
 	}
@@ -380,6 +394,16 @@ func Truncate(s string, width int) string {
 		return cutToWidth(s, width)
 	}
 	return cutToWidth(s, width-len(ellipsis)) + ellipsis
+}
+
+func displayText(s string) string {
+	s = ansi.Strip(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func cutToWidth(s string, w int) string {

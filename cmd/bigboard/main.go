@@ -57,7 +57,7 @@ func main() {
 	fuzzyFlag := flag.Bool("fuzzy", false, "Enable fuzzy author-name merging (may over-merge similar names)")
 	allFilesFlag := flag.Bool("all-files", false, "Count generated/vendored files (disables the default ignore list)")
 	exportFlag := flag.String("export", "", "Export the view headlessly and exit: json|csv|md")
-	sinceFlag := flag.String("since", "", "Window for --export: e.g. 30d, 2w, 1y, all (default 14d)")
+	sinceFlag := flag.String("since", "", "Initial time window: e.g. 30d, 2w, 1y, all (default 14d)")
 	groupFlag := flag.String("group", "", "Use a named repo group from the config file")
 	depthFlag := flag.Int("depth", 0, "Directory levels to scan for repos (default 1)")
 	configFlag := flag.String("config", "", "Config file path (default ~/.config/bigboard/config.json)")
@@ -86,10 +86,8 @@ func main() {
 
 	sortStr := pick(setFlags["sort"], *sortFlag, cfg.Sort, "total")
 	themeStr := pick(setFlags["theme"], *themeFlag, cfg.Theme, "auto")
-	stats.FuzzyMatching = *fuzzyFlag || (!setFlags["fuzzy"] && cfg.Fuzzy)
-	if *allFilesFlag || (!setFlags["all-files"] && cfg.AllFiles) {
-		git.FilterGeneratedPaths = false
-	}
+	fuzzyMatching := *fuzzyFlag || (!setFlags["fuzzy"] && cfg.Fuzzy)
+	includeGenerated := *allFilesFlag || (!setFlags["all-files"] && cfg.AllFiles)
 	depth := 1
 	switch {
 	case setFlags["depth"]:
@@ -111,6 +109,23 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: invalid theme %q (want auto|light|dark)\n", themeStr)
 		os.Exit(1)
 	}
+	initialSort, err := stats.ParseSortField(sortStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid --since: %v\n", err)
+		os.Exit(1)
+	}
+	exportFormat := strings.ToLower(*exportFlag)
+	if exportFormat != "" {
+		if err := validateExportFormat(exportFormat); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	var paths []string
 	switch {
@@ -131,25 +146,30 @@ func main() {
 	for i, p := range paths {
 		paths[i] = expandHome(p)
 	}
+	if err := validateScanPaths(paths); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	repoPaths := git.DiscoverReposDepth(paths, depth)
 	if len(repoPaths) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no git repositories found in %v\n", paths)
 		os.Exit(1)
 	}
+	repositories := git.NewRepositories(repoPaths)
 
 	excludePatterns := append(append([]string{}, cfg.Exclude...), excludes...)
-	excludedRepos := buildExcludeSet(repoPaths, excludePatterns)
-	initialSort := stats.SortFieldFromString(sortStr)
-
-	since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
+	excludedRepos, err := buildExcludeSet(repositories, excludePatterns)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid --since: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: invalid exclusion: %v\n", err)
 		os.Exit(1)
 	}
 
-	if *exportFlag != "" {
-		if err := runExport(os.Stdout, os.Stderr, strings.ToLower(*exportFlag), repoPaths, excludedRepos, since, initialSort); err != nil {
+	if exportFormat != "" {
+		if err := runExportWithOptions(os.Stdout, os.Stderr, exportFormat, repositories, excludedRepos, since, initialSort, analysisOptions{
+			FuzzyMatching:    fuzzyMatching,
+			IncludeGenerated: includeGenerated,
+		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -160,7 +180,10 @@ func main() {
 	if setFlags["since"] || cfg.Since != "" {
 		timeIdx = tui.TimePresetIndex(since)
 	}
-	model := tui.NewModel(repoPaths, initialSort, excludedRepos, version, timeIdx)
+	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
+		FuzzyMatching:    fuzzyMatching,
+		IncludeGenerated: includeGenerated,
+	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
@@ -179,22 +202,27 @@ func pick(setByFlag bool, flagVal, cfgVal, def string) string {
 	return def
 }
 
-func buildExcludeSet(repoPaths, patterns []string) map[string]bool {
+func buildExcludeSet(repositories []git.Repository, patterns []string) (map[string]bool, error) {
 	ex := make(map[string]bool)
-	for _, rp := range repoPaths {
-		base := filepath.Base(rp)
+	for _, pattern := range patterns {
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
+		}
+	}
+	for _, repo := range repositories {
+		base := filepath.Base(repo.Path)
 		for _, pat := range patterns {
 			if pat == base {
-				ex[base] = true
+				ex[repo.ID] = true
 				break
 			}
-			if ok, err := filepath.Match(pat, base); err == nil && ok {
-				ex[base] = true
+			if ok, _ := filepath.Match(pat, base); ok {
+				ex[repo.ID] = true
 				break
 			}
 		}
 	}
-	return ex
+	return ex, nil
 }
 
 func expandHome(p string) string {
@@ -207,4 +235,17 @@ func expandHome(p string) string {
 		}
 	}
 	return p
+}
+
+func validateScanPaths(paths []string) error {
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("scan path %q: %w", path, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("scan path %q is not a directory", path)
+		}
+	}
+	return nil
 }

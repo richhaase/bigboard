@@ -18,6 +18,8 @@ func TestIsAICoAuthor(t *testing.T) {
 		{"", false},
 		{"  ", false},
 		{"noreply@anthropic.com", true},
+		{"Eve <person@openai.com.evil.example>", false},
+		{"Not Copilot <notcopilot@github.com>", false},
 	}
 
 	for _, tc := range cases {

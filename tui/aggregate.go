@@ -107,7 +107,7 @@ func (l tableLayout) rowWidth() int {
 func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) string {
 	if len(authors) == 0 {
 		if ts.Searching || ts.Query != "" {
-			return StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", ts.Query))
+			return StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", displayText(ts.Query)))
 		}
 		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→.")
 	}
@@ -241,12 +241,12 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 
 func renderTableFooter(ts TableState, start, end, total int) string {
 	if ts.Searching {
-		return "  " + StyleCyan.Render("/") + StyleAuthor.Render(ts.Query) + StyleCursor.Render("▌") +
+		return "  " + StyleCyan.Render("/") + StyleAuthor.Render(displayText(ts.Query)) + StyleCursor.Render("▌") +
 			StyleDimWhite.Render("   (enter to apply · esc to clear)")
 	}
 	rng := fmt.Sprintf("showing %d–%d of %d", start+1, end, total)
 	if ts.Query != "" {
-		return "  " + StyleDimCyan.Render(fmt.Sprintf("filter %q · %s · esc clears", ts.Query, rng))
+		return "  " + StyleDimCyan.Render(fmt.Sprintf("filter %q · %s · esc clears", displayText(ts.Query), rng))
 	}
 	return "  " + StyleDimCyan.Render(rng)
 }

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,25 +16,64 @@ import (
 	"github.com/richhaase/bigboard/stats"
 )
 
+type analysisOptions struct {
+	FuzzyMatching    bool
+	IncludeGenerated bool
+}
+
 func runExport(w, errw io.Writer, format string, repoPaths []string, excluded map[string]bool, since time.Duration, sortField stats.SortField) error {
+	repositories := git.NewRepositories(repoPaths)
+	normalizedExcluded := make(map[string]bool)
+	for key, value := range excluded {
+		if value {
+			normalizedExcluded[key] = true
+		}
+	}
+	for _, repo := range repositories {
+		if excluded[repo.Name] || excluded[filepath.Base(repo.Path)] {
+			normalizedExcluded[repo.ID] = true
+		}
+	}
+	for _, repo := range repositories {
+		if repo.Name != repo.ID {
+			delete(normalizedExcluded, repo.Name)
+		}
+		if base := filepath.Base(repo.Path); base != repo.ID {
+			delete(normalizedExcluded, base)
+		}
+	}
+	return runExportWithOptions(w, errw, format, repositories, normalizedExcluded, since, sortField, analysisOptions{
+		FuzzyMatching:    stats.FuzzyMatching,
+		IncludeGenerated: !git.FilterGeneratedPaths,
+	})
+}
+
+func runExportWithOptions(w, errw io.Writer, format string, repositories []git.Repository, excluded map[string]bool, since time.Duration, sortField stats.SortField, options analysisOptions) error {
+	if err := validateExportFormat(format); err != nil {
+		return err
+	}
+
 	var all []git.CommitRecord
 	failed := 0
-	for _, p := range repoPaths {
-		ref := git.DetectDefaultBranch(p)
-		recs, err := git.CollectCommits(p, ref)
+	for _, repo := range repositories {
+		recs, err := git.ScanRepository(context.Background(), repo, git.CollectOptions{
+			IncludeGenerated: options.IncludeGenerated,
+		})
 		if err != nil {
-			fmt.Fprintf(errw, "warning: skipping %s: %v\n", p, err)
+			fmt.Fprintf(errw, "warning: skipping %s: %s\n", diagnosticText(repo.Path), diagnosticText(err.Error()))
 			failed++
 			continue
 		}
 		all = append(all, recs...)
 	}
-	if failed > 0 && failed == len(repoPaths) {
+	if failed > 0 && failed == len(repositories) {
 		return fmt.Errorf("all %d repositories failed to scan", failed)
 	}
 	all = stats.FilterByRepo(all, excluded)
 	all = stats.FilterByTime(all, since)
-	authors := stats.Aggregate(all)
+	authors := stats.AggregateWithOptions(all, stats.AggregateOptions{
+		FuzzyMatching: options.FuzzyMatching,
+	})
 	stats.Sort(authors, sortField)
 
 	switch format {
@@ -43,6 +85,20 @@ func runExport(w, errw io.Writer, format string, repoPaths []string, excluded ma
 		return exportCSV(w, authors)
 	case "md", "markdown":
 		return exportMarkdown(w, authors)
+	default:
+		return fmt.Errorf("unsupported export format %q", format)
+	}
+}
+
+func diagnosticText(s string) string {
+	quoted := strconv.QuoteToGraphic(s)
+	return quoted[1 : len(quoted)-1]
+}
+
+func validateExportFormat(format string) error {
+	switch format {
+	case "json", "csv", "md", "markdown":
+		return nil
 	default:
 		return fmt.Errorf("invalid --export format %q (want json|csv|md)", format)
 	}
@@ -58,7 +114,7 @@ func exportCSV(w io.Writer, authors []stats.AuthorStats) error {
 	for i, a := range authors {
 		row := []string{
 			strconv.Itoa(i + 1),
-			a.Name,
+			spreadsheetCell(a.Name),
 			strconv.Itoa(a.Commits),
 			strconv.Itoa(a.Added),
 			strconv.Itoa(a.Removed),
@@ -75,6 +131,19 @@ func exportCSV(w io.Writer, authors []stats.AuthorStats) error {
 		}
 	}
 	return cw.Error()
+}
+
+func spreadsheetCell(s string) string {
+	trimmed := strings.TrimLeft(s, " \t")
+	if trimmed == "" {
+		return s
+	}
+	switch trimmed[0] {
+	case '=', '+', '-', '@':
+		return "'" + s
+	default:
+		return s
+	}
 }
 
 func exportMarkdown(w io.Writer, authors []stats.AuthorStats) error {
@@ -103,5 +172,7 @@ func dateOrEmpty(t time.Time) string {
 func mdCell(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
+	s = html.EscapeString(s)
+	s = strings.ReplaceAll(s, "\\", "\\\\")
 	return strings.ReplaceAll(s, "|", "\\|")
 }
