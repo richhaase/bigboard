@@ -94,19 +94,16 @@ func FilterByTime(records []git.CommitRecord, d time.Duration) []git.CommitRecor
 	return out
 }
 
-// FilterByRepo returns records not in the excluded set. Keys are stable
-// repository IDs when present, falling back to names for legacy records.
+// FilterByRepo returns records not in the excluded set. Keys may be stable
+// repository IDs or repository names; ID keys allow precise filtering when
+// multiple repositories share a name.
 func FilterByRepo(records []git.CommitRecord, excluded map[string]bool) []git.CommitRecord {
 	if len(excluded) == 0 {
 		return records
 	}
 	out := make([]git.CommitRecord, 0, len(records))
 	for _, r := range records {
-		key := r.RepoID
-		if key == "" {
-			key = r.RepoName
-		}
-		if !excluded[key] {
+		if !excluded[r.RepoID] && !excluded[r.RepoName] {
 			out = append(out, r)
 		}
 	}
@@ -376,6 +373,12 @@ func SortFieldFromString(s string) SortField {
 // similarity when FuzzyMatching is enabled.
 func NamesMatch(a, b string) bool {
 	return namesMatch(a, b, FuzzyMatching)
+}
+
+// NamesMatchWithOptions reports whether two raw author names are the same
+// identity under the supplied merge policy.
+func NamesMatchWithOptions(a, b string, options AggregateOptions) bool {
+	return namesMatch(a, b, options.FuzzyMatching)
 }
 
 func namesMatch(a, b string, fuzzy bool) bool {

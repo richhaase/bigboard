@@ -21,7 +21,9 @@ type MonthActivity struct {
 }
 
 // OperativeView renders a contributor detail screen.
-type OperativeView struct{}
+type OperativeView struct {
+	FuzzyMatching bool
+}
 
 // RenderOperativeDetail renders the full operative detail view.
 func (v OperativeView) RenderOperativeDetail(
@@ -45,7 +47,7 @@ func (v OperativeView) RenderOperativeDetail(
 
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
-	authorRecords := filterRecordsByAuthor(records, authorStats, authorName)
+	authorRecords := filterRecordsByAuthor(records, authorStats, authorName, v.FuzzyMatching)
 	if authorStats == nil && len(authorRecords) == 0 {
 		sections = append(sections, "")
 		sections = append(sections, StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→."))
@@ -284,14 +286,16 @@ func renderMetricsLine(as *stats.AuthorStats) string {
 	return "  " + StyleDimCyan.Render(strings.Join(parts, "  ·  "))
 }
 
-func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string) []git.CommitRecord {
+func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string, fuzzyMatching bool) []git.CommitRecord {
 	var result []git.CommitRecord
 	for _, r := range records {
 		match := false
 		if as != nil && len(as.Aliases) > 0 {
 			match = as.Aliases[r.Author]
 		} else {
-			match = r.Author == authorName || stats.NamesMatch(r.Author, authorName)
+			match = stats.NamesMatchWithOptions(r.Author, authorName, stats.AggregateOptions{
+				FuzzyMatching: fuzzyMatching,
+			})
 		}
 		if match {
 			result = append(result, r)

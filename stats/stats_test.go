@@ -344,6 +344,11 @@ func TestFilterByRepo(t *testing.T) {
 	if len(one) != 1 || one[0].RepoID != "/org-b/api" {
 		t.Errorf("stable repo ID filter returned %+v", one)
 	}
+
+	none = stats.FilterByRepo(sameName, map[string]bool{"api": true})
+	if len(none) != 0 {
+		t.Errorf("name-keyed filter returned %+v, want no records", none)
+	}
 }
 
 func TestSortTiebreakerDeterministic(t *testing.T) {

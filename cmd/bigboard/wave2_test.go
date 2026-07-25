@@ -64,6 +64,15 @@ func TestBuildExcludeSet(t *testing.T) {
 	if _, err := buildExcludeSet(repos, []string{"["}); err == nil {
 		t.Error("invalid glob should return an error")
 	}
+
+	literal := git.NewRepositories([]string{"/a/[archive"})
+	ex, err = buildExcludeSet(literal, []string{"[archive"})
+	if err != nil {
+		t.Fatalf("exact repository name was rejected as a glob: %v", err)
+	}
+	if !ex[literal[0].ID] {
+		t.Error("exact repository name containing '[' was not excluded")
+	}
 }
 
 func TestPick(t *testing.T) {

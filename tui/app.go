@@ -632,7 +632,15 @@ func (m Model) renderOperativeView() string {
 
 	filtered := m.filteredRecords()
 
-	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width, m.timeIdx, len(m.loadedRepos), m.excludedRepoCount())
+	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
+		m.activeOperative,
+		as,
+		filtered,
+		m.width,
+		m.timeIdx,
+		len(m.loadedRepos),
+		m.excludedRepoCount(),
+	)
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
 	return strings.Join([]string{detail, "", helpBar}, "\n")
 }

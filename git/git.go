@@ -211,6 +211,13 @@ func detectDefaultBranch(ctx context.Context, dir string) string {
 	out, err := runGitContext(ctx, dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err == nil {
 		if ref := strings.TrimSpace(out); ref != "" {
+			local := strings.TrimPrefix(ref, "origin/")
+			if local != ref {
+				_, localErr := runGitContext(ctx, dir, "rev-parse", "--verify", "refs/heads/"+local)
+				if localErr == nil {
+					return local
+				}
+			}
 			return ref
 		}
 	}

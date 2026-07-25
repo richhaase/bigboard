@@ -205,20 +205,22 @@ func pick(setByFlag bool, flagVal, cfgVal, def string) string {
 func buildExcludeSet(repositories []git.Repository, patterns []string) (map[string]bool, error) {
 	ex := make(map[string]bool)
 	for _, pattern := range patterns {
+		exact := false
+		for _, repo := range repositories {
+			if pattern == filepath.Base(repo.Path) {
+				ex[repo.ID] = true
+				exact = true
+			}
+		}
+		if exact {
+			continue
+		}
 		if _, err := filepath.Match(pattern, ""); err != nil {
 			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
 		}
-	}
-	for _, repo := range repositories {
-		base := filepath.Base(repo.Path)
-		for _, pat := range patterns {
-			if pat == base {
+		for _, repo := range repositories {
+			if ok, _ := filepath.Match(pattern, filepath.Base(repo.Path)); ok {
 				ex[repo.ID] = true
-				break
-			}
-			if ok, _ := filepath.Match(pat, base); ok {
-				ex[repo.ID] = true
-				break
 			}
 		}
 	}

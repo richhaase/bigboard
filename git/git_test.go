@@ -60,6 +60,36 @@ func TestDetectDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestDetectDefaultBranchPrefersLocalRemoteCounterpart(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	writeAndCommit(t, dir, "README.md", "hello\n", "initial commit")
+
+	for _, args := range [][]string{
+		{"git", "update-ref", "refs/remotes/origin/main", "HEAD"},
+		{"git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	writeAndCommit(t, dir, "local.go", "package local\n", "unpushed local commit")
+
+	ref := git.DetectDefaultBranch(dir)
+	if ref != "main" {
+		t.Fatalf("DetectDefaultBranch = %q, want main", ref)
+	}
+	records, err := git.CollectCommits(dir, ref)
+	if err != nil {
+		t.Fatalf("CollectCommits(%q): %v", ref, err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("CollectCommits(%q) returned %d commits, want 2", ref, len(records))
+	}
+}
+
 func TestDetectDefaultBranchKeepsRemoteRef(t *testing.T) {
 	dir := t.TempDir()
 	makeTestRepo(t, dir)

@@ -42,6 +42,30 @@ func TestRenderOperativeDetailRendersBody(t *testing.T) {
 	}
 }
 
+func TestRenderOperativeDetailUsesExplicitFuzzyMatching(t *testing.T) {
+	records := []git.CommitRecord{{
+		Author: "Alice S",
+		Date:   time.Now(),
+		Added:  10,
+	}}
+
+	out := OperativeView{FuzzyMatching: true}.RenderOperativeDetail(
+		"Alice Smith",
+		nil,
+		records,
+		100,
+		DefaultTimeIndex,
+		1,
+		0,
+	)
+	if strings.Contains(out, "NO SIGNAL") {
+		t.Errorf("fuzzy-matched records were omitted from detail view:\n%s", out)
+	}
+	if !strings.Contains(out, "ACTIVITY TIMELINE") {
+		t.Errorf("fuzzy-matched records did not render activity:\n%s", out)
+	}
+}
+
 func TestRenderHeatmap(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC) // Tuesday
 	recs := []git.CommitRecord{
