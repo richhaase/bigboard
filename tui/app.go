@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -25,9 +26,9 @@ const (
 type Model struct {
 	allRecords      []git.CommitRecord
 	authors         []stats.AuthorStats
-	repoNames       []string
+	repositories    []git.Repository
+	loadedRepos     []git.Repository
 	failedRepos     []string
-	repoPaths       []string
 	excludedRepos   map[string]bool
 	overlayExcluded map[string]bool
 	overlayCursor   int
@@ -45,81 +46,144 @@ type Model struct {
 	height          int
 	loading         bool
 	err             error
+	options         Options
+	scanContext     context.Context
+	cancelScans     context.CancelFunc
 
 	pendingRecords   []git.CommitRecord
-	pendingNames     []string
+	pendingRepos     []git.Repository
 	pendingFailed    []string
 	pendingRemaining int
+	activeScans      int
+	nextRepo         int
 	bootLines        []string
 }
 
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
 // can stream a live scan log instead of blocking on the whole set.
 type RepoLoadedMsg struct {
-	RepoName string
-	Records  []git.CommitRecord
-	Err      error
+	Repository git.Repository
+	Records    []git.CommitRecord
+	Err        error
 }
 
 // DefaultTimeIndex is the TimePresets index used when no --since/since is given.
 const DefaultTimeIndex = 2
 
-// NewModel creates an initial Model ready to display the loading state.
-func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, initialTimeIdx int) Model {
-	return Model{
-		repoPaths:        repoPaths,
-		sortField:        initialSort,
-		timeIdx:          initialTimeIdx,
-		loading:          true,
-		pendingRemaining: len(repoPaths),
-		excludedRepos:    excluded,
-		version:          version,
-	}
+const maxConcurrentRepoScans = 8
+
+// Options controls model behavior without process-wide package state.
+type Options struct {
+	FuzzyMatching    bool
+	IncludeGenerated bool
 }
 
-func loadRepoCmd(path string) tea.Cmd {
+// NewModel creates an initial Model ready to display the loading state.
+func NewModel(repoPaths []string, initialSort stats.SortField, excluded map[string]bool, version string, initialTimeIdx int) Model {
+	options := Options{
+		FuzzyMatching:    stats.FuzzyMatching,
+		IncludeGenerated: !git.FilterGeneratedPaths,
+	}
+	return NewModelWithOptions(git.NewRepositories(repoPaths), initialSort, excluded, version, initialTimeIdx, options)
+}
+
+// NewModelWithOptions creates a model from explicit repository identities and
+// scan options.
+func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortField, excluded map[string]bool, version string, initialTimeIdx int, options Options) Model {
+	if initialTimeIdx < 0 || initialTimeIdx >= len(TimePresets) {
+		initialTimeIdx = DefaultTimeIndex
+	}
+	scanContext, cancelScans := context.WithCancel(context.Background())
+	m := Model{
+		repositories:  append([]git.Repository(nil), repositories...),
+		sortField:     initialSort,
+		timeIdx:       initialTimeIdx,
+		loading:       true,
+		excludedRepos: normalizeExcluded(repositories, excluded),
+		version:       version,
+		options:       options,
+		scanContext:   scanContext,
+		cancelScans:   cancelScans,
+	}
+	m.resetPending()
+	if len(repositories) == 0 {
+		m.finalizeLoad()
+	}
+	return m
+}
+
+func normalizeExcluded(repositories []git.Repository, excluded map[string]bool) map[string]bool {
+	normalized := make(map[string]bool)
+	for key, value := range excluded {
+		if value {
+			normalized[key] = true
+		}
+	}
+	for _, repo := range repositories {
+		if excluded[repo.Name] || excluded[filepath.Base(repo.Path)] {
+			normalized[repo.ID] = true
+		}
+	}
+	for _, repo := range repositories {
+		if repo.Name != repo.ID {
+			delete(normalized, repo.Name)
+		}
+		if base := filepath.Base(repo.Path); base != repo.ID {
+			delete(normalized, base)
+		}
+	}
+	return normalized
+}
+
+func loadRepoCmd(ctx context.Context, repository git.Repository, options Options) tea.Cmd {
 	return func() tea.Msg {
-		name := filepath.Base(path)
-		ref := git.DetectDefaultBranch(path)
-		records, err := git.CollectCommits(path, ref)
-		return RepoLoadedMsg{RepoName: name, Records: records, Err: err}
+		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
+			IncludeGenerated: options.IncludeGenerated,
+		})
+		return RepoLoadedMsg{Repository: repository, Records: records, Err: err}
 	}
 }
 
 func (m Model) loadCmds() tea.Cmd {
-	if len(m.repoPaths) == 0 {
+	if m.activeScans == 0 {
 		return nil
 	}
-	cmds := make([]tea.Cmd, len(m.repoPaths))
-	for i, p := range m.repoPaths {
-		cmds[i] = loadRepoCmd(p)
+	cmds := make([]tea.Cmd, m.activeScans)
+	for i := range m.activeScans {
+		cmds[i] = loadRepoCmd(m.scanContext, m.repositories[i], m.options)
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m *Model) resetPending() {
-	m.pendingRemaining = len(m.repoPaths)
+	m.pendingRemaining = len(m.repositories)
 	m.pendingRecords = nil
-	m.pendingNames = nil
+	m.pendingRepos = nil
 	m.pendingFailed = nil
 	m.bootLines = nil
+	m.activeScans = min(len(m.repositories), maxConcurrentRepoScans)
+	m.nextRepo = m.activeScans
+}
+
+func (m *Model) nextLoadCmd() tea.Cmd {
+	if m.nextRepo >= len(m.repositories) {
+		return nil
+	}
+	repository := m.repositories[m.nextRepo]
+	m.nextRepo++
+	m.activeScans++
+	return loadRepoCmd(m.scanContext, repository, m.options)
 }
 
 func (m *Model) finalizeLoad() {
-	seen := map[string]bool{}
-	var names []string
-	for _, n := range m.pendingNames {
-		if !seen[n] {
-			seen[n] = true
-			names = append(names, n)
-		}
-	}
-	sort.Strings(names)
+	sort.Slice(m.pendingRepos, func(i, j int) bool {
+		return m.pendingRepos[i].Name < m.pendingRepos[j].Name
+	})
 	sort.Strings(m.pendingFailed)
 	m.allRecords = m.pendingRecords
-	m.repoNames = names
+	m.loadedRepos = m.pendingRepos
 	m.failedRepos = m.pendingFailed
-	if len(m.repoNames) == 0 && len(m.failedRepos) > 0 {
+	if len(m.loadedRepos) == 0 && len(m.failedRepos) > 0 {
 		m.err = fmt.Errorf("all %d repositories failed to scan", len(m.failedRepos))
 	} else {
 		m.err = nil
@@ -129,6 +193,7 @@ func (m *Model) finalizeLoad() {
 }
 
 func bootLine(repo string, ok bool) string {
+	repo = displayText(repo)
 	if ok {
 		return "  " + StyleGreen.Render("▸ ") + StyleAuthor.Render(repo) + StyleGreen.Render("  ✓")
 	}
@@ -149,21 +214,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case RepoLoadedMsg:
+		m.activeScans--
 		if msg.Err != nil {
-			m.pendingFailed = append(m.pendingFailed, msg.RepoName)
+			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
 			if m.loading {
-				m.bootLines = append(m.bootLines, bootLine(msg.RepoName, false))
+				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
 			}
 		} else {
 			m.pendingRecords = append(m.pendingRecords, msg.Records...)
-			m.pendingNames = append(m.pendingNames, msg.RepoName)
+			m.pendingRepos = append(m.pendingRepos, msg.Repository)
 			if m.loading {
-				m.bootLines = append(m.bootLines, bootLine(msg.RepoName, true))
+				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, true))
 			}
 		}
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
+		} else {
+			return m, m.nextLoadCmd()
 		}
 
 	case tea.KeyMsg:
@@ -180,7 +248,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m.quit()
 
 	case "q":
 		if m.viewMode == ViewAggregate && m.filterQuery != "" {
@@ -188,7 +256,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampScroll()
 			return m, nil
 		}
-		return m, tea.Quit
+		return m.quit()
 
 	case "R":
 		if m.viewMode == ViewAggregate && !m.loading {
@@ -220,7 +288,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.filterQuery = ""
 				m.clampScroll()
 			} else {
-				return m, tea.Quit
+				return m.quit()
 			}
 		}
 
@@ -242,7 +310,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		switch m.viewMode {
 		case ViewRepoOverlay:
-			if m.overlayCursor < len(m.repoNames)-1 {
+			if m.overlayCursor < len(m.loadedRepos)-1 {
 				m.overlayCursor++
 			}
 		case ViewOperative:
@@ -297,12 +365,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case " ":
-		if m.viewMode == ViewRepoOverlay && m.overlayCursor < len(m.repoNames) {
-			name := m.repoNames[m.overlayCursor]
-			if m.overlayExcluded[name] {
-				delete(m.overlayExcluded, name)
+		if m.viewMode == ViewRepoOverlay && m.overlayCursor < len(m.loadedRepos) {
+			id := m.loadedRepos[m.overlayCursor].ID
+			if m.overlayExcluded[id] {
+				delete(m.overlayExcluded, id)
 			} else {
-				m.overlayExcluded[name] = true
+				m.overlayExcluded[id] = true
 			}
 		}
 
@@ -327,11 +395,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) filteredRecords() []git.CommitRecord {
 	filtered := stats.FilterByRepo(m.allRecords, m.excludedRepos)
+	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
+		m.timeIdx = DefaultTimeIndex
+	}
 	return stats.FilterByTime(filtered, TimePresets[m.timeIdx].Duration)
 }
 
 func (m *Model) recomputeAuthors() {
-	m.authors = stats.Aggregate(m.filteredRecords())
+	m.authors = stats.AggregateWithOptions(m.filteredRecords(), stats.AggregateOptions{
+		FuzzyMatching: m.options.FuzzyMatching,
+	})
 	m.sortAuthors()
 	m.clampScroll()
 }
@@ -374,11 +447,12 @@ func (m Model) failedReposLine() string {
 }
 
 func (m Model) tableViewport() int {
-	above := []string{RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version)}
+	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
+	above := []string{RenderHeader(m.width, len(m.loadedRepos), m.excludedRepoCount(), m.version)}
 	if len(m.failedRepos) > 0 {
 		above = append(above, m.failedReposLine())
 	}
-	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(0, 0, 0, 0, m.width), "")
+	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width), "")
 	help := RenderHelpBar(HelpContext{View: "aggregate"})
 	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
@@ -437,7 +511,7 @@ func (m *Model) stepOperative(delta int) {
 func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m.quit()
 	case "enter":
 		m.searching = false
 	case "esc":
@@ -457,6 +531,13 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) quit() (tea.Model, tea.Cmd) {
+	if m.cancelScans != nil {
+		m.cancelScans()
+	}
+	return m, tea.Quit
+}
+
 // View renders the current UI state.
 func (m Model) View() string {
 	if m.loading {
@@ -469,7 +550,7 @@ func (m Model) View() string {
 			"",
 			lipgloss.NewStyle().Foreground(ColorRed).Bold(true).Render("  ◈ ERROR"),
 			"",
-			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+m.err.Error()),
+			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+displayText(m.err.Error())),
 			"",
 			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit"),
 		)
@@ -508,7 +589,7 @@ func (m Model) renderBootSequence() string {
 func (m Model) renderAggregateView() string {
 	var sections []string
 
-	sections = append(sections, RenderHeader(m.width, len(m.repoNames), len(m.excludedRepos), m.version))
+	sections = append(sections, RenderHeader(m.width, len(m.loadedRepos), m.excludedRepoCount(), m.version))
 
 	if len(m.failedRepos) > 0 {
 		sections = append(sections, StyleAmber.Render(m.failedReposLine()))
@@ -518,13 +599,7 @@ func (m Model) renderAggregateView() string {
 	sections = append(sections, RenderTimePicker(m.timeIdx))
 	sections = append(sections, "")
 
-	var totalCommits, totalAdded, totalRemoved, totalAI int
-	for _, a := range m.authors {
-		totalCommits += a.Commits
-		totalAdded += a.Added
-		totalRemoved += a.Removed
-		totalAI += a.AICommits
-	}
+	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
 	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width))
 	sections = append(sections, "")
 
@@ -557,7 +632,35 @@ func (m Model) renderOperativeView() string {
 
 	filtered := m.filteredRecords()
 
-	detail := OperativeView{}.RenderOperativeDetail(m.activeOperative, as, filtered, m.width, m.timeIdx, len(m.repoNames), len(m.excludedRepos))
+	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
+		m.activeOperative,
+		as,
+		filtered,
+		m.width,
+		m.timeIdx,
+		len(m.loadedRepos),
+		m.excludedRepoCount(),
+	)
 	helpBar := RenderHelpBar(HelpContext{View: "operative"})
 	return strings.Join([]string{detail, "", helpBar}, "\n")
+}
+
+func (m Model) aggregateTotals() (commits, added, removed, ai int) {
+	for _, author := range m.authors {
+		commits += author.Commits
+		added += author.Added
+		removed += author.Removed
+		ai += author.AICommits
+	}
+	return commits, added, removed, ai
+}
+
+func (m Model) excludedRepoCount() int {
+	count := 0
+	for _, repo := range m.loadedRepos {
+		if m.excludedRepos[repo.ID] {
+			count++
+		}
+	}
+	return count
 }

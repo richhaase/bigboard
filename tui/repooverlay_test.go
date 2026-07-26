@@ -3,11 +3,17 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/richhaase/bigboard/git"
 )
 
 func TestRenderRepoOverlayContent(t *testing.T) {
 	m := Model{
-		repoNames:       []string{"repo-a", "repo-b", "repo-c"},
+		loadedRepos: []git.Repository{
+			{ID: "repo-a", Name: "repo-a"},
+			{ID: "repo-b", Name: "repo-b"},
+			{ID: "repo-c", Name: "repo-c"},
+		},
 		overlayExcluded: map[string]bool{"repo-b": true},
 		overlayCursor:   0,
 		viewMode:        ViewRepoOverlay,
@@ -32,9 +38,9 @@ func TestRenderRepoOverlayContent(t *testing.T) {
 	}
 
 	// Should contain all repo names
-	for _, name := range m.repoNames {
-		if !strings.Contains(result, name) {
-			t.Errorf("expected repo name %q in overlay", name)
+	for _, repo := range m.loadedRepos {
+		if !strings.Contains(result, repo.Name) {
+			t.Errorf("expected repo name %q in overlay", repo.Name)
 		}
 	}
 

@@ -1,6 +1,6 @@
 # Big Board development tasks
 
-.PHONY: help build install test test-coverage fmt lint vet tidy clean staticcheck check
+.PHONY: help build install test test-coverage fmt fmt-check lint vet tidy clean staticcheck check
 
 help:
 	@echo "Available targets:"
@@ -9,6 +9,7 @@ help:
 	@echo "  test         - Run all unit tests"
 	@echo "  test-coverage - Run tests with coverage"
 	@echo "  fmt          - Format Go source code"
+	@echo "  fmt-check    - Verify Go source formatting"
 	@echo "  lint         - Run golangci-lint v2"
 	@echo "  vet          - Run go vet"
 	@echo "  tidy         - Tidy go modules"
@@ -55,6 +56,13 @@ fmt:
 	@go fmt ./...
 	@echo "Formatting complete!"
 
+fmt-check:
+	@echo "Checking Go source formatting..."
+	@files="$$(gofmt -l .)"; status=$$?; \
+		test $$status -eq 0 || exit $$status; \
+		test -z "$$files" || { printf '%s\n' "$$files"; exit 1; }
+	@echo "Formatting passed!"
+
 lint:
 	@echo "Running golangci-lint v2..."
 	@go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0 run --timeout=10m ./...
@@ -83,4 +91,4 @@ staticcheck:
 	@go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 	@echo "Staticcheck passed!"
 
-check: fmt lint vet staticcheck test
+check: fmt-check lint vet staticcheck test

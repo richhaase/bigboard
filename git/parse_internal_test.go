@@ -197,3 +197,12 @@ func TestShouldCountPathToggle(t *testing.T) {
 		}
 	}
 }
+
+func TestPathFilterUsesExplicitOptions(t *testing.T) {
+	if defaultPathFilter(CollectOptions{}).shouldCount("vendor/lib.go") {
+		t.Error("default explicit options should filter vendored paths")
+	}
+	if !defaultPathFilter(CollectOptions{IncludeGenerated: true}).shouldCount("vendor/lib.go") {
+		t.Error("IncludeGenerated should count vendored paths")
+	}
+}

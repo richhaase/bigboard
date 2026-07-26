@@ -30,10 +30,11 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 
 ## Key Design Decisions
 
-- **No runtime git dependencies**: all git operations use `os/exec` calling `git`, with a per-repo timeout so a hung/huge repo can't block the whole load.
+- **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans.
 - **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
 - **Identity merging**: group by email, then exact normalized name; git's native `.mailmap` is honored (`%aN`/`%aE`). Substring fuzzy matching is **opt-in** (`--fuzzy`) because it over-merges distinct people. Output ordering is deterministic (sort tiebreaks; no map-iteration leaks).
 - **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; `--all-files` includes them.
+- **Repository identity**: repositories are keyed by absolute path; duplicate basenames receive shortest-unique display labels such as `org-a/api` and `org-b/api`.
 - **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity; surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
 - **Worktree detection**: `isWorktree()` checks if `.git` is a file containing `gitdir:` — skips these during discovery to avoid double-counting.
 - **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.

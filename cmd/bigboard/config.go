@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,7 +46,15 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 		return nil, err
 	}
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("config contains multiple JSON values")
+		}
 		return nil, err
 	}
 	return &cfg, nil
@@ -54,25 +65,39 @@ func parseSince(s string) (time.Duration, error) {
 	if s == "" || s == "all" || s == "0" {
 		return 0, nil
 	}
-	if n, ok := suffixNum(s, "d"); ok {
-		return time.Duration(n) * 24 * time.Hour, nil
+	for _, unit := range []struct {
+		suffix   string
+		duration time.Duration
+	}{
+		{"d", 24 * time.Hour},
+		{"w", 7 * 24 * time.Hour},
+		{"y", 365 * 24 * time.Hour},
+	} {
+		if strings.HasSuffix(s, unit.suffix) {
+			return parseUnitDuration(strings.TrimSuffix(s, unit.suffix), unit.duration)
+		}
 	}
-	if n, ok := suffixNum(s, "w"); ok {
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	duration, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
 	}
-	if n, ok := suffixNum(s, "y"); ok {
-		return time.Duration(n) * 365 * 24 * time.Hour, nil
+	if duration < 0 {
+		return 0, fmt.Errorf("duration must not be negative")
 	}
-	return time.ParseDuration(s)
+	return duration, nil
 }
 
-func suffixNum(s, suffix string) (int, bool) {
-	if !strings.HasSuffix(s, suffix) {
-		return 0, false
-	}
-	n, err := strconv.Atoi(strings.TrimSuffix(s, suffix))
+func parseUnitDuration(value string, unit time.Duration) (time.Duration, error) {
+	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		return 0, false
+		return 0, err
 	}
-	return n, true
+	if n < 0 {
+		return 0, fmt.Errorf("duration must not be negative")
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if n > int64(maxDuration/unit) {
+		return 0, fmt.Errorf("duration is too large")
+	}
+	return time.Duration(n) * unit, nil
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,7 @@ func TestTimePresetIndex(t *testing.T) {
 		{90 * 24 * time.Hour, 4},
 		{45 * 24 * time.Hour, 3},
 		{100 * 365 * 24 * time.Hour, 5},
+		{148 * 365 * 24 * time.Hour, 5},
 	}
 	for _, tc := range cases {
 		if got := TimePresetIndex(tc.d); got != tc.want {
@@ -86,6 +88,11 @@ func TestRenderImpactBar(t *testing.T) {
 }
 
 func TestFormatNumber(t *testing.T) {
+	minInt := -int(^uint(0)>>1) - 1
+	minIntFormatted := "-2,147,483,648"
+	if strconv.IntSize == 64 {
+		minIntFormatted = "-9,223,372,036,854,775,808"
+	}
 	tests := []struct {
 		input    int
 		expected string
@@ -95,12 +102,24 @@ func TestFormatNumber(t *testing.T) {
 		{1000, "1,000"},
 		{1234567, "1,234,567"},
 		{-1234, "-1,234"},
+		{minInt, minIntFormatted},
 	}
 	for _, tt := range tests {
 		got := FormatNumber(tt.input)
 		if got != tt.expected {
 			t.Errorf("FormatNumber(%d) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestDisplayTextRemovesTerminalControls(t *testing.T) {
+	input := "\x1b]52;c;Y2xpcGJvYXJk\aAlice\n\x1b[31mRed\x1b[0m\x7f"
+	got := displayText(input)
+	if strings.ContainsAny(got, "\x1b\n\r\x7f") {
+		t.Fatalf("displayText retained terminal controls: %q", got)
+	}
+	if !strings.Contains(got, "Alice") || !strings.Contains(got, "Red") {
+		t.Fatalf("displayText removed printable content: %q", got)
 	}
 }
 
@@ -173,6 +192,11 @@ func TestRenderHeader(t *testing.T) {
 	result := RenderHeader(80, 15, 0, "v0.1.0")
 	if !strings.Contains(result, "repos") {
 		t.Errorf("expected repo count in header output, got: %q", result)
+	}
+	for _, line := range strings.Split(RenderHeader(40, 15, 0, "v0.1.0"), "\n") {
+		if width := lipgloss.Width(line); width > 40 {
+			t.Errorf("compact header line width = %d, want <= 40: %q", width, line)
+		}
 	}
 }
 

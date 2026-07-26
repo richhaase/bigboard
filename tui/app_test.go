@@ -2,11 +2,13 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 )
@@ -19,7 +21,10 @@ func modelWithData() Model {
 			{Author: "Ada Lovelace", Email: "ada@x.com", Date: now, Added: 100, Removed: 10, RepoName: "engine"},
 			{Author: "Grace Hopper", Email: "grace@x.com", Date: now, Added: 50, Removed: 5, RepoName: "compiler"},
 		},
-		repoNames:     []string{"compiler", "engine"},
+		loadedRepos: []git.Repository{
+			{ID: "compiler", Name: "compiler"},
+			{ID: "engine", Name: "engine"},
+		},
 		excludedRepos: map[string]bool{},
 		timeIdx:       len(TimePresets) - 1, // ALL
 		width:         100,
@@ -315,14 +320,14 @@ func TestStreamingLoadFinalizes(t *testing.T) {
 	if !m.loading || m.pendingRemaining != 2 {
 		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
 	}
-	u, _ := m.Update(RepoLoadedMsg{RepoName: "repoA", Records: []git.CommitRecord{
+	u, _ := m.Update(RepoLoadedMsg{Repository: m.repositories[0], Records: []git.CommitRecord{
 		{Author: "A", Email: "a@x.com", Date: now, Added: 5, RepoName: "repoA"},
 	}})
 	m = u.(Model)
 	if !m.loading {
 		t.Error("should still be loading after 1 of 2")
 	}
-	u, _ = m.Update(RepoLoadedMsg{RepoName: "repoB", Err: errors.New("boom")})
+	u, _ = m.Update(RepoLoadedMsg{Repository: m.repositories[1], Err: errors.New("boom")})
 	m = u.(Model)
 	if m.loading {
 		t.Error("should finalize after 2 of 2")
@@ -339,6 +344,84 @@ func TestInitReturnsLoadCmd(t *testing.T) {
 	m := NewModel([]string{"/x/repoA"}, stats.SortByTotal, map[string]bool{}, "v", DefaultTimeIndex)
 	if m.Init() == nil {
 		t.Error("Init should return a load command")
+	}
+}
+
+func TestRepositoryLoadingIsBounded(t *testing.T) {
+	paths := make([]string, 20)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/workspace/repo-%02d", i)
+	}
+	m := NewModel(paths, stats.SortByTotal, nil, "v", DefaultTimeIndex)
+	if m.activeScans != maxConcurrentRepoScans || m.nextRepo != maxConcurrentRepoScans {
+		t.Fatalf("initial active/next = %d/%d, want %d/%d", m.activeScans, m.nextRepo, maxConcurrentRepoScans, maxConcurrentRepoScans)
+	}
+	msg := m.Init()()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
+	}
+	if len(batch) != maxConcurrentRepoScans {
+		t.Fatalf("initial batch has %d scans, want %d", len(batch), maxConcurrentRepoScans)
+	}
+
+	updated, next := m.Update(RepoLoadedMsg{Repository: m.repositories[0]})
+	m = updated.(Model)
+	if next == nil {
+		t.Fatal("completed scan should schedule the next repository")
+	}
+	if m.activeScans != maxConcurrentRepoScans || m.nextRepo != maxConcurrentRepoScans+1 {
+		t.Fatalf("replacement active/next = %d/%d", m.activeScans, m.nextRepo)
+	}
+}
+
+func TestNewModelClampsTimeIndexAndHandlesNoRepos(t *testing.T) {
+	m := NewModel([]string{"/workspace/repo"}, stats.SortByTotal, nil, "v", -10)
+	if m.timeIdx != DefaultTimeIndex {
+		t.Fatalf("timeIdx = %d, want %d", m.timeIdx, DefaultTimeIndex)
+	}
+
+	empty := NewModel(nil, stats.SortByTotal, nil, "v", DefaultTimeIndex)
+	if empty.loading || empty.Init() != nil {
+		t.Fatalf("empty model should be idle: loading=%v init=%v", empty.loading, empty.Init())
+	}
+}
+
+func TestQuitCancelsRepositoryScans(t *testing.T) {
+	m := NewModel([]string{"/workspace/repo"}, stats.SortByTotal, nil, "v", DefaultTimeIndex)
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c should return a quit command")
+	}
+	m = updated.(Model)
+	select {
+	case <-m.scanContext.Done():
+	default:
+		t.Fatal("ctrl+c did not cancel repository scans")
+	}
+}
+
+func TestTableViewportAccountsForActualStats(t *testing.T) {
+	m := Model{
+		authors: []stats.AuthorStats{{
+			Commits:   1_000_000_000,
+			Added:     1_000_000_000,
+			Removed:   1_000_000_000,
+			AICommits: 1,
+		}},
+		loadedRepos: []git.Repository{{ID: "repo", Name: "repo"}},
+		timeIdx:     DefaultTimeIndex,
+		width:       78,
+		height:      40,
+	}
+	commits, added, removed, ai := m.aggregateTotals()
+	above := []string{RenderHeader(m.width, len(m.loadedRepos), 0, m.version), "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(commits, added, removed, ai, m.width), ""}
+	expected := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(RenderHelpBar(HelpContext{View: "aggregate"})) - tableChromeLines
+	if expected < 3 {
+		expected = 3
+	}
+	if got := m.tableViewport(); got != expected {
+		t.Fatalf("tableViewport = %d, want %d based on rendered stats", got, expected)
 	}
 }
 
