@@ -7,23 +7,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
+
+	"github.com/richhaase/bigboard/tui"
 )
 
 // Config is the optional persistent configuration, read from a JSON file
-// (default ~/.config/bigboard/config.json). Command-line flags override it.
+// (default ~/.config/bigboard/config.json).
 type Config struct {
-	Paths    []string            `json:"paths"`
-	Exclude  []string            `json:"exclude"`
-	Sort     string              `json:"sort"`
-	Since    string              `json:"since"`
-	Theme    string              `json:"theme"`
-	Fuzzy    bool                `json:"fuzzy"`
-	AllFiles bool                `json:"all_files"`
-	Depth    int                 `json:"depth"`
-	Groups   map[string][]string `json:"groups"`
+	Paths         []string            `json:"paths"`
+	Exclude       []string            `json:"exclude"`
+	Sort          string              `json:"sort"`
+	Since         string              `json:"since"`
+	Theme         string              `json:"theme"`
+	Fuzzy         bool                `json:"fuzzy"`
+	AllFiles      bool                `json:"all_files"`
+	Depth         int                 `json:"depth"`
+	Groups        map[string][]string `json:"groups"`
+	AIIdentities  []string            `json:"ai_identities"`
+	BotIdentities []string            `json:"bot_identities"`
 }
 
 func defaultConfigPath() string {
@@ -60,44 +62,17 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 	return &cfg, nil
 }
 
-func parseSince(s string) (time.Duration, error) {
-	s = strings.TrimSpace(strings.ToLower(s))
-	if s == "" || s == "all" || s == "0" {
-		return 0, nil
+func timeIndexForSince(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return tui.DefaultTimeIndex, nil
 	}
-	for _, unit := range []struct {
-		suffix   string
-		duration time.Duration
-	}{
-		{"d", 24 * time.Hour},
-		{"w", 7 * 24 * time.Hour},
-		{"y", 365 * 24 * time.Hour},
-	} {
-		if strings.HasSuffix(s, unit.suffix) {
-			return parseUnitDuration(strings.TrimSuffix(s, unit.suffix), unit.duration)
+	labels := make([]string, len(tui.TimePresets))
+	for i, p := range tui.TimePresets {
+		labels[i] = p.Label
+		if strings.EqualFold(p.Label, s) {
+			return i, nil
 		}
 	}
-	duration, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, err
-	}
-	if duration < 0 {
-		return 0, fmt.Errorf("duration must not be negative")
-	}
-	return duration, nil
-}
-
-func parseUnitDuration(value string, unit time.Duration) (time.Duration, error) {
-	n, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	if n < 0 {
-		return 0, fmt.Errorf("duration must not be negative")
-	}
-	const maxDuration = time.Duration(1<<63 - 1)
-	if n > int64(maxDuration/unit) {
-		return 0, fmt.Errorf("duration is too large")
-	}
-	return time.Duration(n) * unit, nil
+	return 0, fmt.Errorf("invalid since %q (want %s)", s, strings.Join(labels, "|"))
 }

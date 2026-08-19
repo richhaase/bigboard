@@ -210,7 +210,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 
 		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
 		if e.rc.AICommits > 0 && e.rc.Commits > 0 {
-			row += "  " + StyleAmber.Render(fmt.Sprintf("ai %d%%", e.rc.AICommits*100/e.rc.Commits))
+			row += "  " + StyleAmber.Render("ai "+percentLabel(e.rc.AICommits, e.rc.Commits))
 		}
 
 		var rowStyle lipgloss.Style
@@ -281,9 +281,20 @@ func renderMetricsLine(as *stats.AuthorStats) string {
 	}
 	parts = append(parts, fmt.Sprintf("CHURN %.2f", as.ChurnRatio()))
 	if as.AICommits > 0 {
-		parts = append(parts, fmt.Sprintf("AI %d%%", as.AIPercent()))
+		parts = append(parts, "AI "+percentLabel(as.AICommits, as.Commits))
 	}
 	return "  " + StyleDimCyan.Render(strings.Join(parts, "  ·  "))
+}
+
+func percentLabel(part, whole int) string {
+	if whole <= 0 {
+		return "0%"
+	}
+	pct := part * 100 / whole
+	if pct == 0 && part > 0 {
+		return "<1%"
+	}
+	return fmt.Sprintf("%d%%", pct)
 }
 
 func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string, fuzzyMatching bool) []git.CommitRecord {
@@ -333,5 +344,21 @@ func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
 		return result[i].Month.Before(result[j].Month)
 	})
 
-	return result
+	return fillMonthGaps(result)
+}
+
+func fillMonthGaps(months []MonthActivity) []MonthActivity {
+	if len(months) < 2 {
+		return months
+	}
+	filled := make([]MonthActivity, 0, len(months))
+	filled = append(filled, months[0])
+	for _, ma := range months[1:] {
+		prev := filled[len(filled)-1].Month
+		for cur := prev.AddDate(0, 1, 0); cur.Before(ma.Month); cur = cur.AddDate(0, 1, 0) {
+			filled = append(filled, MonthActivity{Month: cur})
+		}
+		filled = append(filled, ma)
+	}
+	return filled
 }

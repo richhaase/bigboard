@@ -32,6 +32,7 @@ var FuzzyMatching = false
 // AggregateOptions controls contributor identity resolution.
 type AggregateOptions struct {
 	FuzzyMatching bool
+	BotIdentities []string
 }
 
 // AuthorStats holds aggregated contribution data for a single author.
@@ -43,6 +44,7 @@ type AuthorStats struct {
 	Net         int                          `json:"net"`
 	TotalChange int                          `json:"total_change"`
 	AICommits   int                          `json:"ai_commits"`
+	Bot         bool                         `json:"bot"`
 	FirstCommit time.Time                    `json:"first_commit"`
 	LastCommit  time.Time                    `json:"last_commit"`
 	ActiveDays  int                          `json:"active_days"`
@@ -120,7 +122,7 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 // options and returns totals in deterministic name order.
 func AggregateWithOptions(records []git.CommitRecord, options AggregateOptions) []AuthorStats {
 	canonical := resolveCanonicalNames(records, options.FuzzyMatching)
-	return aggregateByCanonical(records, canonical)
+	return aggregateByCanonical(records, canonical, options)
 }
 
 type identityKey struct {
@@ -248,7 +250,7 @@ func resolveCanonicalNames(records []git.CommitRecord, fuzzy bool) map[identityK
 	return canonical
 }
 
-func aggregateByCanonical(records []git.CommitRecord, canonical map[identityKey]string) []AuthorStats {
+func aggregateByCanonical(records []git.CommitRecord, canonical map[identityKey]string, options AggregateOptions) []AuthorStats {
 	byName := make(map[string]*AuthorStats)
 	activeDays := make(map[string]map[string]bool)
 	for _, r := range records {
@@ -261,6 +263,9 @@ func aggregateByCanonical(records []git.CommitRecord, canonical map[identityKey]
 				Aliases: make(map[string]bool),
 			}
 			byName[name] = as
+		}
+		if !as.Bot && IsBotIdentity(r.Author, r.Email, options.BotIdentities) {
+			as.Bot = true
 		}
 		as.Commits++
 		as.Added += r.Added
@@ -468,6 +473,57 @@ func preferCanonical(a, b string) bool {
 		return aLength > bLength
 	}
 	return a < b
+}
+
+var builtinBotNames = map[string]bool{
+	"dependabot":         true,
+	"dependabot-preview": true,
+	"renovate":           true,
+	"github-actions":     true,
+	"snyk-bot":           true,
+	"greenkeeper":        true,
+	"imgbot":             true,
+	"mergify":            true,
+	"allcontributors":    true,
+	"pre-commit-ci":      true,
+	"codecov":            true,
+}
+
+// IsBotIdentity reports whether an author name/email pair is a bot account.
+// Extra entries match an exact email, an "@domain" suffix, or an exact name.
+func IsBotIdentity(name, email string, extra []string) bool {
+	rawName := strings.ToLower(strings.TrimSpace(name))
+	address := strings.ToLower(strings.Trim(strings.TrimSpace(email), "<> "))
+	for _, entry := range extra {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(entry, "@"):
+			if strings.HasSuffix(address, entry) {
+				return true
+			}
+		case strings.Contains(entry, "@"):
+			if address == entry {
+				return true
+			}
+		default:
+			if rawName == entry {
+				return true
+			}
+		}
+	}
+	if strings.Contains(rawName, "[bot]") {
+		return true
+	}
+	local, _, _ := strings.Cut(address, "@")
+	if strings.Contains(local, "[bot]") {
+		return true
+	}
+	base := strings.TrimSpace(strings.TrimSuffix(rawName, "[bot]"))
+	base = strings.TrimSpace(strings.TrimSuffix(base, " bot"))
+	return builtinBotNames[base]
 }
 
 func normalizedName(s string) string {

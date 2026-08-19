@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
@@ -45,25 +44,6 @@ func TestRenderStatBoxesSubOnePercent(t *testing.T) {
 	half := RenderStatBoxes(100, 0, 0, 50, 120)
 	if !strings.Contains(half, "50%") {
 		t.Errorf("expected 50%% for 50/100:\n%s", half)
-	}
-}
-
-func TestTimePresetIndex(t *testing.T) {
-	cases := []struct {
-		d    time.Duration
-		want int
-	}{
-		{0, len(TimePresets) - 1},
-		{-time.Hour, len(TimePresets) - 1},
-		{90 * 24 * time.Hour, 4},
-		{45 * 24 * time.Hour, 3},
-		{100 * 365 * 24 * time.Hour, 5},
-		{148 * 365 * 24 * time.Hour, 5},
-	}
-	for _, tc := range cases {
-		if got := TimePresetIndex(tc.d); got != tc.want {
-			t.Errorf("TimePresetIndex(%v) = %d, want %d", tc.d, got, tc.want)
-		}
 	}
 }
 

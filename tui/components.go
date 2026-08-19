@@ -27,28 +27,6 @@ var TimePresets = []TimePreset{
 	{Label: "ALL", Duration: 0},
 }
 
-// TimePresetIndex returns the index of the preset whose window best matches d;
-// d <= 0 selects ALL. It never returns out of range.
-func TimePresetIndex(d time.Duration) int {
-	if d <= 0 {
-		return len(TimePresets) - 1
-	}
-	best, bestDiff := DefaultTimeIndex, time.Duration(1<<63-1)
-	for i, p := range TimePresets {
-		if p.Duration <= 0 {
-			continue
-		}
-		diff := p.Duration - d
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff < bestDiff {
-			best, bestDiff = i, diff
-		}
-	}
-	return best
-}
-
 var bannerLines = [7]string{
 	`████████  ████  ██████      ████████   ███████     ███    ████████  ████████`,
 	`██     ██  ██  ██    ██     ██     ██ ██     ██   ██ ██   ██     ██ ██     ██`,
@@ -315,6 +293,7 @@ var StyleGreen = lipgloss.NewStyle().Foreground(ColorGreen)
 type HelpContext struct {
 	View string
 	Sort string
+	Bots string
 }
 
 // RenderHelpBar renders context-aware key binding hints with bracket styling.
@@ -334,12 +313,17 @@ func RenderHelpBar(ctx HelpContext) string {
 		if ctx.Sort != "" {
 			sortDesc = "sort:" + ctx.Sort
 		}
+		botsDesc := "bots"
+		if ctx.Bots != "" {
+			botsDesc = "bots:" + ctx.Bots
+		}
 		bindings = []struct{ key, desc string }{
 			{"↑↓", "nav"},
 			{"↵", "detail"},
 			{"←→", "time"},
 			{"/", "find"},
 			{"s", sortDesc},
+			{"b", botsDesc},
 			{"r", "repos"},
 			{"R", "refresh"},
 			{"q", "quit"},

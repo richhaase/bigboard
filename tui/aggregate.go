@@ -101,9 +101,9 @@ func (l tableLayout) rowWidth() int {
 
 // RenderTable returns a styled leaderboard for the given authors, showing only
 // the scroll window [ScrollOffset, ScrollOffset+VisibleRows) plus a status
-// footer. Ranks, the podium styling, and the cursor track absolute position.
-// Columns adapt to TableState.Width, dropping ADDED/REMOVED then the impact bar
-// as the terminal narrows.
+// footer. Ranks and podium styling follow metric rank even when the sort is
+// ascending. Columns adapt to TableState.Width, dropping ADDED/REMOVED then the
+// impact bar as the terminal narrows.
 func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) string {
 	if len(authors) == 0 {
 		if ts.Searching || ts.Query != "" {
@@ -182,23 +182,34 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 			cursor = StyleCursor.Render("▸ ")
 		}
 
+		rank := i + 1
+		if ts.SortAsc {
+			rank = len(authors) - i
+		}
 		var rankStyle lipgloss.Style
-		switch i {
-		case 0:
-			rankStyle = StyleRankGold
+		switch rank {
 		case 1:
-			rankStyle = StyleRankSilver
+			rankStyle = StyleRankGold
 		case 2:
+			rankStyle = StyleRankSilver
+		case 3:
 			rankStyle = StyleRankBronze
 		default:
 			rankStyle = StyleRank
 		}
-		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", fmt.Sprintf("%02d", i+1)))
+		rankStr := rankStyle.Render(fmt.Sprintf("%-2s", fmt.Sprintf("%02d", rank)))
+
+		nameCell := StyleAuthor.Render(padRight(Truncate(a.Name, l.nameW), l.nameW))
+		if a.Bot {
+			label := " BOT"
+			nameFit := l.nameW - lipgloss.Width(label)
+			nameCell = StyleAuthor.Render(padRight(Truncate(a.Name, nameFit), nameFit)) + StyleDimCyan.Render(label)
+		}
 
 		var cells []string
 		cells = append(cells,
 			cursor+rankStr,
-			StyleAuthor.Render(padRight(Truncate(a.Name, l.nameW), l.nameW)),
+			nameCell,
 			StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Commits))),
 		)
 		if l.showAddedRemoved {
@@ -211,7 +222,11 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 
 		aiCell := strings.Repeat(" ", l.aiW)
 		if a.AICommits > 0 {
-			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", l.aiW, fmt.Sprintf("%d%%", a.AIPercent())))
+			label := fmt.Sprintf("%d%%", a.AIPercent())
+			if a.AIPercent() == 0 {
+				label = "<1%"
+			}
+			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", l.aiW, label))
 		}
 		cells = append(cells, aiCell)
 

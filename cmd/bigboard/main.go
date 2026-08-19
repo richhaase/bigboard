@@ -42,36 +42,17 @@ func init() {
 	}
 }
 
-type excludeFlags []string
-
-func (e *excludeFlags) String() string { return strings.Join(*e, ",") }
-func (e *excludeFlags) Set(v string) error {
-	*e = append(*e, v)
-	return nil
-}
-
 func main() {
-	sortFlag := flag.String("sort", "total", "Initial sort: commits|added|removed|net|ai|total")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
-	themeFlag := flag.String("theme", "auto", "Color theme: auto|light|dark")
-	fuzzyFlag := flag.Bool("fuzzy", false, "Enable fuzzy author-name merging (may over-merge similar names)")
-	allFilesFlag := flag.Bool("all-files", false, "Count generated/vendored files (disables the default ignore list)")
-	exportFlag := flag.String("export", "", "Export the view headlessly and exit: json|csv|md")
-	sinceFlag := flag.String("since", "", "Initial time window: e.g. 30d, 2w, 1y, all (default 14d)")
+	exportFlag := flag.Bool("export", false, "Print contributor stats as JSON and exit")
 	groupFlag := flag.String("group", "", "Use a named repo group from the config file")
-	depthFlag := flag.Int("depth", 0, "Directory levels to scan for repos (default 1)")
 	configFlag := flag.String("config", "", "Config file path (default ~/.config/bigboard/config.json)")
-	var excludes excludeFlags
-	flag.Var(&excludes, "exclude", "Repo basename or glob to exclude (repeatable)")
 	flag.Parse()
 
 	if *versionFlag {
 		fmt.Printf("bigboard %s (commit: %s, built: %s)\n", version, commit, date)
 		os.Exit(0)
 	}
-
-	setFlags := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
 
 	cfgPath := *configFlag
 	explicitCfg := cfgPath != ""
@@ -84,47 +65,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	sortStr := pick(setFlags["sort"], *sortFlag, cfg.Sort, "total")
-	themeStr := pick(setFlags["theme"], *themeFlag, cfg.Theme, "auto")
-	fuzzyMatching := *fuzzyFlag || (!setFlags["fuzzy"] && cfg.Fuzzy)
-	includeGenerated := *allFilesFlag || (!setFlags["all-files"] && cfg.AllFiles)
-	depth := 1
-	switch {
-	case setFlags["depth"]:
-		depth = *depthFlag
-	case cfg.Depth > 0:
-		depth = cfg.Depth
-	}
-	if depth < 1 {
-		depth = 1
-	}
-
-	switch strings.ToLower(themeStr) {
+	switch strings.ToLower(cfg.Theme) {
 	case "light":
 		lipgloss.SetHasDarkBackground(false)
 	case "dark":
 		lipgloss.SetHasDarkBackground(true)
 	case "", "auto":
 	default:
-		fmt.Fprintf(os.Stderr, "Error: invalid theme %q (want auto|light|dark)\n", themeStr)
+		fmt.Fprintf(os.Stderr, "Error: invalid theme %q in config (want auto|light|dark)\n", cfg.Theme)
 		os.Exit(1)
+	}
+
+	sortStr := cfg.Sort
+	if sortStr == "" {
+		sortStr = "total"
 	}
 	initialSort, err := stats.ParseSortField(sortStr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	since, err := parseSince(pick(setFlags["since"], *sinceFlag, cfg.Since, "14d"))
+
+	timeIdx, err := timeIndexForSince(cfg.Since)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid --since: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	exportFormat := strings.ToLower(*exportFlag)
-	if exportFormat != "" {
-		if err := validateExportFormat(exportFormat); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+
+	depth := cfg.Depth
+	if depth < 1 {
+		depth = 1
 	}
 
 	var paths []string
@@ -158,17 +128,18 @@ func main() {
 	}
 	repositories := git.NewRepositories(repoPaths)
 
-	excludePatterns := append(append([]string{}, cfg.Exclude...), excludes...)
-	excludedRepos, err := buildExcludeSet(repositories, excludePatterns)
+	excludedRepos, err := buildExcludeSet(repositories, cfg.Exclude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid exclusion: %v\n", err)
 		os.Exit(1)
 	}
 
-	if exportFormat != "" {
-		if err := runExportWithOptions(os.Stdout, os.Stderr, exportFormat, repositories, excludedRepos, since, initialSort, analysisOptions{
-			FuzzyMatching:    fuzzyMatching,
-			IncludeGenerated: includeGenerated,
+	if *exportFlag {
+		if err := runExportJSON(os.Stdout, os.Stderr, repositories, excludedRepos, initialSort, analysisOptions{
+			FuzzyMatching:    cfg.Fuzzy,
+			IncludeGenerated: cfg.AllFiles,
+			AIIdentities:     cfg.AIIdentities,
+			BotIdentities:    cfg.BotIdentities,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -176,13 +147,11 @@ func main() {
 		return
 	}
 
-	timeIdx := tui.DefaultTimeIndex
-	if setFlags["since"] || cfg.Since != "" {
-		timeIdx = tui.TimePresetIndex(since)
-	}
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
-		FuzzyMatching:    fuzzyMatching,
-		IncludeGenerated: includeGenerated,
+		FuzzyMatching:    cfg.Fuzzy,
+		IncludeGenerated: cfg.AllFiles,
+		AIIdentities:     cfg.AIIdentities,
+		BotIdentities:    cfg.BotIdentities,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -192,22 +161,12 @@ func main() {
 	}
 }
 
-func pick(setByFlag bool, flagVal, cfgVal, def string) string {
-	if setByFlag {
-		return flagVal
-	}
-	if cfgVal != "" {
-		return cfgVal
-	}
-	return def
-}
-
 func buildExcludeSet(repositories []git.Repository, patterns []string) (map[string]bool, error) {
 	ex := make(map[string]bool)
 	for _, pattern := range patterns {
 		exact := false
 		for _, repo := range repositories {
-			if pattern == filepath.Base(repo.Path) {
+			if pattern == filepath.Base(repo.Path) || pattern == repo.Name {
 				ex[repo.ID] = true
 				exact = true
 			}
@@ -220,6 +179,10 @@ func buildExcludeSet(repositories []git.Repository, patterns []string) (map[stri
 		}
 		for _, repo := range repositories {
 			if ok, _ := filepath.Match(pattern, filepath.Base(repo.Path)); ok {
+				ex[repo.ID] = true
+				continue
+			}
+			if ok, _ := filepath.Match(pattern, repo.Name); ok {
 				ex[repo.ID] = true
 			}
 		}

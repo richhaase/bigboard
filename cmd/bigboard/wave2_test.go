@@ -8,43 +8,44 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
+	"github.com/richhaase/bigboard/tui"
 )
 
-func TestParseSince(t *testing.T) {
+func TestTimeIndexForSince(t *testing.T) {
 	cases := []struct {
 		in   string
-		want time.Duration
+		want int
 		err  bool
 	}{
-		{"", 0, false},
-		{"all", 0, false},
-		{"0", 0, false},
-		{"30d", 30 * 24 * time.Hour, false},
-		{"2w", 2 * 7 * 24 * time.Hour, false},
-		{"1y", 365 * 24 * time.Hour, false},
-		{"48h", 48 * time.Hour, false},
-		{"-1d", 0, true},
-		{"-1h", 0, true},
-		{"1000y", 0, true},
+		{"", tui.DefaultTimeIndex, false},
+		{"1d", 0, false},
+		{"14d", 2, false},
+		{"90d", 4, false},
+		{"1y", 5, false},
+		{"all", len(tui.TimePresets) - 1, false},
+		{"ALL", len(tui.TimePresets) - 1, false},
+		{" 30d ", 3, false},
+		{"6m", 0, true},
+		{"21d", 0, true},
 		{"nonsense", 0, true},
 	}
 	for _, tc := range cases {
-		got, err := parseSince(tc.in)
+		got, err := timeIndexForSince(tc.in)
 		if tc.err {
 			if err == nil {
-				t.Errorf("parseSince(%q): expected error", tc.in)
+				t.Errorf("timeIndexForSince(%q): expected error", tc.in)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("parseSince(%q): unexpected error %v", tc.in, err)
+			t.Errorf("timeIndexForSince(%q): unexpected error %v", tc.in, err)
+			continue
 		}
 		if got != tc.want {
-			t.Errorf("parseSince(%q) = %v, want %v", tc.in, got, tc.want)
+			t.Errorf("timeIndexForSince(%q) = %d, want %d", tc.in, got, tc.want)
 		}
 	}
 }
@@ -86,15 +87,25 @@ func TestBuildExcludeSet(t *testing.T) {
 	}
 }
 
-func TestPick(t *testing.T) {
-	if got := pick(true, "flagv", "cfgv", "def"); got != "flagv" {
-		t.Errorf("set flag should win, got %q", got)
+func TestBuildExcludeSetMatchesUniqueDisplayName(t *testing.T) {
+	repos := git.NewRepositories([]string{"/src/org-a/api", "/src/org-b/api"})
+	ex, err := buildExcludeSet(repos, []string{"org-a/api"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := pick(false, "flagv", "cfgv", "def"); got != "cfgv" {
-		t.Errorf("config should win when flag unset, got %q", got)
+	if !ex[repos[0].ID] {
+		t.Error("display name should exclude the matching duplicate")
 	}
-	if got := pick(false, "flagv", "", "def"); got != "def" {
-		t.Errorf("default should win when flag unset and cfg empty, got %q", got)
+	if ex[repos[1].ID] {
+		t.Error("display name must not exclude the other duplicate")
+	}
+
+	ex, err = buildExcludeSet(repos, []string{"org-b/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex[repos[0].ID] || !ex[repos[1].ID] {
+		t.Errorf("display-name glob matched wrong repos: %v", ex)
 	}
 }
 
@@ -116,35 +127,25 @@ func TestLoadConfigMissing(t *testing.T) {
 	}
 }
 
-func TestExportFormats(t *testing.T) {
-	authors := []stats.AuthorStats{
-		{Name: "Ada", Commits: 5, Added: 100, Removed: 10, Net: 90, TotalChange: 110, AICommits: 1, ActiveDays: 3},
-		{Name: "Grace", Commits: 2, Added: 20, Removed: 0, Net: 20, TotalChange: 20},
-	}
-
-	var csv bytes.Buffer
-	if err := exportCSV(&csv, authors); err != nil {
-		t.Fatalf("exportCSV: %v", err)
-	}
-	if !strings.Contains(csv.String(), "contributor") || !strings.Contains(csv.String(), "Ada") {
-		t.Errorf("CSV missing header or data:\n%s", csv.String())
-	}
-
-	var md bytes.Buffer
-	if err := exportMarkdown(&md, authors); err != nil {
-		t.Fatalf("exportMarkdown: %v", err)
-	}
-	if !strings.Contains(md.String(), "| # |") || !strings.Contains(md.String(), "Grace") {
-		t.Errorf("markdown missing header or data:\n%s", md.String())
-	}
-
-	var unsafeCSV bytes.Buffer
-	if err := exportCSV(&unsafeCSV, []stats.AuthorStats{{Name: "=1+1"}}); err != nil {
+func TestLoadConfigIdentityLists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := `{"ai_identities":["tag@teamsense.com","@agents.example.com"],"bot_identities":["renovate"]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(unsafeCSV.String(), "'=1+1") {
-		t.Errorf("CSV formula was not neutralized:\n%s", unsafeCSV.String())
+	cfg, err := loadConfig(path, true)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(cfg.AIIdentities) != 2 || cfg.AIIdentities[0] != "tag@teamsense.com" {
+		t.Errorf("ai_identities not loaded: %v", cfg.AIIdentities)
+	}
+	if len(cfg.BotIdentities) != 1 || cfg.BotIdentities[0] != "renovate" {
+		t.Errorf("bot_identities not loaded: %v", cfg.BotIdentities)
+	}
+}
+
+func TestDiagnosticText(t *testing.T) {
 	if got := diagnosticText("repo\x1b\nname"); strings.ContainsAny(got, "\x1b\n") {
 		t.Errorf("diagnosticText retained terminal controls: %q", got)
 	}
@@ -205,6 +206,31 @@ func TestDiscoverReposDepth(t *testing.T) {
 	}
 }
 
+func TestDiscoverReposDepthFollowsSymlinks(t *testing.T) {
+	real := t.TempDir()
+	repo := filepath.Join(real, "actual")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initRepoWithCommit(t, repo)
+
+	workspace := t.TempDir()
+	link := filepath.Join(workspace, "linked")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Fatal(err)
+	}
+
+	found := git.DiscoverReposDepth([]string{workspace}, 1)
+	if len(found) != 1 {
+		t.Fatalf("symlinked repo not discovered: %v", found)
+	}
+
+	both := git.DiscoverReposDepth([]string{workspace, real}, 1)
+	if len(both) != 1 {
+		t.Errorf("symlink and real path should deduplicate to one repo: %v", both)
+	}
+}
+
 func initRepoWithCommit(t *testing.T, dir string) {
 	t.Helper()
 	for _, args := range [][]string{
@@ -230,41 +256,14 @@ func initRepoWithCommit(t *testing.T, dir string) {
 	}
 }
 
-func TestExportMarkdownEscapesPipes(t *testing.T) {
-	authors := []stats.AuthorStats{{Name: "Foo | Bar", Commits: 1}}
-	var md bytes.Buffer
-	if err := exportMarkdown(&md, authors); err != nil {
-		t.Fatalf("exportMarkdown: %v", err)
-	}
-	out := md.String()
-	if strings.Contains(out, "Foo | Bar") {
-		t.Errorf("unescaped pipe in name would inject a table column:\n%s", out)
-	}
-	if !strings.Contains(out, "Foo \\| Bar") {
-		t.Errorf("expected escaped pipe:\n%s", out)
-	}
-	if got := mdCell(`A\|B <tag>`); got != `A\\\|B &lt;tag&gt;` {
-		t.Errorf("mdCell adversarial escaping = %q", got)
-	}
-}
-
-func TestRunExportRoundTrip(t *testing.T) {
+func TestRunExportJSONRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	initRepoWithCommit(t, dir)
 
-	for _, format := range []string{"json", "csv", "md"} {
-		var out, errw bytes.Buffer
-		if err := runExport(&out, &errw, format, []string{dir}, nil, 0, stats.SortByTotal); err != nil {
-			t.Fatalf("runExport(%s): %v", format, err)
-		}
-		if out.Len() == 0 {
-			t.Errorf("runExport(%s) produced no output", format)
-		}
-	}
-
 	var out, errw bytes.Buffer
-	if err := runExport(&out, &errw, "json", []string{dir}, nil, 0, stats.SortByTotal); err != nil {
-		t.Fatalf("runExport json: %v", err)
+	repositories := git.NewRepositories([]string{dir})
+	if err := runExportJSON(&out, &errw, repositories, nil, stats.SortByTotal, analysisOptions{}); err != nil {
+		t.Fatalf("runExportJSON: %v", err)
 	}
 	var authors []stats.AuthorStats
 	if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
@@ -273,13 +272,34 @@ func TestRunExportRoundTrip(t *testing.T) {
 	if len(authors) != 1 || authors[0].Name != "Ada" || authors[0].Added != 3 {
 		t.Errorf("unexpected json round-trip: %+v", authors)
 	}
-
-	if err := runExport(&out, &errw, "xml", []string{dir}, nil, 0, stats.SortByTotal); err == nil {
-		t.Error("invalid format should error")
+	if authors[0].Bot {
+		t.Error("human contributor flagged as bot")
+	}
+	if !strings.Contains(out.String(), `"bot"`) {
+		t.Errorf("bot field missing from JSON:\n%s", out.String())
 	}
 }
 
-func TestRunExportKeepsDuplicateBasenamesDistinct(t *testing.T) {
+func TestRunExportJSONFlagsConfiguredBots(t *testing.T) {
+	dir := t.TempDir()
+	initRepoWithCommit(t, dir)
+
+	var out, errw bytes.Buffer
+	repositories := git.NewRepositories([]string{dir})
+	options := analysisOptions{BotIdentities: []string{"ada@x.com"}}
+	if err := runExportJSON(&out, &errw, repositories, nil, stats.SortByTotal, options); err != nil {
+		t.Fatal(err)
+	}
+	var authors []stats.AuthorStats
+	if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 1 || !authors[0].Bot {
+		t.Errorf("configured bot identity not flagged in export: %+v", authors)
+	}
+}
+
+func TestRunExportJSONKeepsDuplicateBasenamesDistinct(t *testing.T) {
 	root := t.TempDir()
 	paths := []string{
 		filepath.Join(root, "org-a", "api"),
@@ -294,7 +314,7 @@ func TestRunExportKeepsDuplicateBasenamesDistinct(t *testing.T) {
 	repositories := git.NewRepositories(paths)
 
 	var out, errw bytes.Buffer
-	if err := runExportWithOptions(&out, &errw, "json", repositories, nil, 0, stats.SortByTotal, analysisOptions{}); err != nil {
+	if err := runExportJSON(&out, &errw, repositories, nil, stats.SortByTotal, analysisOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var authors []stats.AuthorStats
@@ -311,7 +331,7 @@ func TestRunExportKeepsDuplicateBasenamesDistinct(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := runExportWithOptions(&out, &errw, "json", repositories, map[string]bool{repositories[0].ID: true}, 0, stats.SortByTotal, analysisOptions{}); err != nil {
+	if err := runExportJSON(&out, &errw, repositories, map[string]bool{repositories[0].ID: true}, stats.SortByTotal, analysisOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	authors = nil
@@ -326,24 +346,16 @@ func TestRunExportKeepsDuplicateBasenamesDistinct(t *testing.T) {
 	}
 }
 
-func TestRunExportAllReposFail(t *testing.T) {
+func TestRunExportJSONAllReposFail(t *testing.T) {
 	var out, errw bytes.Buffer
-	notRepo := t.TempDir()
-	if err := runExport(&out, &errw, "json", []string{notRepo}, nil, 0, stats.SortByTotal); err == nil {
+	repositories := git.NewRepositories([]string{t.TempDir()})
+	if err := runExportJSON(&out, &errw, repositories, nil, stats.SortByTotal, analysisOptions{}); err == nil {
 		t.Error("expected error when all repos fail to scan")
 	}
 	if out.Len() != 0 {
 		t.Errorf("no output should be written when all repos fail, got:\n%s", out.String())
 	}
-}
-
-func TestRunExportValidatesFormatBeforeScanning(t *testing.T) {
-	var out, errw bytes.Buffer
-	err := runExport(&out, &errw, "pdf", []string{filepath.Join(t.TempDir(), "missing")}, nil, 0, stats.SortByTotal)
-	if err == nil || !strings.Contains(err.Error(), "invalid --export format") {
-		t.Fatalf("runExport invalid format error = %v", err)
-	}
-	if errw.Len() != 0 {
-		t.Fatalf("invalid format should not scan repositories: %s", errw.String())
+	if errw.Len() == 0 {
+		t.Error("expected a warning for the failed repository")
 	}
 }
