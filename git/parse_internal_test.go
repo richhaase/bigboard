@@ -29,7 +29,7 @@ func TestParseGitLogBasic(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("expected 2 records, got %d", len(records))
 	}
-	if records[0].Author != "Alice" || records[0].Added != 13 || records[0].Removed != 5 || records[0].Files != 2 {
+	if records[0].Author != "Alice" || records[0].Added != 13 || records[0].Removed != 5 {
 		t.Errorf("Alice record wrong: %+v", records[0])
 	}
 	if records[1].Author != "Bob" || records[1].Added != 1 || records[1].Removed != 1 {
@@ -94,7 +94,7 @@ func TestParseGitLogBinaryAndMalformed(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 record (binary skipped, malformed dropped), got %d", len(records))
 	}
-	if records[0].Added != 7 || records[0].Removed != 2 || records[0].Files != 1 {
+	if records[0].Added != 7 || records[0].Removed != 2 {
 		t.Errorf("binary line not skipped correctly: %+v", records[0])
 	}
 }
@@ -146,9 +146,6 @@ func TestParseGitLogPathFiltering(t *testing.T) {
 	}
 	if records[0].Added != 23 { // 20 + 3, excluding the 5800 generated lines
 		t.Errorf("Added = %d, want 23 (generated/vendored excluded)", records[0].Added)
-	}
-	if records[0].Files != 2 {
-		t.Errorf("Files = %d, want 2 (only counted files)", records[0].Files)
 	}
 }
 

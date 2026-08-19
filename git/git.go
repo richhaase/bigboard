@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -48,6 +49,7 @@ var (
 // CollectOptions controls commit collection without process-wide state.
 type CollectOptions struct {
 	IncludeGenerated bool
+	AIIdentities     []string
 }
 
 type pathFilter struct {
@@ -127,7 +129,6 @@ type CommitRecord struct {
 	Date       time.Time
 	Added      int
 	Removed    int
-	Files      int
 	RepoID     string
 	RepoName   string
 	AIAssisted bool
@@ -238,7 +239,7 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 	repo := NewRepositories([]string{dir})[0]
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	return collectRepository(ctx, repo, ref, legacyPathFilter())
+	return collectRepository(ctx, repo, ref, legacyPathFilter(), newAIMatcher(nil))
 }
 
 // CollectRepository collects commits using explicit repository identity and
@@ -246,7 +247,7 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 func CollectRepository(repo Repository, ref string, options CollectOptions) ([]CommitRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	return collectRepository(ctx, repo, ref, defaultPathFilter(options))
+	return collectRepository(ctx, repo, ref, defaultPathFilter(options), newAIMatcher(options.AIIdentities))
 }
 
 // ScanRepository detects the default branch and collects its commits under one
@@ -255,19 +256,51 @@ func ScanRepository(ctx context.Context, repo Repository, options CollectOptions
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	ref := detectDefaultBranch(ctx, repo.Path)
-	return collectRepository(ctx, repo, ref, defaultPathFilter(options))
+	return collectRepository(ctx, repo, ref, defaultPathFilter(options), newAIMatcher(options.AIIdentities))
 }
 
-func collectRepository(ctx context.Context, repo Repository, ref string, filter pathFilter) ([]CommitRecord, error) {
-	out, err := runGitContext(ctx, repo.Path, "log", ref, "--no-merges", "-M", "-C",
-		"--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat")
+func collectRepository(ctx context.Context, repo Repository, ref string, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
+	args := []string{"-c", "core.quotePath=false", "log", ref, "--no-merges", "-M", "-C",
+		"--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat"}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repo.Path
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, fmt.Errorf("git log in %s: %w", repo.Path, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git log in %s: %w", repo.Path, err)
+	}
+	parser := newLogParser(repo, filter, ai)
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		parser.feed(scanner.Text())
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if waitErr != nil || scanErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if errors.Is(ctxErr, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("git log in %s: %w", repo.Path, context.DeadlineExceeded)
+			}
+			return nil, fmt.Errorf("git log in %s: %w", repo.Path, ctxErr)
+		}
 		if isEmptyRepo(ctx, repo.Path) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("git log failed: %w", err)
+		cause := waitErr
+		if cause == nil {
+			cause = scanErr
+		}
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			return nil, fmt.Errorf("git log failed in %s: %w: %s", repo.Path, cause, detail)
+		}
+		return nil, fmt.Errorf("git log failed in %s: %w", repo.Path, cause)
 	}
-	return parseGitLogForRepository(out, repo, filter)
+	return parser.finish(), nil
 }
 
 // DiscoverReposDepth scans paths for git repositories, descending up to maxDepth
@@ -279,8 +312,12 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 	var result []string
 
 	add := func(abs string) {
-		if _, ok := seen[abs]; !ok {
-			seen[abs] = struct{}{}
+		key := abs
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			key = resolved
+		}
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
 			result = append(result, abs)
 		}
 	}
@@ -301,10 +338,25 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 			return
 		}
 		for _, e := range entries {
-			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			if strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
-			walk(filepath.Join(dir, e.Name()), depth+1)
+			child := filepath.Join(dir, e.Name())
+			if !e.IsDir() {
+				if e.Type()&os.ModeSymlink == 0 {
+					continue
+				}
+				resolved, err := filepath.EvalSymlinks(child)
+				if err != nil {
+					continue
+				}
+				info, err := os.Stat(resolved)
+				if err != nil || !info.IsDir() {
+					continue
+				}
+				child = resolved
+			}
+			walk(child, depth+1)
 		}
 	}
 
@@ -324,75 +376,91 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 
 func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 	repo := Repository{ID: repoName, Path: repoName, Name: repoName}
-	return parseGitLogForRepository(output, repo, legacyPathFilter())
+	return parseGitLogForRepository(output, repo, legacyPathFilter(), newAIMatcher(nil))
 }
 
-func parseGitLogForRepository(output string, repo Repository, filter pathFilter) ([]CommitRecord, error) {
-	var records []CommitRecord
-	var current *CommitRecord
+func parseGitLogForRepository(output string, repo Repository, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
+	parser := newLogParser(repo, filter, ai)
+	for _, line := range strings.Split(output, "\n") {
+		parser.feed(line)
+	}
+	return parser.finish(), nil
+}
 
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
+type logParser struct {
+	repo    Repository
+	filter  pathFilter
+	ai      aiMatcher
+	records []CommitRecord
+	current *CommitRecord
+}
 
-		if strings.Contains(line, fieldSep) {
-			parts := strings.SplitN(line, fieldSep, 4)
-			if len(parts) >= 3 {
-				t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
-				if err != nil {
-					if current != nil {
-						records = append(records, *current)
-						current = nil
-					}
-					continue
-				}
-				if current != nil {
-					records = append(records, *current)
-				}
-				email := strings.TrimSpace(parts[1])
-				aiAssisted := isAIIdentity(email) || (len(parts) == 4 && isAICoAuthor(parts[3]))
-				current = &CommitRecord{
-					Author:     strings.TrimSpace(parts[0]),
-					Email:      email,
-					Date:       t,
-					RepoID:     repo.ID,
-					RepoName:   repo.Name,
-					AIAssisted: aiAssisted,
-				}
-				continue
+func newLogParser(repo Repository, filter pathFilter, ai aiMatcher) *logParser {
+	return &logParser{repo: repo, filter: filter, ai: ai}
+}
+
+func (p *logParser) flush() {
+	if p.current != nil {
+		p.records = append(p.records, *p.current)
+		p.current = nil
+	}
+}
+
+func (p *logParser) feed(line string) {
+	if line == "" {
+		return
+	}
+
+	if strings.Contains(line, fieldSep) {
+		parts := strings.SplitN(line, fieldSep, 4)
+		if len(parts) >= 3 {
+			t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
+			if err != nil {
+				p.flush()
+				return
 			}
-		}
-
-		if current != nil {
-			fields := strings.SplitN(line, "\t", 3)
-			if len(fields) == 3 {
-				addedStr := fields[0]
-				removedStr := fields[1]
-				if addedStr == "-" || removedStr == "-" {
-					continue
-				}
-				if !filter.shouldCount(fields[2]) {
-					continue
-				}
-				added, err1 := strconv.Atoi(addedStr)
-				removed, err2 := strconv.Atoi(removedStr)
-				if err1 != nil || err2 != nil {
-					continue
-				}
-				current.Added += added
-				current.Removed += removed
-				current.Files++
+			p.flush()
+			email := strings.TrimSpace(parts[1])
+			aiAssisted := p.ai.isAI(email) || (len(parts) == 4 && p.ai.isAICoAuthor(parts[3]))
+			p.current = &CommitRecord{
+				Author:     strings.TrimSpace(parts[0]),
+				Email:      email,
+				Date:       t,
+				RepoID:     p.repo.ID,
+				RepoName:   p.repo.Name,
+				AIAssisted: aiAssisted,
 			}
+			return
 		}
 	}
 
-	if current != nil {
-		records = append(records, *current)
+	if p.current == nil {
+		return
 	}
+	fields := strings.SplitN(line, "\t", 3)
+	if len(fields) != 3 {
+		return
+	}
+	addedStr := fields[0]
+	removedStr := fields[1]
+	if addedStr == "-" || removedStr == "-" {
+		return
+	}
+	if !p.filter.shouldCount(fields[2]) {
+		return
+	}
+	added, err1 := strconv.Atoi(addedStr)
+	removed, err2 := strconv.Atoi(removedStr)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	p.current.Added += added
+	p.current.Removed += removed
+}
 
-	return records, nil
+func (p *logParser) finish() []CommitRecord {
+	p.flush()
+	return p.records
 }
 
 var aiEmailDomains = []string{
@@ -411,16 +479,65 @@ var aiEmailAddresses = []string{
 	"bot@codium.ai",
 }
 
-func isAIIdentity(value string) bool {
-	address := strings.ToLower(strings.TrimSpace(value))
-	if parsed, err := mail.ParseAddress(address); err == nil {
-		address = strings.ToLower(parsed.Address)
-	} else {
-		address = strings.Trim(address, "<> ")
+var aiGitHubUsers = map[string]bool{
+	"copilot":              true,
+	"copilot-swe-agent":    true,
+	"claude":               true,
+	"devin-ai-integration": true,
+	"google-labs-jules":    true,
+	"cursoragent":          true,
+}
+
+type aiMatcher struct {
+	extra []string
+}
+
+func newAIMatcher(entries []string) aiMatcher {
+	cleaned := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry != "" {
+			cleaned = append(cleaned, entry)
+		}
 	}
+	return aiMatcher{extra: cleaned}
+}
+
+func (m aiMatcher) isAI(value string) bool {
+	address := normalizeAddress(value)
 	if address == "" {
 		return false
 	}
+	for _, entry := range m.extra {
+		if strings.HasPrefix(entry, "@") {
+			if strings.HasSuffix(address, entry) {
+				return true
+			}
+		} else if address == entry {
+			return true
+		}
+	}
+	return isAIAddress(address)
+}
+
+func (m aiMatcher) isAICoAuthor(trailerValue string) bool {
+	for _, entry := range strings.Split(trailerValue, coAuthorSep) {
+		if m.isAI(entry) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAddress(value string) string {
+	address := strings.ToLower(strings.TrimSpace(value))
+	if parsed, err := mail.ParseAddress(address); err == nil {
+		return strings.ToLower(parsed.Address)
+	}
+	return strings.Trim(address, "<> ")
+}
+
+func isAIAddress(address string) bool {
 	for _, domain := range aiEmailDomains {
 		if strings.HasSuffix(address, domain) {
 			return true
@@ -431,12 +548,12 @@ func isAIIdentity(value string) bool {
 			return true
 		}
 	}
-	return false
-}
-
-func isAICoAuthor(trailerValue string) bool {
-	for _, entry := range strings.Split(trailerValue, coAuthorSep) {
-		if isAIIdentity(entry) {
+	if local, ok := strings.CutSuffix(address, "@users.noreply.github.com"); ok {
+		if _, after, found := strings.Cut(local, "+"); found {
+			local = after
+		}
+		local = strings.TrimSuffix(local, "[bot]")
+		if aiGitHubUsers[local] {
 			return true
 		}
 	}

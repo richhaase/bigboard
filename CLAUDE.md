@@ -7,36 +7,38 @@ Cyberpunk-themed terminal dashboard for visualizing contributor statistics acros
 ## Architecture
 
 ```
-cmd/bigboard/main.go    CLI entry, flag + config resolution, repo discovery, export dispatch
-cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): default paths, excludes, groups, sort/since/depth
-cmd/bigboard/export.go  Headless --export json|csv|md (runs the pipeline without the TUI)
-git/git.go              Git ops: recursive discovery, branch detection, commit collection, path filtering, AI detection
-stats/stats.go          Aggregation, identity merging, time/repo filtering, sorting, derived metrics
-tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state
+cmd/bigboard/main.go    CLI entry (4 flags: --version/--config/--group/--export), config resolution, repo discovery
+cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): paths, excludes, groups, sort/since/depth, ai_identities/bot_identities
+cmd/bigboard/export.go  Headless --export (JSON only, ALL window, concurrent scans)
+git/git.go              Git ops: recursive discovery (follows symlinks), branch detection, streaming commit collection, path filtering, AI detection
+stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
+tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
 tui/styles.go           Color palette and lipgloss style definitions
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
-tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column)
-tui/operativeview.go    Per-contributor detail: repo breakdown, monthly timeline, neon heatmap, derived metrics
+tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
+tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
 tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 ```
 
 ## Data Flow
 
-1. `main.go` resolves config + flags, picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees).
-2. `--export` runs the pipeline headlessly and exits; otherwise the TUI launches.
+1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
+2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
 3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R`).
-4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` → `Sort` (with ascending toggle).
+4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
 5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 
 ## Key Design Decisions
 
-- **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans.
+- **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans. `git log` output is parsed as a stream (pipe + scanner), never buffered whole.
+- **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state.
 - **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
 - **Identity merging**: group by email, then exact normalized name; git's native `.mailmap` is honored (`%aN`/`%aE`). Substring fuzzy matching is **opt-in** (`--fuzzy`) because it over-merges distinct people. Output ordering is deterministic (sort tiebreaks; no map-iteration leaks).
 - **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; `--all-files` includes them.
 - **Repository identity**: repositories are keyed by absolute path; duplicate basenames receive shortest-unique display labels such as `org-a/api` and `org-b/api`.
-- **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity; surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
-- **Worktree detection**: `isWorktree()` checks if `.git` is a file containing `gitdir:` — skips these during discovery to avoid double-counting.
+- **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity, including GitHub-noreply agent accounts (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, …); extensible via `ai_identities` (exact email or `@domain`). Surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
+- **Bots are counted, not excluded**: bot identities (`[bot]` names/emails, builtin roster, `bot_identities` config) get `AuthorStats.Bot` and a leaderboard `BOT` tag; the `b` key toggles visibility (default shown). Agents that do their own work rank like any contributor.
+- **Worktree detection**: `isWorktree()` checks if `.git` is a file containing `gitdir:` — skips these during discovery to avoid double-counting. Symlinked directories are followed, deduplicated by resolved path.
 - **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.
 
 ## Build & Test

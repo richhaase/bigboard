@@ -38,6 +38,7 @@ type Model struct {
 	filterQuery     string
 	searching       bool
 	sortAsc         bool
+	hideBots        bool
 	activeOperative string
 	sortField       stats.SortField
 	timeIdx         int
@@ -76,6 +77,8 @@ const maxConcurrentRepoScans = 8
 type Options struct {
 	FuzzyMatching    bool
 	IncludeGenerated bool
+	AIIdentities     []string
+	BotIdentities    []string
 }
 
 // NewModel creates an initial Model ready to display the loading state.
@@ -139,6 +142,7 @@ func loadRepoCmd(ctx context.Context, repository git.Repository, options Options
 	return func() tea.Msg {
 		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
 			IncludeGenerated: options.IncludeGenerated,
+			AIIdentities:     options.AIIdentities,
 		})
 		return RepoLoadedMsg{Repository: repository, Records: records, Err: err}
 	}
@@ -354,6 +358,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollOffset = 0
 		}
 
+	case "b":
+		if m.viewMode == ViewAggregate {
+			m.hideBots = !m.hideBots
+			m.recomputeAuthors()
+			m.selectedRow = 0
+			m.scrollOffset = 0
+		}
+
 	case "r":
 		if m.viewMode == ViewAggregate {
 			m.overlayExcluded = make(map[string]bool)
@@ -402,9 +414,20 @@ func (m *Model) filteredRecords() []git.CommitRecord {
 }
 
 func (m *Model) recomputeAuthors() {
-	m.authors = stats.AggregateWithOptions(m.filteredRecords(), stats.AggregateOptions{
+	authors := stats.AggregateWithOptions(m.filteredRecords(), stats.AggregateOptions{
 		FuzzyMatching: m.options.FuzzyMatching,
+		BotIdentities: m.options.BotIdentities,
 	})
+	if m.hideBots {
+		kept := make([]stats.AuthorStats, 0, len(authors))
+		for _, a := range authors {
+			if !a.Bot {
+				kept = append(kept, a)
+			}
+		}
+		authors = kept
+	}
+	m.authors = authors
 	m.sortAuthors()
 	m.clampScroll()
 }
@@ -489,14 +512,18 @@ func (m *Model) stepOperative(delta int) {
 	if len(list) == 0 {
 		return
 	}
-	idx := 0
+	idx := -1
 	for i, a := range list {
 		if a.Name == m.activeOperative {
 			idx = i
 			break
 		}
 	}
-	idx += delta
+	if idx == -1 {
+		idx = m.selectedRow
+	} else {
+		idx += delta
+	}
 	if idx < 0 {
 		idx = 0
 	}
@@ -616,7 +643,11 @@ func (m Model) renderAggregateView() string {
 
 	sections = append(sections, "")
 	sortLabel := strings.ToLower(stats.SortFieldLabel(m.sortField))
-	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel}))
+	botsLabel := "on"
+	if m.hideBots {
+		botsLabel = "off"
+	}
+	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
 
 	return strings.Join(sections, "\n")
 }

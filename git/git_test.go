@@ -168,7 +168,7 @@ func TestCollectCommits(t *testing.T) {
 	}
 
 	// Records come newest-first from git log
-	var totalAdded, totalFiles int
+	var totalAdded int
 	for _, r := range records {
 		if r.Author == "" {
 			t.Error("author should not be empty")
@@ -181,14 +181,10 @@ func TestCollectCommits(t *testing.T) {
 			t.Errorf("date %v seems unreasonable", r.Date)
 		}
 		totalAdded += r.Added
-		totalFiles += r.Files
 	}
 
 	if totalAdded != 8 {
 		t.Errorf("expected total added=8, got %d", totalAdded)
-	}
-	if totalFiles != 2 {
-		t.Errorf("expected total files=2, got %d", totalFiles)
 	}
 }
 
