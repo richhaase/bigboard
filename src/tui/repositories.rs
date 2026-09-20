@@ -1,9 +1,8 @@
-//! Bounded repository selection and a separate pager for full diagnostics.
+//! Bounded repository selection with pageable paths and scan failures.
 use super::App;
 use super::components::*;
 use super::merge::{wrap_help, wrapped};
 use ratatui::text::Line;
-use std::collections::HashSet;
 
 struct RepositoryChoice<'a> {
     id: &'a str,
@@ -14,7 +13,7 @@ struct RepositoryChoice<'a> {
 
 struct RepositoryLayout {
     list_rows: usize,
-    diagnostic_rows: usize,
+    detail_rows: usize,
     help: Vec<UiLine>,
 }
 
@@ -63,74 +62,60 @@ impl App {
             &[
                 ("↑↓/jk", "repo".into()),
                 ("space", "toggle".into()),
-                ("PgUp/PgDn", "warnings".into()),
+                ("PgUp/PgDn", "details".into()),
                 ("enter/esc", "apply".into()),
                 ("q", "quit".into()),
             ],
             self.width as usize,
             &self.palette,
         );
-        // Frame, context, diagnostic heading, pager and footer have fixed cost.
-        // Warning count never reduces the list or navigation-help budget.
+        // Preserve controls and at least one repository row. Healthy nodes
+        // need only their path; return unused detail space to the list.
         let available = (self.height as usize).saturating_sub(help.len() + 5);
-        let list_rows = if available >= 2 {
-            (available / 3).clamp(1, 8)
+        let choices = self.repository_choices();
+        let failed = choices
+            .get(self.overlay_cursor)
+            .is_some_and(|repo| repo.failed);
+        let detail_limit = if failed {
+            available.saturating_sub((available / 3).clamp(1, 8))
         } else {
-            available
+            (available / 3).max(1).min(available.saturating_sub(1))
         };
+        let detail_rows = self.repository_details().len().min(detail_limit);
         RepositoryLayout {
-            list_rows,
-            diagnostic_rows: available.saturating_sub(list_rows),
+            list_rows: available
+                .saturating_sub(detail_rows)
+                .min(choices.len().max(1)),
+            detail_rows,
             help,
         }
     }
 
-    fn repository_diagnostics(&self) -> Vec<UiLine> {
+    fn repository_details(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = (self.width as usize).saturating_sub(4).max(1);
         let choices = self.repository_choices();
         let Some(repo) = choices.get(self.overlay_cursor) else {
             return wrapped("No repositories available.", width, p.dim_white);
         };
-        let mut lines = wrapped(&format!("NODE // {}", repo.name), width, p.cyan);
-        if let Some(path) = repo.path {
-            lines.extend(wrapped(&path.to_string_lossy(), width, p.dim_white));
-        }
-        let mut has_diagnostics = false;
+        let mut lines = if let Some(path) = repo.path {
+            wrapped(&path.to_string_lossy(), width, p.dim_white)
+        } else {
+            wrapped("Repository path unavailable.", width, p.dim_white)
+        };
         if repo.failed {
-            has_diagnostics = true;
             let failure = self.failure_details.iter().find(|(id, _)| id == repo.id);
             let detail = failure.map_or(
                 "Scan failed; this repository is absent from the totals.",
                 |(_, error)| error.as_str(),
             );
             lines.extend(wrapped(&format!("SCAN FAILED // {detail}"), width, p.red));
-        }
-        for (_, warning) in self.warnings.iter().filter(|(id, _)| id == repo.id) {
-            has_diagnostics = true;
-            lines.extend(wrapped(&format!("WARNING // {warning}"), width, p.amber));
-        }
-        let filtered = self.filtered_records();
-        let commit_ids: HashSet<_> = filtered
-            .iter()
-            .filter(|record| record.repo_id == repo.id)
-            .map(|record| record.commit_id.as_str())
-            .collect();
-        let associated: Vec<_> = filtered
-            .iter()
-            .filter(|record| commit_ids.contains(record.commit_id.as_str()))
-            .cloned()
-            .collect();
-        for warning in crate::stats::attribution_warnings(&associated, &self.aggregate_options()) {
-            has_diagnostics = true;
+        } else if self.repository_history_unavailable(repo.id) {
             lines.extend(wrapped(
-                &format!("ATTRIBUTION // {warning}"),
+                "Default branch unavailable locally; use B on the board for all branches.",
                 width,
                 p.amber,
             ));
-        }
-        if !has_diagnostics {
-            lines.extend(wrapped("No scan or attribution warnings.", width, p.green));
         }
         lines
     }
@@ -160,8 +145,8 @@ impl App {
     }
 
     pub(super) fn page_repository_diagnostics(&mut self, forward: bool) {
-        let rows = self.repository_layout().diagnostic_rows.max(1);
-        let last = self.repository_diagnostics().len().saturating_sub(rows);
+        let rows = self.repository_layout().detail_rows.max(1);
+        let last = self.repository_details().len().saturating_sub(rows);
         self.repository_diagnostic_offset = if forward {
             self.repository_diagnostic_offset
                 .saturating_add(rows)
@@ -218,7 +203,6 @@ impl App {
                 } else {
                     p.cyan
                 };
-                let has_warning = self.warnings.iter().any(|(id, _)| id == repo.id);
                 Line::from(vec![
                     bold(if selected { "▸ " } else { "  " }, p.magenta),
                     span(
@@ -232,7 +216,6 @@ impl App {
                         color,
                     ),
                     span(display_text(repo.name), color),
-                    span(if has_warning { "  ⚠" } else { "" }, p.amber),
                 ])
                 .style(p.row(selected, index))
             } else if choices.is_empty() && index == 0 {
@@ -242,26 +225,26 @@ impl App {
             };
             lines.push(panel_row(content, width, p));
         }
-        lines.push(panel_header("NODE DIAGNOSTICS", width, p));
-        let diagnostics = self.repository_diagnostics();
-        let last = diagnostics.len().saturating_sub(layout.diagnostic_rows);
+        lines.push(panel_header("REPOSITORY DETAILS", width, p));
+        let details = self.repository_details();
+        let last = details.len().saturating_sub(layout.detail_rows);
         let offset = self.repository_diagnostic_offset.min(last);
-        for index in offset..offset + layout.diagnostic_rows {
+        for index in offset..offset + layout.detail_rows {
             lines.push(panel_row(
-                diagnostics.get(index).cloned().unwrap_or_else(blank),
+                details.get(index).cloned().unwrap_or_else(blank),
                 width,
                 p,
             ));
         }
-        let end = (offset + layout.diagnostic_rows).min(diagnostics.len());
-        let pager = if layout.diagnostic_rows == 0 {
-            "Resize to read diagnostics".into()
+        let end = (offset + layout.detail_rows).min(details.len());
+        let pager = if layout.detail_rows == 0 {
+            "Resize to read details".into()
         } else {
             format!(
                 "LINES {}–{} / {}  // PgUp PgDn",
                 offset + 1,
                 end,
-                diagnostics.len()
+                details.len()
             )
         };
         lines.push(panel_row(text_line(pager, p.magenta), width, p));
@@ -282,6 +265,7 @@ mod tests {
         stats::SortField,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::collections::HashSet;
 
     fn repo(index: usize) -> Repository {
         Repository {
@@ -326,46 +310,85 @@ mod tests {
     }
 
     #[test]
-    fn large_diagnostic_log_keeps_list_help_and_every_warning_accessible() {
+    fn long_scan_errors_are_pageable_without_hiding_selection_or_help() {
         for (width, height) in [(40, 12), (60, 18), (80, 24), (140, 45)] {
             let mut app = app(width, height);
-            app.warnings = (0..120)
-                .map(|index| {
-                    (
-                        "/repos/node-00".into(),
-                        format!("SIGNAL-{index:03} // shallow or merge diagnostic"),
-                    )
-                })
+            app.loaded_repos.remove(0);
+            app.failed_repos = vec!["node-00".into()];
+            app.failure_details = vec![(
+                "/repos/node-00".into(),
+                (0..120)
+                    .map(|index| format!("ERROR-{index:03}: unreadable object; "))
+                    .collect(),
+            )];
+            app.overlay_cursor = app.loaded_repos.len();
+            let expected: HashSet<_> = app
+                .repository_details()
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .filter(|span| span.style.fg == Some(app.palette.red))
+                .map(|span| span.content.to_string())
                 .collect();
-            let mut seen = String::new();
+            let mut seen = HashSet::new();
             loop {
                 let lines = app.repository_lines();
                 assert!(lines.len() <= height as usize);
                 assert!(lines.iter().all(|line| line.width() <= width as usize));
                 let screen = text(&lines);
                 assert!(screen.contains("REPOSITORY MATRIX"));
-                assert!(screen.contains("NODE DIAGNOSTICS"));
+                assert!(screen.contains("REPOSITORY DETAILS"));
                 assert!(screen.contains("node-00"));
                 assert!(screen.contains("PgUp/PgDn"));
                 assert!(screen.contains("enter/esc"));
-                seen.push_str(&screen);
+                seen.extend(
+                    lines
+                        .iter()
+                        .flat_map(|line| line.spans.iter())
+                        .filter(|span| span.style.fg == Some(app.palette.red))
+                        .map(|span| span.content.to_string()),
+                );
                 let offset = app.repository_diagnostic_offset;
                 key(&mut app, KeyCode::PageDown);
                 if offset == app.repository_diagnostic_offset {
                     break;
                 }
             }
-            for index in 0..120 {
-                assert!(
-                    seen.contains(&format!("SIGNAL-{index:03}")),
-                    "missing {index} at {width}x{height}"
-                );
-            }
+            assert!(
+                expected.is_subset(&seen),
+                "missing error lines at {width}x{height}"
+            );
             key(&mut app, KeyCode::PageUp);
-            assert!(app.repository_diagnostic_offset < app.repository_diagnostics().len());
-            key(&mut app, KeyCode::Down);
+            assert!(app.repository_diagnostic_offset < app.repository_details().len());
+            key(&mut app, KeyCode::Up);
             assert_eq!(app.repository_diagnostic_offset, 0);
         }
+    }
+
+    #[test]
+    fn healthy_repository_details_use_only_path_rows_and_ignore_warning_data() {
+        let mut app = app(80, 24);
+        app.warnings = vec![("/repos/node-00".into(), "RAW-COMMIT-WARNING".into())];
+        app.attribution_warnings = vec!["RAW-ATTRIBUTION-WARNING".into()];
+        let details = text(&app.repository_details());
+        assert_eq!(details, "/repos/node-00");
+        let screen = text(&app.repository_lines());
+        assert!(!screen.contains("RAW-COMMIT"));
+        assert!(!screen.contains("RAW-ATTRIBUTION"));
+        assert!(!screen.contains("⚠"));
+        assert!(!screen.contains("No scan"));
+        assert_eq!(app.repository_layout().detail_rows, 1);
+        assert!(app.repository_layout().list_rows >= 12);
+    }
+
+    #[test]
+    fn unavailable_landed_history_shows_actionable_context_without_raw_log() {
+        let mut app = app(80, 24);
+        app.warnings = vec![("/repos/node-00".into(), "node-00: No available default branch could be identified; landed history is unknown. All locally available branches remain available in All branches.".into())];
+        let details = text(&app.repository_details());
+        assert!(details.contains("Default branch unavailable locally"));
+        assert!(details.contains("use B on the board for all branches"));
+        assert!(!details.contains("No available default branch could be identified"));
+        assert!(!details.contains("WARNING //"));
     }
 
     #[test]
@@ -382,7 +405,7 @@ mod tests {
             warnings: vec![],
         });
         app.view = View::Repositories;
-        let diagnostics = text(&app.repository_diagnostics());
+        let diagnostics = text(&app.repository_details());
         assert!(diagnostics.contains("DEADFACE"));
         assert!(text(&app.repository_lines()).contains("[!]"));
         key(&mut app, KeyCode::Char(' '));
@@ -419,61 +442,13 @@ mod tests {
             (2, &second, "ERROR-B", "ERROR-A"),
         ] {
             app.overlay_cursor = index;
-            let diagnostics = text(&app.repository_diagnostics());
+            let diagnostics = text(&app.repository_details());
             assert!(diagnostics.contains(expected.path.to_str().unwrap()));
             assert!(diagnostics.contains(error));
             assert!(!diagnostics.contains(other_error));
             key(&mut app, KeyCode::Char(' '));
             assert!(!app.overlay_excluded.contains(&expected.id));
         }
-    }
-
-    #[test]
-    fn attribution_diagnostics_remain_available_for_each_affected_repository() {
-        let mut app = app(40, 12);
-        app.loaded_repos.truncate(2);
-        app.all_records = app
-            .loaded_repos
-            .iter()
-            .enumerate()
-            .map(|(index, repo)| crate::model::CommitRecord {
-                commit_id: "shared-object".into(),
-                author: format!("Person {index}"),
-                email: format!("person-{index}@example.test"),
-                date: app.cutoff - chrono::Duration::days(1),
-                added: 2,
-                removed: 1,
-                repo_id: repo.id.clone(),
-                repo_name: repo.name.clone(),
-                ai_assisted: false,
-                coauthors: vec![],
-                lines_known: true,
-                landed: true,
-                is_merge: false,
-            })
-            .collect();
-        let expected =
-            crate::stats::attribution_warnings(&app.filtered_records(), &app.aggregate_options());
-        assert_eq!(expected.len(), 1);
-        for index in 0..2 {
-            app.overlay_cursor = index;
-            let all_lines = app
-                .repository_diagnostics()
-                .iter()
-                .map(|line| {
-                    line.spans
-                        .iter()
-                        .map(|span| span.content.as_ref())
-                        .collect::<String>()
-                })
-                .collect::<String>();
-            assert!(all_lines.contains("ATTRIBUTION //"));
-            assert!(all_lines.contains(&display_text(&expected[0])));
-        }
-        assert_eq!(
-            app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Action::Quit
-        );
     }
 
     #[test]

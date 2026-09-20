@@ -422,20 +422,17 @@ fn scan_repository_with_version(
     // maintenance releases). Conservatively skip older partial clones instead
     // of assuming an arbitrary vendor build honors the variable.
     if partial && version < (2, 45, 1) {
-        return Ok(ScanData {
-            records: vec![],
-            warnings: vec!["Partial clone skipped: Git 2.45.1 or newer is required to disable automatic object fetching reliably. No remote history was fetched. Totals exclude this repository.".into()],
-        });
+        ctx.check()?;
+        bail!(
+            "Partial clone skipped: Git 2.45.1 or newer is required to disable automatic object fetching reliably. No remote history was fetched."
+        );
     }
     match collect_available_history(repo, options, ctx) {
         Err(error) if partial => {
             ctx.check()?;
-            Ok(ScanData {
-                records: vec![],
-                warnings: vec![format!(
-                    "Partial clone scan failed with automatic object fetching disabled; required history may be unavailable locally. Totals exclude this repository. {error:#}"
-                )],
-            })
+            Err(error.context(
+                "Partial clone scan failed with automatic object fetching disabled; required history may be unavailable locally",
+            ))
         }
         result => result,
     }
@@ -2054,7 +2051,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_clone_missing_objects_are_not_fetched_and_totals_are_qualified() {
+    fn partial_clone_missing_objects_are_not_fetched_and_scan_fails() {
         let root = TempDir::new().unwrap();
         let partial = prepare_partial_clone(root.path());
         let before = git(
@@ -2065,22 +2062,25 @@ mod tests {
             before.lines().filter(|line| line.starts_with('?')).count(),
             2
         );
-        let data = scan(&partial);
-        assert!(data.records.is_empty());
+        let error = scan_repository(
+            &new_repositories(std::slice::from_ref(&partial))[0],
+            &CollectOptions::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
         let version = parse_git_version(&git(&partial, &["--version"])).unwrap();
         if version >= (2, 45, 1) {
+            assert!(message.contains("scan failed with automatic object fetching disabled"));
             assert!(
-                data.warnings[0].contains("scan failed with automatic object fetching disabled")
+                error.chain().count() > 1,
+                "original Git error must be retained: {message}"
             );
         } else {
-            assert!(data.warnings[0].contains("skipped"));
+            assert!(message.contains("skipped"));
+            assert!(message.contains("No remote history was fetched"));
         }
-        assert!(
-            data.warnings
-                .iter()
-                .any(|warning| warning.contains("Partial clone")
-                    && warning.contains("Totals exclude this repository"))
-        );
+        assert!(message.contains("Partial clone"));
         assert_eq!(
             git(
                 &partial,
@@ -2101,12 +2101,11 @@ mod tests {
         let repo = new_repositories(std::slice::from_ref(&partial)).remove(0);
         let cancel = AtomicBool::new(false);
         let ctx = GitContext::new(&cancel);
-        let data =
+        let error =
             scan_repository_with_version(&repo, &CollectOptions::default(), &ctx, (2, 44, 0))
-                .unwrap();
-        assert!(data.records.is_empty());
-        assert!(data.warnings[0].contains("Git 2.45.1 or newer"));
-        assert!(data.warnings[0].contains("Totals exclude this repository"));
+                .unwrap_err();
+        assert!(error.to_string().contains("Git 2.45.1 or newer"));
+        assert!(error.to_string().contains("No remote history was fetched"));
         assert_eq!(
             git(
                 &partial,
@@ -2120,6 +2119,25 @@ mod tests {
                 .unwrap();
         assert_eq!(data.records.len(), 2);
         assert!(data.warnings.is_empty());
+        // Partial-clone configuration is not itself a failure when every
+        // required object is available and Git supports the no-fetch guard.
+        git(&full.path, &["config", "remote.origin.promisor", "true"]);
+        let available =
+            scan_repository_with_version(&full, &CollectOptions::default(), &ctx, (2, 45, 1))
+                .unwrap();
+        assert_eq!(available.records.len(), data.records.len());
+        assert_eq!(
+            available
+                .records
+                .iter()
+                .map(|record| (record.added, record.removed))
+                .collect::<Vec<_>>(),
+            data.records
+                .iter()
+                .map(|record| (record.added, record.removed))
+                .collect::<Vec<_>>(),
+        );
+        assert!(available.warnings.is_empty());
         assert!(
             scan_repository_with_version(&full, &CollectOptions::default(), &ctx, (2, 30, 0))
                 .unwrap_err()

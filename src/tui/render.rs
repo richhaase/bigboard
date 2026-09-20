@@ -79,27 +79,25 @@ impl App {
     }
 
     pub(super) fn quality_lines(&self) -> Vec<UiLine> {
-        let warnings = self
-            .warnings
-            .iter()
-            .filter(|(id, _)| !self.excluded.contains(id))
-            .count()
-            + self.attribution_warnings.len();
-        if warnings == 0 && self.failed_repos.is_empty() {
-            return vec![];
-        }
-        let mut parts = Vec::new();
+        let mut status = Vec::new();
         if !self.failed_repos.is_empty() {
-            parts.push(format!(
-                "Partial history: {} unreadable",
-                self.failed_repos.len()
-            ));
+            status.push(format!("{} unreadable", self.failed_repos.len()));
         }
-        if warnings > 0 {
-            parts.push(format!(
-                "{warnings} warning{}",
-                if warnings == 1 { "" } else { "s" }
-            ));
+        if self.scope == crate::model::HistoryScope::Landed {
+            let missing = self
+                .loaded_repos
+                .iter()
+                .filter(|repo| {
+                    !self.excluded.contains(&repo.id)
+                        && self.repository_history_unavailable(&repo.id)
+                })
+                .count();
+            if missing > 0 {
+                status.push(format!("{missing} without landed history"));
+            }
+        }
+        if status.is_empty() {
+            return vec![];
         }
         let inspect = if self.view == View::Operative {
             "esc → r"
@@ -108,14 +106,14 @@ impl App {
         };
         vec![text_line(
             truncate(
-                &format!("  ⚠ {}  //  [{inspect}] inspect", parts.join(" · ")),
+                &format!("  ⚠ Repos: {} · [{inspect}] details", status.join(" · ")),
                 self.width as usize,
             ),
             self.palette.amber,
         )]
     }
 
-    fn scope_line(&self) -> UiLine {
+    pub(super) fn scope_line(&self) -> UiLine {
         text_line(
             format!(
                 "  {} · {} · as of {}",
@@ -484,21 +482,12 @@ impl App {
         lines
     }
 
-    pub(super) fn detail_lines(&self) -> Vec<UiLine> {
+    pub(super) fn detail_content(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
         let author = self.authors.iter().find(|a| a.id == self.active_id);
         let context = author.or_else(|| self.contributors.iter().find(|a| a.id == self.active_id));
-        let name = context.map(|a| a.name.as_str()).unwrap_or("Contributor");
-        let mut lines = banner(width, self.height < 40, p);
-        lines.extend([
-            blank(),
-            footer(self.loaded_repos.len(), self.excluded_count(), width, "", p),
-            self.scope_line(),
-            time_picker(self.time_index, p),
-            blank(),
-            section(&format!("CONTRIBUTOR: {}", name.to_uppercase()), width, p),
-        ]);
+        let mut lines = Vec::new();
         if let Some(a) = context {
             let mut emails: Vec<_> = a.emails.iter().map(|e| display_text(e)).collect();
             emails.sort();
@@ -565,42 +554,10 @@ impl App {
                     p,
                 ));
             }
-            if a.unknown_line_commits > 0 {
-                lines.extend(wrapped(
-                    &format!(
-                        "  ⚠ Known line subtotal; {} authored commits have unknown lines.",
-                        a.unknown_line_commits
-                    ),
-                    width,
-                    p.amber,
-                ));
-            }
         } else {
             lines.extend([blank(),text_line("  ◈ NO SIGNAL — no activity in this range. Change time or press B for all branches.",p.amber)]);
         }
-        // Keep qualification and context visible even when the finite terminal
-        // displays the final screenful of a long contributor view.
-        lines.extend(self.quality_lines());
-        lines.push(self.scope_line());
-        lines.push(text_line(truncate(&format!("  {}", name), width), p.bright));
-        if let Some(notice) = &self.notice {
-            lines.push(text_line(
-                truncate(&format!("  ✓ {notice}"), width),
-                p.green,
-            ));
-        }
-        lines.extend(wrap_help(
-            &[
-                ("↑↓", "prev/next".into()),
-                ("esc", "back".into()),
-                ("←→", "time".into()),
-                ("B", "history".into()),
-                ("M", "merge".into()),
-                ("q", "quit".into()),
-            ],
-            width,
-            p,
-        ));
+
         lines
     }
 }

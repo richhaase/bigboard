@@ -265,8 +265,8 @@ fn timezone_maps_drive_daily_monthly_and_heatmap() {
     assert!(app.authors[0].daily.contains_key(&day));
     assert!(app.authors[0].monthly.contains_key("2026-05"));
     key(&mut app, KeyCode::Enter);
-    let text = plain(app.detail_lines());
-    assert!(text.contains("America/Denver"));
+    let text = plain(app.detail_content());
+    assert!(plain(app.detail_lines()).contains("America/Denver"));
     assert!(text.contains("May 2026"));
     assert!(text.contains('█'));
 }
@@ -292,31 +292,55 @@ fn unknown_and_coauthored_lines_are_not_rendered_as_zero() {
     assert!(plain(app.lines()).contains("Known line subtotal"));
     app.active_id = "email:grace@example.com".into();
     app.view = View::Operative;
-    let detail = plain(app.detail_lines());
+    let detail = plain(app.detail_content());
     assert!(detail.contains("Coauthored participation 1"));
     assert!(detail.contains("unallocated"));
     assert!(detail.contains('○'));
     assert!(detail.contains("Removed/added ratio: N/A"));
+    assert!(plain(app.detail_lines()).contains("— coauthor lines unallocated"));
 }
 #[test]
-fn incomplete_scan_warnings_visible_in_board_detail_and_repository() {
+fn scan_failures_remain_visible_without_per_commit_warnings() {
     let mut app = populated();
     app.failed_repos = vec!["broken".into()];
     app.warnings = vec![("/repos/engine".into(), "engine: shallow history".into())];
     let screen = draw(&mut app, 100, 28);
     assert!(screen.contains("1 unreadable"), "{screen}");
-    assert!(screen.contains("1 warning"), "{screen}");
+    assert!(!screen.contains("1 warning"), "{screen}");
     assert!(!screen.contains("shallow history"), "{screen}");
     key(&mut app, KeyCode::Enter);
     let screen = draw(&mut app, 80, 24);
     assert!(screen.contains("1 unreadable"), "{screen}");
-    assert!(screen.contains("1 warning"), "{screen}");
+    assert!(!screen.contains("1 warning"), "{screen}");
     assert!(!screen.contains("shallow history"), "{screen}");
     assert!(screen.contains("LANDED"));
     key(&mut app, KeyCode::Esc);
     ch(&mut app, 'r');
     ch(&mut app, 'j');
-    assert!(plain(app.lines()).contains("shallow history"));
+    assert!(!plain(app.lines()).contains("shallow history"));
+    ch(&mut app, 'j');
+    let inspector = draw(&mut app, 80, 24);
+    assert!(inspector.contains("SCAN FAILED"), "{inspector}");
+}
+
+#[test]
+fn unavailable_landed_history_is_actionable_only_when_it_affects_the_board() {
+    let mut app = populated();
+    app.warnings = vec![(
+        "/repos/engine".into(),
+        "engine: No available default branch could be identified; landed history is unknown. All locally available branches remain available in All branches.".into(),
+    )];
+
+    let board = plain(app.quality_lines());
+    assert!(board.contains("1 without landed history"), "{board}");
+    assert!(!board.contains("No available default branch"), "{board}");
+
+    app.scope = HistoryScope::AllBranches;
+    assert!(app.quality_lines().is_empty());
+
+    app.scope = HistoryScope::Landed;
+    app.excluded.insert("/repos/engine".into());
+    assert!(app.quality_lines().is_empty());
 }
 #[test]
 fn merged_commit_associations_not_summed_in_board() {
@@ -330,7 +354,7 @@ fn merged_commit_associations_not_summed_in_board() {
     assert_eq!(app.totals(), (1, 100, 10, 0));
     assert_eq!(app.authors[0].per_repo.len(), 2);
     key(&mut app, KeyCode::Enter);
-    assert!(plain(app.detail_lines()).contains("Repository associations can overlap"));
+    assert!(plain(app.detail_content()).contains("Repository associations can overlap"));
 }
 #[test]
 fn merge_picker_searches_all_loaded_dates_branches_repositories_and_emails() {
@@ -510,7 +534,7 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
     assert_eq!(app.authors.len(), 1);
     let summary = plain(app.lines());
     assert!(summary.contains("1 unreadable"), "{summary}");
-    assert!(summary.contains("1 warning"), "{summary}");
+    assert!(!summary.contains("1 warning"), "{summary}");
     assert!(!summary.contains("shallow history"), "{summary}");
     let old = app.cutoff;
     assert_eq!(ch(&mut app, 'R'), Action::Refresh);
@@ -660,7 +684,7 @@ fn views_render_at_tiny_and_large_sizes() {
 }
 
 #[test]
-fn attribution_conflicts_are_visible_and_change_with_repository_filters() {
+fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters() {
     let mut app = populated();
     let mut duplicate = app.all_records[0].clone();
     duplicate.repo_id = "/repos/compiler".into();
@@ -671,7 +695,7 @@ fn attribution_conflicts_are_visible_and_change_with_repository_filters() {
     populate(&mut app);
     assert!(!app.attribution_warnings.is_empty());
     let summary = plain(app.lines());
-    assert!(summary.contains("1 warning"), "{summary}");
+    assert!(!summary.contains("1 warning"), "{summary}");
     assert!(
         !summary.contains("conflicting contributor mappings"),
         "{summary}"
@@ -682,7 +706,7 @@ fn attribution_conflicts_are_visible_and_change_with_repository_filters() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        inspector.contains("conflicting contributor mappings"),
+        !inspector.contains("conflicting contributor mappings"),
         "{inspector}"
     );
     key(&mut app, KeyCode::Esc);
@@ -722,7 +746,7 @@ fn unknown_headers_are_qualified_and_detected_ai_remains_in_detail_breakdowns() 
     app.all_records[0].ai_assisted = true;
     app.all_records[0].added = 100;
     populate(&mut app);
-    let detail = plain(app.detail_lines());
+    let detail = plain(app.detail_content());
     let repo = detail
         .split("REPO CONTRIBUTIONS")
         .nth(1)
@@ -818,7 +842,7 @@ fn warning_heavy_dashboard_keeps_context_rows_and_controls_visible() {
                 let mut app = warning_heavy_dashboard(theme, unknown_lines);
                 let screen = draw(&mut app, width, 24);
                 let context = format!("{theme} {width}x24 unknown={unknown_lines}:\n{screen}");
-                assert!(screen.contains("19 warnings"), "{context}");
+                assert!(!screen.contains("19 warnings"), "{context}");
                 assert!(
                     !screen.contains("resolution line counts cannot"),
                     "{context}"
@@ -866,15 +890,7 @@ fn low_resolution_warning_keeps_context_and_resize_restores_selected_contributor
     ch(&mut app, 'j');
     let selected = app.selected_id().unwrap();
     let small = draw(&mut app, 60, 17);
-    for label in [
-        "B I G",
-        "LOW RESOLUTION",
-        "resize",
-        "LANDED",
-        "UTC",
-        "19 warnings",
-        "quit",
-    ] {
+    for label in ["B I G", "LOW RESOLUTION", "resize", "LANDED", "UTC", "quit"] {
         assert!(small.contains(label), "missing {label} at 60x17:\n{small}");
     }
     assert_eq!(app.selected_id().unwrap(), selected);
@@ -891,13 +907,7 @@ fn low_resolution_warning_keeps_context_and_resize_restores_selected_contributor
             .any(|line| line.contains('▸') && line.contains("Grace Hopper")),
         "{restored}"
     );
-    for label in [
-        "LANDED",
-        "UTC",
-        "19 warnings",
-        "Known line subtotal",
-        "unknown lines",
-    ] {
+    for label in ["LANDED", "UTC", "Known line subtotal", "unknown lines"] {
         assert!(
             restored.contains(label),
             "missing {label} after resize:\n{restored}"
@@ -1051,4 +1061,215 @@ fn many_row_navigation_preserves_selection_across_banner_height_boundary() {
             );
         }
     }
+}
+
+fn long_contributor_detail() -> App {
+    let mut app = empty();
+    app.loaded_repos = (0..20).map(|i| repo(&format!("project-{i:02}"))).collect();
+    app.all_records = (0..20)
+        .map(|i| {
+            let mut entry = record("Ada Lovelace", &format!("project-{i:02}"), 100 + i);
+            entry.lines_known = i != 0;
+            entry
+        })
+        .collect();
+    for offset in 0..11 {
+        let month = 7 + offset;
+        let (year, month) = if month > 12 {
+            (2026, month - 12)
+        } else {
+            (2025, month)
+        };
+        let mut entry = record("Ada Lovelace", "project-00", 200 + offset as i64);
+        entry.date = Utc
+            .with_ymd_and_hms(year, month, 1, 12, 0, 0)
+            .unwrap()
+            .fixed_offset();
+        app.all_records.push(entry);
+    }
+    app.all_records
+        .push(record("Grace Hopper", "project-00", 1));
+    app.failed_repos = vec!["broken".into()];
+    app.warnings = vec![(
+        "/repos/project-00".into(),
+        "per-commit diagnostic must not be rendered".into(),
+    )];
+    populate(&mut app);
+    assert_eq!(app.authors[0].per_repo.len(), 20);
+    assert_eq!(app.authors[0].monthly.len(), 12);
+    app
+}
+
+fn assert_detail_chrome(app: &App, screen: &str, width: u16, height: u16) {
+    let header = screen.lines().take(6).collect::<Vec<_>>().join("\n");
+    for label in ["CONTRIBUTOR:", "ADA LOVELACE", "LANDED", "UTC", "▐ALL▌"] {
+        assert!(header.contains(label), "missing fixed {label}:\n{screen}");
+    }
+    let normalized = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = normalized.to_lowercase();
+    for label in [
+        "? incomplete line counts",
+        "1 unreadable",
+        "pgup",
+        "pgdn",
+        "home",
+        "end",
+        "merge",
+        "history",
+        "back",
+        "quit",
+    ] {
+        assert!(lower.contains(label), "missing fixed {label}:\n{screen}");
+    }
+    assert!(!lower.contains("warning"), "{screen}");
+    assert!(!lower.contains("per-commit diagnostic"), "{screen}");
+    let lines = app.detail_lines();
+    assert!(lines.len() <= usize::from(height), "{screen}");
+    for line in lines {
+        assert!(
+            line.width() <= usize::from(width),
+            "detail line exceeds {width} columns: {}",
+            plain(vec![line])
+        );
+    }
+}
+
+#[test]
+fn detail_paging_reaches_every_repository_month_and_section_with_fixed_context() {
+    for (width, height) in [(80, 24), (144, 50)] {
+        let mut app = long_contributor_detail();
+        draw(&mut app, width, height);
+        key(&mut app, KeyCode::Enter);
+        let mut pages = Vec::new();
+        let selected = app.active_id.clone();
+        for _ in 0..100 {
+            let screen = draw(&mut app, width, height);
+            assert_detail_chrome(&app, &screen, width, height);
+            assert_eq!(app.active_id, selected);
+            pages.push(screen);
+            let before = app.detail_offset;
+            key(&mut app, KeyCode::PageDown);
+            if app.detail_offset == before {
+                break;
+            }
+        }
+        assert!(pages.len() > 1, "fixture must exceed {width}x{height}");
+        assert!(pages.len() < 100, "detail paging did not reach the end");
+        let all_pages = pages.join("\n");
+        for label in [
+            "REPO CONTRIBUTIONS",
+            "ACTIVITY TIMELINE",
+            "ACTIVITY MATRIX",
+            "Removed/added ratio:",
+            "Repository associations can overlap",
+        ] {
+            assert!(all_pages.contains(label), "missing {label}:\n{all_pages}");
+        }
+        for i in 0..20 {
+            let label = format!("project-{i:02}");
+            assert!(all_pages.contains(&label), "missing {label}:\n{all_pages}");
+        }
+        for label in [
+            "Jul 2025", "Aug 2025", "Sep 2025", "Oct 2025", "Nov 2025", "Dec 2025", "Jan 2026",
+            "Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026",
+        ] {
+            assert!(all_pages.contains(label), "missing {label}:\n{all_pages}");
+        }
+        key(&mut app, KeyCode::Home);
+        let first = draw(&mut app, width, height);
+        assert_eq!(app.detail_offset, 0);
+        assert_eq!(first, pages[0], "Home must restore the original first page");
+    }
+}
+
+#[test]
+fn detail_home_end_page_bounds_and_resize_keep_header_visible() {
+    let mut app = long_contributor_detail();
+    draw(&mut app, 80, 24);
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::End);
+    let last = draw(&mut app, 80, 24);
+    assert_detail_chrome(&app, &last, 80, 24);
+    assert!(last.contains("more (Lines changed)"), "{last}");
+    let bottom = app.detail_offset;
+    assert!(bottom > 0);
+    for code in [KeyCode::End, KeyCode::PageDown, KeyCode::PageDown] {
+        key(&mut app, code);
+        assert_eq!(app.detail_offset, bottom);
+    }
+    key(&mut app, KeyCode::PageUp);
+    assert!(app.detail_offset < bottom);
+    key(&mut app, KeyCode::Home);
+    assert_eq!(app.detail_offset, 0);
+    key(&mut app, KeyCode::PageUp);
+    assert_eq!(app.detail_offset, 0);
+    key(&mut app, KeyCode::End);
+    let wider = draw(&mut app, 144, 50);
+    assert_detail_chrome(&app, &wider, 144, 50);
+    let resized_bottom = app.detail_offset;
+    assert!(resized_bottom < bottom);
+    key(&mut app, KeyCode::End);
+    assert_eq!(
+        app.detail_offset, resized_bottom,
+        "resize must clamp to the new end"
+    );
+    let expanded = draw(&mut app, 144, 120);
+    assert_detail_chrome(&app, &expanded, 144, 120);
+    assert_eq!(app.detail_offset, 0, "all content fits after expansion");
+    assert!(expanded.contains("REPO CONTRIBUTIONS"));
+    assert!(expanded.contains("ACTIVITY MATRIX"));
+}
+
+#[test]
+fn detail_navigation_resets_viewport_without_changing_existing_controls() {
+    let mut app = long_contributor_detail();
+    draw(&mut app, 80, 24);
+    key(&mut app, KeyCode::Enter);
+    let ada = app.active_id.clone();
+    key(&mut app, KeyCode::End);
+    assert!(app.detail_offset > 0);
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.detail_offset, 0);
+    assert_ne!(app.active_id, ada);
+    assert!(draw(&mut app, 80, 24).contains("GRACE HOPPER"));
+    key(&mut app, KeyCode::Up);
+    assert_eq!(app.active_id, ada);
+    assert_eq!(app.detail_offset, 0);
+
+    for code in [KeyCode::Left, KeyCode::Right] {
+        key(&mut app, KeyCode::End);
+        assert!(app.detail_offset > 0);
+        let time = app.time_index;
+        key(&mut app, code);
+        assert_ne!(app.time_index, time);
+        assert_eq!(app.detail_offset, 0);
+        assert_eq!(app.active_id, ada);
+    }
+    for expected in [HistoryScope::AllBranches, HistoryScope::Landed] {
+        key(&mut app, KeyCode::End);
+        assert!(app.detail_offset > 0);
+        ch(&mut app, 'B');
+        assert_eq!(app.scope, expected);
+        assert_eq!(app.detail_offset, 0);
+        assert_eq!(app.active_id, ada);
+    }
+    key(&mut app, KeyCode::End);
+    ch(&mut app, 'M');
+    assert!(
+        app.merge.is_some(),
+        "merge remains available while detail is scrolled"
+    );
+    key(&mut app, KeyCode::Esc);
+    assert!(app.merge.is_none());
+    assert_eq!(app.active_id, ada);
+    key(&mut app, KeyCode::End);
+    assert!(app.detail_offset > 0);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.view, View::Aggregate);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.view, View::Operative);
+    assert_eq!(app.detail_offset, 0);
+    assert_eq!(app.active_id, ada);
+    let screen = draw(&mut app, 80, 24);
+    assert_detail_chrome(&app, &screen, 80, 24);
 }
