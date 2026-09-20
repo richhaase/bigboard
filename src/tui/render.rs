@@ -1,15 +1,19 @@
 use super::components::*;
 use super::merge::{wrap_help, wrapped};
-use super::{App, View};
+use super::{App, TIME_PRESETS, View};
 use crate::stats::{AuthorStats, RepoContribution, SortField};
 use chrono::{Datelike, Duration, Months, NaiveDate};
 use ratatui::text::{Line, Span};
 use std::collections::BTreeMap;
+use unicode_width::UnicodeWidthStr;
 
 impl App {
     pub(super) fn lines(&self) -> Vec<UiLine> {
         if self.loading {
             return self.loading_lines();
+        }
+        if self.view == View::Repositories {
+            return self.repository_lines();
         }
         if let Some(error) = &self.error {
             let mut lines = banner(self.width as usize, self.height < 25, &self.palette);
@@ -33,7 +37,7 @@ impl App {
         match self.view {
             View::Aggregate => self.aggregate_lines(),
             View::Operative => self.detail_lines(),
-            View::Repositories => self.overlay_lines(),
+            View::Repositories => self.repository_lines(),
         }
     }
 
@@ -75,56 +79,40 @@ impl App {
     }
 
     pub(super) fn quality_lines(&self) -> Vec<UiLine> {
-        let mut lines = Vec::new();
-        let p = &self.palette;
-        let width = self.width as usize;
-        if !self.failed_repos.is_empty() {
-            let names = self
-                .failed_repos
-                .iter()
-                .take(3)
-                .map(|n| display_text(n))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let more = if self.failed_repos.len() > 3 {
-                format!(", +{} more", self.failed_repos.len() - 3)
-            } else {
-                String::new()
-            };
-            lines.push(text_line(
-                truncate(
-                    &format!(
-                        "  ⚠ Partial history: {} unreadable — {names}{more}",
-                        self.failed_repos.len()
-                    ),
-                    width,
-                ),
-                p.amber,
-            ));
-        }
-        let warnings: Vec<_> = self
+        let warnings = self
             .warnings
             .iter()
             .filter(|(id, _)| !self.excluded.contains(id))
-            .map(|(_, warning)| warning)
-            .chain(self.attribution_warnings.iter())
-            .collect();
-        for warning in warnings.iter().take(2) {
-            lines.push(text_line(
-                truncate(&format!("  ⚠ {warning}"), width),
-                p.amber,
+            .count()
+            + self.attribution_warnings.len();
+        if warnings == 0 && self.failed_repos.is_empty() {
+            return vec![];
+        }
+        let mut parts = Vec::new();
+        if !self.failed_repos.is_empty() {
+            parts.push(format!(
+                "Partial history: {} unreadable",
+                self.failed_repos.len()
             ));
         }
-        if warnings.len() > 2 {
-            lines.push(text_line(
-                format!(
-                    "  ⚠ {} more data warnings; r → inspect details",
-                    warnings.len() - 2
-                ),
-                p.amber,
+        if warnings > 0 {
+            parts.push(format!(
+                "{warnings} warning{}",
+                if warnings == 1 { "" } else { "s" }
             ));
         }
-        lines
+        let inspect = if self.view == View::Operative {
+            "esc → r"
+        } else {
+            "r"
+        };
+        vec![text_line(
+            truncate(
+                &format!("  ⚠ {}  //  [{inspect}] inspect", parts.join(" · ")),
+                self.width as usize,
+            ),
+            self.palette.amber,
+        )]
     }
 
     fn scope_line(&self) -> UiLine {
@@ -144,101 +132,217 @@ impl App {
     fn aggregate_above(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
-        let short = self.height < 30;
-        let mut lines = banner(width, short, p);
-        if !short {
-            lines.push(blank());
-        }
-        lines.push(footer(
-            self.loaded_repos.len(),
-            self.excluded_count(),
-            width,
-            &self.version,
-            p,
-        ));
-        lines.push(self.scope_line());
-        lines.extend(self.quality_lines());
-        lines.push(time_picker(self.time_index, p));
-        if !short {
-            lines.push(blank());
-        }
+        // Expand the logo only when every contributor still fits. Resizing a
+        // busy board must never trade contributor rows for extra decoration.
+        let full_banner =
+            self.height >= 40 && self.authors.len() <= (self.height as usize).saturating_sub(22);
+        let mut lines = banner(width, !full_banner, p);
+        let left = format!(
+            "  {} · {} · {} · {}",
+            repo_count(self.loaded_repos.len(), self.excluded_count()).trim(),
+            self.scope.label(),
+            self.options.timezone,
+            self.cutoff
+                .with_timezone(&self.options.timezone)
+                .format("%Y-%m-%d %H:%M"),
+        );
+        let right = format!("v{}  ", self.version);
+        let context = if left.width() + right.width() + 2 <= width {
+            format!(
+                "{left}{}{right}",
+                " ".repeat(width - left.width() - right.width())
+            )
+        } else {
+            truncate(&left, width)
+        };
+        lines.push(text_line(context, p.dim_cyan));
+        lines.push(panel_header("ACTIVITY", width, p));
+        let inner = width.saturating_sub(4);
+        let (commits, added, removed, ai) = self.totals();
         let unknown = self
             .authors
             .iter()
             .map(|a| a.unknown_line_commits)
             .sum::<i64>();
-        lines.extend(qualified_stat_boxes(
-            self.totals(),
-            unknown,
-            width,
-            short,
-            p,
-        ));
         let coauthored = self
             .authors
             .iter()
             .map(|a| a.coauthored_commits)
             .sum::<i64>();
-        let (_, added, removed, _) = self.totals();
-        lines.push(text_line(
-            format!(
-                "  Lines changed: {} · Coauthored participation: {}",
+        let metrics = [
+            ("AUTHORED", format_number(commits), p.cyan),
+            ("ADDED", line_value(added, unknown, false), p.green),
+            ("REMOVED", line_value(removed, unknown, false), p.magenta),
+            (
+                "Lines changed",
                 line_value(added + removed, unknown, false),
-                format_number(coauthored)
+                p.cyan,
             ),
-            p.dim_cyan,
-        ));
-        if unknown > 0 {
-            lines.push(text_line(
-                format!("  ⚠ Known line subtotal; {unknown} authored commits have unknown lines"),
+            ("COAUTHORED", format_number(coauthored), p.cyan),
+            (
+                "Detected AI",
+                format!("{} ({ai})", percent_label(ai, commits)),
                 p.amber,
+            ),
+        ];
+        let mut row = Vec::new();
+        let mut used = 0;
+        for (label, value, color) in metrics {
+            let size = label.width() + value.width() + 1;
+            if !row.is_empty() && used + 3 + size > inner {
+                lines.push(panel_row(Line::from(std::mem::take(&mut row)), width, p));
+                used = 0;
+            }
+            if !row.is_empty() {
+                row.push(span(" │ ", p.dim_cyan));
+                used += 3;
+            }
+            row.extend([span(format!("{label} "), p.dim_cyan), bold(value, color)]);
+            used += size;
+        }
+        if !row.is_empty() {
+            lines.push(panel_row(Line::from(row), width, p));
+        }
+        if unknown > 0 {
+            let qualifier =
+                format!("Known line subtotal · {unknown} authored commits have unknown lines");
+            lines.push(panel_row(
+                text_line(truncate(&qualifier, inner), p.amber),
+                width,
+                p,
             ));
         }
+        lines.push(panel_footer(width, p));
+        if width >= 70 {
+            lines.push(time_picker(self.time_index, p));
+        } else {
+            lines.push(text_line(
+                truncate(
+                    &format!(
+                        "  ◂ RANGE ▐{}▌ ▸  [←→] change",
+                        TIME_PRESETS[self.time_index].0
+                    ),
+                    width,
+                ),
+                p.cyan,
+            ));
+        }
+        lines.extend(self.quality_lines());
         if let Some(notice) = &self.notice {
             lines.push(text_line(
                 truncate(&format!("  ✓ {notice}"), width),
                 p.green,
             ));
         }
-        if !short {
-            lines.push(blank());
-        }
         lines
     }
 
     fn aggregate_help(&self) -> Vec<UiLine> {
-        wrap_help(
-            &[
-                ("↑↓", "nav".into()),
+        let p = &self.palette;
+        let width = self.width as usize;
+        let groups = [
+            vec![
+                ("↑↓", "select".into()),
                 ("↵", "detail".into()),
-                ("←→", "time".into()),
+                ("←→", "range".into()),
                 ("/", "find".into()),
-                ("s", "sort".into()),
-                ("S", "reverse".into()),
+                ("s/S", "sort/reverse".into()),
+            ],
+            vec![
+                ("M", "merge".into()),
+                ("B", "history".into()),
                 (
                     "b",
                     format!("bots:{}", if self.hide_bots { "off" } else { "on" }),
                 ),
-                ("B", "history".into()),
-                ("M", "merge".into()),
                 ("r", "repos".into()),
                 ("R", "refresh".into()),
                 ("q", "quit".into()),
             ],
-            self.width as usize,
-            &self.palette,
-        )
+        ];
+        groups
+            .iter()
+            .flat_map(|group| wrap_help(group, width, p))
+            .collect()
+    }
+
+    fn table_legend(&self) -> Option<String> {
+        let authors = self.displayed_authors();
+        let mut markers = Vec::new();
+        if authors.iter().any(|a| a.unknown_line_commits > 0) {
+            markers.push("? unknown lines");
+        }
+        if authors
+            .iter()
+            .any(|a| a.commits == 0 && a.coauthored_commits > 0)
+        {
+            markers.push("— coauthor lines unallocated");
+        }
+        (!markers.is_empty()).then(|| markers.join(" · "))
+    }
+
+    fn selected_identity(&self) -> Option<String> {
+        let authors = self.displayed_authors();
+        let author = authors.get(self.selected)?;
+        if authors
+            .iter()
+            .filter(|other| other.name == author.name)
+            .count()
+            < 2
+        {
+            return None;
+        }
+        let mut emails: Vec<_> = author.emails.iter().map(|s| display_text(s)).collect();
+        emails.sort();
+        Some(if emails.is_empty() {
+            format!(
+                "repository-local · {}",
+                author
+                    .per_repo
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            emails.join(", ")
+        })
     }
 
     pub(super) fn table_viewport(&self) -> usize {
+        let footer = 1
+            + usize::from(self.table_legend().is_some())
+            + usize::from(self.selected_identity().is_some());
         (self.height as usize)
-            .saturating_sub(self.aggregate_above().len() + 2 + 3 + self.aggregate_help().len())
+            .saturating_sub(self.aggregate_above().len() + 3 + footer + self.aggregate_help().len())
             .max(1)
     }
+
     fn aggregate_lines(&self) -> Vec<UiLine> {
         let mut lines = self.aggregate_above();
         lines.extend(self.table_lines());
         lines.extend(self.aggregate_help());
+        if lines.len() > self.height as usize || self.width < 60 {
+            // Never silently tail-clip the board's scope or quality context.
+            // A terminal that cannot fit even one row needs an explicit prompt.
+            let required = lines.len();
+            let required_width = self.width.max(60);
+            let width = self.width as usize;
+            let p = &self.palette;
+            let mut compact = banner(width, true, p);
+            compact.push(text_line(
+                truncate(&self.scope_line().to_string(), width),
+                p.dim_cyan,
+            ));
+            compact.extend(self.quality_lines());
+            compact.extend(wrapped(
+                &format!("  ◈ LOW RESOLUTION · resize to at least {required_width}×{required} to display the board"),
+                width, p.amber,
+            ));
+            compact.push(help(&[("q", "quit".into())], p));
+            compact.truncate(self.height as usize);
+            return compact;
+        }
         lines
     }
 
@@ -248,67 +352,45 @@ impl App {
         let width = self.width as usize;
         if authors.is_empty() {
             return vec![text_line(
-                if self.searching || !self.filter_query.is_empty() {
-                    format!(
-                        "  ◈ NO MATCH for {:?} — esc to clear filter.",
-                        display_text(&self.filter_query)
-                    )
-                } else {
-                    "  ◈ NO SIGNAL — no commit data in range. Widen time or toggle B for all branches.".into()
-                },
+                truncate(
+                    &if self.searching || !self.filter_query.is_empty() {
+                        format!(
+                            "  ◈ NO MATCH for {:?} — esc to clear filter.",
+                            display_text(&self.filter_query)
+                        )
+                    } else {
+                        "  ◈ NO SIGNAL — no commit data in range. Widen time or toggle B for all branches.".into()
+                    },
+                    width,
+                ),
                 p.amber,
             )];
         }
-        let layout = TableLayout::new(width);
+        let layout = TableLayout::new(width.saturating_sub(4), &authors);
         let arrow = if self.sort_ascending { "↑" } else { "↓" };
-        let label = |s: &str, field| {
-            if self.sort_field == field {
-                format!("{s}{arrow}")
-            } else {
-                s.into()
-            }
-        };
-        let mut headers = vec![
-            "  # ".to_string(),
-            pad_right("CONTRIBUTOR", layout.name),
-            pad_left(
-                &label(
-                    if width < 60 { "AUTH" } else { "AUTHORED" },
-                    SortField::Commits,
-                ),
-                layout.count,
+        let mut header = vec![bold(
+            format!(
+                "  {}  {}",
+                pad_left("#", layout.rank),
+                pad_right(&truncate("CONTRIBUTOR", layout.name), layout.name)
             ),
-            pad_left(if width < 60 { "CO" } else { "COAUTH" }, layout.co_count),
-        ];
-        if layout.extra {
-            headers.extend([
-                pad_left(&label("ADDED", SortField::Added), 9),
-                pad_left(&label("REMOVED", SortField::Removed), 9),
-            ]);
-        }
-        if layout.net {
-            headers.push(pad_left(&label("NET", SortField::Net), 9));
-        }
-        headers.push(pad_left(
-            &label(
-                if width < 60 { "LINES" } else { "LINES CHANGED" },
-                SortField::Total,
-            ),
-            layout.lines,
-        ));
-        if layout.ai {
-            headers.push(pad_left(
-                &label(
-                    if width < 80 { "AI%" } else { "DETECTED AI" },
-                    SortField::AI,
-                ),
-                layout.ai_width,
+            p.cyan,
+        )];
+        for column in &layout.columns {
+            let selected = column.field.sort_field() == Some(self.sort_field);
+            let label = format!("{}{}", column.label, if selected { arrow } else { " " });
+            header.push(bold(
+                format!("  {}", pad_left(&label, column.width)),
+                if selected { p.magenta } else { p.cyan },
             ));
         }
-        let mut lines = vec![Line::from(bold(headers.join(" "), p.cyan)), rule(width, p)];
+        let mut lines = vec![
+            panel_header("CONTRIBUTORS", width, p),
+            panel_row(Line::from(header), width, p),
+        ];
         let start = self.offset.min(authors.len());
         let end = (start + self.table_viewport()).min(authors.len());
-        for (index, a) in authors.iter().enumerate().take(end).skip(start) {
+        for (index, author) in authors.iter().enumerate().take(end).skip(start) {
             let rank = if self.sort_ascending {
                 authors.len() - index
             } else {
@@ -322,208 +404,83 @@ impl App {
             };
             let mut row = vec![
                 bold(if index == self.selected { "▸ " } else { "  " }, p.cyan),
-                bold(format!("{rank:02}"), rank_color),
-                Span::raw(" "),
+                bold(pad_left(&format!("{rank:02}"), layout.rank), rank_color),
+                Span::raw("  "),
             ];
-            if a.bot {
-                let n = layout.name.saturating_sub(4);
+            if author.bot && layout.name >= 8 {
+                let name_width = layout.name - 4;
+                let name = truncate(&author.name, name_width);
+                let padding = name_width.saturating_sub(name.width());
                 row.extend([
-                    span(pad_right(&truncate(&a.name, n), n), p.bright),
+                    span(name, p.bright),
                     span(" BOT", p.dim_cyan),
+                    Span::raw(" ".repeat(padding)),
                 ]);
             } else {
                 row.push(span(
-                    pad_right(&truncate(&a.name, layout.name), layout.name),
+                    pad_right(&truncate(&author.name, layout.name), layout.name),
                     p.bright,
                 ));
             }
-            append_cell(&mut row, &format_number(a.commits), layout.count, p.green);
-            append_cell(
-                &mut row,
-                &format_number(a.coauthored_commits),
-                layout.co_count,
-                p.cyan,
-            );
-            let unallocated = a.commits == 0 && a.coauthored_commits > 0;
-            if layout.extra {
-                append_cell(
-                    &mut row,
-                    &line_value(a.added, a.unknown_line_commits, unallocated),
-                    9,
-                    p.green,
-                );
-                append_cell(
-                    &mut row,
-                    &line_value(a.removed, a.unknown_line_commits, unallocated),
-                    9,
-                    p.magenta,
-                );
+            for column in &layout.columns {
+                let value = column.field.value(author);
+                let color = match column.field {
+                    TableField::Added => p.green,
+                    TableField::Removed => p.magenta,
+                    TableField::Lines | TableField::Net if author.unknown_line_commits > 0 => {
+                        p.amber
+                    }
+                    TableField::Net if author.net < 0 => p.red,
+                    TableField::Net | TableField::Lines => p.green,
+                    TableField::AI => p.amber,
+                    _ => p.cyan,
+                };
+                row.push(span(format!("  {}", pad_left(&value, column.width)), color));
             }
-            if layout.net {
-                append_cell(
-                    &mut row,
-                    &line_value(a.net, a.unknown_line_commits, unallocated),
-                    9,
-                    if a.net < 0 { p.red } else { p.green },
-                );
-            }
-            append_cell(
-                &mut row,
-                &line_value(a.total_change, a.unknown_line_commits, unallocated),
-                layout.lines,
-                if a.unknown_line_commits > 0 {
-                    p.amber
-                } else {
-                    p.green
-                },
-            );
-            if layout.ai {
-                append_cell(
-                    &mut row,
-                    &if a.commits > 0 {
-                        percent_label(a.ai_commits, a.commits)
-                    } else {
-                        "—".into()
-                    },
-                    layout.ai_width,
-                    p.amber,
-                );
-            }
-            lines.push(Line::from(row).style(p.row(index == self.selected, index)));
+            lines.push(panel_row(
+                Line::from(row).style(p.row(index == self.selected, index)),
+                width,
+                p,
+            ));
         }
+        lines.push(panel_footer(width, p));
         if self.searching {
-            lines.push(Line::from(vec![
-                span("  /", p.cyan),
-                span(display_text(&self.filter_query), p.bright),
-                bold("▌", p.cyan),
-                span("  enter apply · esc clear", p.dim_white),
-            ]));
+            lines.push(text_line(
+                truncate(
+                    &format!(
+                        "  /{}▌  enter apply · esc clear",
+                        display_text(&self.filter_query)
+                    ),
+                    width,
+                ),
+                p.cyan,
+            ));
         } else {
             lines.push(text_line(
                 truncate(
                     &format!(
-                        "  showing {}–{end} of {} · sort: {} {}",
+                        "  showing {}–{end} of {} · sort: {} {arrow}",
                         start + 1,
                         authors.len(),
-                        self.sort_field.label(),
-                        arrow
+                        self.sort_field.label()
                     ),
                     width,
                 ),
                 p.dim_cyan,
             ));
         }
-        lines.push(text_line(
-            truncate(
-                "  CO = coauthored participation · ? unknown lines · — unallocated",
-                width,
-            ),
-            p.dim_white,
-        ));
-        if let Some(author) = authors.get(self.selected) {
-            let mut emails: Vec<_> = author.emails.iter().map(|s| display_text(s)).collect();
-            emails.sort();
-            let identity = if emails.is_empty() {
-                format!(
-                    "repository-local · {}",
-                    author
-                        .per_repo
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                emails.join(", ")
-            };
+        if let Some(legend) = self.table_legend() {
             lines.push(text_line(
-                truncate(&format!("  {identity}"), width),
+                truncate(&format!("  {legend}"), width),
                 p.dim_white,
             ));
         }
-        lines
-    }
-
-    fn overlay_lines(&self) -> Vec<UiLine> {
-        let p = &self.palette;
-        let width = self.width as usize;
-        let mut lines = vec![section("REPOSITORY CONTROL", width, p), blank()];
-        let selected = self.loaded_repos.get(self.overlay_cursor);
-        let mut warning_lines = Vec::new();
-        if let Some(repo) = selected {
-            for (_, warning) in self.warnings.iter().filter(|(id, _)| id == &repo.id) {
-                warning_lines.extend(wrapped(&format!("  ⚠ {warning}"), width, p.amber));
-            }
+        if let Some(identity) = self.selected_identity() {
+            lines.push(text_line(
+                truncate(&format!("  ID {identity}"), width),
+                p.dim_white,
+            ));
         }
-        if let Some(repo) = selected {
-            let filtered = self.filtered_records();
-            let commits: std::collections::HashSet<_> = filtered
-                .iter()
-                .filter(|record| record.repo_id == repo.id)
-                .map(|record| record.commit_id.clone())
-                .collect();
-            let associated: Vec<_> = filtered
-                .into_iter()
-                .filter(|record| commits.contains(&record.commit_id))
-                .collect();
-            let warnings =
-                crate::stats::attribution_warnings(&associated, &self.aggregate_options());
-            if !warnings.is_empty() {
-                warning_lines.push(text_line(
-                    "  Attribution warnings for the current filters:",
-                    p.amber,
-                ));
-                for warning in warnings {
-                    warning_lines.extend(wrapped(&format!("  ⚠ {warning}"), width, p.amber));
-                }
-            }
-        }
-        let rows = (self.height as usize)
-            .saturating_sub(lines.len() + warning_lines.len() + 5)
-            .max(1);
-        let start = self.overlay_cursor.saturating_add(1).saturating_sub(rows);
-        for (i, repo) in self.loaded_repos.iter().enumerate().skip(start).take(rows) {
-            let excluded = self.overlay_excluded.contains(&repo.id);
-            let c = if excluded { p.dim_white } else { p.cyan };
-            let has_warning = self.warnings.iter().any(|(id, _)| id == &repo.id);
-            lines.push(
-                Line::from(vec![
-                    bold(
-                        if i == self.overlay_cursor {
-                            "  ▸ "
-                        } else {
-                            "    "
-                        },
-                        p.cyan,
-                    ),
-                    span(if excluded { "[ ] " } else { "[x] " }, c),
-                    span(display_text(&repo.name), c),
-                    span(if has_warning { "  ⚠" } else { "" }, p.amber),
-                ])
-                .style(p.row(i == self.overlay_cursor, i)),
-            );
-        }
-        let excluded = self
-            .loaded_repos
-            .iter()
-            .filter(|r| self.overlay_excluded.contains(&r.id))
-            .count();
-        lines.push(blank());
-        lines.extend(warning_lines);
-        lines.push(text_line(
-            repo_count(self.loaded_repos.len(), excluded),
-            p.dim_cyan,
-        ));
-        lines.push(blank());
-        lines.extend(wrap_help(
-            &[
-                ("space", "toggle".into()),
-                ("enter/esc", "done".into()),
-                ("↑↓", "navigate".into()),
-            ],
-            width,
-            p,
-        ));
         lines
     }
 
@@ -681,68 +638,125 @@ fn qualified_stat_boxes(
     lines
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TableField {
+    Authored,
+    Coauthored,
+    Added,
+    Removed,
+    Net,
+    Lines,
+    AI,
+}
+impl TableField {
+    fn sort_field(self) -> Option<SortField> {
+        Some(match self {
+            Self::Authored => SortField::Commits,
+            Self::Added => SortField::Added,
+            Self::Removed => SortField::Removed,
+            Self::Net => SortField::Net,
+            Self::Lines => SortField::Total,
+            Self::AI => SortField::AI,
+            Self::Coauthored => return None,
+        })
+    }
+    fn value(self, author: &AuthorStats) -> String {
+        let unallocated = author.commits == 0 && author.coauthored_commits > 0;
+        match self {
+            Self::Authored => format_number(author.commits),
+            Self::Coauthored => format_number(author.coauthored_commits),
+            Self::Added => line_value(author.added, author.unknown_line_commits, unallocated),
+            Self::Removed => line_value(author.removed, author.unknown_line_commits, unallocated),
+            Self::Net => line_value(author.net, author.unknown_line_commits, unallocated),
+            Self::Lines => line_value(
+                author.total_change,
+                author.unknown_line_commits,
+                unallocated,
+            ),
+            Self::AI if author.commits == 0 => "—".into(),
+            Self::AI => percent_label(author.ai_commits, author.commits),
+        }
+    }
+}
+struct TableColumn {
+    field: TableField,
+    label: &'static str,
+    width: usize,
+}
 struct TableLayout {
     name: usize,
-    count: usize,
-    co_count: usize,
-    lines: usize,
-    extra: bool,
-    net: bool,
-    ai: bool,
-    ai_width: usize,
+    rank: usize,
+    columns: Vec<TableColumn>,
 }
 impl TableLayout {
-    fn new(width: usize) -> Self {
-        if width >= 120 {
-            Self {
-                name: 22,
-                count: 8,
-                co_count: 7,
-                lines: 14,
-                extra: true,
-                net: true,
-                ai: true,
-                ai_width: 11,
+    fn new(width: usize, authors: &[&AuthorStats]) -> Self {
+        let compact = width < 70;
+        let fields = [
+            (
+                TableField::Authored,
+                if compact { "AUTH" } else { "AUTHORED" },
+            ),
+            (
+                TableField::Coauthored,
+                if compact { "CO" } else { "COAUTH" },
+            ),
+            (TableField::Added, "ADDED"),
+            (TableField::Removed, "REMOVED"),
+            (TableField::Net, "NET"),
+            (
+                TableField::Lines,
+                if compact { "LINES" } else { "LINES CHANGED" },
+            ),
+            (
+                TableField::AI,
+                if width < 110 { "AI%" } else { "DETECTED AI" },
+            ),
+        ];
+        let rank = authors.len().to_string().len().max(2);
+        let mut columns: Vec<_> = fields
+            .into_iter()
+            .map(|(field, label)| {
+                let values = authors
+                    .iter()
+                    .map(|author| field.value(author).width())
+                    .max()
+                    .unwrap_or(0);
+                // Every sortable heading reserves its arrow before allocating cells.
+                TableColumn {
+                    field,
+                    label,
+                    width: values.max(label.width() + 1),
+                }
+            })
+            .collect();
+        let fixed =
+            |columns: &[TableColumn]| 4 + rank + columns.iter().map(|c| c.width + 2).sum::<usize>();
+        let min_name = if width >= 70 { 16 } else { 12 };
+        for remove in [
+            TableField::Added,
+            TableField::Removed,
+            TableField::Net,
+            TableField::AI,
+            TableField::Coauthored,
+            TableField::Lines,
+            TableField::Authored,
+        ] {
+            if fixed(&columns) + min_name <= width {
+                break;
             }
-        } else if width >= 80 {
-            Self {
-                name: 20,
-                count: 8,
-                co_count: 6,
-                lines: 14,
-                extra: false,
-                net: true,
-                ai: true,
-                ai_width: 11,
-            }
-        } else if width >= 60 {
-            Self {
-                name: 18,
-                count: 8,
-                co_count: 6,
-                lines: 14,
-                extra: false,
-                net: false,
-                ai: true,
-                ai_width: 5,
-            }
-        } else {
-            Self {
-                name: width.saturating_sub(25).clamp(6, 16),
-                count: 4,
-                co_count: 2,
-                lines: 7,
-                extra: false,
-                net: false,
-                ai: width >= 44,
-                ai_width: 4,
-            }
+            columns.retain(|c| c.field != remove);
+        }
+        Self {
+            name: width.saturating_sub(fixed(&columns)),
+            rank,
+            columns,
         }
     }
 }
 fn append_cell(row: &mut Vec<UiSpan>, value: &str, width: usize, color: ratatui::style::Color) {
     row.push(span(format!(" {}", pad_left(value, width)), color));
 }
+
 pub(super) fn line_value(value: i64, unknown: i64, unallocated: bool) -> String {
     if unallocated {
         "—".into()

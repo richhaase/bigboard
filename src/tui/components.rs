@@ -3,7 +3,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub(super) type UiLine = Line<'static>;
 pub(super) type UiSpan = Span<'static>;
@@ -49,8 +50,8 @@ impl Palette {
             cyan_dim: c(0x7CAEB8, 0x005577),
             magenta_mid: c(0xB449C4, 0xCC00CC),
             magenta_dim: c(0xD29ED9, 0x660066),
-            dim_cyan: c(0x5E8590, 0x005566),
-            dim_white: c(0x888888, 0x555555),
+            dim_cyan: c(0x486E7D, 0x4B99A8),
+            dim_white: c(0x64677B, 0x8991A8),
             bright: c(0x1A1A1A, 0xE0E0E0),
             row_even: c(0xF0F2F8, 0x0A0A1A),
             row_odd: c(0xFAFAFA, 0x070714),
@@ -106,7 +107,21 @@ pub(super) fn rule(width: usize, p: &Palette) -> UiLine {
 
 pub(super) fn banner(width: usize, compact: bool, p: &Palette) -> Vec<UiLine> {
     if width < 82 || compact {
-        return vec![Line::from(bold("  ░▒▓█  B I G   B O A R D  █▓▒░", p.cyan))];
+        let title = if width >= 31 {
+            "B I G   B O A R D"
+        } else {
+            "BIG BOARD"
+        };
+        return vec![clip_line(
+            Line::from(vec![
+                span("  ░▒", p.cyan_dim),
+                bold("▓█  ", p.cyan),
+                bold(title, p.cyan),
+                bold("  █▓", p.magenta),
+                span("▒░", p.magenta_dim),
+            ]),
+            width,
+        )];
     }
     [
         "████████  ████  ██████      ████████   ███████     ███    ████████  ████████",
@@ -201,35 +216,17 @@ pub(super) fn stat_boxes(
         values.push((ai_value(commits, ai), "DETECTED AI", p.amber));
     }
     if width < 78 || compact {
-        let mut spans = vec![
-            span("  AUTHORED ", p.dim_cyan),
-            bold(format_number(commits), p.cyan),
-        ];
-        let mut used = 10 + format_number(commits).width();
-        for (value, label, color) in values.iter().skip(1) {
-            let val = if *label == "DETECTED AI" {
-                format!("Detected AI {value}")
-            } else {
-                value.clone()
-            };
-            if used + 5 + val.width() > width {
-                break;
-            }
-            used += 5 + val.width();
-            spans.push(span("  ·  ", p.dim_cyan));
-            spans.push(bold(val, *color));
-        }
-        return vec![Line::from(spans)];
+        return compact_stat_lines(&values, width, p);
     }
     let boxes: Vec<Vec<UiLine>> = values
-        .into_iter()
+        .iter()
         .map(|(value, label, color)| {
             let inner = value.width().max(label.width()) + 6;
             vec![
                 text_line(format!("┏{}┓", "━".repeat(inner)), p.dim_cyan),
                 Line::from(vec![
                     span("┃", p.dim_cyan),
-                    bold(center(&value, inner), color),
+                    bold(center(value, inner), *color),
                     span("┃", p.dim_cyan),
                 ]),
                 text_line(format!("┃{}┃", center(label, inner)), p.dim_cyan),
@@ -240,14 +237,9 @@ pub(super) fn stat_boxes(
     let full_width: usize =
         2 + boxes.iter().map(|b| b[0].width()).sum::<usize>() + boxes.len().saturating_sub(1);
     if full_width > width {
-        return boxes
-            .into_iter()
-            .flatten()
-            .map(|mut l| {
-                l.spans.insert(0, Span::raw("  "));
-                l
-            })
-            .collect();
+        // Stacking four cards uses sixteen rows. Fall back to a compact,
+        // width-bounded summary so large counts do not consume the dashboard.
+        return compact_stat_lines(&values, width, p);
     }
     (0..4)
         .map(|row| {
@@ -261,6 +253,111 @@ pub(super) fn stat_boxes(
             Line::from(spans)
         })
         .collect()
+}
+
+fn compact_stat_lines(values: &[(String, &str, Color)], width: usize, p: &Palette) -> Vec<UiLine> {
+    if width == 0 {
+        return vec![blank()];
+    }
+    let indent = " ".repeat(width.min(2));
+    let mut lines = Vec::new();
+    let mut line = Line::from(indent.clone());
+    for (value, label, color) in values {
+        let item = Line::from(vec![
+            span(format!("{label} "), p.dim_cyan),
+            bold(value, *color),
+        ]);
+        let populated = line.spans.len() > 1;
+        let separator_width = if populated { 3 } else { 0 };
+        if populated && line.width() + separator_width + item.width() > width {
+            lines.push(line);
+            line = Line::from(indent.clone());
+        }
+        if line.spans.len() > 1 {
+            line.spans.push(span(" · ", p.dim_cyan));
+        }
+        let available = width.saturating_sub(line.width());
+        line.spans.extend(clip_line(item, available).spans);
+    }
+    lines.push(line);
+    lines
+}
+
+/// A full-width neon panel edge. Width includes the border; no margin is added.
+pub(super) fn panel_header(label: &str, width: usize, p: &Palette) -> UiLine {
+    if width < 8 {
+        return panel_edge("┏", "┓", width, p);
+    }
+    let label = truncate(label, width - 8);
+    Line::from(vec![
+        span("┏━╸ ", p.cyan),
+        bold(label.clone(), p.magenta),
+        span(
+            format!(" ╺{}", "━".repeat(width - label.width() - 7)),
+            p.cyan_mid,
+        ),
+        span("┓", p.magenta),
+    ])
+}
+
+pub(super) fn panel_footer(width: usize, p: &Palette) -> UiLine {
+    panel_edge("┗", "┛", width, p)
+}
+
+fn panel_edge(left: &str, right: &str, width: usize, p: &Palette) -> UiLine {
+    if width == 0 {
+        return blank();
+    }
+    if width == 1 {
+        return text_line(left, p.cyan);
+    }
+    let inner = width - 2;
+    let cyan_width = inner * 2 / 3;
+    Line::from(vec![
+        span(left, p.cyan),
+        span("━".repeat(cyan_width), p.cyan_mid),
+        span("━".repeat(inner - cyan_width), p.magenta_mid),
+        span(right, p.magenta),
+    ])
+}
+
+/// Frame an existing styled row. The content area is width - 4 cells, with one
+/// space between each edge and its content. Wide graphemes are never split.
+pub(super) fn panel_row(content: UiLine, width: usize, p: &Palette) -> UiLine {
+    if width < 4 {
+        return match width {
+            0 => blank(),
+            1 => text_line("┃", p.cyan),
+            2 => Line::from(vec![span("┃", p.cyan), span("┃", p.magenta)]),
+            _ => Line::from(vec![span("┃ ", p.cyan), span("┃", p.magenta)]),
+        };
+    }
+    let inner_width = width - 4;
+    let content_style = content.style;
+    let content = clip_line(content, inner_width);
+    let used = content.width();
+    let mut spans = vec![span("┃ ", p.cyan_mid)];
+    spans.extend(content.spans);
+    spans.push(Span::styled(" ".repeat(inner_width - used), content_style));
+    spans.push(span(" ┃", p.magenta_mid));
+    Line::from(spans)
+}
+
+fn clip_line(line: UiLine, width: usize) -> UiLine {
+    let mut remaining = width;
+    let mut clipped = Vec::new();
+    for item in line.spans {
+        let clean = display_text(&item.content);
+        let text = cut_width(&clean, remaining);
+        let used = text.width();
+        let complete = text.len() == clean.len();
+        clipped.push(Span::styled(text, line.style.patch(item.style)));
+        remaining -= used;
+        if !complete || remaining == 0 {
+            break;
+        }
+    }
+    Line::from(clipped)
 }
 
 pub(super) fn impact_bar(
@@ -313,8 +410,8 @@ pub(super) fn help(bindings: &[(&str, String)], p: &Palette) -> UiLine {
         }
         spans.extend([
             span("▐", p.dim_cyan),
-            span(*key, p.cyan),
-            span("▌", p.dim_cyan),
+            bold(*key, p.cyan),
+            span("▌ ", p.dim_cyan),
             span(desc.clone(), p.dim_white),
         ]);
     }
@@ -398,9 +495,9 @@ pub(super) fn truncate(s: &str, width: usize) -> String {
 }
 fn cut_width(s: &str, width: usize) -> String {
     let mut used = 0;
-    s.chars()
-        .take_while(|c| {
-            used += c.width().unwrap_or(0);
+    s.graphemes(true)
+        .take_while(|grapheme| {
+            used += grapheme.width();
             used <= width
         })
         .collect()
@@ -414,4 +511,98 @@ pub(super) fn pad_left(s: &str, width: usize) -> String {
 fn center(s: &str, width: usize) -> String {
     let pad = width.saturating_sub(s.width());
     format!("{}{s}{}", " ".repeat(pad / 2), " ".repeat(pad - pad / 2))
+}
+
+#[cfg(test)]
+mod component_tests {
+    use super::*;
+
+    fn plain(line: &UiLine) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn neon_panels_keep_exact_cell_width_and_styled_content() {
+        for theme in ["light", "dark"] {
+            let p = Palette::for_theme(theme);
+            for width in [0, 1, 2, 3, 4, 7, 8, 20, 60, 120, 220] {
+                let content = Line::from(vec![
+                    bold("日本語 ", p.green),
+                    span("👩‍💻 e\u{301} contributor", p.bright),
+                ])
+                .style(Style::default().bg(p.row_selected));
+                let row = panel_row(content, width, &p);
+                assert_eq!(row.width(), width, "row {theme} {width}");
+                assert_eq!(
+                    panel_header("CONTRIBUTION // 活動", width, &p).width(),
+                    width
+                );
+                assert_eq!(panel_footer(width, &p).width(), width);
+                if width >= 20 {
+                    assert!(row.spans.iter().any(|s| {
+                        s.content.starts_with("日本語")
+                            && s.style.fg == Some(p.green)
+                            && s.style.bg == Some(p.row_selected)
+                    }));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_banner_is_bounded_and_full_banner_remains_available() {
+        let p = Palette::for_theme("dark");
+        for width in [0, 1, 10, 20, 30, 31, 60, 120, 220] {
+            let lines = banner(width, true, &p);
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].width() <= width);
+        }
+        assert_eq!(banner(120, false, &p).len(), 7);
+        let compact = banner(120, true, &p);
+        assert!(
+            compact[0]
+                .spans
+                .iter()
+                .any(|s| s.style.fg == Some(p.magenta))
+        );
+    }
+
+    #[test]
+    fn keycaps_have_space_before_description_and_keep_bindings() {
+        let p = Palette::for_theme("dark");
+        let line = help(&[("B", "history".into()), ("M", "merge".into())], &p);
+        assert_eq!(plain(&line), "  ▐B▌ history  ▐M▌ merge");
+    }
+
+    #[test]
+    fn card_overflow_uses_bounded_summary_instead_of_vertical_card_stack() {
+        let p = Palette::for_theme("light");
+        for width in [40, 60, 78, 80, 96, 120] {
+            let lines = stat_boxes((1_234_567, 9_876_543, 1_234_567, 4_321), width, false, &p);
+            assert!(lines.len() <= 4, "{width} cells used {} rows", lines.len());
+            assert!(lines.iter().all(|line| line.width() <= width));
+            let text = lines.iter().map(plain).collect::<Vec<_>>().join("\n");
+            for value in ["1,234,567", "+9,876,543", "-1,234,567", "DETECTED AI"] {
+                assert!(text.contains(value), "{width} cells dropped {value}");
+            }
+        }
+        for width in [0, 1, 2, 3, 10, 20, 40, 78, 120] {
+            let lines = stat_boxes((i64::MAX, i64::MAX, i64::MAX, 0), width, true, &p);
+            assert!(lines.len() <= 3);
+            assert!(lines.iter().all(|line| line.width() <= width));
+        }
+    }
+
+    #[test]
+    fn clipping_preserves_whole_unicode_graphemes() {
+        assert_eq!(cut_width("👩‍💻作業", 2), "👩‍💻");
+        assert_eq!(cut_width("e\u{301}quipe", 1), "e\u{301}");
+        let p = Palette::for_theme("dark");
+        let row = panel_row(text_line("👩‍💻作業", p.cyan), 6, &p);
+        assert_eq!(plain(&row), "┃ 👩‍💻 ┃");
+        assert_eq!(row.width(), 6);
+    }
 }
