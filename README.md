@@ -67,12 +67,15 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `b` | Include/exclude bots from contributor rows and totals |
 | `B` | Toggle landed / all-branch activity |
 | `M` | Merge the selected contributor with another identity |
+| `?` | Expand/collapse the board's command reference |
 | `r` | Open repository selection and details from the board |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
 | `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
 | `Home/End` | Jump to the top/bottom of contributor detail content |
 | `R` | Refresh (re-scan all repos) |
 | `q` | Quit (clears an active filter first) |
+
+The board uses a compact wordmark and shows contribution totals, net change, total lines changed, and relevant coauthor or detected-AI columns. Added or removed lines appear when that metric is selected for sorting; the contributor detail view retains the full breakdown. Press `?` for the complete command reference.
 
 In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
 

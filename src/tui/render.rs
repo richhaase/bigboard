@@ -130,11 +130,9 @@ impl App {
     fn aggregate_above(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
-        // Expand the logo only when every contributor still fits. Resizing a
-        // busy board must never trade contributor rows for extra decoration.
-        let full_banner =
-            self.height >= 40 && self.authors.len() <= (self.height as usize).saturating_sub(22);
-        let mut lines = banner(width, !full_banner, p);
+        // The board is an operational view. Keep the full logo for transient
+        // screens and use the neon wordmark here so data gets the space.
+        let mut lines = banner(width, true, p);
         let left = format!(
             "  {} · {} · {} · {}",
             repo_count(self.loaded_repos.len(), self.excluded_count()).trim(),
@@ -154,8 +152,7 @@ impl App {
             truncate(&left, width)
         };
         lines.push(text_line(context, p.dim_cyan));
-        lines.push(panel_header("ACTIVITY", width, p));
-        let inner = width.saturating_sub(4);
+        lines.push(section("ACTIVITY", width, p));
         let (commits, added, removed, ai) = self.totals();
         let unknown = self
             .authors
@@ -167,50 +164,58 @@ impl App {
             .iter()
             .map(|a| a.coauthored_commits)
             .sum::<i64>();
-        let metrics = [
-            ("AUTHORED", format_number(commits), p.cyan),
-            ("ADDED", line_value(added, unknown, false), p.green),
-            ("REMOVED", line_value(removed, unknown, false), p.magenta),
+        let mut metrics = vec![
+            ("AUTH", format_number(commits), p.cyan),
             (
-                "Lines changed",
+                "LINES",
                 line_value(added + removed, unknown, false),
-                p.cyan,
+                p.green,
             ),
-            ("COAUTHORED", format_number(coauthored), p.cyan),
             (
-                "Detected AI",
-                format!("{} ({ai})", percent_label(ai, commits)),
-                p.amber,
+                "NET",
+                line_value(added - removed, unknown, false),
+                if added >= removed { p.green } else { p.red },
             ),
         ];
-        let mut row = Vec::new();
-        let mut used = 0;
+        if coauthored > 0 {
+            metrics.push(("COAUTH", format_number(coauthored), p.cyan));
+        }
+        if ai > 0 {
+            metrics.push((
+                "AI",
+                format!("{} ({ai})", percent_label(ai, commits)),
+                p.amber,
+            ));
+        }
+        let mut row = vec![Span::raw("  ")];
+        let mut used = 2;
         for (label, value, color) in metrics {
             let size = label.width() + value.width() + 1;
-            if !row.is_empty() && used + 3 + size > inner {
-                lines.push(panel_row(Line::from(std::mem::take(&mut row)), width, p));
-                used = 0;
+            if row.len() > 1 && used + 3 + size > width {
+                lines.push(Line::from(std::mem::replace(
+                    &mut row,
+                    vec![Span::raw("  ")],
+                )));
+                used = 2;
             }
-            if !row.is_empty() {
-                row.push(span(" │ ", p.dim_cyan));
+            if row.len() > 1 {
+                row.push(span(" · ", p.dim_cyan));
                 used += 3;
             }
             row.extend([span(format!("{label} "), p.dim_cyan), bold(value, color)]);
             used += size;
         }
-        if !row.is_empty() {
-            lines.push(panel_row(Line::from(row), width, p));
+        if row.len() > 1 {
+            lines.push(Line::from(row));
         }
         if unknown > 0 {
             let qualifier =
                 format!("Known line subtotal · {unknown} authored commits have unknown lines");
-            lines.push(panel_row(
-                text_line(truncate(&qualifier, inner), p.amber),
-                width,
-                p,
+            lines.push(text_line(
+                truncate(&format!("  {qualifier}"), width),
+                p.amber,
             ));
         }
-        lines.push(panel_footer(width, p));
         if width >= 70 {
             lines.push(time_picker(self.time_index, p));
         } else {
@@ -238,6 +243,18 @@ impl App {
     fn aggregate_help(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
+        if !self.show_help {
+            return wrap_help(
+                &[
+                    ("↑↓", "select".into()),
+                    ("↵", "detail".into()),
+                    ("?", "commands".into()),
+                    ("q", "quit".into()),
+                ],
+                width,
+                p,
+            );
+        }
         let groups = [
             vec![
                 ("↑↓", "select".into()),
@@ -255,6 +272,7 @@ impl App {
                 ),
                 ("r", "repos".into()),
                 ("R", "refresh".into()),
+                ("?", "less".into()),
                 ("q", "quit".into()),
             ],
         ];
@@ -312,7 +330,7 @@ impl App {
             + usize::from(self.table_legend().is_some())
             + usize::from(self.selected_identity().is_some());
         (self.height as usize)
-            .saturating_sub(self.aggregate_above().len() + 3 + footer + self.aggregate_help().len())
+            .saturating_sub(self.aggregate_above().len() + 2 + footer + self.aggregate_help().len())
             .max(1)
     }
 
@@ -364,7 +382,7 @@ impl App {
                 p.amber,
             )];
         }
-        let layout = TableLayout::new(width.saturating_sub(4), &authors);
+        let layout = TableLayout::new(width, &authors, self.sort_field);
         let arrow = if self.sort_ascending { "↑" } else { "↓" };
         let mut header = vec![bold(
             format!(
@@ -382,10 +400,7 @@ impl App {
                 if selected { p.magenta } else { p.cyan },
             ));
         }
-        let mut lines = vec![
-            panel_header("CONTRIBUTORS", width, p),
-            panel_row(Line::from(header), width, p),
-        ];
+        let mut lines = vec![section("CONTRIBUTORS", width, p), Line::from(header)];
         let start = self.offset.min(authors.len());
         let end = (start + self.table_viewport()).min(authors.len());
         for (index, author) in authors.iter().enumerate().take(end).skip(start) {
@@ -435,13 +450,8 @@ impl App {
                 };
                 row.push(span(format!("  {}", pad_left(&value, column.width)), color));
             }
-            lines.push(panel_row(
-                Line::from(row).style(p.row(index == self.selected, index)),
-                width,
-                p,
-            ));
+            lines.push(Line::from(row).style(p.row(index == self.selected, index)));
         }
-        lines.push(panel_footer(width, p));
         if self.searching {
             lines.push(text_line(
                 truncate(
@@ -457,7 +467,7 @@ impl App {
             lines.push(text_line(
                 truncate(
                     &format!(
-                        "  showing {}–{end} of {} · sort: {} {arrow}",
+                        "  {}–{end} / {} · sort {} {arrow}",
                         start + 1,
                         authors.len(),
                         self.sort_field.label()
@@ -646,29 +656,27 @@ struct TableLayout {
     columns: Vec<TableColumn>,
 }
 impl TableLayout {
-    fn new(width: usize, authors: &[&AuthorStats]) -> Self {
+    fn new(width: usize, authors: &[&AuthorStats], sort_field: SortField) -> Self {
         let compact = width < 70;
-        let fields = [
-            (
-                TableField::Authored,
-                if compact { "AUTH" } else { "AUTHORED" },
-            ),
-            (
-                TableField::Coauthored,
-                if compact { "CO" } else { "COAUTH" },
-            ),
-            (TableField::Added, "ADDED"),
-            (TableField::Removed, "REMOVED"),
+        let mut fields = vec![(TableField::Authored, "AUTH")];
+        if authors.iter().any(|author| author.coauthored_commits > 0) {
+            fields.push((TableField::Coauthored, "CO"));
+        }
+        match sort_field {
+            SortField::Added => fields.push((TableField::Added, "ADDED")),
+            SortField::Removed => fields.push((TableField::Removed, "REMOVED")),
+            _ => {}
+        }
+        fields.extend([
             (TableField::Net, "NET"),
             (
                 TableField::Lines,
                 if compact { "LINES" } else { "LINES CHANGED" },
             ),
-            (
-                TableField::AI,
-                if width < 110 { "AI%" } else { "DETECTED AI" },
-            ),
-        ];
+        ]);
+        if authors.iter().any(|author| author.ai_commits > 0) || sort_field == SortField::AI {
+            fields.push((TableField::AI, "AI"));
+        }
         let rank = authors.len().to_string().len().max(2);
         let mut columns: Vec<_> = fields
             .into_iter()
@@ -689,22 +697,16 @@ impl TableLayout {
         let fixed =
             |columns: &[TableColumn]| 4 + rank + columns.iter().map(|c| c.width + 2).sum::<usize>();
         let min_name = if width >= 70 { 16 } else { 12 };
-        for remove in [
-            TableField::Added,
-            TableField::Removed,
-            TableField::Net,
-            TableField::AI,
-            TableField::Coauthored,
-            TableField::Lines,
-            TableField::Authored,
-        ] {
+        for remove in [TableField::Coauthored, TableField::AI, TableField::Net] {
             if fixed(&columns) + min_name <= width {
                 break;
             }
-            columns.retain(|c| c.field != remove);
+            if remove.sort_field() != Some(sort_field) {
+                columns.retain(|c| c.field != remove);
+            }
         }
         Self {
-            name: width.saturating_sub(fixed(&columns)),
+            name: width.saturating_sub(fixed(&columns)).min(40),
             rank,
             columns,
         }

@@ -71,6 +71,7 @@ struct App {
     detail_offset: usize,
     filter_query: String,
     searching: bool,
+    show_help: bool,
     sort_ascending: bool,
     hide_bots: bool,
     active_id: String,
@@ -147,6 +148,7 @@ impl App {
             detail_offset: 0,
             filter_query: String::new(),
             searching: false,
+            show_help: false,
             sort_ascending: false,
             hide_bots: false,
             active_id: String::new(),
@@ -387,6 +389,10 @@ impl App {
             return Action::None;
         }
         match key.code {
+            KeyCode::Char('?') if self.view == View::Aggregate => {
+                self.show_help = !self.show_help;
+                self.clamp_scroll();
+            }
             KeyCode::Char('M') if self.view != View::Repositories && !self.loading => {
                 self.open_merge();
             }

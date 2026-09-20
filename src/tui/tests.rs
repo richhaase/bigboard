@@ -493,8 +493,11 @@ fn table_labels_bot_toggle_and_detected_ai() {
     populate(&mut app);
     app.width = 144;
     let table = plain(app.table_lines());
-    for text in ["AUTHORED", "COAUTH", "LINES CHANGED", "DETECTED AI", "BOT"] {
+    for text in ["AUTH", "LINES CHANGED", "AI", "BOT"] {
         assert!(table.contains(text), "missing {text}:\n{table}");
+    }
+    for text in ["ADDED", "REMOVED", "COAUTH"] {
+        assert!(!table.contains(text), "irrelevant {text} column:\n{table}");
     }
     ch(&mut app, 'b');
     assert_eq!(app.authors.len(), 2);
@@ -723,12 +726,7 @@ fn unknown_headers_are_qualified_and_detected_ai_remains_in_detail_breakdowns() 
     app.all_records = vec![unknown];
     populate(&mut app);
     let overview = plain(app.lines());
-    for qualifier in [
-        "ADDED ?",
-        "REMOVED ?",
-        "Known line subtotal",
-        "unknown lines",
-    ] {
+    for qualifier in ["LINES ?", "NET ?", "Known line subtotal", "unknown lines"] {
         assert!(
             overview.contains(qualifier),
             "missing {qualifier}:\n{overview}"
@@ -862,9 +860,22 @@ fn warning_heavy_dashboard_keeps_context_rows_and_controls_visible() {
                     "selected contributor missing: {context}"
                 );
                 let lower = screen.to_lowercase();
-                for label in ["history", "merge", "repos", "quit"] {
+                for label in ["select", "detail", "commands", "quit"] {
                     assert!(lower.contains(label), "missing control {label}: {context}");
                 }
+                assert!(
+                    !lower.contains("history"),
+                    "collapsed help is busy: {context}"
+                );
+                ch(&mut app, '?');
+                let expanded = draw(&mut app, width, 24).to_lowercase();
+                for label in ["history", "merge", "repos", "refresh", "less"] {
+                    assert!(
+                        expanded.contains(label),
+                        "missing expanded control {label}: {context}"
+                    );
+                }
+                ch(&mut app, '?');
                 for line in app.lines() {
                     assert!(
                         line.width() <= usize::from(width),
@@ -885,14 +896,21 @@ fn warning_heavy_dashboard_keeps_context_rows_and_controls_visible() {
 }
 
 #[test]
-fn low_resolution_warning_keeps_context_and_resize_restores_selected_contributor() {
+fn compact_dashboard_fits_short_terminal_and_resize_preserves_selected_contributor() {
     let mut app = warning_heavy_dashboard("dark", true);
     ch(&mut app, 'j');
     let selected = app.selected_id().unwrap();
     let small = draw(&mut app, 60, 17);
-    for label in ["B I G", "LOW RESOLUTION", "resize", "LANDED", "UTC", "quit"] {
+    for label in ["B I G", "ACTIVITY", "CONTRIBUTORS", "LANDED", "UTC", "quit"] {
         assert!(small.contains(label), "missing {label} at 60x17:\n{small}");
     }
+    assert!(!small.contains("LOW RESOLUTION"), "{small}");
+    assert!(
+        small
+            .lines()
+            .any(|line| line.contains('▸') && line.contains("Grace Hopper")),
+        "{small}"
+    );
     assert_eq!(app.selected_id().unwrap(), selected);
     assert!(app.lines().len() <= 17);
     assert!(app.lines().iter().all(|line| line.width() <= 60));
