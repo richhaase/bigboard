@@ -2,6 +2,7 @@
 mod components;
 mod merge;
 mod render;
+mod repositories;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -58,9 +59,11 @@ struct App {
     repositories: Vec<Repository>,
     loaded_repos: Vec<Repository>,
     failed_repos: Vec<String>,
+    failure_details: Vec<(String, String)>,
     excluded: HashSet<String>,
     overlay_excluded: HashSet<String>,
     overlay_cursor: usize,
+    repository_diagnostic_offset: usize,
     view: View,
     selected: usize,
     offset: usize,
@@ -80,6 +83,7 @@ struct App {
     pending_records: Vec<CommitRecord>,
     pending_repos: Vec<Repository>,
     pending_failed: Vec<String>,
+    pending_failure_details: Vec<(String, String)>,
     pending_remaining: usize,
     boot_lines: Vec<(String, bool)>,
     palette: Palette,
@@ -130,9 +134,11 @@ impl App {
             repositories,
             loaded_repos: vec![],
             failed_repos: vec![],
+            failure_details: vec![],
             excluded: normalized,
             overlay_excluded: HashSet::new(),
             overlay_cursor: 0,
+            repository_diagnostic_offset: 0,
             view: View::Aggregate,
             selected: 0,
             offset: 0,
@@ -156,6 +162,7 @@ impl App {
             pending_records: vec![],
             pending_repos: vec![],
             pending_failed: vec![],
+            pending_failure_details: vec![],
             pending_remaining: 0,
             boot_lines: vec![],
             palette: Palette::for_theme(theme),
@@ -170,6 +177,7 @@ impl App {
         self.pending_records.clear();
         self.pending_repos.clear();
         self.pending_failed.clear();
+        self.pending_failure_details.clear();
         self.pending_warnings.clear();
         self.cutoff = Utc::now().fixed_offset();
         self.boot_lines.clear();
@@ -192,6 +200,10 @@ impl App {
             self.pending_records.extend(result.records);
             self.pending_repos.push(result.repository);
         } else {
+            if let Some(error) = result.error {
+                self.pending_failure_details
+                    .push((result.repository.id, error));
+            }
             self.pending_failed.push(result.repository.name);
         }
         self.pending_remaining = self.pending_remaining.saturating_sub(1);
@@ -206,6 +218,7 @@ impl App {
         self.all_records = std::mem::take(&mut self.pending_records);
         self.loaded_repos = std::mem::take(&mut self.pending_repos);
         self.failed_repos = std::mem::take(&mut self.pending_failed);
+        self.failure_details = std::mem::take(&mut self.pending_failure_details);
         self.warnings = std::mem::take(&mut self.pending_warnings);
         self.warnings.sort();
         self.error = if self.loaded_repos.is_empty() && !self.failed_repos.is_empty() {
@@ -404,7 +417,7 @@ impl App {
                 View::Aggregate => return Action::Quit,
             },
             KeyCode::Up | KeyCode::Char('k') => match self.view {
-                View::Repositories => self.overlay_cursor = self.overlay_cursor.saturating_sub(1),
+                View::Repositories => self.step_repository(-1),
                 View::Operative => self.step_operative(-1),
                 View::Aggregate => {
                     self.selected = self.selected.saturating_sub(1);
@@ -412,10 +425,7 @@ impl App {
                 }
             },
             KeyCode::Down | KeyCode::Char('j') => match self.view {
-                View::Repositories => {
-                    self.overlay_cursor =
-                        (self.overlay_cursor + 1).min(self.loaded_repos.len().saturating_sub(1))
-                }
+                View::Repositories => self.step_repository(1),
                 View::Operative => self.step_operative(1),
                 View::Aggregate => {
                     self.selected =
@@ -423,6 +433,12 @@ impl App {
                     self.clamp_scroll();
                 }
             },
+            KeyCode::PageUp if self.view == View::Repositories => {
+                self.page_repository_diagnostics(false);
+            }
+            KeyCode::PageDown if self.view == View::Repositories => {
+                self.page_repository_diagnostics(true);
+            }
             KeyCode::Left | KeyCode::Char('h') if self.view != View::Repositories => {
                 if self.time_index > 0 {
                     self.time_index -= 1;
@@ -456,14 +472,11 @@ impl App {
             KeyCode::Char('r') if self.view == View::Aggregate => {
                 self.overlay_excluded = self.excluded.clone();
                 self.overlay_cursor = 0;
+                self.repository_diagnostic_offset = 0;
                 self.view = View::Repositories;
             }
             KeyCode::Char(' ') if self.view == View::Repositories => {
-                if let Some(repo) = self.loaded_repos.get(self.overlay_cursor)
-                    && !self.overlay_excluded.remove(&repo.id)
-                {
-                    self.overlay_excluded.insert(repo.id.clone());
-                }
+                self.toggle_repository();
             }
             KeyCode::Enter => match self.view {
                 View::Repositories => self.close_overlay(),

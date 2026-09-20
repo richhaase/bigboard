@@ -67,12 +67,17 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `b` | Include/exclude bots from contributor rows and totals |
 | `B` | Toggle landed / all-branch activity |
 | `M` | Merge the selected contributor with another identity |
-| `r` | Open repo inclusion/exclusion overlay |
-| `space` | Toggle a repo in/out (within the repo overlay) |
+| `r` | Open repository selection and diagnostics from the board |
+| `space` | Toggle a loaded repo in/out (within repository selection) |
+| `PgUp/PgDn` | Scroll the selected repository's full diagnostics |
 | `R` | Refresh (re-scan all repos) |
 | `q` | Quit (clears an active filter first) |
 
 In the contributor detail view, `↑/↓` step to the previous/next contributor. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
+
+The board shows a compact warning count. Press `r` to inspect full scan and attribution warnings in the repository diagnostics panel; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its diagnostics while the list and controls stay visible. Failed repositories are inspectable, with their original error details, but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
+
+The dashboard keeps its neon cyberpunk panels and adapts to terminal size. If the board cannot fit its context, controls, and a contributor row, it shows a resize prompt.
 
 ## Config file
 
@@ -115,7 +120,7 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 
 ## Features
 
-- ASCII art banner with vertical color gradient
+- ASCII art banner with vertical color gradient and neon framed activity panels
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient activity bars with trailing glow; gold/silver/bronze rank styling
 - Detected AI attribution in the leaderboard, monthly activity, and repository breakdown

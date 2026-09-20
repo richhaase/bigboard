@@ -202,7 +202,9 @@ fn same_name_contributors_keep_distinct_ids_and_detail_selection() {
     app.all_records = vec![first, second];
     populate(&mut app);
     assert_eq!(app.authors.len(), 2);
+    assert!(plain(app.table_lines()).contains("alex.one@example.com"));
     ch(&mut app, 'j');
+    assert!(plain(app.table_lines()).contains("alex.two@example.com"));
     let selected = app.selected_id().unwrap();
     key(&mut app, KeyCode::Enter);
     assert_eq!(app.active_id, selected);
@@ -302,12 +304,14 @@ fn incomplete_scan_warnings_visible_in_board_detail_and_repository() {
     app.failed_repos = vec!["broken".into()];
     app.warnings = vec![("/repos/engine".into(), "engine: shallow history".into())];
     let screen = draw(&mut app, 100, 28);
-    assert!(screen.contains("Partial history"));
-    assert!(screen.contains("shallow history"));
+    assert!(screen.contains("1 unreadable"), "{screen}");
+    assert!(screen.contains("1 warning"), "{screen}");
+    assert!(!screen.contains("shallow history"), "{screen}");
     key(&mut app, KeyCode::Enter);
     let screen = draw(&mut app, 80, 24);
-    assert!(screen.contains("Partial history"));
-    assert!(screen.contains("shallow history"));
+    assert!(screen.contains("1 unreadable"), "{screen}");
+    assert!(screen.contains("1 warning"), "{screen}");
+    assert!(!screen.contains("shallow history"), "{screen}");
     assert!(screen.contains("LANDED"));
     key(&mut app, KeyCode::Esc);
     ch(&mut app, 'r');
@@ -443,7 +447,14 @@ fn all_contributors_remain_reachable_after_resize() {
         }
         let screen = draw(&mut app, w, h);
         assert_eq!(app.selected, 39);
-        assert!(screen.contains("Person 39"), "{w}x{h}:\n{screen}");
+        if (w, h) == (40, 12) {
+            assert!(screen.contains("LOW RESOLUTION"), "{w}x{h}:\n{screen}");
+            let restored = draw(&mut app, 80, 24);
+            assert_eq!(app.selected, 39);
+            assert!(restored.contains("Person 39"), "{restored}");
+        } else {
+            assert!(screen.contains("Person 39"), "{w}x{h}:\n{screen}");
+        }
         for _ in 0..50 {
             ch(&mut app, 'k');
         }
@@ -456,6 +467,7 @@ fn table_labels_bot_toggle_and_detected_ai() {
     bot.ai_assisted = true;
     app.all_records.push(bot);
     populate(&mut app);
+    app.width = 144;
     let table = plain(app.table_lines());
     for text in ["AUTHORED", "COAUTH", "LINES CHANGED", "DETECTED AI", "BOT"] {
         assert!(table.contains(text), "missing {text}:\n{table}");
@@ -496,7 +508,10 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
     });
     assert!(!app.loading);
     assert_eq!(app.authors.len(), 1);
-    assert!(plain(app.lines()).contains("shallow history"));
+    let summary = plain(app.lines());
+    assert!(summary.contains("1 unreadable"), "{summary}");
+    assert!(summary.contains("1 warning"), "{summary}");
+    assert!(!summary.contains("shallow history"), "{summary}");
     let old = app.cutoff;
     assert_eq!(ch(&mut app, 'R'), Action::Refresh);
     assert_ne!(app.cutoff, old);
@@ -655,10 +670,21 @@ fn attribution_conflicts_are_visible_and_change_with_repository_filters() {
     app.all_records.push(duplicate);
     populate(&mut app);
     assert!(!app.attribution_warnings.is_empty());
-    let warning = app.attribution_warnings[0].clone();
-    assert!(plain(app.lines()).contains(&truncate(&format!("  ⚠ {warning}"), app.width as usize)));
+    let summary = plain(app.lines());
+    assert!(summary.contains("1 warning"), "{summary}");
+    assert!(
+        !summary.contains("conflicting contributor mappings"),
+        "{summary}"
+    );
     ch(&mut app, 'r');
-    assert!(plain(app.lines()).contains("Attribution warnings for the current filters"));
+    let inspector = plain(app.lines())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        inspector.contains("conflicting contributor mappings"),
+        "{inspector}"
+    );
     key(&mut app, KeyCode::Esc);
     app.excluded.insert("/repos/compiler".into());
     app.recompute();
@@ -673,7 +699,17 @@ fn unknown_headers_are_qualified_and_detected_ai_remains_in_detail_breakdowns() 
     app.all_records = vec![unknown];
     populate(&mut app);
     let overview = plain(app.lines());
-    assert!(overview.contains("Known line subtotal: added ? · removed ?"));
+    for qualifier in [
+        "ADDED ?",
+        "REMOVED ?",
+        "Known line subtotal",
+        "unknown lines",
+    ] {
+        assert!(
+            overview.contains(qualifier),
+            "missing {qualifier}:\n{overview}"
+        );
+    }
     assert!(
         !overview
             .split_whitespace()
@@ -746,4 +782,273 @@ fn conflicting_clone_identity_remains_mergeable_when_representative_is_excluded(
     assert_eq!(app.authors.len(), 1);
     assert_eq!(app.authors[0].name, "Resolved Person");
     assert_eq!(app.totals(), (1, 100, 10, 0));
+}
+
+fn warning_heavy_dashboard(theme: &str, unknown_lines: bool) -> App {
+    let mut app = empty();
+    app.palette = Palette::for_theme(theme);
+    app.loaded_repos = (0..15).map(|i| repo(&format!("repo-{i:02}"))).collect();
+    let mut first = record("Ada Lovelace", "repo-00", 12_345);
+    first.ai_assisted = true;
+    app.all_records = if unknown_lines {
+        first.lines_known = false;
+        first.coauthors.push(Identity {
+            name: "Grace Hopper".into(),
+            email: "gracehopper@example.com".into(),
+        });
+        vec![first]
+    } else {
+        vec![first, record("Grace Hopper", "repo-01", 6_789)]
+    };
+    app.warnings = (0..19)
+        .map(|i| (
+            format!("/repos/repo-{:02}", i % 15),
+            format!("repo-{:02}: Merge {i:012} resolution line counts cannot be allocated reliably because the locally available history lacks a reconstructable baseline. Authored participation remains visible, but line totals are incomplete and the full explanation belongs in the repository inspector.", i % 15),
+        ))
+        .collect();
+    populate(&mut app);
+    app
+}
+
+#[test]
+fn warning_heavy_dashboard_keeps_context_rows_and_controls_visible() {
+    for theme in ["light", "dark"] {
+        for width in [144, 80] {
+            for unknown_lines in [false, true] {
+                let mut app = warning_heavy_dashboard(theme, unknown_lines);
+                let screen = draw(&mut app, width, 24);
+                let context = format!("{theme} {width}x24 unknown={unknown_lines}:\n{screen}");
+                assert!(screen.contains("19 warnings"), "{context}");
+                assert!(
+                    !screen.contains("resolution line counts cannot"),
+                    "{context}"
+                );
+                assert!(!screen.contains("reconstructable baseline"), "{context}");
+                assert!(
+                    !plain(app.table_lines()).contains("@example.com"),
+                    "unambiguous rows should not add an identity footer: {context}"
+                );
+                for label in ["Ada Lovelace", "Grace Hopper", "LANDED", "UTC"] {
+                    assert!(screen.contains(label), "missing {label}: {context}");
+                }
+                assert!(
+                    screen
+                        .lines()
+                        .any(|line| line.contains('▸') && line.contains("Ada Lovelace")),
+                    "selected contributor missing: {context}"
+                );
+                let lower = screen.to_lowercase();
+                for label in ["history", "merge", "repos", "quit"] {
+                    assert!(lower.contains(label), "missing control {label}: {context}");
+                }
+                for line in app.lines() {
+                    assert!(
+                        line.width() <= usize::from(width),
+                        "line exceeds width: {} > {width}: {}",
+                        line.width(),
+                        plain(vec![line])
+                    );
+                }
+                if unknown_lines {
+                    assert!(screen.contains('?'), "{context}");
+                    assert!(screen.contains('—'), "{context}");
+                    assert!(lower.contains("known"), "{context}");
+                    assert!(lower.contains("unknown"), "{context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn low_resolution_warning_keeps_context_and_resize_restores_selected_contributor() {
+    let mut app = warning_heavy_dashboard("dark", true);
+    ch(&mut app, 'j');
+    let selected = app.selected_id().unwrap();
+    let small = draw(&mut app, 60, 17);
+    for label in [
+        "B I G",
+        "LOW RESOLUTION",
+        "resize",
+        "LANDED",
+        "UTC",
+        "19 warnings",
+        "quit",
+    ] {
+        assert!(small.contains(label), "missing {label} at 60x17:\n{small}");
+    }
+    assert_eq!(app.selected_id().unwrap(), selected);
+    assert!(app.lines().len() <= 17);
+    assert!(app.lines().iter().all(|line| line.width() <= 60));
+    assert!(!small.contains("resolution line counts cannot"));
+
+    let restored = draw(&mut app, 80, 24);
+    assert!(!restored.contains("LOW RESOLUTION"), "{restored}");
+    assert_eq!(app.selected_id().unwrap(), selected);
+    assert!(
+        restored
+            .lines()
+            .any(|line| line.contains('▸') && line.contains("Grace Hopper")),
+        "{restored}"
+    );
+    for label in [
+        "LANDED",
+        "UTC",
+        "19 warnings",
+        "Known line subtotal",
+        "unknown lines",
+    ] {
+        assert!(
+            restored.contains(label),
+            "missing {label} after resize:\n{restored}"
+        );
+    }
+    assert!(
+        restored.contains('?') && restored.contains('—'),
+        "{restored}"
+    );
+}
+
+#[test]
+fn table_headings_and_large_values_fit_every_sort_and_supported_width() {
+    let mut app = populated();
+    for author in &mut app.authors {
+        author.commits = 123_456;
+        author.coauthored_commits = 23_456;
+        author.added = 134_567_890;
+        author.removed = 246_801_357;
+        author.net = author.added - author.removed;
+        author.total_change = author.added + author.removed;
+        author.ai_commits = 12_345;
+    }
+    for width in [60, 80, 100, 120, 144] {
+        app.width = width;
+        app.height = 24;
+        for field in [
+            SortField::Total,
+            SortField::Commits,
+            SortField::Added,
+            SortField::Removed,
+            SortField::Net,
+            SortField::AI,
+        ] {
+            app.sort_field = field;
+            for ascending in [false, true] {
+                app.sort_ascending = ascending;
+                let table = app.table_lines();
+                let text = plain(table.clone());
+                assert!(text.contains("Ada"), "{width} {field:?}:\n{text}");
+                assert!(
+                    text.contains("123,456"),
+                    "authored value truncated at {width} {field:?}:\n{text}"
+                );
+                assert!(
+                    text.contains("381,369,247"),
+                    "line count truncated at {width} {field:?}:\n{text}"
+                );
+                let header = table
+                    .iter()
+                    .find(|line| {
+                        line.spans.iter().any(|span| {
+                            span.content
+                                .split_whitespace()
+                                .any(|label| label == "CONTRIBUTOR")
+                        })
+                    })
+                    .unwrap();
+                let row = table
+                    .iter()
+                    .find(|line| line.spans.iter().any(|span| span.content.contains("Ada")))
+                    .unwrap();
+                let endpoints = |line: &UiLine| {
+                    let mut end = 0;
+                    line.spans
+                        .iter()
+                        .map(|span| {
+                            end += span.width();
+                            (span.content.trim().to_owned(), end)
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let cells = endpoints(row);
+                let mut checked_columns = 0;
+                for (heading, edge) in endpoints(header) {
+                    let label = heading.trim_end_matches(['↑', '↓']).trim();
+                    let expected = match label {
+                        "AUTH" | "AUTHORED" => "123,456",
+                        "CO" | "COAUTH" => "23,456",
+                        "ADDED" => "134,567,890",
+                        "REMOVED" => "246,801,357",
+                        "NET" => "-112,233,467",
+                        "LINES" | "LINES CHANGED" => "381,369,247",
+                        "AI%" | "DETECTED AI" => "9%",
+                        _ => continue,
+                    };
+                    checked_columns += 1;
+                    let cell_edge = cells
+                        .iter()
+                        .find(|(value, _)| value == expected)
+                        .unwrap_or_else(|| {
+                            panic!("missing {label} value at {width} {field:?}:\n{text}")
+                        })
+                        .1;
+                    assert_eq!(
+                        edge, cell_edge,
+                        "{label} heading/value right edges differ at {width} {field:?}:\n{text}"
+                    );
+                }
+                assert!(
+                    checked_columns >= 2,
+                    "numeric column alignment was not exercised at {width} {field:?}:\n{text}"
+                );
+                for line in table {
+                    assert!(
+                        line.width() <= usize::from(width),
+                        "{width} {field:?} ascending={ascending}, width {}: {}",
+                        line.width(),
+                        plain(vec![line])
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn many_row_navigation_preserves_selection_across_banner_height_boundary() {
+    let mut app = empty();
+    app.all_records = (0..40)
+        .map(|i| record(&format!("Person {i:02}"), "engine", 100 - i))
+        .collect();
+    populate(&mut app);
+    for width in [80, 144] {
+        for height in [29, 30, 29] {
+            draw(&mut app, width, height);
+            for _ in 0..50 {
+                ch(&mut app, 'j');
+            }
+            let selected = app.selected_id().unwrap();
+            let screen = draw(&mut app, width, height);
+            assert_eq!(app.selected, 39);
+            assert_eq!(app.selected_id().unwrap(), selected);
+            assert!(
+                screen
+                    .lines()
+                    .any(|line| line.contains('▸') && line.contains("Person 39")),
+                "{width}x{height}:\n{screen}"
+            );
+            assert!(screen.contains("LANDED"), "{width}x{height}:\n{screen}");
+            for _ in 0..50 {
+                ch(&mut app, 'k');
+            }
+            let screen = draw(&mut app, width, height);
+            assert_eq!(app.selected, 0);
+            assert!(
+                screen
+                    .lines()
+                    .any(|line| line.contains('▸') && line.contains("Person 00")),
+                "{width}x{height}:\n{screen}"
+            );
+        }
+    }
 }
