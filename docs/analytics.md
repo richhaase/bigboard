@@ -21,9 +21,9 @@ Human `Co-authored-by` metadata gives separate coauthored participation credit. 
 
 ## History and unique counts
 
-The initial scope is **Landed**: commits reachable from the available default-branch snapshot. Available remote-tracking default history is preferred over a potentially divergent local checkout. **All branches** (`B`) includes local and remote-tracking branch history already on disk. Tags alone do not bring commits into either scope. No scan fetches remote history, so results reflect the local snapshot, not a claim that the clone is up to date. If no default branch can be identified, Big Board shows a warning and contributes no Landed history from that repository; `B` still exposes its available branch history.
+The initial scope is **Landed**: commits reachable from the available default-branch snapshot. Available remote-tracking default history is preferred over a potentially divergent local checkout. **All branches** (`B`) includes local and remote-tracking branch history already on disk. Tags alone do not bring commits into either scope. No scan fetches remote history, so results reflect the local snapshot, not a claim that the clone is up to date. If no default branch can be identified, Big Board shows a short availability notice and contributes no Landed history from that repository; `B` still exposes its available branch history.
 
-Commits are deduplicated by object ID across selected repositories. A full copy can supply known line counts missing at a shallow boundary. If copies have conflicting mailmap attribution, the board displays a warning naming the affected repositories and the deterministic attribution used. Consistent mailmaps or an explicit identity merge can reconcile them. Repository membership is retained, so repository subtotals may overlap and must not be summed to obtain board totals. Cherry-picks and rebases that create different IDs remain distinct.
+Commits are deduplicated by object ID across selected repositories. A full copy can supply known line counts missing at a shallow boundary. If copies have conflicting mailmap attribution, one attribution is chosen deterministically. The TUI does not display the per-commit conflict log. Consistent mailmaps or an explicit identity merge can reconcile them. Repository membership is retained, so repository subtotals may overlap and must not be summed to obtain board totals. Cherry-picks and rebases that create different IDs remain distinct.
 
 Git author timestamps remain the activity date; the landed filter does not turn them into integration dates. A single scan cutoff excludes future-dated commits, including in ALL. Recent windows retain their rolling duration semantics. Daily/monthly buckets and heatmap cells all use the configured reporting timezone, defaulting to UTC. `R` rescans repositories and advances the cutoff; switching filters uses the existing scan snapshot.
 
@@ -33,7 +33,7 @@ Clean integration-only two-parent merges are omitted when Git can reconstruct th
 
 Branch references are resolved unambiguously, filenames use NUL-delimited parsing, and diff settings that affect counting are pinned. Generated/vendor exclusions apply to the parsed paths. Valid separate-Git-directory repositories are discoverable; linked worktrees remain skipped to avoid presenting duplicate checkouts.
 
-Shallow history and scan failures are visibly qualified in the TUI. Missing boundary diffs and unallocatable merge diffs do not masquerade as measured zeros. Known line subtotals remain available with an explicit unknown/partial indicator. These warnings indicate limitations of the available data; Big Board does not automatically deepen or fetch repositories. Automatic object fetching in partial clones is disabled. If required objects are missing, the scan is visibly excluded rather than silently downloading them. Partial clones on Git older than 2.45.1 are skipped conservatively because this control was not consistently available; ordinary repositories require Git 2.31 or newer.
+Missing boundary diffs in shallow history and unallocatable merge diffs remain unknown, marked with `?` alongside any known subtotal. The TUI omits per-commit diagnostic logs and shows alerts for repository scan failures or unavailable default-branch history. Big Board does not automatically deepen or fetch repositories. Automatic object fetching in partial clones is disabled. If required objects are missing, the scan is visibly excluded rather than silently downloading them. Partial clones on Git older than 2.45.1 are skipped conservatively because this control was not consistently available; ordinary repositories require Git 2.31 or newer.
 
 ### Reading qualifications
 
@@ -41,7 +41,7 @@ Shallow history and scan failures are visibly qualified in the TUI. Missing boun
 - `—` means line attribution is unallocated for coauthor-only participation, not measured as zero.
 - `○` in the activity matrix marks coauthor-only participation on that day; it is separate from the line-change intensity scale.
 - `N/A` for Removed/added ratio means additions are zero or some authored line counts are unknown.
-- `⚠` marks data limitations or conflicting attribution. From the board, press `r` to inspect the repository warnings and their details. Press `Esc` first if viewing contributor details.
+- `⚠` marks repository scan failures or unavailable default-branch history. From the board, press `r` to inspect repository paths and full failure details, with `PgUp/PgDn` paging the selected repository's details. Press `Esc` first if viewing contributor details.
 
 ## Metrics and preferences
 

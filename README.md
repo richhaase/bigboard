@@ -4,7 +4,7 @@ A cyberpunk-themed TUI for exploring team contribution activity across Git repos
 
 ## Install
 
-Big Board requires Git **2.31 or newer** on `PATH`. Git **2.38 or newer** supports reconstructed merge baselines; on older versions, merge activity is retained with unknown line counts. Partial clones require **2.45.1 or newer** so automatic object fetching can be disabled; older partial clones are skipped with a visible warning. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
+Big Board requires Git **2.31 or newer** on `PATH`. Git **2.38 or newer** supports reconstructed merge baselines; on older versions, merge activity is retained with unknown line counts. Partial clones require **2.45.1 or newer** so automatic object fetching can be disabled; older partial clones are excluded as scan failures. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
 
 ### From Source
 
@@ -67,15 +67,16 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `b` | Include/exclude bots from contributor rows and totals |
 | `B` | Toggle landed / all-branch activity |
 | `M` | Merge the selected contributor with another identity |
-| `r` | Open repository selection and diagnostics from the board |
+| `r` | Open repository selection and details from the board |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
-| `PgUp/PgDn` | Scroll the selected repository's full diagnostics |
+| `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
+| `Home/End` | Jump to the top/bottom of contributor detail content |
 | `R` | Refresh (re-scan all repos) |
 | `q` | Quit (clears an active filter first) |
 
-In the contributor detail view, `↑/↓` step to the previous/next contributor. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
+In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
 
-The board shows a compact warning count. Press `r` to inspect full scan and attribution warnings in the repository diagnostics panel; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its diagnostics while the list and controls stay visible. Failed repositories are inspectable, with their original error details, but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
+Incomplete line counts retain the `?` marker. Alerts identify repository scan failures or unavailable default-branch history; per-commit and attribution warning logs are not displayed. Press `r` to inspect repository paths and full scan errors; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its details while the list and controls stay visible. Failed repositories remain inspectable but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
 
 The dashboard keeps its neon cyberpunk panels and adapts to terminal size. If the board cannot fit its context, controls, and a contributor row, it shows a resize prompt.
 

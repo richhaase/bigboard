@@ -1,5 +1,6 @@
 //! Ratatui presentation and keyboard state, retaining the Go dashboard's behavior.
 mod components;
+mod detail;
 mod merge;
 mod render;
 mod repositories;
@@ -67,6 +68,7 @@ struct App {
     view: View,
     selected: usize,
     offset: usize,
+    detail_offset: usize,
     filter_query: String,
     searching: bool,
     sort_ascending: bool,
@@ -142,6 +144,7 @@ impl App {
             view: View::Aggregate,
             selected: 0,
             offset: 0,
+            detail_offset: 0,
             filter_query: String::new(),
             searching: false,
             sort_ascending: false,
@@ -283,6 +286,7 @@ impl App {
     }
 
     fn recompute(&mut self) {
+        self.detail_offset = 0;
         let selected_id = self.selected_id();
         let records = self.filtered_records();
         let options = self.aggregate_options();
@@ -334,7 +338,11 @@ impl App {
             None => self.selected,
         }
         .min(list.len() - 1);
-        self.active_id = list[idx].id.clone();
+        let next_id = list[idx].id.clone();
+        if self.active_id != next_id {
+            self.detail_offset = 0;
+        }
+        self.active_id = next_id;
         self.selected = idx;
         self.clamp_scroll();
     }
@@ -433,6 +441,12 @@ impl App {
                     self.clamp_scroll();
                 }
             },
+            KeyCode::PageUp if self.view == View::Operative => self.page_detail(false),
+            KeyCode::PageDown if self.view == View::Operative => self.page_detail(true),
+            KeyCode::Home if self.view == View::Operative => self.detail_offset = 0,
+            KeyCode::End if self.view == View::Operative => {
+                self.detail_offset = self.detail_max_offset();
+            }
             KeyCode::PageUp if self.view == View::Repositories => {
                 self.page_repository_diagnostics(false);
             }
@@ -484,6 +498,7 @@ impl App {
                     if let Some(author) = self.displayed_authors().get(self.selected) {
                         self.active_id = author.id.clone();
                         self.view = View::Operative;
+                        self.detail_offset = 0;
                     }
                 }
                 View::Operative => {}
@@ -498,6 +513,12 @@ impl App {
         self.excluded = std::mem::take(&mut self.overlay_excluded);
         self.view = View::Aggregate;
         self.recompute();
+    }
+
+    fn repository_history_unavailable(&self, id: &str) -> bool {
+        self.warnings.iter().any(|(repo_id, warning)| {
+            repo_id == id && warning.contains("No available default branch could be identified;")
+        })
     }
 
     fn totals(&self) -> (i64, i64, i64, i64) {
@@ -522,11 +543,16 @@ impl App {
         self.width = frame.area().width;
         self.height = frame.area().height;
         self.clamp_scroll();
+        if self.view == View::Operative && self.merge.is_none() {
+            self.clamp_detail_scroll();
+        }
         let mut lines = self.lines();
-        // Bubble Tea's renderer retains the final screenful when a view exceeds
-        // terminal height. Preserve that behavior for long contributor details.
-        let overflow = lines.len().saturating_sub(self.height as usize);
-        lines.drain(..overflow);
+        // Detail screens compose a bounded viewport with fixed context and
+        // controls. Other legacy screens retain their existing overflow fallback.
+        if self.view != View::Operative {
+            let overflow = lines.len().saturating_sub(self.height as usize);
+            lines.drain(..overflow);
+        }
         frame.render_widget(ratatui::widgets::Paragraph::new(lines), frame.area());
     }
 }

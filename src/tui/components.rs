@@ -138,23 +138,6 @@ pub(super) fn banner(width: usize, compact: bool, p: &Palette) -> Vec<UiLine> {
     .collect()
 }
 
-pub(super) fn footer(
-    repos: usize,
-    excluded: usize,
-    width: usize,
-    version: &str,
-    p: &Palette,
-) -> UiLine {
-    let left = repo_count(repos, excluded);
-    let target = width.saturating_sub(2).max(left.width());
-    let ver = truncate(version, target.saturating_sub(left.width() + 2));
-    let padding = if ver.is_empty() {
-        String::new()
-    } else {
-        " ".repeat(target.saturating_sub(left.width() + ver.width()).max(2))
-    };
-    text_line(format!("{left}{padding}{ver}"), p.dim_cyan)
-}
 pub(super) fn repo_count(total: usize, excluded: usize) -> String {
     if excluded > 0 {
         format!("  {}/{} repos", total.saturating_sub(excluded), total)
