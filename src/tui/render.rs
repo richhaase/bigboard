@@ -8,6 +8,12 @@ use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
 impl App {
+    fn roomy_aggregate(&self) -> bool {
+        self.width >= 82
+            && self.height >= 40
+            && self.authors.len() <= (self.height as usize).saturating_sub(27)
+    }
+
     pub(super) fn lines(&self) -> Vec<UiLine> {
         if self.loading {
             return self.loading_lines();
@@ -130,6 +136,7 @@ impl App {
     fn aggregate_above(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
+        let roomy = self.roomy_aggregate();
         // Expand the logo only when every contributor still fits. Resizing a
         // busy board must never trade contributor rows for extra decoration.
         let full_banner =
@@ -154,6 +161,9 @@ impl App {
             truncate(&left, width)
         };
         lines.push(text_line(context, p.dim_cyan));
+        if roomy {
+            lines.push(blank());
+        }
         lines.push(panel_header("ACTIVITY", width, p));
         let inner = width.saturating_sub(4);
         let (commits, added, removed, ai) = self.totals();
@@ -183,23 +193,41 @@ impl App {
                 p.amber,
             ),
         ];
-        let mut row = Vec::new();
-        let mut used = 0;
-        for (label, value, color) in metrics {
-            let size = label.width() + value.width() + 1;
-            if !row.is_empty() && used + 3 + size > inner {
-                lines.push(panel_row(Line::from(std::mem::take(&mut row)), width, p));
-                used = 0;
+        if roomy {
+            let mut start = 0;
+            while start < metrics.len() {
+                let mut end = start + 1;
+                let mut used = metrics[start].0.width() + metrics[start].1.width() + 1;
+                while end < metrics.len() && end - start < 3 {
+                    let next = metrics[end].0.width() + metrics[end].1.width() + 1;
+                    if used + 3 + next > inner {
+                        break;
+                    }
+                    used += 3 + next;
+                    end += 1;
+                }
+                lines.push(activity_metric_row(&metrics[start..end], width, p));
+                start = end;
+            }
+        } else {
+            let mut row = Vec::new();
+            let mut used = 0;
+            for (label, value, color) in metrics {
+                let size = label.width() + value.width() + 1;
+                if !row.is_empty() && used + 3 + size > inner {
+                    lines.push(panel_row(Line::from(std::mem::take(&mut row)), width, p));
+                    used = 0;
+                }
+                if !row.is_empty() {
+                    row.push(span(" │ ", p.dim_cyan));
+                    used += 3;
+                }
+                row.extend([span(format!("{label} "), p.dim_cyan), bold(value, color)]);
+                used += size;
             }
             if !row.is_empty() {
-                row.push(span(" │ ", p.dim_cyan));
-                used += 3;
+                lines.push(panel_row(Line::from(row), width, p));
             }
-            row.extend([span(format!("{label} "), p.dim_cyan), bold(value, color)]);
-            used += size;
-        }
-        if !row.is_empty() {
-            lines.push(panel_row(Line::from(row), width, p));
         }
         if unknown > 0 {
             let qualifier =
@@ -211,6 +239,9 @@ impl App {
             ));
         }
         lines.push(panel_footer(width, p));
+        if roomy {
+            lines.push(blank());
+        }
         if width >= 70 {
             lines.push(time_picker(self.time_index, p));
         } else {
@@ -231,6 +262,9 @@ impl App {
                 truncate(&format!("  ✓ {notice}"), width),
                 p.green,
             ));
+        }
+        if roomy {
+            lines.push(blank());
         }
         lines
     }
@@ -312,13 +346,22 @@ impl App {
             + usize::from(self.table_legend().is_some())
             + usize::from(self.selected_identity().is_some());
         (self.height as usize)
-            .saturating_sub(self.aggregate_above().len() + 3 + footer + self.aggregate_help().len())
+            .saturating_sub(
+                self.aggregate_above().len()
+                    + 3
+                    + footer
+                    + self.aggregate_help().len()
+                    + usize::from(self.roomy_aggregate()),
+            )
             .max(1)
     }
 
     fn aggregate_lines(&self) -> Vec<UiLine> {
         let mut lines = self.aggregate_above();
         lines.extend(self.table_lines());
+        if self.roomy_aggregate() {
+            lines.push(blank());
+        }
         lines.extend(self.aggregate_help());
         if lines.len() > self.height as usize || self.width < 60 {
             // Never silently tail-clip the board's scope or quality context.
@@ -560,6 +603,33 @@ impl App {
 
         lines
     }
+}
+
+fn activity_metric_row(
+    metrics: &[(&str, String, ratatui::style::Color)],
+    width: usize,
+    p: &Palette,
+) -> UiLine {
+    let inner = width.saturating_sub(4);
+    let content_width = metrics
+        .iter()
+        .map(|(label, value, _)| label.width() + value.width() + 1)
+        .sum::<usize>()
+        + metrics.len().saturating_sub(1) * 3;
+    let spare = inner.saturating_sub(content_width);
+    let mut row = Vec::new();
+    for (index, (label, value, color)) in metrics.iter().enumerate() {
+        row.extend([
+            span(format!("{label} "), p.dim_cyan),
+            bold(value.clone(), *color),
+        ]);
+        let padding = spare / metrics.len() + usize::from(index < spare % metrics.len());
+        row.push(Span::raw(" ".repeat(padding)));
+        if index + 1 < metrics.len() {
+            row.push(span(" │ ", p.dim_cyan));
+        }
+    }
+    panel_row(Line::from(row), width, p)
 }
 
 fn qualified_stat_boxes(

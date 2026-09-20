@@ -684,6 +684,70 @@ fn views_render_at_tiny_and_large_sizes() {
 }
 
 #[test]
+fn roomy_dashboard_preserves_full_content_and_separates_major_sections() {
+    let mut app = populated();
+    let roomy = draw(&mut app, 180, 50);
+    let lines: Vec<_> = roomy.lines().collect();
+    let activity = lines
+        .iter()
+        .position(|line| line.contains("ACTIVITY"))
+        .unwrap();
+    let range = lines.iter().position(|line| line.contains("14d")).unwrap();
+    let contributors = lines
+        .iter()
+        .position(|line| line.contains("CONTRIBUTORS"))
+        .unwrap();
+    let controls = lines
+        .iter()
+        .position(|line| line.contains("select") && line.contains("detail"))
+        .unwrap();
+
+    for section in [activity, range, contributors, controls] {
+        assert!(
+            lines[section - 1].trim().is_empty(),
+            "section at row {section} has no breathing room:\n{roomy}"
+        );
+    }
+    for label in [
+        "AUTHORED",
+        "ADDED",
+        "REMOVED",
+        "Lines changed",
+        "COAUTHORED",
+        "Detected AI",
+        "Ada Lovelace",
+        "Grace Hopper",
+        "history",
+        "merge",
+        "repos",
+        "quit",
+    ] {
+        assert!(roomy.contains(label), "missing {label}:\n{roomy}");
+    }
+    assert!(
+        lines[activity + 1].contains("AUTHORED")
+            && lines[activity + 1].contains("ADDED")
+            && lines[activity + 1].contains("REMOVED")
+    );
+    assert!(
+        lines[activity + 2].contains("Lines changed")
+            && lines[activity + 2].contains("COAUTHORED")
+            && lines[activity + 2].contains("Detected AI")
+    );
+
+    let compact = draw(&mut app, 120, 24);
+    let compact_lines: Vec<_> = compact.lines().collect();
+    let compact_activity = compact_lines
+        .iter()
+        .position(|line| line.contains("ACTIVITY"))
+        .unwrap();
+    assert!(
+        !compact_lines[compact_activity - 1].trim().is_empty(),
+        "compact fallback spent a contributor row on spacing:\n{compact}"
+    );
+}
+
+#[test]
 fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters() {
     let mut app = populated();
     let mut duplicate = app.all_records[0].clone();
