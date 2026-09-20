@@ -734,6 +734,17 @@ fn roomy_dashboard_preserves_full_content_and_separates_major_sections() {
             && lines[activity + 2].contains("COAUTHORED")
             && lines[activity + 2].contains("Detected AI")
     );
+    let dividers = |line: &str| {
+        line.chars()
+            .enumerate()
+            .filter_map(|(column, character)| (character == '│').then_some(column))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        dividers(lines[activity + 1]),
+        dividers(lines[activity + 2]),
+        "activity grid dividers must align:\n{roomy}"
+    );
 
     let compact = draw(&mut app, 120, 24);
     let compact_lines: Vec<_> = compact.lines().collect();
