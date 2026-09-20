@@ -4,10 +4,35 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
+
+/// Explicitly unlock even if a concurrently spawned child briefly inherits a
+/// duplicate descriptor. Closing only this process's file may leave flock held.
+struct IdentityLock(File);
+
+impl IdentityLock {
+    fn acquire(path: &Path) -> Result<Self> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)
+            .context("opening identity mapping lock")?;
+        FileExt::try_lock_exclusive(&file)
+            .context("identity mappings are busy; retry the merge")?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for IdentityLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
 
 fn version_one() -> u32 {
     1
@@ -159,15 +184,7 @@ impl IdentityStore {
         fs::create_dir_all(parent)
             .with_context(|| format!("creating identity directory {}", parent.display()))?;
         let lock_path = path.with_extension("lock");
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .context("opening identity mapping lock")?;
-        FileExt::try_lock_exclusive(&lock)
-            .context("identity mappings are busy; retry the merge")?;
+        let _lock = IdentityLock::acquire(&lock_path)?;
         // Reload inside the lock: another running dashboard may have saved a
         // different merge since this dashboard loaded its snapshot.
         let mut store = Self::load(path)?;
@@ -236,6 +253,24 @@ mod tests {
         assert_eq!(store.canonical_id("email:d@test"), id2);
         assert_eq!(store.canonical_id("email:e@test"), id2);
         store.validate().unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn lock_releases_even_when_an_inherited_descriptor_remains_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identities.lock");
+        let held = IdentityLock::acquire(&path).unwrap();
+        // A duplicate shares flock ownership, just like a forked Git child
+        // before exec closes inherited descriptors. Avoid timing-dependent forks.
+        let inherited = held.0.try_clone().unwrap();
+        assert!(IdentityLock::acquire(&path).is_err());
+        drop(held);
+        let next_save = IdentityLock::acquire(&path).unwrap();
+        drop(inherited);
+        // The previous child's eventual close must not release the new save.
+        assert!(IdentityLock::acquire(&path).is_err());
+        drop(next_save);
+        assert!(IdentityLock::acquire(&path).is_ok());
     }
     #[test]
     fn separate_saves_reload_existing_mappings() {
