@@ -194,20 +194,35 @@ impl App {
             ),
         ];
         if roomy {
-            let mut start = 0;
-            while start < metrics.len() {
-                let mut end = start + 1;
-                let mut used = metrics[start].0.width() + metrics[start].1.width() + 1;
-                while end < metrics.len() && end - start < 3 {
-                    let next = metrics[end].0.width() + metrics[end].1.width() + 1;
-                    if used + 3 + next > inner {
-                        break;
-                    }
-                    used += 3 + next;
-                    end += 1;
+            let mut columns = [0; 3];
+            for (index, (label, value, _)) in metrics.iter().enumerate() {
+                columns[index % 3] = columns[index % 3].max(label.width() + value.width() + 1);
+            }
+            let required = columns.iter().sum::<usize>() + 6;
+            if required <= inner {
+                let spare = inner - required;
+                for (index, column) in columns.iter_mut().enumerate() {
+                    *column += spare / 3 + usize::from(index < spare % 3);
                 }
-                lines.push(activity_metric_row(&metrics[start..end], width, p));
-                start = end;
+                for row in metrics.chunks(3) {
+                    lines.push(activity_metric_row(row, width, p, Some(&columns)));
+                }
+            } else {
+                let mut start = 0;
+                while start < metrics.len() {
+                    let mut end = start + 1;
+                    let mut used = metrics[start].0.width() + metrics[start].1.width() + 1;
+                    while end < metrics.len() && end - start < 3 {
+                        let next = metrics[end].0.width() + metrics[end].1.width() + 1;
+                        if used + 3 + next > inner {
+                            break;
+                        }
+                        used += 3 + next;
+                        end += 1;
+                    }
+                    lines.push(activity_metric_row(&metrics[start..end], width, p, None));
+                    start = end;
+                }
             }
         } else {
             let mut row = Vec::new();
@@ -609,6 +624,7 @@ fn activity_metric_row(
     metrics: &[(&str, String, ratatui::style::Color)],
     width: usize,
     p: &Palette,
+    columns: Option<&[usize]>,
 ) -> UiLine {
     let inner = width.saturating_sub(4);
     let content_width = metrics
@@ -623,7 +639,11 @@ fn activity_metric_row(
             span(format!("{label} "), p.dim_cyan),
             bold(value.clone(), *color),
         ]);
-        let padding = spare / metrics.len() + usize::from(index < spare % metrics.len());
+        let size = label.width() + value.width() + 1;
+        let padding = columns.map_or_else(
+            || spare / metrics.len() + usize::from(index < spare % metrics.len()),
+            |columns| columns[index].saturating_sub(size),
+        );
         row.push(Span::raw(" ".repeat(padding)));
         if index + 1 < metrics.len() {
             row.push(span(" │ ", p.dim_cyan));
