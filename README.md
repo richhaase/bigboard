@@ -4,7 +4,7 @@ A cyberpunk-themed TUI for assessing contributor volumes across git repositories
 
 ## Install
 
-Big Board requires the `git` command-line client on `PATH`. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
+Big Board requires Git **2.31 or newer** on `PATH`. Git **2.38 or newer** supports reconstructed merge baselines; on older versions, merge activity is retained with unknown line counts. Partial clones require **2.45.1 or newer** so automatic object fetching can be disabled; older partial clones are skipped with a visible warning. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
 
 ### From Source
 
@@ -16,7 +16,7 @@ cargo install --path . --locked
 
 ## Usage
 
-Big Board is TUI-first: preferences live in the config file, and the CLI has exactly four flags.
+Big Board is TUI-first: preferences live in the config file, and the CLI has three flags: `--version`, `--config`, and `--group`.
 
 ```bash
 # Analyze current directory
@@ -29,9 +29,6 @@ bigboard ~/src/
 # Use a named group from your config
 bigboard --group backend
 
-# Print contributor stats as JSON and exit (all-time window)
-bigboard --export ~/src/ > board.json
-
 # Use an alternate config file
 bigboard --config ./bigboard.json
 
@@ -40,21 +37,21 @@ bigboard --version
 ```
 
 The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
-`since` in the config to choose the initial range. `--export` always covers
-all time; per-contributor first/last commit dates describe the exported history.
-These aggregates cannot reconstruct counts for a narrower time range.
+`since` in the config to choose the initial range. Dates use UTC unless you set
+`timezone` to an IANA timezone such as `America/Denver`.
 
-## Compatibility and accuracy
+## Analytics
 
-This Rust revision preserves the Go application’s analytics behavior. The migration is checked against the Go reference with synthetic repositories; it does not resolve the accuracy issues found during the audit. See [the correction backlog](docs/analytics-correction-backlog.md) for known limitations and [port validation](docs/rust-port.md) for the migration boundary.
+- **Explicit identity:** matching canonical emails and Git `.mailmap` entries establish identity. Names alone never combine people. Highlight a contributor and press `M` to select another identity, choose a combined name, and confirm a merge. Saved merges apply across repositories and sessions.
+- **History:** the default view shows landed work on the available default branch. Press `B` to include unmerged activity from local and remote-tracking branches already present on disk. Scanning does not fetch remote changes.
+- **Unique commits:** identical commit IDs count once across the board, retaining their repository associations. Repository subtotals can overlap. Cherry-picks and rebases with different IDs remain distinct commits.
+- **Collaboration:** authored and human-coauthored commit counts are separate. Line changes remain attributed to the primary author; coauthor metadata does not specify each person's line contribution.
+- **Detected AI:** known agent identities and recognized coauthor metadata indicate AI attribution. Human employees are not flagged solely by an AI company's domain. User-configured exact emails and domain overrides remain available. Missing attribution does not prove AI was absent.
+- **Activity metrics:** Lines changed means additions plus removals. Removed/added ratio is N/A with zero additions or unknown line counts. These metrics describe activity, not productivity or business value.
+- **Completeness:** shallow history, scan failures, and unallocatable merge-resolution line counts are visibly qualified. Unknown counts are not treated as measured zero. Clean integration-only merges do not add duplicate activity; additional merge edits receive credit where measurable.
+- **Bots and generated files:** bots remain counted and tagged, with `b` toggling visibility. Generated/vendor files are excluded from line counts by default; `all_files` includes them.
 
-### Existing analytics policy
-
-- **Author identity** is resolved by git's native `.mailmap` (honored automatically for `%aN`/`%aE`), then grouped by email and exact name. Substring name merging (which can collapse distinct people like *Daniel* / *Daniela*) is **off by default** — enable it with `"fuzzy": true`. Add a `.mailmap` to a repo to canonicalize names/emails precisely.
-- **AI authorship** is detected from `Co-authored-by` trailers and AI author identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Add your own agents' emails or `@domains` under `ai_identities`.
-- **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on the leaderboard with a `BOT` tag; press `b` to toggle them out of view.
-- **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, `--no-merges`. Squash-merge workflows credit the merger; rename/copy churn is normalized via `-M -C`.
+See [analytics behavior](docs/analytics.md) for the counting rules and limitations. The [original audit](docs/analytics-correction-backlog.md) and [Rust port record](docs/rust-port.md) remain historical references.
 
 ## Controls
 
@@ -68,6 +65,8 @@ This Rust revision preserves the Go application’s analytics behavior. The migr
 | `S` | Reverse sort direction |
 | `/` | Filter contributors by name (incremental) |
 | `b` | Toggle bot contributors in/out |
+| `B` | Toggle landed / all-branch activity |
+| `M` | Merge the selected contributor with another identity |
 | `r` | Open repo inclusion/exclusion overlay |
 | `space` | Toggle a repo in/out (within the repo overlay) |
 | `R` | Refresh (re-scan all repos) |
@@ -86,7 +85,7 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
   "sort": "net",
   "since": "90d",
   "theme": "dark",
-  "fuzzy": false,
+  "timezone": "UTC",
   "all_files": false,
   "depth": 2,
   "groups": {
@@ -98,6 +97,9 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 }
 ```
 
+- `timezone` defaults to `UTC` and accepts IANA names such as `America/Denver`.
+- Saved merges live in `~/.config/bigboard/identities.json` (or `$XDG_CONFIG_HOME/bigboard/identities.json`), independent of repo groups and `--config`.
+- Legacy `fuzzy: false` is accepted. `fuzzy: true` now gives an actionable error; use `M` for explicit merges.
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`.
 - `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
@@ -108,13 +110,13 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 
 - ASCII art banner with vertical color gradient
 - Streaming repository-scan loader that surfaces unreadable repos as they load
-- Gradient impact bars with trailing glow; gold/silver/bronze rank styling
-- AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %
+- Gradient activity bars with trailing glow; gold/silver/bronze rank styling
+- Detected AI attribution in the leaderboard, monthly activity, and repository breakdown
 - Bot contributors counted and tagged (`BOT`), with a one-key toggle to hide them
-- Per-contributor drill-down: repo breakdown, gap-aware monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)
+- Per-contributor drill-down: repo breakdown, gap-aware monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, removed/added ratio)
 - Scrollable, height-aware leaderboard with incremental `/` search — every contributor reachable
-- Headless `--export` (JSON, same pipeline and identity policy as the TUI), config file with named `--group`s, glob excludes, and recursive scan depth
-- Native `.mailmap`, generated/vendored file filtering, deterministic ordering, and rename/copy detection (with known limitations recorded in the correction backlog)
+- Config file with named `--group`s, glob excludes, and recursive scan depth
+- Native `.mailmap`, generated/vendored file filtering, deterministic ordering, and rename/copy detection
 - Git worktree detection (automatically skipped during repo discovery); symlinked repo directories are followed and deduplicated
 
 ## Development
@@ -128,13 +130,9 @@ cargo clippy --all-targets --locked -- -D warnings
 
 `make check` runs formatting, Clippy, and tests. `make build` creates the release binary at `target/release/bigboard`.
 
-To compare exports with a Go reference binary, run:
+Tests use synthetic Git repositories with known expected counts, including ambiguous refs, unusual filenames, duplicate clones, coauthors, shallow history, and merges. CI runs the Rust suite on Linux and macOS, and packages both systems on x86-64 and ARM64.
 
-```bash
-python3 scripts/check_parity.py --reference /path/to/go-bigboard
-```
-
-CI builds the immutable pre-port Go revision and runs this comparison on Linux and macOS. Tag releases build archives for both systems on x86-64 and ARM64.
+Version 0.8 removes `--export`. The earlier Go comparison suite intentionally preserved defects and is no longer the correctness target.
 
 ## License
 

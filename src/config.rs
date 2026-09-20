@@ -1,4 +1,4 @@
-//! The existing four-flag CLI and JSON configuration contract.
+//! Terminal CLI and user preferences.
 use crate::{model::Repository, stats::SortField};
 use anyhow::{Context, Result, bail};
 use serde::{
@@ -18,6 +18,8 @@ pub struct Config {
     pub sort: String,
     pub since: String,
     pub theme: String,
+    pub timezone: String,
+    // Accept legacy false values; true is rejected with a migration message.
     pub fuzzy: bool,
     pub all_files: bool,
     pub depth: i64,
@@ -125,6 +127,11 @@ impl<'de> Deserialize<'de> for Config {
                                 config.theme = value
                             }
                         }
+                        "timezone" => {
+                            if let Some(value) = map.next_value::<Option<String>>()? {
+                                config.timezone = value;
+                            }
+                        }
                         "fuzzy" => {
                             if let Some(value) = map.next_value::<Option<bool>>()? {
                                 config.fuzzy = value
@@ -168,7 +175,6 @@ impl<'de> Deserialize<'de> for Config {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct Cli {
     pub version: bool,
-    pub export: bool,
     pub group: String,
     pub config: String,
     pub paths: Vec<String>,
@@ -202,17 +208,14 @@ impl Cli {
                     result.help = true;
                     break;
                 }
-                "version" | "export" => {
+                "export" => bail!("--export has been removed; use the interactive dashboard"),
+                "version" => {
                     let value = match supplied.unwrap_or("true") {
                         "1" | "t" | "T" | "TRUE" | "true" | "True" => true,
                         "0" | "f" | "F" | "FALSE" | "false" | "False" => false,
                         v => bail!("invalid boolean value {v:?} for -{key}"),
                     };
-                    if key == "version" {
-                        result.version = value
-                    } else {
-                        result.export = value
-                    }
+                    result.version = value;
                 }
                 "group" | "config" => {
                     let value = supplied
@@ -264,7 +267,21 @@ pub fn time_index_for_since(s: &str) -> Result<usize> {
         .with_context(|| format!("invalid since {s:?} (want 1d|7d|14d|30d|90d|1y|all)"))
 }
 
+pub fn reporting_timezone(config: &Config) -> Result<chrono_tz::Tz> {
+    let timezone = config.timezone.trim();
+    if timezone.is_empty() {
+        return Ok(chrono_tz::UTC);
+    }
+    timezone.parse().with_context(|| format!("invalid reporting timezone {timezone:?}; use an IANA name such as UTC or America/Denver"))
+}
+
 pub fn validate_preferences(config: &Config) -> Result<(SortField, usize)> {
+    if config.fuzzy {
+        bail!(
+            "automatic name merging (fuzzy) has been removed; set fuzzy to false or remove it, then use M in the dashboard to merge contributors"
+        );
+    }
+    reporting_timezone(config)?;
     match config.theme.to_lowercase().as_str() {
         "" | "auto" | "dark" | "light" => {}
         _ => bail!(
@@ -559,22 +576,49 @@ fn file_pattern_matches(mut pattern: &str, name: &str) -> Result<bool> {
 mod tests {
     use super::*;
     #[test]
-    fn cli_preserves_four_flags_and_go_ordering() {
-        let args = [
-            "--export",
-            "--config=x.json",
-            "--group",
-            "backend",
-            "repo",
-            "--version",
-        ];
-        let cli = Cli::parse(args.map(String::from)).unwrap();
-        assert!(cli.export);
+    fn cli_has_three_flags_and_export_is_removed() {
+        let cli = Cli::parse(
+            ["--config=x.json", "--group", "backend", "repo", "--version"].map(String::from),
+        )
+        .unwrap();
         assert!(!cli.version);
         assert_eq!(cli.config, "x.json");
         assert_eq!(cli.paths, ["repo", "--version"]);
-        assert!(Cli::parse(["--since".into()]).is_err());
-        assert!(!Cli::parse(["--export=false".into()]).unwrap().export);
+        for flag in ["--export", "-export", "--export=false"] {
+            assert!(
+                Cli::parse([flag.into()])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("removed")
+            );
+        }
+    }
+    #[test]
+    fn timezone_defaults_and_legacy_name_merging_validation() {
+        let mut cfg = Config::default();
+        assert_eq!(reporting_timezone(&cfg).unwrap(), chrono_tz::UTC);
+        cfg.timezone = "America/Denver".into();
+        assert_eq!(
+            reporting_timezone(&cfg).unwrap(),
+            chrono_tz::America::Denver
+        );
+        cfg.timezone = "Invalid/Zone".into();
+        assert!(validate_preferences(&cfg).is_err());
+        cfg.timezone.clear();
+        cfg.fuzzy = true;
+        assert!(
+            validate_preferences(&cfg)
+                .unwrap_err()
+                .to_string()
+                .contains("use M")
+        );
+        cfg.fuzzy = false;
+        assert!(validate_preferences(&cfg).is_ok());
+        let decoded: Config = serde_json::from_str(r#"{"timezone":"Asia/Tokyo"}"#).unwrap();
+        assert_eq!(
+            reporting_timezone(&decoded).unwrap(),
+            chrono_tz::Asia::Tokyo
+        );
     }
     #[test]
     fn config_is_strict_but_accepts_go_nulls() {
@@ -677,26 +721,21 @@ mod tests {
     }
 
     #[test]
-    fn cli_boolean_values_repetition_help_and_terminators_match_go() {
+    fn cli_boolean_values_repetition_help_and_terminators() {
         for value in ["1", "t", "T", "TRUE", "true", "True"] {
-            assert!(Cli::parse([format!("--export={value}")]).unwrap().export);
+            assert!(Cli::parse([format!("--version={value}")]).unwrap().version);
         }
         for value in ["0", "f", "F", "FALSE", "false", "False"] {
             assert!(!Cli::parse([format!("--version={value}")]).unwrap().version);
         }
-        assert!(Cli::parse(["--export=TrUe".into()]).is_err());
-        assert!(
-            Cli::parse(["---export".into()])
-                .unwrap_err()
-                .to_string()
-                .starts_with("bad flag syntax:")
-        );
-        assert!(Cli::parse(["--=export".into()]).is_err());
+        assert!(Cli::parse(["--version=TrUe".into()]).is_err());
+        assert!(Cli::parse(["---version".into()]).is_err());
+        assert!(Cli::parse(["--=version".into()]).is_err());
         assert!(Cli::parse(["--group".into()]).is_err());
         let cli = Cli::parse(
             [
-                "-export",
-                "--export=false",
+                "-version",
+                "--version=false",
                 "--group=old",
                 "-group",
                 "--",
@@ -705,15 +744,10 @@ mod tests {
             .map(String::from),
         )
         .unwrap();
-        assert!(!cli.export);
+        assert!(!cli.version);
         assert_eq!(cli.group, "--");
         assert_eq!(cli.paths, ["repo"]);
-        let cli = Cli::parse(["--export", "false", "--version"].map(String::from)).unwrap();
-        assert!(cli.export);
-        assert!(!cli.version);
-        assert_eq!(cli.paths, ["false", "--version"]);
         let cli = Cli::parse(["--", "--export", "repo"].map(String::from)).unwrap();
-        assert!(!cli.export);
         assert_eq!(cli.paths, ["--export", "repo"]);
         assert!(
             Cli::parse(["--help=false".into(), "--invalid".into()])

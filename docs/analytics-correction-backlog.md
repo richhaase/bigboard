@@ -1,8 +1,8 @@
-# Big Board analytics audit
+# Big Board analytics audit (pre-port findings)
 
 Go reference revision: `a0acd7677837fff81eb10d31afc3a6b030362009`. Audited 2026-09-20.
 
-These are deferred corrections. The user chose a behavior-preserving Rust port first; analytics changes will follow separately. All Go source references below refer to that immutable revision.
+The user chose a behavior-preserving Rust port first. The subsequent analytics revision addresses these findings under the decisions documented in [analytics behavior](analytics.md); this document retains the original audit evidence. All Go source references below refer to that immutable revision.
 The initial audit was read-only and used isolated synthetic fixtures.
 
 ## Baseline
@@ -45,6 +45,6 @@ The Go baseline passed all four packages’ tests and `go vet ./...`. Passing th
 
 ## Evidence and migration boundary
 
-The Rust unit tests and `scripts/check_parity.py` record existing behavior for normal histories and selected audited edge cases. These fixtures establish compatibility, not analytical correctness. The initial audit also reproduced these findings against the public Go APIs and CLI in isolated temporary repositories.
+In the original Rust port, its unit tests and `scripts/check_parity.py` recorded existing behavior for normal histories and selected audited edge cases. That parity script was retired in the subsequent analytics revision. These fixtures establish compatibility, not analytical correctness. The initial audit also reproduced these findings against the public Go APIs and CLI in isolated temporary repositories.
 
-The confirmed purpose is contribution activity across a team, with interest in personal/agent activity and productivity insights as well. Identity, history scope, date policy, and the interpretation of productivity will be decided during the subsequent analytics work. No analytics-policy change is intended in this Rust revision.
+The confirmed purpose is contribution activity across a team, with interest in personal/agent activity and productivity insights as well. At the audit stage, identity, history scope, date policy, and the interpretation of productivity were deferred until after the behavior-preserving Rust port. The subsequent decisions and implemented behavior are documented in [analytics behavior](analytics.md).
