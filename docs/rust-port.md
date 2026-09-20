@@ -1,4 +1,6 @@
-# Rust revision
+# Rust revision (historical 0.7 record)
+
+This document records the completed behavior-preserving port. Version 0.8 changes the analytics contract and removes JSON export and the parity script; see [current analytics behavior](analytics.md). The reproduction commands and results below apply to the 0.7 port revision.
 
 The user requested an isolated, behavior-preserving port before correcting the analytics. The Go reference is commit `a0acd7677837fff81eb10d31afc3a6b030362009`. The [analytics correction backlog](analytics-correction-backlog.md) records deferred work. The scope record in [the draft contract](contracts/rust-port.md) documents the conversational authorization; it is not a separately approved Steward contract.
 

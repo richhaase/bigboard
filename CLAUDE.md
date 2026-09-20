@@ -1,21 +1,22 @@
 # Big Board project context
 
-Cyberpunk terminal dashboard for contributor activity across Git repositories. The application is Rust, using Ratatui with the Crossterm backend; Git operations invoke the Git CLI.
+Cyberpunk terminal dashboard for contributor activity across Git repositories. Rust with Ratatui/Crossterm; Git operations invoke the local Git CLI.
 
 ## Architecture
 
-- `src/main.rs`: CLI entry and JSON export.
-- `src/config.rs`: strict JSON config, the four existing flags, groups, paths, exclusions, preset validation.
-- `src/model.rs`: repository, commit, and analysis option types.
-- `src/git.rs`: repository discovery, default branch, streaming Git log parsing, path filters, AI identity matching, cancellation and timeout.
-- `src/stats.rs`: identity union, aggregation, bot tagging, filters, sorting, derived metrics.
-- `src/scan.rs`: bounded eight-worker repository scan sessions for export and TUI.
-- `src/tui/`: application state, Ratatui rendering, terminal lifecycle and keyboard handling.
-- `scripts/check_parity.py`: compares the Rust executable with the immutable Go reference.
+- `src/main.rs`, `src/config.rs`: three CLI flags, strict JSON preferences, timezone, groups, paths and exclusions. No JSON export.
+- `src/model.rs`: repository, identity, commit, scope, scan data and options.
+- `src/git.rs`: snapshot branch history, streaming collection, generated-file filtering, mailmap/coauthors, detected AI, completeness and merge accounting.
+- `src/identity.rs`: explicit user-global contributor mappings, atomic persistence with locking.
+- `src/stats.rs`: identity aggregation, unique commit counting, participation, consistent calendar buckets, bot tags, filters and exact-ratio sorting.
+- `src/scan.rs`: bounded eight-worker cancelable scan sessions.
+- `src/tui/`: stable contributor selection, merge flow, history toggle, completeness notices, rendering and terminal lifecycle.
 
-## Migration scope
+## Analytics invariants
 
-This revision preserves Go behavior. Do not silently correct analytics during port maintenance. The deferred findings and policy decisions are in `docs/analytics-correction-backlog.md`. The immutable Go reference is recorded in `docs/rust-port.md` and CI.
+Follow `docs/analytics.md` and the user-approved conversational scope recorded in `docs/contracts/analytics-accuracy.md`. Names are labels, never automatic identity joins. Commit totals are globally unique across selected repositories, whose subtotals may overlap. Human coauthored credit is separate from authored commits/lines. Missing measurements must stay visibly unknown. Calendar buckets use the configured timezone and a shared cutoff. Metrics describe activity, not productivity.
+
+Use only locally available Git history; do not fetch or modify the user's working tree/index/refs during analysis. Keep reconstruction objects temporary. Prefer targeted synthetic fixtures with known expected outcomes to old Go parity, which deliberately preserved defects.
 
 ## Checks
 
@@ -26,8 +27,4 @@ cargo test --locked
 cargo build --release --locked
 ```
 
-Run `python3 scripts/check_parity.py --reference /path/to/go-bigboard` after building the debug binary to check the end-to-end migration fixtures. The shipped application needs Rust to build and Git at runtime; Go is used only for reference validation.
-
-## UI conventions
-
-Use contributor in visible labels. Preserve cyberpunk colors, the block banner, gold/silver/bronze ranks, negative net values in red, and gradient impact bars. Keep the original keyboard controls and static presentation. JSON export covers all time; interactive time/repository filters are computed in memory. Git scans are concurrent and cancelable, with a 120-second per-repository deadline.
+CI checks Linux/macOS and release packaging on x86-64/ARM64. Preserve existing keyboard controls and cyberpunk presentation. `M` merges identities and `B` toggles history scope. The initial scope is landed work. Known-data qualifiers must remain visible at small terminal sizes.

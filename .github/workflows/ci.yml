@@ -15,8 +15,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -24,15 +22,3 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: cargo build --locked
-      - name: Extract the immutable Go reference
-        run: |
-          mkdir -p "$RUNNER_TEMP/bigboard-go"
-          git archive a0acd7677837fff81eb10d31afc3a6b030362009 | tar -x -C "$RUNNER_TEMP/bigboard-go"
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: ${{ runner.temp }}/bigboard-go/go.mod
-          cache: false
-      - name: Build the Go reference and compare behavior
-        run: |
-          (cd "$RUNNER_TEMP/bigboard-go" && go build -o "$RUNNER_TEMP/go-bigboard" ./cmd/bigboard)
-          python3 scripts/check_parity.py --reference "$RUNNER_TEMP/go-bigboard"

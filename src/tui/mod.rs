@@ -1,19 +1,22 @@
 //! Ratatui presentation and keyboard state, retaining the Go dashboard's behavior.
 mod components;
+mod merge;
 mod render;
 #[cfg(test)]
 mod tests;
 mod theme;
 
-use crate::model::{AnalysisOptions, CommitRecord, Repository};
+use crate::identity::IdentityStore;
+use crate::model::{AnalysisOptions, CommitRecord, HistoryScope, Repository};
 use crate::scan::{self, ScanResult, ScanSession};
 use crate::stats::{self, AggregateOptions, AuthorStats, SortField};
-use chrono::Duration;
+use chrono::{DateTime, Duration, FixedOffset, Utc};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
-use std::{collections::HashSet, io, time::Duration as StdDuration};
+use std::{collections::HashSet, io, path::PathBuf, time::Duration as StdDuration};
 
 use components::Palette;
+use merge::MergeFlow;
 
 pub const DEFAULT_TIME_INDEX: usize = 2;
 pub const TIME_PRESETS: [(&str, i64); 7] = [
@@ -42,6 +45,16 @@ enum Action {
 struct App {
     all_records: Vec<CommitRecord>,
     authors: Vec<AuthorStats>,
+    contributors: Vec<AuthorStats>,
+    identities: IdentityStore,
+    identity_path: PathBuf,
+    merge: Option<MergeFlow>,
+    notice: Option<String>,
+    scope: HistoryScope,
+    cutoff: DateTime<FixedOffset>,
+    warnings: Vec<(String, String)>,
+    attribution_warnings: Vec<String>,
+    pending_warnings: Vec<(String, String)>,
     repositories: Vec<Repository>,
     loaded_repos: Vec<Repository>,
     failed_repos: Vec<String>,
@@ -55,7 +68,7 @@ struct App {
     searching: bool,
     sort_ascending: bool,
     hide_bots: bool,
-    active_operative: String,
+    active_id: String,
     sort_field: SortField,
     time_index: usize,
     version: String,
@@ -73,6 +86,7 @@ struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         repositories: Vec<Repository>,
         initial_sort: SortField,
@@ -81,6 +95,8 @@ impl App {
         initial_time_index: usize,
         options: AnalysisOptions,
         theme: &str,
+        identities: IdentityStore,
+        identity_path: PathBuf,
     ) -> Self {
         let mut normalized = excluded.clone();
         for repo in &repositories {
@@ -101,6 +117,16 @@ impl App {
         let mut app = Self {
             all_records: vec![],
             authors: vec![],
+            contributors: vec![],
+            identities,
+            identity_path,
+            merge: None,
+            notice: None,
+            scope: HistoryScope::Landed,
+            cutoff: Utc::now().fixed_offset(),
+            warnings: vec![],
+            attribution_warnings: vec![],
+            pending_warnings: vec![],
             repositories,
             loaded_repos: vec![],
             failed_repos: vec![],
@@ -114,7 +140,7 @@ impl App {
             searching: false,
             sort_ascending: false,
             hide_bots: false,
-            active_operative: String::new(),
+            active_id: String::new(),
             sort_field: initial_sort,
             time_index: if initial_time_index < TIME_PRESETS.len() {
                 initial_time_index
@@ -144,6 +170,8 @@ impl App {
         self.pending_records.clear();
         self.pending_repos.clear();
         self.pending_failed.clear();
+        self.pending_warnings.clear();
+        self.cutoff = Utc::now().fixed_offset();
         self.boot_lines.clear();
         if self.pending_remaining == 0 {
             self.finalize_load();
@@ -152,6 +180,13 @@ impl App {
 
     fn loaded(&mut self, result: ScanResult) {
         let ok = result.error.is_none();
+        self.pending_warnings
+            .extend(result.warnings.into_iter().map(|warning| {
+                (
+                    result.repository.id.clone(),
+                    format!("{}: {warning}", result.repository.name),
+                )
+            }));
         self.boot_lines.push((result.repository.name.clone(), ok));
         if ok {
             self.pending_records.extend(result.records);
@@ -171,6 +206,8 @@ impl App {
         self.all_records = std::mem::take(&mut self.pending_records);
         self.loaded_repos = std::mem::take(&mut self.pending_repos);
         self.failed_repos = std::mem::take(&mut self.pending_failed);
+        self.warnings = std::mem::take(&mut self.pending_warnings);
+        self.warnings.sort();
         self.error = if self.loaded_repos.is_empty() && !self.failed_repos.is_empty() {
             Some(format!(
                 "all {} repositories failed to scan",
@@ -180,28 +217,71 @@ impl App {
             None
         };
         self.loading = false;
+        self.rebuild_contributors();
         self.recompute();
     }
 
+    fn aggregate_options(&self) -> AggregateOptions {
+        AggregateOptions {
+            identities: self.identities.clone(),
+            timezone: self.options.timezone,
+            bot_identities: self.options.bot_identities.clone(),
+        }
+    }
+
     fn filtered_records(&self) -> Vec<CommitRecord> {
-        stats::filter_by_time(
-            &stats::filter_by_repo(&self.all_records, &self.excluded),
+        stats::filter_by_time_at(
+            &stats::filter_by_scope(
+                &stats::filter_by_repo(&self.all_records, &self.excluded),
+                self.scope,
+            ),
             Duration::days(TIME_PRESETS[self.time_index].1),
+            self.cutoff,
         )
     }
 
-    fn recompute(&mut self) {
-        self.authors = stats::aggregate(
-            &self.filtered_records(),
-            &AggregateOptions {
-                fuzzy_matching: self.options.fuzzy_matching,
-                bot_identities: self.options.bot_identities.clone(),
-            },
+    fn rebuild_contributors(&mut self) {
+        // Merge choices include every loaded repository and branch, independent
+        // of view filters. Future-dated records remain excluded by the same cutoff.
+        self.contributors = stats::identity_catalog(
+            &stats::filter_by_time_at(&self.all_records, Duration::zero(), self.cutoff),
+            &self.aggregate_options(),
         );
+        self.contributors
+            .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    }
+
+    fn selected_id(&self) -> Option<String> {
+        self.displayed_authors()
+            .get(self.selected)
+            .map(|a| a.id.clone())
+    }
+
+    fn select_id(&mut self, id: &str) {
+        let canonical = self.identities.canonical_id(id);
+        if let Some(index) = self
+            .displayed_authors()
+            .iter()
+            .position(|a| a.id == canonical)
+        {
+            self.selected = index;
+        }
+        self.clamp_scroll();
+    }
+
+    fn recompute(&mut self) {
+        let selected_id = self.selected_id();
+        let records = self.filtered_records();
+        let options = self.aggregate_options();
+        self.attribution_warnings = stats::attribution_warnings(&records, &options);
+        self.authors = stats::aggregate(&records, &options);
         if self.hide_bots {
             self.authors.retain(|a| !a.bot);
         }
         self.sort_authors();
+        if let Some(id) = selected_id {
+            self.select_id(&id);
+        }
         self.clamp_scroll();
     }
 
@@ -236,15 +316,12 @@ impl App {
         if list.is_empty() {
             return;
         }
-        // Deliberately retain Go's name-based selection, including its behavior when
-        // aggregation changes the preferred name after switching the time range.
-        let idx = match list.iter().position(|a| a.name == self.active_operative) {
+        let idx = match list.iter().position(|a| a.id == self.active_id) {
             Some(idx) => idx.saturating_add_signed(delta),
             None => self.selected,
         }
         .min(list.len() - 1);
-        let name = list[idx].name.clone();
-        self.active_operative = name;
+        self.active_id = list[idx].id.clone();
         self.selected = idx;
         self.clamp_scroll();
     }
@@ -255,6 +332,9 @@ impl App {
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Action::Quit;
+        }
+        if self.merge.is_some() {
+            return self.merge_key(key);
         }
         if self.searching {
             match key.code {
@@ -286,6 +366,13 @@ impl App {
             return Action::None;
         }
         match key.code {
+            KeyCode::Char('M') if self.view != View::Repositories && !self.loading => {
+                self.open_merge();
+            }
+            KeyCode::Char('B') if self.view != View::Repositories => {
+                self.scope = self.scope.toggle();
+                self.recompute();
+            }
             KeyCode::Char('q') => {
                 if self.view == View::Aggregate && !self.filter_query.is_empty() {
                     self.filter_query.clear();
@@ -308,7 +395,7 @@ impl App {
                 View::Repositories => self.close_overlay(),
                 View::Operative => {
                     self.view = View::Aggregate;
-                    self.active_operative.clear();
+                    self.active_id.clear();
                 }
                 View::Aggregate if !self.filter_query.is_empty() => {
                     self.filter_query.clear();
@@ -382,7 +469,7 @@ impl App {
                 View::Repositories => self.close_overlay(),
                 View::Aggregate => {
                     if let Some(author) = self.displayed_authors().get(self.selected) {
-                        self.active_operative = author.name.clone();
+                        self.active_id = author.id.clone();
                         self.view = View::Operative;
                     }
                 }
@@ -448,6 +535,7 @@ fn restore_terminal() {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     repositories: Vec<Repository>,
     initial_sort: SortField,
@@ -456,6 +544,8 @@ pub fn run(
     initial_time_idx: usize,
     options: AnalysisOptions,
     theme: &str,
+    identities: IdentityStore,
+    identity_path: PathBuf,
 ) -> anyhow::Result<()> {
     let theme = theme::resolve(theme);
     let mut app = App::new(
@@ -466,6 +556,8 @@ pub fn run(
         initial_time_idx,
         options,
         theme,
+        identities,
+        identity_path,
     );
     crossterm::terminal::enable_raw_mode()?;
     let _guard = TerminalGuard;

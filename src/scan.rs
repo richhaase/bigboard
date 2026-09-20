@@ -1,7 +1,7 @@
-//! Shared bounded scan workers for the TUI and headless export.
+//! Bounded, cancelable repository scan workers for the terminal dashboard.
 use crate::{
     git::{self, CollectOptions},
-    model::{AnalysisOptions, CommitRecord, Repository},
+    model::{AnalysisOptions, CommitRecord, Repository, ScanData},
 };
 use std::sync::{
     Arc,
@@ -15,6 +15,7 @@ pub struct ScanResult {
     pub repository: Repository,
     pub records: Vec<CommitRecord>,
     pub error: Option<String>,
+    pub warnings: Vec<String>,
 }
 
 pub struct ScanSession {
@@ -44,7 +45,7 @@ fn start_scan_with<F>(
     scan: F,
 ) -> ScanSession
 where
-    F: Fn(&Repository, &CollectOptions, &AtomicBool) -> anyhow::Result<Vec<CommitRecord>>
+    F: Fn(&Repository, &CollectOptions, &AtomicBool) -> anyhow::Result<ScanData>
         + Send
         + Sync
         + 'static,
@@ -78,14 +79,16 @@ where
                     break;
                 };
                 let result = match scan(repo, &options, &cancel) {
-                    Ok(records) => ScanResult {
+                    Ok(data) => ScanResult {
                         repository: repo.clone(),
-                        records,
+                        records: data.records,
+                        warnings: data.warnings,
                         error: None,
                     },
                     Err(error) => ScanResult {
                         repository: repo.clone(),
                         records: vec![],
+                        warnings: vec![],
                         error: Some(format!("{error:#}")),
                     },
                 };
@@ -146,7 +149,7 @@ mod tests {
                 if repo.id == "7" {
                     anyhow::bail!("intentional repository failure");
                 }
-                Ok(vec![])
+                Ok(ScanData::default())
             }
         });
         for _ in 0..MAX_CONCURRENT_SCANS {
@@ -250,17 +253,18 @@ mod tests {
         let session = start_scan_with(repositories(2), options, |_, options, _| {
             assert!(options.include_generated);
             assert_eq!(options.ai_identities, ["worker@example.com"]);
-            Ok(vec![])
+            Ok(ScanData {
+                records: vec![],
+                warnings: vec!["available history only".into()],
+            })
         });
         for _ in 0..2 {
-            assert!(
-                session
-                    .receiver
-                    .recv_timeout(Duration::from_secs(2))
-                    .unwrap()
-                    .error
-                    .is_none()
-            );
+            let result = session
+                .receiver
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            assert!(result.error.is_none());
+            assert_eq!(result.warnings, ["available history only"]);
         }
         assert!(matches!(
             session.receiver.recv_timeout(Duration::from_secs(2)),

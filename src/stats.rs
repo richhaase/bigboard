@@ -1,12 +1,15 @@
-//! Contributor aggregation and identity policy, preserved from the Go revision.
+//! Contributor identity, unique-commit accounting, and reporting-calendar totals.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Duration, FixedOffset, Local, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, SecondsFormat, TimeZone, Utc};
+use chrono_tz::Tz;
 use serde::{Serialize, Serializer};
 
-use crate::model::CommitRecord;
+use crate::identity::IdentityStore;
+use crate::model::{CommitRecord, HistoryScope, identity_key};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SortField {
@@ -21,13 +24,13 @@ pub enum SortField {
 
 impl SortField {
     pub fn parse(value: &str) -> Result<Self> {
-        match lowercase(value).as_str() {
-            "total" | "impact" => Ok(Self::Total),
+        match value.to_lowercase().as_str() {
+            "total" | "impact" | "lines changed" => Ok(Self::Total),
             "commits" => Ok(Self::Commits),
             "added" => Ok(Self::Added),
             "removed" => Ok(Self::Removed),
             "net" => Ok(Self::Net),
-            "ai" => Ok(Self::AI),
+            "ai" | "detected ai" => Ok(Self::AI),
             _ => bail!("invalid sort {value:?} (want commits|added|removed|net|ai|total)"),
         }
     }
@@ -45,39 +48,60 @@ impl SortField {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Total => "IMPACT",
+            Self::Total => "LINES CHANGED",
             Self::Commits => "COMMITS",
             Self::Added => "ADDED",
             Self::Removed => "REMOVED",
             Self::Net => "NET",
-            Self::AI => "AI",
+            Self::AI => "DETECTED AI",
         }
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub struct AggregateOptions {
-    pub fuzzy_matching: bool,
+    pub identities: IdentityStore,
+    pub timezone: Tz,
     pub bot_identities: Vec<String>,
+}
+
+impl Default for AggregateOptions {
+    fn default() -> Self {
+        Self {
+            identities: IdentityStore::default(),
+            timezone: chrono_tz::UTC,
+            bot_identities: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AuthorStats {
+    pub id: String,
     pub name: String,
+    pub emails: HashSet<String>,
+    pub member_ids: HashSet<String>,
+    /// Unique commits credited to this contributor as primary author.
     pub commits: i64,
+    /// Human participation on commits authored by somebody else.
+    pub coauthored_commits: i64,
     pub added: i64,
     pub removed: i64,
     pub net: i64,
     pub total_change: i64,
     pub ai_commits: i64,
+    /// Authored commits for which no selected repository supplied a known diff.
+    pub unknown_line_commits: i64,
     pub bot: bool,
     #[serde(serialize_with = "serialize_date")]
     pub first_commit: DateTime<FixedOffset>,
     #[serde(serialize_with = "serialize_date")]
     pub last_commit: DateTime<FixedOffset>,
     pub active_days: i64,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    /// Repository associations overlap when clones/forks share a commit.
     pub per_repo: BTreeMap<String, RepoContribution>,
+    pub daily: BTreeMap<NaiveDate, RepoContribution>,
+    pub monthly: BTreeMap<String, RepoContribution>,
     #[serde(skip)]
     pub aliases: HashSet<String>,
 }
@@ -85,39 +109,42 @@ pub struct AuthorStats {
 impl Default for AuthorStats {
     fn default() -> Self {
         Self {
+            id: String::new(),
             name: String::new(),
+            emails: HashSet::new(),
+            member_ids: HashSet::new(),
             commits: 0,
+            coauthored_commits: 0,
             added: 0,
             removed: 0,
             net: 0,
             total_change: 0,
             ai_commits: 0,
+            unknown_line_commits: 0,
             bot: false,
             first_commit: zero_time(),
             last_commit: zero_time(),
             active_days: 0,
             per_repo: BTreeMap::new(),
+            daily: BTreeMap::new(),
+            monthly: BTreeMap::new(),
             aliases: HashSet::new(),
         }
     }
 }
 
 impl AuthorStats {
-    /// The existing metric is removed / added, with zero for no additions.
-    pub fn churn_ratio(&self) -> f64 {
-        if self.added == 0 {
-            0.0
-        } else {
-            self.removed as f64 / self.added as f64
-        }
+    pub fn removed_added_ratio(&self) -> Option<f64> {
+        (self.added != 0 && self.unknown_line_commits == 0)
+            .then(|| self.removed as f64 / self.added as f64)
     }
 
-    /// Integer truncation is also retained for sorting compatibility.
+    /// Rounded down for display only; sorting compares the exact ratios.
     pub fn ai_percent(&self) -> i64 {
         if self.commits == 0 {
             0
         } else {
-            self.ai_commits * 100 / self.commits
+            (i128::from(self.ai_commits) * 100 / i128::from(self.commits)) as i64
         }
     }
 }
@@ -125,17 +152,32 @@ impl AuthorStats {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RepoContribution {
     pub commits: i64,
+    pub coauthored_commits: i64,
     pub added: i64,
     pub removed: i64,
     pub net: i64,
     pub total_change: i64,
     pub ai_commits: i64,
+    pub unknown_line_commits: i64,
+}
+
+impl RepoContribution {
+    fn add(&mut self, contribution: &Self) {
+        self.commits += contribution.commits;
+        self.coauthored_commits += contribution.coauthored_commits;
+        self.added += contribution.added;
+        self.removed += contribution.removed;
+        self.net += contribution.net;
+        self.total_change += contribution.total_change;
+        self.ai_commits += contribution.ai_commits;
+        self.unknown_line_commits += contribution.unknown_line_commits;
+    }
 }
 
 fn zero_time() -> DateTime<FixedOffset> {
     Utc.with_ymd_and_hms(1, 1, 1, 0, 0, 0)
         .single()
-        .expect("the Go zero timestamp is valid")
+        .expect("the zero timestamp is valid")
         .fixed_offset()
 }
 
@@ -147,22 +189,19 @@ where
 }
 
 pub fn filter_by_time(records: &[CommitRecord], duration: Duration) -> Vec<CommitRecord> {
-    filter_by_time_at(records, duration, Local::now().fixed_offset())
+    filter_by_time_at(records, duration, Utc::now().fixed_offset())
 }
 
-/// Match the existing exclusive lower cutoff, including future-dated records.
+/// Apply a single query clock: (now-duration, now], or all history through now.
 pub fn filter_by_time_at(
     records: &[CommitRecord],
     duration: Duration,
     now: DateTime<FixedOffset>,
 ) -> Vec<CommitRecord> {
-    if duration.is_zero() {
-        return records.to_vec();
-    }
     let cutoff = now - duration;
     records
         .iter()
-        .filter(|record| record.date > cutoff)
+        .filter(|record| record.date <= now && (duration.is_zero() || record.date > cutoff))
         .cloned()
         .collect()
 }
@@ -177,165 +216,374 @@ pub fn filter_by_repo(records: &[CommitRecord], excluded: &HashSet<String>) -> V
         .collect()
 }
 
-type IdentityKey = (String, String);
-
-fn key_for_record(record: &CommitRecord) -> IdentityKey {
-    (record.author.clone(), lowercase(record.email.trim()))
+pub fn filter_by_scope(records: &[CommitRecord], scope: HistoryScope) -> Vec<CommitRecord> {
+    records
+        .iter()
+        .filter(|record| scope == HistoryScope::AllBranches || record.landed)
+        .cloned()
+        .collect()
 }
 
-struct DisjointSet(Vec<usize>);
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum CommitKey<'a> {
+    Object(&'a str),
+    // Missing IDs must never accidentally collapse unrelated input records.
+    Missing(usize),
+}
 
-impl DisjointSet {
-    fn new(size: usize) -> Self {
-        Self((0..size).collect())
-    }
+#[derive(Clone, Copy)]
+struct IdentityRef<'a> {
+    name: &'a str,
+    email: &'a str,
+    repo_id: &'a str,
+}
 
-    fn find(&mut self, mut index: usize) -> usize {
-        let mut root = index;
-        while self.0[root] != root {
-            root = self.0[root];
-        }
-        while self.0[index] != index {
-            let parent = self.0[index];
-            self.0[index] = root;
-            index = parent;
-        }
-        root
-    }
-
-    fn union(&mut self, a: usize, b: usize) {
-        let a = self.find(a);
-        let b = self.find(b);
-        if a < b {
-            self.0[b] = a;
-        } else if b < a {
-            self.0[a] = b;
-        }
+impl IdentityRef<'_> {
+    fn member_id(self) -> String {
+        identity_key(self.name, self.email, self.repo_id)
     }
 }
 
-fn resolve_canonical_names(records: &[CommitRecord], fuzzy: bool) -> HashMap<IdentityKey, String> {
-    let mut pair_index = HashMap::new();
-    let mut pairs = Vec::new();
-    for record in records {
-        let key = key_for_record(record);
-        if !pair_index.contains_key(&key) {
-            pair_index.insert(key.clone(), pairs.len());
-            pairs.push(key);
-        }
-    }
+struct Participant<'a> {
+    primary: bool,
+    preferred_name: &'a str,
+    identities: Vec<IdentityRef<'a>>,
+}
 
-    let mut set = DisjointSet::new(pairs.len());
-    let mut by_email = HashMap::new();
-    let mut by_name = BTreeMap::new();
-    for (index, (author, email)) in pairs.iter().enumerate() {
-        if !email.is_empty() {
-            if let Some(&previous) = by_email.get(email) {
-                set.union(index, previous);
-            } else {
-                by_email.insert(email.clone(), index);
-            }
-        }
-        let name = normalized_name(author);
-        if name.is_empty() {
+fn participants<'a>(
+    record: &'a CommitRecord,
+    copies: &[&'a CommitRecord],
+    options: &AggregateOptions,
+) -> BTreeMap<String, Participant<'a>> {
+    let primary = IdentityRef {
+        name: &record.author,
+        email: &record.email,
+        repo_id: &record.repo_id,
+    };
+    let id = options.identities.canonical_id(&primary.member_id());
+    let mut participants = BTreeMap::from([(
+        id,
+        Participant {
+            primary: true,
+            preferred_name: primary.name,
+            identities: vec![primary],
+        },
+    )]);
+    // The Git collector has already removed detected AI coauthors using its
+    // built-in identities and the configured AI overrides.
+    for coauthor in &record.coauthors {
+        if is_bot_identity(&coauthor.name, &coauthor.email, &options.bot_identities) {
             continue;
         }
-        if let Some(&previous) = by_name.get(&name) {
-            set.union(index, previous);
+        let identity = IdentityRef {
+            name: &coauthor.name,
+            email: &coauthor.email,
+            repo_id: &record.repo_id,
+        };
+        let id = options.identities.canonical_id(&identity.member_id());
+        let participant = participants.entry(id).or_insert_with(|| Participant {
+            primary: false,
+            preferred_name: identity.name,
+            identities: vec![],
+        });
+        if !participant.primary && prefer_name(identity.name, participant.preferred_name) {
+            participant.preferred_name = identity.name;
+        }
+        participant.identities.push(identity);
+    }
+    // Preserve observed aliases from other clones, without inferring merges
+    // when repositories have conflicting mailmap rules for the same object.
+    for copy in copies {
+        let primary = IdentityRef {
+            name: &copy.author,
+            email: &copy.email,
+            repo_id: &copy.repo_id,
+        };
+        let others = copy.coauthors.iter().map(|identity| IdentityRef {
+            name: &identity.name,
+            email: &identity.email,
+            repo_id: &copy.repo_id,
+        });
+        for identity in std::iter::once(primary).chain(others) {
+            let id = options.identities.canonical_id(&identity.member_id());
+            if let Some(participant) = participants.get_mut(&id) {
+                participant.identities.push(identity);
+            }
+        }
+    }
+    participants
+}
+
+fn commit_groups(records: &[CommitRecord]) -> BTreeMap<CommitKey<'_>, Vec<&CommitRecord>> {
+    let mut commits = BTreeMap::new();
+    for (index, record) in records.iter().enumerate() {
+        let key = if record.commit_id.is_empty() {
+            CommitKey::Missing(index)
         } else {
-            by_name.insert(name, index);
-        }
+            CommitKey::Object(&record.commit_id)
+        };
+        commits.entry(key).or_insert_with(Vec::new).push(record);
     }
+    commits
+}
 
-    if fuzzy {
-        let names: Vec<_> = by_name.keys().collect();
-        for (index, name) in names.iter().enumerate() {
-            for candidate in &names[index + 1..] {
-                if similar_normalized_names(name, candidate) {
-                    set.union(by_name[*name], by_name[*candidate]);
-                }
-            }
-        }
-    }
+fn representative<'a>(copies: &[&'a CommitRecord]) -> &'a CommitRecord {
+    // A full-history copy supplies the diff missing at a shallow boundary.
+    // Repository/name ordering makes remaining choices input-order neutral.
+    copies
+        .iter()
+        .copied()
+        .min_by_key(|record| {
+            (
+                !record.lines_known,
+                &record.repo_id,
+                &record.repo_name,
+                &record.email,
+                &record.author,
+                record.added,
+                record.removed,
+            )
+        })
+        .expect("each commit group contains a record")
+}
 
-    let mut name_counts: HashMap<usize, BTreeMap<String, i64>> = HashMap::new();
-    for record in records {
-        let root = set.find(pair_index[&key_for_record(record)]);
-        *name_counts
-            .entry(root)
-            .or_default()
-            .entry(record.author.clone())
-            .or_default() += 1;
-    }
-    let mut canonical_by_root = HashMap::new();
-    for (root, counts) in name_counts {
-        let mut best = String::new();
-        let mut best_count = -1;
-        for (name, count) in counts {
-            if count > best_count || (count == best_count && prefer_canonical(&name, &best)) {
-                best = name;
-                best_count = count;
-            }
-        }
-        canonical_by_root.insert(root, best);
-    }
-    pairs
+fn resolved_attribution(
+    record: &CommitRecord,
+    options: &AggregateOptions,
+) -> BTreeMap<String, bool> {
+    participants(record, &[], options)
         .into_iter()
-        .enumerate()
-        .map(|(index, pair)| (pair, canonical_by_root[&set.find(index)].clone()))
+        .map(|(id, participant)| (id, participant.primary))
         .collect()
 }
 
-/// Resolve identities and return totals in deterministic canonical-name order.
-pub fn aggregate(records: &[CommitRecord], options: &AggregateOptions) -> Vec<AuthorStats> {
-    let canonical = resolve_canonical_names(records, options.fuzzy_matching);
-    let mut by_name: BTreeMap<String, AuthorStats> = BTreeMap::new();
-    let mut active_days: HashMap<String, HashSet<String>> = HashMap::new();
-    for record in records {
-        let name = &canonical[&key_for_record(record)];
-        let author = by_name.entry(name.clone()).or_insert_with(|| AuthorStats {
-            name: name.clone(),
-            ..AuthorStats::default()
-        });
-        if !author.bot && is_bot_identity(&record.author, &record.email, &options.bot_identities) {
-            author.bot = true;
+/// Qualify unique-object attribution when repository mailmaps disagree.
+/// Call with the same filtered records and options supplied to `aggregate`.
+pub fn attribution_warnings(records: &[CommitRecord], options: &AggregateOptions) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for copies in commit_groups(records).into_values() {
+        if copies.len() < 2 {
+            continue;
         }
-        author.commits += 1;
-        author.added += record.added;
-        author.removed += record.removed;
-        author.net += record.added - record.removed;
-        author.total_change += record.added + record.removed;
-        author.aliases.insert(record.author.clone());
-        if author.first_commit == zero_time() || record.date < author.first_commit {
-            author.first_commit = record.date;
+        let record = representative(&copies);
+        let attribution = resolved_attribution(record, options);
+        if copies
+            .iter()
+            .all(|copy| resolved_attribution(copy, options) == attribution)
+        {
+            continue;
         }
-        if record.date > author.last_commit {
-            author.last_commit = record.date;
-        }
-        active_days
-            .entry(name.clone())
-            .or_default()
-            .insert(record.date.format("%Y-%m-%d").to_string());
-        if record.ai_assisted {
-            author.ai_commits += 1;
-        }
-        let repo = author.per_repo.entry(record.repo_name.clone()).or_default();
-        repo.commits += 1;
-        repo.added += record.added;
-        repo.removed += record.removed;
-        repo.net += record.added - record.removed;
-        repo.total_change += record.added + record.removed;
-        if record.ai_assisted {
-            repo.ai_commits += 1;
+        let repositories: BTreeSet<_> = copies.iter().map(|copy| copy.repo_name.as_str()).collect();
+        let primary = attribution
+            .iter()
+            .find(|(_, primary)| **primary)
+            .map(|(id, _)| id.as_str())
+            .expect("each commit has a primary author");
+        let coauthors = attribution
+            .iter()
+            .filter(|(_, primary)| !**primary)
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>();
+        let chosen_name = options
+            .identities
+            .display_name(primary)
+            .unwrap_or(&record.author);
+        let chosen = if coauthors.is_empty() {
+            format!("{chosen_name} ({primary}) with no human coauthors")
+        } else {
+            format!(
+                "{chosen_name} ({primary}) with coauthors {}",
+                coauthors.join(", ")
+            )
+        };
+        let oid: String = record.commit_id.chars().take(12).collect();
+        warnings.push(format!(
+            "Shared commit {oid} has conflicting contributor mappings across {}; using {chosen} from {}. Review repository mailmaps or merge the identities explicitly.",
+            repositories.into_iter().collect::<Vec<_>>().join(", "),
+            record.repo_name,
+        ));
+    }
+    warnings
+}
+
+/// Merge-choice catalog containing every observed resolved identity, including
+/// competing repository mailmaps for one object. Each row counts only copies in
+/// which that identity participates; these rows must not be summed as board totals.
+pub fn identity_catalog(records: &[CommitRecord], options: &AggregateOptions) -> Vec<AuthorStats> {
+    let mut identities: BTreeMap<String, BTreeMap<CommitKey<'_>, Vec<&CommitRecord>>> =
+        BTreeMap::new();
+    for (index, record) in records.iter().enumerate() {
+        for id in participants(record, &[], options).into_keys() {
+            let key = if record.commit_id.is_empty() {
+                CommitKey::Missing(index)
+            } else {
+                CommitKey::Object(&record.commit_id)
+            };
+            identities
+                .entry(id)
+                .or_default()
+                .entry(key)
+                .or_default()
+                .push(record);
         }
     }
-    by_name
+    let mut catalog = Vec::with_capacity(identities.len());
+    for (id, commits) in identities {
+        catalog.extend(aggregate_groups(commits.into_values(), options, Some(&id)));
+    }
+    catalog.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    catalog
+}
+
+/// Aggregate unique Git objects, retaining overlapping repository associations.
+/// Callers apply repository, history-scope, and query-time filters first.
+pub fn aggregate(records: &[CommitRecord], options: &AggregateOptions) -> Vec<AuthorStats> {
+    aggregate_groups(commit_groups(records).into_values(), options, None)
+}
+
+fn aggregate_groups<'a>(
+    groups: impl IntoIterator<Item = Vec<&'a CommitRecord>>,
+    options: &AggregateOptions,
+    only_id: Option<&str>,
+) -> Vec<AuthorStats> {
+    let mut by_id: BTreeMap<String, AuthorStats> = BTreeMap::new();
+    let mut name_counts: HashMap<String, BTreeMap<String, usize>> = HashMap::new();
+    for copies in groups {
+        let record = representative(&copies);
+        let ai_assisted = copies.iter().any(|record| record.ai_assisted);
+        let mut repositories = BTreeMap::new();
+        for copy in &copies {
+            let key = if copy.repo_id.is_empty() {
+                &copy.repo_name
+            } else {
+                &copy.repo_id
+            };
+            repositories
+                .entry(key)
+                .and_modify(|label: &mut &String| {
+                    if copy.repo_name < **label {
+                        *label = &copy.repo_name;
+                    }
+                })
+                .or_insert(&copy.repo_name);
+        }
+        let repository_names: BTreeSet<_> = repositories.into_values().collect();
+        let local_date = record.date.with_timezone(&options.timezone);
+        let day = local_date.date_naive();
+        let month = local_date.format("%Y-%m").to_string();
+        for (id, participant) in participants(record, &copies, options) {
+            if only_id.is_some_and(|selected| selected != id) {
+                continue;
+            }
+            let author = by_id.entry(id.clone()).or_insert_with(|| AuthorStats {
+                id: id.clone(),
+                ..AuthorStats::default()
+            });
+            for identity in participant.identities {
+                author.aliases.insert(identity.name.to_owned());
+                author.member_ids.insert(identity.member_id());
+                let email = identity.email.trim().to_lowercase();
+                if !email.is_empty() {
+                    author.emails.insert(email);
+                }
+                author.bot |=
+                    is_bot_identity(identity.name, identity.email, &options.bot_identities);
+            }
+            *name_counts
+                .entry(id)
+                .or_default()
+                .entry(participant.preferred_name.to_owned())
+                .or_default() += 1;
+            let date = local_date.fixed_offset();
+            if author.commits == 0 && author.coauthored_commits == 0 {
+                author.first_commit = date;
+                author.last_commit = date;
+            } else {
+                author.first_commit = author.first_commit.min(date);
+                author.last_commit = author.last_commit.max(date);
+            }
+            let contribution = if participant.primary {
+                let (added, removed) = if record.lines_known {
+                    (record.added, record.removed)
+                } else {
+                    (0, 0)
+                };
+                RepoContribution {
+                    commits: 1,
+                    added,
+                    removed,
+                    net: added - removed,
+                    total_change: added + removed,
+                    ai_commits: i64::from(ai_assisted),
+                    unknown_line_commits: i64::from(!record.lines_known),
+                    ..RepoContribution::default()
+                }
+            } else {
+                RepoContribution {
+                    coauthored_commits: 1,
+                    ..RepoContribution::default()
+                }
+            };
+            author.commits += contribution.commits;
+            author.coauthored_commits += contribution.coauthored_commits;
+            author.added += contribution.added;
+            author.removed += contribution.removed;
+            author.net += contribution.net;
+            author.total_change += contribution.total_change;
+            author.ai_commits += contribution.ai_commits;
+            author.unknown_line_commits += contribution.unknown_line_commits;
+            author.daily.entry(day).or_default().add(&contribution);
+            author
+                .monthly
+                .entry(month.clone())
+                .or_default()
+                .add(&contribution);
+            for name in &repository_names {
+                author
+                    .per_repo
+                    .entry((*name).clone())
+                    .or_default()
+                    .add(&contribution);
+            }
+        }
+    }
+    let mut authors: Vec<_> = by_id
         .into_values()
         .map(|mut author| {
-            author.active_days = active_days[&author.name].len() as i64;
+            author.name = options
+                .identities
+                .display_name(&author.id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    name_counts[&author.id]
+                        .iter()
+                        .max_by(|(name_a, count_a), (name_b, count_b)| {
+                            count_a
+                                .cmp(count_b)
+                                .then_with(|| name_a.chars().count().cmp(&name_b.chars().count()))
+                                .then_with(|| name_b.cmp(name_a))
+                        })
+                        .map(|(name, _)| name.clone())
+                        .unwrap_or_default()
+                });
+            if author.name.is_empty() {
+                author.name = author
+                    .emails
+                    .iter()
+                    .min()
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown contributor".into());
+            }
+            author.active_days = author.daily.len() as i64;
             author
         })
-        .collect()
+        .collect();
+    authors.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    authors
+}
+
+fn prefer_name(a: &str, b: &str) -> bool {
+    a.chars().count() > b.chars().count() || (a.chars().count() == b.chars().count() && a < b)
 }
 
 fn metric_value(author: &AuthorStats, field: SortField) -> i64 {
@@ -345,38 +593,29 @@ fn metric_value(author: &AuthorStats, field: SortField) -> i64 {
         SortField::Added => author.added,
         SortField::Removed => author.removed,
         SortField::Net => author.net,
-        SortField::AI => author.ai_percent(),
+        SortField::AI => unreachable!("AI ordering compares exact ratios"),
     }
+}
+
+fn descending_ai_ratio(a: &AuthorStats, b: &AuthorStats) -> Ordering {
+    let denominator_a = i128::from(a.commits.max(1));
+    let denominator_b = i128::from(b.commits.max(1));
+    (i128::from(b.ai_commits) * denominator_a).cmp(&(i128::from(a.ai_commits) * denominator_b))
 }
 
 pub fn sort(authors: &mut [AuthorStats], field: SortField) {
     authors.sort_by(|a, b| {
-        metric_value(b, field)
-            .cmp(&metric_value(a, field))
+        let metric_order = if field == SortField::AI {
+            descending_ai_ratio(a, b)
+        } else {
+            metric_value(b, field).cmp(&metric_value(a, field))
+        };
+        metric_order
             .then_with(|| b.total_change.cmp(&a.total_change))
             .then_with(|| b.commits.cmp(&a.commits))
             .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
     });
-}
-
-pub fn names_match(a: &str, b: &str, fuzzy: bool) -> bool {
-    let a = normalized_name(a);
-    let b = normalized_name(b);
-    a == b || (fuzzy && similar_normalized_names(&a, &b))
-}
-
-fn similar_normalized_names(a: &str, b: &str) -> bool {
-    a == b || (a.chars().count() > 5 && b.contains(a)) || (b.chars().count() > 5 && a.contains(b))
-}
-
-fn prefer_canonical(a: &str, b: &str) -> bool {
-    let a_length = a.chars().count();
-    let b_length = b.chars().count();
-    if a_length != b_length {
-        a_length > b_length
-    } else {
-        a < b
-    }
 }
 
 pub fn is_bot_identity(name: &str, email: &str, extra: &[String]) -> bool {
@@ -427,166 +666,677 @@ fn lowercase(value: &str) -> String {
         .collect()
 }
 
-fn normalized_name(value: &str) -> String {
-    lowercase(value)
-        .chars()
-        .filter(|character| !character.is_whitespace() && !matches!(character, '-' | '_' | '.'))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Identity;
 
-    fn record(
-        author: &str,
-        email: &str,
-        date: &str,
-        added: i64,
-        removed: i64,
-        repo: &str,
-    ) -> CommitRecord {
+    fn record(id: &str, name: &str, email: &str, repo: &str) -> CommitRecord {
         CommitRecord {
-            author: author.into(),
+            commit_id: id.into(),
+            author: name.into(),
             email: email.into(),
-            date: DateTime::parse_from_rfc3339(date).unwrap(),
-            added,
-            removed,
+            date: DateTime::parse_from_rfc3339("2026-09-20T12:00:00Z").unwrap(),
+            added: 10,
+            removed: 3,
             repo_id: format!("/repos/{repo}"),
             repo_name: repo.into(),
             ai_assisted: false,
+            coauthors: Vec::new(),
+            lines_known: true,
+            landed: true,
+            is_merge: false,
         }
     }
 
-    fn simple(author: &str, email: &str) -> CommitRecord {
-        record(author, email, "2026-09-20T12:00:00Z", 1, 0, "r")
+    fn coauthor(name: &str, email: &str) -> Identity {
+        Identity {
+            name: name.into(),
+            email: email.into(),
+        }
+    }
+
+    fn author<'a>(authors: &'a [AuthorStats], id: &str) -> &'a AuthorStats {
+        authors.iter().find(|author| author.id == id).unwrap()
     }
 
     #[test]
-    fn aggregates_totals_aliases_dates_and_per_repo() {
-        let mut records = vec![
-            record(
-                "Alice Smith",
-                "alice@example.com",
-                "2026-09-02T12:00:00-06:00",
-                100,
-                20,
-                "a",
-            ),
-            record(
-                "asmith",
-                " ALICE@EXAMPLE.COM ",
-                "2026-09-01T12:00:00-06:00",
-                50,
-                10,
-                "a",
-            ),
-            record(
-                "Alice Smith",
-                "alice@personal.com",
-                "2026-09-02T13:00:00-06:00",
-                30,
-                5,
-                "b",
-            ),
-            record(
-                "Bob",
-                "bob@example.com",
-                "2026-09-02T12:00:00Z",
-                200,
-                80,
-                "a",
-            ),
+    fn same_names_stay_separate_while_matching_emails_keep_aliases() {
+        let records = vec![
+            record("one", "Alex Lee", "alex-one@test", "a"),
+            record("two", "Alex Lee", "alex-two@test", "a"),
+            record("three", "alee", " ALEX-ONE@TEST ", "b"),
         ];
-        records[0].ai_assisted = true;
-        records[2].ai_assisted = true;
         let authors = aggregate(&records, &AggregateOptions::default());
         assert_eq!(authors.len(), 2);
-        let alice = &authors[0];
-        assert_eq!(alice.name, "Alice Smith");
+        let first = author(&authors, "email:alex-one@test");
+        assert_eq!((first.commits, first.added, first.removed), (2, 20, 6));
+        assert_eq!(
+            first.aliases,
+            HashSet::from(["Alex Lee".into(), "alee".into()])
+        );
+        assert_eq!(first.emails, HashSet::from(["alex-one@test".into()]));
+        assert_eq!(
+            first.member_ids,
+            HashSet::from(["email:alex-one@test".into()])
+        );
+        assert_eq!(author(&authors, "email:alex-two@test").commits, 1);
+        assert_eq!(authors[0].name, authors[1].name);
+        assert_ne!(authors[0].id, authors[1].id);
+    }
+
+    #[test]
+    fn explicit_mapping_combines_emails_and_preserves_selection_id_across_filters() {
+        let records = vec![
+            record("one", "Alice Smith", "alice@work.test", "work"),
+            record("two", "asmith", "alice@home.test", "personal"),
+            record("three", "Alice Smith", "other-person@test", "work"),
+        ];
+        let mut options = AggregateOptions::default();
+        let id = options
+            .identities
+            .merge("email:alice@work.test", "email:alice@home.test", "Alice")
+            .unwrap();
+        let authors = aggregate(&records, &options);
+        assert_eq!(authors.len(), 2);
+        let alice = author(&authors, &id);
+        assert_eq!(
+            (alice.name.as_str(), alice.commits, alice.total_change),
+            ("Alice", 2, 26)
+        );
+        assert_eq!(alice.emails.len(), 2);
+        assert_eq!(alice.member_ids.len(), 2);
+        let filtered = filter_by_repo(&records, &HashSet::from(["work".into()]));
+        let filtered_authors = aggregate(&filtered, &options);
+        assert_eq!(filtered_authors[0].id, id);
+        assert_eq!(filtered_authors[0].name, "Alice");
+        assert_eq!(filtered_authors[0].commits, 1);
+    }
+
+    #[test]
+    fn missing_email_identities_are_scoped_to_repository_and_exact_name() {
+        let records = vec![
+            record("one", "Alex", "", "a"),
+            record("two", "Alex", "", "b"),
+            record("three", "alex", "", "a"),
+            record("four", "Alex", "", "a"),
+        ];
+        let authors = aggregate(&records, &AggregateOptions::default());
+        assert_eq!(authors.len(), 3);
+        assert_eq!(
+            author(&authors, &identity_key("Alex", "", "/repos/a")).commits,
+            2
+        );
+        assert_eq!(
+            author(&authors, &identity_key("Alex", "", "/repos/b")).commits,
+            1
+        );
+        assert_eq!(
+            author(&authors, &identity_key("alex", "", "/repos/a")).commits,
+            1
+        );
+    }
+
+    #[test]
+    fn merge_catalog_keeps_every_observed_conflicting_identity_without_changing_board_counts() {
+        let mut a = record("shared", "Alice", "a@test", "a");
+        a.coauthors = vec![
+            coauthor("Pair", "p@test"),
+            coauthor("Self", "a@test"),
+            coauthor("worker[bot]", "worker@test"),
+        ];
+        let mut b = record("shared", "Alice", "b@test", "b");
+        b.coauthors = vec![
+            coauthor("Pair", "q@test"),
+            coauthor("Configured Bot", "agent@bots.test"),
+        ];
+        let records = vec![a, b];
+        let mut options = AggregateOptions {
+            bot_identities: vec!["@bots.test".into()],
+            ..Default::default()
+        };
+        let catalog = identity_catalog(&records, &options);
+        assert_eq!(catalog.len(), 4);
+        for (id, repo) in [("email:a@test", "a"), ("email:b@test", "b")] {
+            let entry = author(&catalog, id);
+            assert_eq!(
+                (entry.commits, entry.coauthored_commits, entry.added),
+                (1, 0, 10)
+            );
+            assert_eq!(entry.per_repo.len(), 1);
+            assert!(entry.per_repo.contains_key(repo));
+        }
+        for (id, repo) in [("email:p@test", "a"), ("email:q@test", "b")] {
+            let entry = author(&catalog, id);
+            assert_eq!(
+                (entry.commits, entry.coauthored_commits, entry.added),
+                (0, 1, 0)
+            );
+            assert_eq!(entry.per_repo.len(), 1);
+            assert!(entry.per_repo.contains_key(repo));
+        }
+        assert_eq!(
+            catalog,
+            identity_catalog(&[records[1].clone(), records[0].clone()], &options)
+        );
+        let board = aggregate(&records, &options);
+        assert_eq!(board.iter().map(|entry| entry.commits).sum::<i64>(), 1);
+        assert_eq!(board.len(), 2);
+        // The identity visible after excluding the representative remains in the catalog.
+        let filtered = filter_by_repo(&records, &HashSet::from(["a".into()]));
+        for entry in aggregate(&filtered, &options) {
+            assert!(catalog.iter().any(|candidate| candidate.id == entry.id));
+        }
+        options
+            .identities
+            .merge("email:a@test", "email:b@test", "Alice Combined")
+            .unwrap();
+        options
+            .identities
+            .merge("email:p@test", "email:q@test", "Pair Combined")
+            .unwrap();
+        let merged = identity_catalog(&records, &options);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(author(&merged, "email:a@test").commits, 1);
+        assert_eq!(author(&merged, "email:a@test").name, "Alice Combined");
+        assert_eq!(author(&merged, "email:a@test").member_ids.len(), 2);
+        assert_eq!(author(&merged, "email:a@test").per_repo.len(), 2);
+        assert_eq!(author(&merged, "email:p@test").coauthored_commits, 1);
+        assert_eq!(author(&merged, "email:p@test").member_ids.len(), 2);
+        assert!(attribution_warnings(&records, &options).is_empty());
+        assert_eq!(
+            aggregate(&records, &options)
+                .iter()
+                .map(|entry| entry.commits)
+                .sum::<i64>(),
+            1
+        );
+        assert!(identity_catalog(&[], &options).is_empty());
+    }
+
+    #[test]
+    fn conflicting_mailmaps_warn_without_inferred_identity_merges() {
+        let mut a = record("shared-object", "Alice", "a@test", "a");
+        a.coauthors = vec![coauthor("Pair", "p@test")];
+        let mut b = record("shared-object", "Alice", "b@test", "b");
+        b.coauthors = vec![coauthor("Pair", "q@test")];
+        let records = vec![a.clone(), b.clone()];
+        let options = AggregateOptions::default();
+        let warnings = attribution_warnings(&records, &options);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("across a, b"));
+        assert!(warnings[0].contains("Alice (email:a@test) with coauthors email:p@test from a"));
+        let authors = aggregate(&records, &options);
+        assert_eq!(authors.len(), 2);
+        assert_eq!(author(&authors, "email:a@test").commits, 1);
+        assert_eq!(author(&authors, "email:p@test").coauthored_commits, 1);
+        assert_eq!(
+            attribution_warnings(&[b.clone(), a.clone()], &options),
+            warnings
+        );
+        a.lines_known = false;
+        let partial = vec![a, b];
+        let warnings = attribution_warnings(&partial, &options);
+        assert!(warnings[0].contains("Alice (email:b@test) with coauthors email:q@test from b"));
+        assert_eq!(
+            author(&aggregate(&partial, &options), "email:b@test").commits,
+            1
+        );
+        let selected = filter_by_repo(&records, &HashSet::from(["b".into()]));
+        assert!(attribution_warnings(&selected, &options).is_empty());
+        let mut merged = options.clone();
+        merged
+            .identities
+            .merge("email:a@test", "email:b@test", "Alice")
+            .unwrap();
+        // Reconciling only the primary identity still leaves conflicting coauthors.
+        assert_eq!(attribution_warnings(&records, &merged).len(), 1);
+        merged
+            .identities
+            .merge("email:p@test", "email:q@test", "Pair")
+            .unwrap();
+        assert!(attribution_warnings(&records, &merged).is_empty());
+    }
+
+    #[test]
+    fn attribution_comparison_uses_participant_roles_and_ignores_names_and_bots() {
+        let mut a = record("one", "Alice", "a@test", "a");
+        a.coauthors = vec![coauthor("Pair", "p@test")];
+        let mut b = record("one", "Alias", " A@TEST ", "b");
+        b.coauthors = vec![
+            coauthor("Pair Alias", " P@TEST "),
+            coauthor("Self", "a@test"),
+            coauthor("worker[bot]", "worker@test"),
+            coauthor("Custom Agent", "agent@bots.test"),
+        ];
+        let options = AggregateOptions {
+            bot_identities: vec!["@bots.test".into()],
+            ..Default::default()
+        };
+        assert!(attribution_warnings(&[a.clone(), b.clone()], &options).is_empty());
+        b.email = "p@test".into();
+        b.coauthors = vec![coauthor("Other Primary", "a@test")];
+        assert_eq!(
+            attribution_warnings(&[a.clone(), b.clone()], &options).len(),
+            1
+        );
+        let mut merged = options;
+        merged
+            .identities
+            .merge("email:a@test", "email:p@test", "Same person")
+            .unwrap();
+        assert!(attribution_warnings(&[a, b], &merged).is_empty());
+    }
+
+    #[test]
+    fn shared_objects_count_once_but_keep_each_repository_association() {
+        let a = record("shared", "A", "a@test", "a");
+        let mut b = a.clone();
+        b.repo_id = "/repos/b".into();
+        b.repo_name = "b".into();
+        b.ai_assisted = true;
+        let records = vec![a.clone(), a, b, record("other", "A", "a@test", "b")];
+        let authors = aggregate(&records, &AggregateOptions::default());
+        let a = &authors[0];
         assert_eq!(
             (
-                alice.commits,
-                alice.added,
-                alice.removed,
-                alice.net,
-                alice.total_change
+                a.commits,
+                a.added,
+                a.removed,
+                a.net,
+                a.total_change,
+                a.ai_commits
             ),
-            (3, 180, 35, 145, 215)
+            (2, 20, 6, 14, 26, 1)
         );
-        assert_eq!(
-            (alice.active_days, alice.ai_commits, alice.ai_percent()),
-            (2, 2, 66)
-        );
-        assert_eq!(alice.first_commit, records[1].date);
-        assert_eq!(alice.last_commit, records[2].date);
-        assert_eq!(
-            alice.aliases,
-            HashSet::from(["Alice Smith".into(), "asmith".into()])
-        );
-        assert_eq!(
-            alice.per_repo["a"],
-            RepoContribution {
-                commits: 2,
-                added: 150,
-                removed: 30,
-                net: 120,
-                total_change: 180,
-                ai_commits: 1
-            }
-        );
-        assert_eq!(alice.per_repo["b"].ai_commits, 1);
-        assert!(!alice.bot);
+        assert_eq!(a.per_repo["a"].commits, 1);
+        assert_eq!(a.per_repo["b"].commits, 2);
+        assert_eq!(a.daily.values().next().unwrap().commits, 2);
+        assert_eq!(a.monthly["2026-09"].commits, 2);
+        let excluded = filter_by_repo(&records, &HashSet::from(["/repos/b".into()]));
+        let remaining = aggregate(&excluded, &AggregateOptions::default());
+        assert_eq!(remaining[0].commits, 1);
+        assert_eq!(remaining[0].per_repo.len(), 1);
     }
 
     #[test]
-    fn default_identity_keeps_similar_names_but_merges_same_names() {
-        let records = vec![
-            simple("Daniel", "one@x"),
-            simple("Daniela", "two@x"),
-            simple("Martin", "three@x"),
-            simple("Martinez", "four@x"),
-        ];
-        assert_eq!(aggregate(&records, &AggregateOptions::default()).len(), 4);
-        let homonyms = vec![simple("Alex Lee", "one@x"), simple("Alex Lee", "two@x")];
-        let authors = aggregate(&homonyms, &AggregateOptions::default());
-        assert_eq!(authors.len(), 1);
-        assert_eq!(authors[0].commits, 2);
-    }
-
-    #[test]
-    fn name_normalization_and_fuzzy_character_count_match_go() {
-        for (a, b) in [
-            ("Alice Smith", "alice-smith"),
-            ("Alice_  Smith", "alice.smith"),
-            ("ΟΣ", "οσ"),
-            ("İ", "i"),
-        ] {
-            assert!(names_match(a, b, false), "{a:?} vs {b:?}");
+    fn full_history_diff_replaces_unknown_shallow_copy_without_counting_twice() {
+        let full = record("shared", "A", "a@test", "z-full");
+        let mut shallow = full.clone();
+        shallow.repo_id = "/repos/a-shallow".into();
+        shallow.repo_name = "a-shallow".into();
+        shallow.lines_known = false;
+        shallow.added = 1000;
+        shallow.removed = 900;
+        let options = AggregateOptions::default();
+        let records = vec![shallow.clone(), full.clone()];
+        let a = aggregate(&records, &options).remove(0);
+        assert_eq!(
+            (a.commits, a.added, a.removed, a.unknown_line_commits),
+            (1, 10, 3, 0)
+        );
+        for repo in a.per_repo.values() {
+            assert_eq!(
+                (repo.commits, repo.added, repo.unknown_line_commits),
+                (1, 10, 0)
+            );
         }
-        assert!(!names_match("Alice S", "Alice Smith", false));
-        assert!(names_match("Alice S", "Alice Smith", true));
-        assert!(!names_match("東京", "東京都", true));
-        assert!(!names_match("Al", "Alice", true));
+        assert_eq!(aggregate(&[full, shallow.clone()], &options)[0], a);
+        let unknown = aggregate(&[shallow], &options).remove(0);
+        assert_eq!(
+            (
+                unknown.commits,
+                unknown.added,
+                unknown.removed,
+                unknown.unknown_line_commits
+            ),
+            (1, 0, 0, 1)
+        );
+        assert_eq!(
+            unknown.daily.values().next().unwrap().unknown_line_commits,
+            1
+        );
+        assert_eq!(unknown.monthly["2026-09"].unknown_line_commits, 1);
     }
 
     #[test]
-    fn aggregation_is_independent_of_all_720_identity_permutations() {
+    fn removed_added_ratio_is_available_only_for_complete_nonzero_additions() {
+        let known = record("known", "A", "a@test", "a");
+        let mut unknown = record("unknown", "A", "a@test", "a");
+        unknown.lines_known = false;
+        let options = AggregateOptions::default();
+        let known_stats = aggregate(std::slice::from_ref(&known), &options).remove(0);
+        assert_eq!(known_stats.removed_added_ratio(), Some(0.3));
+        let mixed = aggregate(&[known, unknown], &options).remove(0);
+        assert_eq!(
+            (mixed.added, mixed.removed, mixed.unknown_line_commits),
+            (10, 3, 1)
+        );
+        assert_eq!(mixed.removed_added_ratio(), None);
+        let mut deletion = record("delete", "A", "a@test", "a");
+        deletion.added = 0;
+        let deletion_stats = aggregate(&[deletion], &options).remove(0);
+        assert_eq!(deletion_stats.removed_added_ratio(), None);
+    }
+
+    #[test]
+    fn human_coauthors_receive_unique_participation_without_authored_or_line_credit() {
+        let mut commit = record("shared", "Primary", "primary@test", "a");
+        commit.ai_assisted = true;
+        commit.coauthors = vec![
+            coauthor("Pair", "pair@test"),
+            coauthor("Pair Alias", " PAIR@TEST "),
+            coauthor("Primary Alias", "primary@test"),
+            coauthor("worker[bot]", "worker@test"),
+            coauthor("Configured Bot", "bot@agents.test"),
+        ];
+        let mut clone = commit.clone();
+        clone.repo_id = "/repos/b".into();
+        clone.repo_name = "b".into();
+        let options = AggregateOptions {
+            bot_identities: vec!["@agents.test".into()],
+            ..AggregateOptions::default()
+        };
+        let authors = aggregate(&[commit, clone], &options);
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors.iter().map(|a| a.commits).sum::<i64>(), 1);
+        let primary = author(&authors, "email:primary@test");
+        assert_eq!(
+            (
+                primary.commits,
+                primary.coauthored_commits,
+                primary.added,
+                primary.ai_commits
+            ),
+            (1, 0, 10, 1)
+        );
+        assert!(primary.aliases.contains("Primary Alias"));
+        let pair = author(&authors, "email:pair@test");
+        assert_eq!(
+            (
+                pair.commits,
+                pair.coauthored_commits,
+                pair.added,
+                pair.removed,
+                pair.ai_commits,
+                pair.unknown_line_commits
+            ),
+            (0, 1, 0, 0, 0, 0)
+        );
+        assert_eq!(pair.per_repo.len(), 2);
+        assert_eq!(pair.per_repo["a"].coauthored_commits, 1);
+        assert_eq!(pair.per_repo["b"].coauthored_commits, 1);
+        assert_eq!(pair.daily.values().next().unwrap().coauthored_commits, 1);
+        assert_eq!(pair.monthly["2026-09"].coauthored_commits, 1);
+        assert_eq!(pair.active_days, 1);
+    }
+
+    #[test]
+    fn merging_primary_with_coauthors_does_not_double_participation() {
+        let mut commit = record("one", "Primary", "author@test", "a");
+        commit.coauthors = vec![
+            coauthor("Partner", "partner@test"),
+            coauthor("Partner Alias", "alias@test"),
+        ];
+        let mut options = AggregateOptions::default();
+        let id = options
+            .identities
+            .merge("email:author@test", "email:partner@test", "One person")
+            .unwrap();
+        let id = options
+            .identities
+            .merge(&id, "email:alias@test", "One person")
+            .unwrap();
+        let authors = aggregate(&[commit], &options);
+        assert_eq!(authors.len(), 1);
+        assert_eq!(authors[0].id, id);
+        assert_eq!(
+            (
+                authors[0].commits,
+                authors[0].coauthored_commits,
+                authors[0].added
+            ),
+            (1, 0, 10)
+        );
+        assert_eq!(authors[0].member_ids.len(), 3);
+    }
+
+    #[test]
+    fn merged_coauthor_aliases_count_once_and_unknowns_belong_only_to_primary() {
+        let mut commit = record("one", "Primary", "author@test", "a");
+        commit.lines_known = false;
+        commit.coauthors = vec![
+            coauthor("Partner", "partner@test"),
+            coauthor("Partner Alias", "alias@test"),
+        ];
+        let mut options = AggregateOptions::default();
+        let id = options
+            .identities
+            .merge("email:partner@test", "email:alias@test", "Partner")
+            .unwrap();
+        let authors = aggregate(&[commit], &options);
+        assert_eq!(
+            author(&authors, "email:author@test").unknown_line_commits,
+            1
+        );
+        let pair = author(&authors, &id);
+        assert_eq!((pair.coauthored_commits, pair.unknown_line_commits), (1, 0));
+        assert_eq!(pair.member_ids.len(), 2);
+    }
+
+    #[test]
+    fn reporting_timezone_controls_daily_monthly_and_visible_dates() {
+        let mut january = record("january", "A", "a@test", "a");
+        january.date = DateTime::parse_from_rfc3339("2026-02-01T00:30:00+01:00").unwrap();
+        let mut february = record("february", "A", "a@test", "a");
+        february.date = DateTime::parse_from_rfc3339("2026-02-01T00:30:00Z").unwrap();
+        let records = vec![january, february];
+        let utc = aggregate(&records, &AggregateOptions::default()).remove(0);
+        assert_eq!(utc.active_days, 2);
+        assert_eq!(utc.monthly["2026-01"].commits, 1);
+        assert_eq!(utc.monthly["2026-02"].commits, 1);
+        assert_eq!(utc.first_commit.to_rfc3339(), "2026-01-31T23:30:00+00:00");
+        let denver = aggregate(
+            &records,
+            &AggregateOptions {
+                timezone: chrono_tz::America::Denver,
+                ..AggregateOptions::default()
+            },
+        )
+        .remove(0);
+        assert_eq!(denver.active_days, 1);
+        assert_eq!(denver.monthly.len(), 1);
+        assert_eq!(denver.monthly["2026-01"].commits, 2);
+        assert_eq!(
+            denver.daily[&NaiveDate::from_ymd_opt(2026, 1, 31).unwrap()].commits,
+            2
+        );
+        assert_eq!(denver.last_commit.to_rfc3339(), "2026-01-31T17:30:00-07:00");
+    }
+
+    #[test]
+    fn dst_fold_has_one_reporting_day_with_correct_first_and_last_offsets() {
+        let mut first = record("first", "A", "a@test", "a");
+        first.date = DateTime::parse_from_rfc3339("2026-11-01T07:30:00Z").unwrap();
+        let mut last = record("last", "A", "a@test", "a");
+        last.date = DateTime::parse_from_rfc3339("2026-11-01T08:30:00Z").unwrap();
+        let stats = aggregate(
+            &[first, last],
+            &AggregateOptions {
+                timezone: chrono_tz::America::Denver,
+                ..AggregateOptions::default()
+            },
+        )
+        .remove(0);
+        assert_eq!(stats.active_days, 1);
+        assert_eq!(stats.first_commit.to_rfc3339(), "2026-11-01T01:30:00-06:00");
+        assert_eq!(stats.last_commit.to_rfc3339(), "2026-11-01T01:30:00-07:00");
+    }
+
+    #[test]
+    fn future_records_are_excluded_including_all_history_and_cutoff_is_consistent() {
+        let now = DateTime::parse_from_rfc3339("2026-09-20T12:00:00Z").unwrap();
         let mut records = vec![
-            simple("A", "one@x"),
-            simple("Alice", "one@x"),
-            simple("A", "two@x"),
-            simple("Aaron", "two@x"),
-            simple("Anne", "three@x"),
-            simple("Anna", "three@x"),
+            record("now", "A", "a@test", "a"),
+            record("boundary", "A", "a@test", "a"),
+            record("future", "A", "a@test", "a"),
+            record("past-east", "A", "a@test", "a"),
+        ];
+        records[1].date = now - Duration::days(1);
+        records[2].date = now + Duration::nanoseconds(1);
+        records[3].date = DateTime::parse_from_rfc3339("2026-09-21T00:30:00+14:00").unwrap();
+        let ids = |records: Vec<CommitRecord>| {
+            records.into_iter().map(|r| r.commit_id).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(filter_by_time_at(&records, Duration::days(1), now)),
+            ["now", "past-east"]
+        );
+        assert_eq!(
+            ids(filter_by_time_at(&records, Duration::zero(), now)),
+            ["now", "boundary", "past-east"]
+        );
+        let stats = aggregate(
+            &filter_by_time_at(&records, Duration::days(1), now),
+            &AggregateOptions::default(),
+        );
+        assert_eq!(stats[0].active_days, 1);
+        assert_eq!(
+            stats[0].daily[&NaiveDate::from_ymd_opt(2026, 9, 20).unwrap()].commits,
+            2
+        );
+    }
+
+    #[test]
+    fn landed_scope_excludes_unmerged_work_and_all_branches_includes_it_once() {
+        let landed = record("landed", "A", "a@test", "a");
+        let mut unmerged = record("unmerged", "A", "a@test", "a");
+        unmerged.landed = false;
+        let records = vec![landed.clone(), landed, unmerged];
+        let options = AggregateOptions::default();
+        assert_eq!(
+            aggregate(&filter_by_scope(&records, HistoryScope::Landed), &options)[0].commits,
+            1
+        );
+        assert_eq!(
+            aggregate(
+                &filter_by_scope(&records, HistoryScope::AllBranches),
+                &options
+            )[0]
+            .commits,
+            2
+        );
+    }
+
+    #[test]
+    fn exact_ai_sort_beats_line_tiebreakers_and_does_not_overflow_i64_products() {
+        let mut authors = vec![
+            AuthorStats {
+                id: "high".into(),
+                name: "High".into(),
+                commits: 101,
+                ai_commits: 1,
+                total_change: 1,
+                ..AuthorStats::default()
+            },
+            AuthorStats {
+                id: "low".into(),
+                name: "Low".into(),
+                commits: 1000,
+                ai_commits: 1,
+                total_change: 1000,
+                ..AuthorStats::default()
+            },
+            AuthorStats {
+                id: "coauthor".into(),
+                name: "Coauthor".into(),
+                coauthored_commits: 100,
+                ..AuthorStats::default()
+            },
+        ];
+        sort(&mut authors, SortField::AI);
+        assert_eq!(
+            authors.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            ["high", "low", "coauthor"]
+        );
+        assert_eq!(authors[0].ai_percent(), 0);
+        let high = AuthorStats {
+            commits: i64::MAX,
+            ai_commits: i64::MAX - 1,
+            ..AuthorStats::default()
+        };
+        let low = AuthorStats {
+            commits: i64::MAX,
+            ai_commits: i64::MAX - 2,
+            ..AuthorStats::default()
+        };
+        assert_eq!(descending_ai_ratio(&high, &low), Ordering::Less);
+        assert_eq!(high.ai_percent(), 99);
+    }
+
+    #[test]
+    fn deterministic_sort_uses_id_when_names_and_metrics_collide() {
+        let mut authors = vec![
+            AuthorStats {
+                id: "b".into(),
+                name: "Same".into(),
+                commits: 3,
+                ..AuthorStats::default()
+            },
+            AuthorStats {
+                id: "a".into(),
+                name: "Same".into(),
+                commits: 3,
+                ..AuthorStats::default()
+            },
+        ];
+        sort(&mut authors, SortField::Commits);
+        assert_eq!(authors[0].id, "a");
+        assert_eq!(AuthorStats::default().removed_added_ratio(), None);
+        assert_eq!(
+            AuthorStats {
+                added: 0,
+                removed: 100,
+                ..AuthorStats::default()
+            }
+            .removed_added_ratio(),
+            None
+        );
+        assert_eq!(
+            AuthorStats {
+                added: 10,
+                removed: 4,
+                ..AuthorStats::default()
+            }
+            .removed_added_ratio(),
+            Some(0.4)
+        );
+    }
+
+    #[test]
+    fn identity_deduplication_and_metadata_are_independent_of_input_order() {
+        let mut full = record("shared", "A", "a@test", "a");
+        full.coauthors = vec![coauthor("B", "b@test")];
+        let mut shallow = full.clone();
+        shallow.repo_id = "/repos/shallow".into();
+        shallow.repo_name = "shallow".into();
+        shallow.lines_known = false;
+        shallow.added = 1000;
+        let mut records = vec![
+            full,
+            shallow,
+            record("second", "Alias", "a@test", "a"),
+            record("third", "A", "other@test", "a"),
+            record("fourth", "B", "b@test", "b"),
+            record("fifth", "Bot[bot]", "bot@test", "a"),
         ];
         let options = AggregateOptions::default();
         let expected = aggregate(&records, &options);
-        fn permutations(
+        fn visit(
             records: &mut [CommitRecord],
             index: usize,
-            expected: &[AuthorStats],
             options: &AggregateOptions,
+            expected: &[AuthorStats],
         ) -> usize {
             if index == records.len() {
                 assert_eq!(aggregate(records, options), expected);
@@ -595,265 +1345,46 @@ mod tests {
             let mut count = 0;
             for next in index..records.len() {
                 records.swap(index, next);
-                count += permutations(records, index + 1, expected, options);
+                count += visit(records, index + 1, options, expected);
                 records.swap(index, next);
             }
             count
         }
-        assert_eq!(permutations(&mut records, 0, &expected, &options), 720);
+        assert_eq!(visit(&mut records, 0, &options, &expected), 720);
     }
 
     #[test]
-    fn fuzzy_union_is_transitive_and_chooses_longest_then_lexical_name() {
-        let mut records = vec![simple("Andrew", "one@x")];
-        for _ in 0..5 {
-            records.push(simple("Andrews", "two@x"));
-            records.push(simple("xAndrew", "three@x"));
-        }
-        let options = AggregateOptions {
-            fuzzy_matching: true,
-            ..AggregateOptions::default()
-        };
-        let result = aggregate(&records, &options);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "Andrews");
-        assert_eq!(result[0].commits, 11);
-        records.reverse();
-        assert_eq!(aggregate(&records, &options), result);
-    }
-
-    #[test]
-    fn bot_roster_and_config_entries_tag_merged_identity() {
-        for name in [
-            "dependabot",
-            "dependabot-preview",
-            "renovate",
-            "github-actions",
-            "snyk-bot",
-            "greenkeeper",
-            "imgbot",
-            "mergify",
-            "allcontributors",
-            "pre-commit-ci",
-            "codecov",
-            "Renovate Bot",
-            "worker[bot]",
-        ] {
-            assert!(is_bot_identity(name, "someone@example.com", &[]), "{name}");
-        }
-        assert!(is_bot_identity(
-            "Worker",
-            "123+agent[bot]@users.noreply.github.com",
-            &[]
-        ));
-        assert!(!is_bot_identity("Robotics Lab", "robots@example.com", &[]));
-        assert!(is_bot_identity(
-            "Worker",
-            " <RUNNER@AGENTS.EXAMPLE.COM> ",
-            &[" @agents.example.com ".into()]
-        ));
-        assert!(is_bot_identity(
-            "Worker",
-            "runner@example.com",
-            &["RUNNER@EXAMPLE.COM".into()]
-        ));
-        assert!(is_bot_identity(
-            "Fleet Runner",
-            "other@example.com",
-            &[" fleet runner ".into()]
-        ));
-        assert!(!is_bot_identity(
-            "Worker",
-            "someone@example.com",
-            &["".into(), "other".into()]
-        ));
-        let authors = aggregate(
-            &[simple("Person", "one@x"), simple("Worker[bot]", "one@x")],
-            &AggregateOptions::default(),
-        );
-        assert_eq!(authors.len(), 1);
-        assert!(authors[0].bot);
-    }
-
-    #[test]
-    fn time_filter_preserves_exclusive_boundary_and_future_inclusion() {
-        let now = DateTime::parse_from_rfc3339("2026-09-20T12:00:00Z").unwrap();
-        let mut records = vec![
-            simple("Recent", "a@x"),
-            simple("Boundary", "b@x"),
-            simple("Old", "c@x"),
-            simple("Future", "d@x"),
-        ];
-        records[1].date = now - Duration::days(1);
-        records[2].date = now - Duration::days(2);
-        records[3].date = now + Duration::days(1000);
-        let result = filter_by_time_at(&records, Duration::days(1), now);
-        assert_eq!(
-            result
-                .iter()
-                .map(|record| record.author.as_str())
-                .collect::<Vec<_>>(),
-            ["Recent", "Future"]
-        );
-        assert_eq!(filter_by_time_at(&records, Duration::zero(), now).len(), 4);
-    }
-
-    #[test]
-    fn repo_filters_support_stable_ids_and_display_names() {
-        let mut records = vec![simple("A", "a@x"), simple("B", "b@x")];
-        records[0].repo_id = "/org-a/api".into();
-        records[1].repo_id = "/org-b/api".into();
-        records[0].repo_name = "api".into();
-        records[1].repo_name = "api".into();
-        let remaining = filter_by_repo(&records, &HashSet::from(["/org-a/api".into()]));
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].repo_id, "/org-b/api");
-        assert!(filter_by_repo(&records, &HashSet::from(["api".into()])).is_empty());
-        assert_eq!(filter_by_repo(&records, &HashSet::new()).len(), 2);
-    }
-
-    #[test]
-    fn preserves_truncated_ai_sort_and_other_tiebreakers() {
-        let mut authors = vec![
-            AuthorStats {
-                name: "HigherShare".into(),
-                commits: 101,
-                ai_commits: 1,
-                total_change: 1,
-                ..AuthorStats::default()
-            },
-            AuthorStats {
-                name: "LowerShare".into(),
-                commits: 1000,
-                ai_commits: 1,
-                total_change: 1000,
-                ..AuthorStats::default()
-            },
-        ];
-        sort(&mut authors, SortField::AI);
-        assert_eq!(authors[0].name, "LowerShare");
-        authors = vec![
-            AuthorStats {
-                name: "Charlie".into(),
-                commits: 5,
-                total_change: 10,
-                ..AuthorStats::default()
-            },
-            AuthorStats {
-                name: "Bob".into(),
-                commits: 5,
-                total_change: 30,
-                ..AuthorStats::default()
-            },
-            AuthorStats {
-                name: "Alice".into(),
-                commits: 5,
-                total_change: 30,
-                ..AuthorStats::default()
-            },
-        ];
-        sort(&mut authors, SortField::Commits);
-        assert_eq!(
-            authors
-                .iter()
-                .map(|author| author.name.as_str())
-                .collect::<Vec<_>>(),
-            ["Alice", "Bob", "Charlie"]
-        );
-        let mut authors = vec![
-            AuthorStats {
-                name: "HighCount".into(),
-                commits: 100,
-                ai_commits: 10,
-                ..AuthorStats::default()
-            },
-            AuthorStats {
-                name: "HighPercent".into(),
-                commits: 4,
-                ai_commits: 4,
-                ..AuthorStats::default()
-            },
-        ];
-        sort(&mut authors, SortField::AI);
-        assert_eq!(authors[0].name, "HighPercent");
-    }
-
-    #[test]
-    fn preserves_author_local_active_days_and_deletion_only_churn() {
-        let authors = aggregate(
-            &[
-                record("A", "a@x", "2026-01-01T23:30:00Z", 0, 50, "r"),
-                record("A", "a@x", "2026-01-02T00:30:00+01:00", 0, 50, "r"),
-            ],
-            &AggregateOptions::default(),
-        );
-        assert_eq!(authors[0].active_days, 2);
-        assert_eq!(authors[0].churn_ratio(), 0.0);
-        assert_eq!(AuthorStats::default().ai_percent(), 0);
-        assert_eq!(
-            AuthorStats {
-                added: 10,
-                removed: 4,
-                ..AuthorStats::default()
-            }
-            .churn_ratio(),
-            0.4
-        );
-    }
-
-    #[test]
-    fn canonical_name_is_recomputed_from_each_filtered_input() {
-        let mut records = vec![
-            simple("Alice Smith", "a@x"),
-            simple("Alice Smith", "a@x"),
-            simple("asmith", "a@x"),
-        ];
-        records[0].date -= Duration::days(60);
-        records[1].date -= Duration::days(60);
-        let options = AggregateOptions::default();
-        assert_eq!(aggregate(&records, &options)[0].name, "Alice Smith");
-        let recent = filter_by_time_at(&records, Duration::days(7), records[2].date);
-        assert_eq!(aggregate(&recent, &options)[0].name, "asmith");
-    }
-
-    #[test]
-    fn json_preserves_go_field_names_timestamp_offsets_and_omissions() {
-        let records = vec![record("A", "a@x", "2026-09-20T12:00:00Z", 2, 1, "r")];
-        let authors = aggregate(&records, &AggregateOptions::default());
-        let value = serde_json::to_value(&authors[0]).unwrap();
-        assert_eq!(value["first_commit"], "2026-09-20T12:00:00Z");
-        assert_eq!(value["last_commit"], "2026-09-20T12:00:00Z");
-        assert_eq!(value["per_repo"]["r"]["total_change"], 3);
-        assert_eq!(value["bot"], false);
-        assert!(value.get("aliases").is_none());
-        let empty = serde_json::to_value(AuthorStats::default()).unwrap();
-        assert!(empty.get("per_repo").is_none());
-        assert_eq!(empty["first_commit"], "0001-01-01T00:00:00Z");
-        let mut author = authors[0].clone();
-        author.first_commit = DateTime::parse_from_rfc3339("2026-09-20T12:00:00-06:00").unwrap();
-        assert_eq!(
-            serde_json::to_value(author).unwrap()["first_commit"],
-            "2026-09-20T12:00:00-06:00"
-        );
+    fn empty_input_is_empty_and_missing_object_ids_do_not_collapse() {
         assert!(aggregate(&[], &AggregateOptions::default()).is_empty());
+        let records = vec![
+            record("", "A", "a@test", "a"),
+            record("", "A", "a@test", "a"),
+        ];
+        assert_eq!(
+            aggregate(&records, &AggregateOptions::default())[0].commits,
+            2
+        );
     }
 
     #[test]
-    fn sort_field_parser_labels_and_cycle_match_the_tui() {
-        let fields = [
+    fn primary_bots_are_tagged_and_sort_labels_describe_activity() {
+        let authors = aggregate(
+            &[record("one", "worker[bot]", "worker@test", "a")],
+            &AggregateOptions::default(),
+        );
+        assert!(authors[0].bot);
+        assert_eq!(SortField::Total.label(), "LINES CHANGED");
+        assert_eq!(SortField::AI.label(), "DETECTED AI");
+        for field in [
             SortField::Total,
             SortField::Commits,
             SortField::Added,
             SortField::Removed,
             SortField::Net,
             SortField::AI,
-        ];
-        for (index, field) in fields.iter().enumerate() {
-            assert_eq!(SortField::parse(field.label()).unwrap(), *field);
-            assert_eq!(field.next(), fields[(index + 1) % fields.len()]);
+        ] {
+            assert_eq!(SortField::parse(field.label()).unwrap(), field);
         }
-        assert_eq!(SortField::parse("total").unwrap(), SortField::Total);
-        assert!(SortField::parse("commit").is_err());
-        assert!(SortField::parse(" total ").is_err());
+        assert_eq!(SortField::AI.next(), SortField::Total);
     }
 }

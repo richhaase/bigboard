@@ -1,13 +1,7 @@
-//! Git collection deliberately preserves the Go revision's analytics policy.
-//!
-//! In particular, short reference names, generated-path filtering, broad AI
-//! identity defaults, and gitfile discovery are compatibility behavior. They
-//! are covered by tests so an analytics-policy change can be made separately.
-
-use crate::model::{CommitRecord, Repository};
+use crate::model::{CommitRecord, Identity, Repository, ScanData};
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::DateTime;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,7 +11,6 @@ use std::time::{Duration, Instant};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_LOG_LINE: usize = 4 * 1024 * 1024;
-const FIELD_SEP: char = '\x1e';
 const COAUTHOR_SEP: char = '\x1f';
 const IGNORED_DIRS: &[&str] = &[
     "vendor",
@@ -49,15 +42,11 @@ const IGNORED_FILE_GLOBS: &[&str] = &[
     "Gemfile.lock",
     "poetry.lock",
 ];
-const AI_DOMAINS: &[&str] = &[
-    "@anthropic.com",
-    "@openai.com",
-    "@cursor.com",
-    "@cursor.sh",
-    "@codeium.com",
-    "@windsurf.com",
-];
 const AI_ADDRESSES: &[&str] = &[
+    "noreply@anthropic.com",
+    "noreply@openai.com",
+    "hi@cursor.com",
+    "hi@cursor.sh",
     "copilot@github.com",
     "devin@cognition.ai",
     "noreply@aider.chat",
@@ -111,19 +100,99 @@ where
     F: FnOnce(std::process::ChildStdout) -> Result<T> + Send,
 {
     ctx.check()?;
-    let child = Command::new("git")
-        .args(["-c", "core.quotePath=false"])
-        .args(args)
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let child = git_command(dir, args)
         .spawn()
         .with_context(|| format!("git {} in {}", args[0], dir.display()))?;
     run_child(ctx, child, consume)
         .map_err(|error| anyhow!("git {} in {}: {error:#}", args[0], dir.display()))
 }
 
-fn run_child<T, F>(ctx: &GitContext<'_>, mut child: std::process::Child, consume: F) -> Result<T>
+fn git_command(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "-c",
+            "log.showRoot=true",
+            "-c",
+            "log.showSignature=false",
+            "-c",
+            "diff.algorithm=myers",
+            "-c",
+            "diff.indentHeuristic=false",
+            "-c",
+            "diff.renameLimit=0",
+            "-c",
+            "color.ui=false",
+            "-c",
+            "merge.renames=true",
+            "-c",
+            "merge.conflictStyle=merge",
+            "-c",
+            "merge.renormalize=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("GIT_NO_REPLACE_OBJECTS", "1")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env_remove("GIT_EXTERNAL_DIFF")
+        .env_remove("GIT_DIFF_OPTS");
+    // A scanner can be launched from a Git hook. Repository-local environment
+    // variables then refer to the hook's repository, overriding current_dir.
+    // Clear the local variables listed by `git rev-parse --local-env-vars`,
+    // plus namespace routing; retain normal global/system configuration.
+    for key in [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(key);
+    }
+    command
+}
+
+struct ProcessOutput<T> {
+    value: T,
+    status: std::process::ExitStatus,
+    stderr: Vec<u8>,
+}
+fn run_child<T, F>(ctx: &GitContext<'_>, child: std::process::Child, consume: F) -> Result<T>
+where
+    T: Send,
+    F: FnOnce(std::process::ChildStdout) -> Result<T> + Send,
+{
+    let output = run_child_output(ctx, child, consume)?;
+    if !output.status.success() {
+        bail!(
+            "{}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.value)
+}
+
+fn run_child_output<T, F>(
+    ctx: &GitContext<'_>,
+    mut child: std::process::Child,
+    consume: F,
+) -> Result<ProcessOutput<T>>
 where
     T: Send,
     F: FnOnce(std::process::ChildStdout) -> Result<T> + Send,
@@ -184,10 +253,11 @@ where
                 .recv()
                 .map_err(|_| anyhow!("Git output reader stopped unexpectedly"))?,
         }?;
-        if !status.success() {
-            bail!("{}: {}", status, String::from_utf8_lossy(&errors).trim());
-        }
-        Ok(output)
+        Ok(ProcessOutput {
+            value: output,
+            status,
+            stderr: errors,
+        })
     })
 }
 
@@ -199,224 +269,681 @@ fn git_output(ctx: &GitContext<'_>, dir: &Path, args: &[&str]) -> Result<String>
     })
 }
 
-pub fn detect_default_branch(path: &Path) -> String {
-    let cancel = AtomicBool::new(false);
-    detect_branch(&GitContext::new(&cancel), path)
+#[derive(Clone, Debug)]
+struct BranchRef {
+    oid: String,
+    name: String,
+    target: String,
 }
 
-fn detect_branch(ctx: &GitContext<'_>, dir: &Path) -> String {
-    if let Ok(output) = git_output(
+fn branches(ctx: &GitContext<'_>, path: &Path) -> Result<Vec<BranchRef>> {
+    let output = git_output(
         ctx,
-        dir,
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    ) {
-        let reference = output.trim();
-        if !reference.is_empty() {
-            if let Some(local) = reference.strip_prefix("origin/")
-                && git_output(
-                    ctx,
-                    dir,
-                    &["rev-parse", "--verify", &format!("refs/heads/{local}")],
-                )
-                .is_ok()
-            {
-                return local.to_owned();
+        path,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)%00%(refname)%00%(symref)",
+            "refs/heads/",
+            "refs/remotes/",
+        ],
+    )?;
+    output
+        .lines()
+        .map(|line| {
+            let fields: Vec<_> = line.split('\0').collect();
+            if fields.len() != 3 || !is_oid(fields[0]) {
+                bail!("invalid branch-ref metadata");
             }
-            return reference.to_owned();
+            Ok(BranchRef {
+                oid: fields[0].to_owned(),
+                name: fields[1].to_owned(),
+                target: fields[2].to_owned(),
+            })
+        })
+        .collect()
+}
+
+fn default_branch(refs: &[BranchRef]) -> Option<&BranchRef> {
+    let find = |name: &str| refs.iter().find(|reference| reference.name == name);
+    if let Some(reference) = find("refs/remotes/origin/HEAD") {
+        return Some(reference);
+    }
+    if let Some(reference) = refs.iter().find(|r| {
+        r.name.starts_with("refs/remotes/") && r.name.ends_with("/HEAD") && !r.target.is_empty()
+    }) {
+        return Some(reference);
+    }
+    for name in ["refs/remotes/origin/main", "refs/remotes/origin/master"] {
+        if let Some(reference) = find(name) {
+            return Some(reference);
         }
     }
     for branch in ["main", "master"] {
-        if git_output(ctx, dir, &["rev-parse", "--verify", branch]).is_ok() {
-            return branch.to_owned();
+        if let Some(reference) = refs.iter().find(|r| {
+            r.name.starts_with("refs/remotes/") && r.name.ends_with(&format!("/{branch}"))
+        }) {
+            return Some(reference);
         }
     }
-    "HEAD".to_owned()
+    for name in ["refs/heads/main", "refs/heads/master"] {
+        if let Some(reference) = find(name) {
+            return Some(reference);
+        }
+    }
+    None
 }
 
-/// Detect and collect one repository under a single 120-second deadline.
+/// Return a fully resolved commit OID, never an ambiguous short ref name.
+pub fn detect_default_branch(path: &Path) -> String {
+    let cancel = AtomicBool::new(false);
+    let ctx = GitContext::new(&cancel);
+    let Ok(refs) = branches(&ctx, path) else {
+        return String::new();
+    };
+    default_branch(&refs)
+        .map(|r| r.oid.clone())
+        .unwrap_or_default()
+}
+
+#[derive(Clone)]
+struct Metadata {
+    record: CommitRecord,
+    parents: Vec<String>,
+    trailers: Vec<String>,
+}
+
+/// Collect locally available branch history under one cancelable deadline.
+/// The caller selects landed-only or all-branches from the returned records.
 pub fn scan_repository(
     repo: &Repository,
     options: &CollectOptions,
     cancel: &AtomicBool,
-) -> Result<Vec<CommitRecord>> {
+) -> Result<ScanData> {
     let ctx = GitContext::new(cancel);
-    let reference = detect_branch(&ctx, &repo.path);
-    collect_repository(&ctx, repo, &reference, options)
+    let version_text = git_output(&ctx, &repo.path, &["--version"])?;
+    let version = parse_git_version(&version_text)
+        .ok_or_else(|| anyhow!("unrecognized Git version: {}", version_text.trim()))?;
+    scan_repository_with_version(repo, options, &ctx, version)
 }
 
-fn collect_repository(
-    ctx: &GitContext<'_>,
+fn parse_git_version(text: &str) -> Option<(u32, u32, u32)> {
+    let version = text
+        .trim()
+        .strip_prefix("git version ")?
+        .split_whitespace()
+        .next()?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts
+        .next()
+        .unwrap_or("0")
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .ok()?;
+    Some((major, minor, patch))
+}
+
+fn is_partial_clone(ctx: &GitContext<'_>, path: &Path) -> Result<bool> {
+    // Configuration inspection does not traverse objects or trigger fetching.
+    // Honor the last value of each key, as Git does for these settings.
+    let output = git_output(ctx, path, &["config", "--null", "--list"])?;
+    let settings: HashMap<_, _> = output
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.split_once('\n').unwrap_or((entry, "")))
+        .collect();
+    Ok(settings.into_iter().any(|(key, value)| {
+        let key = key.to_ascii_lowercase();
+        key == "extensions.partialclone"
+            || (key.starts_with("remote.")
+                && (key.ends_with(".partialclonefilter")
+                    || (key.ends_with(".promisor")
+                        && !matches!(
+                            value.to_ascii_lowercase().as_str(),
+                            "false" | "no" | "off" | "0"
+                        ))))
+    }))
+}
+
+fn scan_repository_with_version(
     repo: &Repository,
-    reference: &str,
     options: &CollectOptions,
-) -> Result<Vec<CommitRecord>> {
-    let args = [
-        "log",
-        reference,
-        "--no-merges",
-        "-M",
-        "-C",
-        "--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)",
-        "--numstat",
-    ];
-    let collected = run_git(ctx, &repo.path, &args, |stdout| {
-        let mut reader = BufReader::new(stdout);
-        let mut line = Vec::new();
-        let mut parser = LogParser::new(repo, options);
-        while read_log_line(&mut reader, &mut line)? {
-            parser.feed(&String::from_utf8_lossy(&line));
-        }
-        Ok(parser.finish())
-    });
-    if collected.is_err() && ctx.check().is_ok() && is_empty_repo(ctx, &repo.path) {
-        return Ok(Vec::new());
+    ctx: &GitContext<'_>,
+    version: (u32, u32, u32),
+) -> Result<ScanData> {
+    if version < (2, 31, 0) {
+        bail!("Big Board requires Git 2.31 or newer for reliable history collection");
     }
-    collected
+    let partial = is_partial_clone(ctx, &repo.path)?;
+    // Git 2.45.1 introduced GIT_NO_LAZY_FETCH (also backported to some
+    // maintenance releases). Conservatively skip older partial clones instead
+    // of assuming an arbitrary vendor build honors the variable.
+    if partial && version < (2, 45, 1) {
+        return Ok(ScanData {
+            records: vec![],
+            warnings: vec!["Partial clone skipped: Git 2.45.1 or newer is required to disable automatic object fetching reliably. No remote history was fetched. Totals exclude this repository.".into()],
+        });
+    }
+    match collect_available_history(repo, options, ctx) {
+        Err(error) if partial => {
+            ctx.check()?;
+            Ok(ScanData {
+                records: vec![],
+                warnings: vec![format!(
+                    "Partial clone scan failed with automatic object fetching disabled; required history may be unavailable locally. Totals exclude this repository. {error:#}"
+                )],
+            })
+        }
+        result => result,
+    }
 }
 
-fn read_log_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> Result<bool> {
-    line.clear();
+fn collect_available_history(
+    repo: &Repository,
+    options: &CollectOptions,
+    ctx: &GitContext<'_>,
+) -> Result<ScanData> {
+    let refs = branches(ctx, &repo.path)?;
+    if refs.is_empty() {
+        return Ok(ScanData::default());
+    }
+    let mut tips: Vec<_> = refs.iter().map(|r| r.oid.clone()).collect();
+    tips.sort();
+    tips.dedup();
+    let default = default_branch(&refs);
+    let mut warnings = Vec::new();
+    let landed: HashSet<String> = if let Some(reference) = default {
+        git_output(ctx, &repo.path, &["rev-list", &reference.oid, "--"])?
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        warnings.push("No available default branch could be identified; landed history is unknown. All locally available branches remain available in All branches.".into());
+        HashSet::new()
+    };
+    let shallow_path = git_output(
+        ctx,
+        &repo.path,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "shallow",
+        ],
+    )?;
+    let shallow: HashSet<_> = match std::fs::read_to_string(shallow_path.trim()) {
+        Ok(text) => text.lines().map(str::to_owned).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashSet::new(),
+        Err(error) => return Err(error).context("reading shallow history boundaries"),
+    };
+    if !shallow.is_empty() {
+        warnings.push("Shallow repository: earlier commits are unavailable and boundary-commit line counts are unknown. Totals cover available history only.".into());
+    }
+    let mut args = vec![
+        "log",
+        "--no-patch",
+        "-z",
+        "--no-show-signature",
+        "--format=%H%x00%P%x00%aN%x00%aE%x00%ae%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,unfold=true,separator=%x1f)",
+    ];
+    args.extend(tips.iter().map(String::as_str));
+    args.push("--");
+    let mut metadata = run_git(ctx, &repo.path, &args, |stdout| {
+        let mut reader = BufReader::new(stdout);
+        let mut result = Vec::new();
+        while let Some(oid) = read_nul(&mut reader)? {
+            if oid.is_empty() {
+                continue;
+            }
+            let mut fields = vec![oid];
+            for _ in 0..6 {
+                fields.push(
+                    read_nul(&mut reader)?
+                        .ok_or_else(|| anyhow!("truncated Git commit metadata"))?,
+                );
+            }
+            let fields: Vec<_> = fields
+                .iter()
+                .map(|field| {
+                    std::str::from_utf8(field).context("invalid UTF-8 in Git author metadata")
+                })
+                .collect::<Result<_>>()?;
+            if !is_oid(fields[0]) {
+                bail!("invalid Git commit OID");
+            }
+            let parents: Vec<_> = fields[1].split_whitespace().map(str::to_owned).collect();
+            result.push(Metadata {
+                record: CommitRecord {
+                    commit_id: fields[0].into(),
+                    author: fields[2].trim().into(),
+                    email: fields[3].trim().into(),
+                    date: DateTime::parse_from_rfc3339(fields[5])
+                        .context("invalid Git author date")?,
+                    added: 0,
+                    removed: 0,
+                    repo_id: repo.id.clone(),
+                    repo_name: repo.name.clone(),
+                    ai_assisted: is_ai(fields[3], &options.ai_identities)
+                        || is_ai(fields[4], &options.ai_identities),
+                    coauthors: Vec::new(),
+                    lines_known: !shallow.contains(fields[0]),
+                    landed: landed.contains(fields[0]),
+                    is_merge: parents.len() > 1,
+                },
+                parents,
+                trailers: fields[6]
+                    .split(COAUTHOR_SEP)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            });
+        }
+        Ok(result)
+    })?;
+    apply_coauthors(ctx, repo, options, &mut metadata, &mut warnings)?;
+    let mut diff_args = vec![
+        "log",
+        "--no-merges",
+        "--root",
+        "--format=%H",
+        "--numstat",
+        "-z",
+    ];
+    diff_args.extend(DIFF_OPTIONS);
+    diff_args.extend(tips.iter().map(String::as_str));
+    diff_args.push("--");
+    let counts = run_git(ctx, &repo.path, &diff_args, |stdout| {
+        parse_numstat(BufReader::new(stdout), options, true)
+    })?;
+    let mut result = Vec::with_capacity(metadata.len());
+    let mut scratch = None;
+    for mut entry in metadata {
+        ctx.check()?;
+        if !entry.record.lines_known {
+            result.push(entry.record);
+        } else if entry.parents.len() < 2 {
+            if let Some(count) = counts.get(&entry.record.commit_id) {
+                entry.record.added = count.added;
+                entry.record.removed = count.removed;
+            }
+            result.push(entry.record);
+        } else {
+            if scratch.is_none() {
+                scratch = Some(ObjectScratch::new(ctx, &repo.path)?);
+            }
+            match merge_counts(ctx, repo, options, &entry, scratch.as_ref().unwrap()) {
+                Ok(Some(count)) => {
+                    entry.record.added = count.added;
+                    entry.record.removed = count.removed;
+                    if count.changed {
+                        result.push(entry.record);
+                    }
+                }
+                Ok(None) => {
+                    entry.record.lines_known = false;
+                    warnings.push(format!("Merge {} has conflict-resolution or unsupported merge work: authored participation is counted, but resolution line counts cannot be allocated reliably and are unknown.", &entry.record.commit_id[..12]));
+                    result.push(entry.record);
+                }
+                Err(error) => {
+                    ctx.check()?;
+                    entry.record.lines_known = false;
+                    warnings.push(format!(
+                        "Merge {} resolution line counts are unknown: {error:#}",
+                        &entry.record.commit_id[..12]
+                    ));
+                    result.push(entry.record);
+                }
+            }
+        }
+    }
+    Ok(ScanData {
+        records: result,
+        warnings,
+    })
+}
+
+const DIFF_OPTIONS: &[&str] = &[
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--no-relative",
+    "--diff-algorithm=myers",
+    "--no-indent-heuristic",
+    "--ignore-submodules=none",
+    "-M50%",
+    "-C50%",
+    "--find-copies-harder",
+    "-l0",
+];
+
+fn is_oid(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn read_nul(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>> {
+    let mut bytes = Vec::new();
     loop {
         let available = reader.fill_buf()?;
         if available.is_empty() {
-            return Ok(!line.is_empty());
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            bail!("truncated NUL-delimited Git output");
         }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let consumed = newline.map_or(available.len(), |index| index + 1);
-        if line.len() + consumed > MAX_LOG_LINE {
-            bail!("Git log line exceeds the 4 MiB scanner limit");
+        let end = available.iter().position(|byte| *byte == 0);
+        let consumed = end.map_or(available.len(), |index| index + 1);
+        if bytes.len() + consumed > MAX_LOG_LINE {
+            bail!("Git field exceeds the 4 MiB scanner limit");
         }
-        line.extend_from_slice(&available[..consumed]);
+        bytes.extend_from_slice(&available[..consumed]);
         reader.consume(consumed);
-        if newline.is_some() {
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            return Ok(true);
+        if end.is_some() {
+            bytes.pop();
+            return Ok(Some(bytes));
         }
     }
 }
 
-fn is_empty_repo(ctx: &GitContext<'_>, dir: &Path) -> bool {
-    git_output(ctx, dir, &["rev-parse", "--git-dir"]).is_ok()
-        && git_output(ctx, dir, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_err()
+#[derive(Clone, Copy, Debug, Default)]
+struct LineCounts {
+    added: i64,
+    removed: i64,
+    changed: bool,
 }
 
-struct LogParser<'a> {
-    repo: &'a Repository,
-    options: &'a CollectOptions,
-    records: Vec<CommitRecord>,
-    current: Option<CommitRecord>,
-}
-
-impl<'a> LogParser<'a> {
-    fn new(repo: &'a Repository, options: &'a CollectOptions) -> Self {
-        Self {
-            repo,
-            options,
-            records: Vec::new(),
-            current: None,
+fn parse_numstat(
+    mut reader: impl BufRead,
+    options: &CollectOptions,
+    commit_headers: bool,
+) -> Result<HashMap<String, LineCounts>> {
+    let mut counts = HashMap::new();
+    let mut current = String::new();
+    while let Some(token) = read_nul(&mut reader)? {
+        let token = token.strip_prefix(b"\n").unwrap_or(&token);
+        if token.is_empty() {
+            continue;
         }
-    }
-
-    fn flush(&mut self) {
-        if let Some(record) = self.current.take() {
-            self.records.push(record);
+        if commit_headers && std::str::from_utf8(token).is_ok_and(is_oid) {
+            current = String::from_utf8(token.to_vec())?;
+            counts
+                .entry(current.clone())
+                .or_insert(LineCounts::default());
+            continue;
         }
-    }
-
-    fn feed(&mut self, line: &str) {
-        if line.is_empty() {
-            return;
+        let fields: Vec<_> = token.splitn(3, |byte| *byte == b'\t').collect();
+        if fields.len() != 3 {
+            bail!("invalid Git numstat record");
         }
-        if line.contains(FIELD_SEP) {
-            let parts: Vec<_> = line.splitn(4, FIELD_SEP).collect();
-            if parts.len() >= 3 {
-                self.flush();
-                let Ok(date) = DateTime::parse_from_rfc3339(parts[2].trim()) else {
-                    return;
-                };
-                let email = parts[1].trim();
-                let ai_assisted = is_ai(email, &self.options.ai_identities)
-                    || parts.get(3).is_some_and(|trailers| {
-                        trailers
-                            .split(COAUTHOR_SEP)
-                            .any(|value| is_ai(value, &self.options.ai_identities))
-                    });
-                self.current = Some(CommitRecord {
-                    author: parts[0].trim().to_owned(),
-                    email: email.to_owned(),
-                    date,
-                    added: 0,
-                    removed: 0,
-                    repo_id: self.repo.id.clone(),
-                    repo_name: self.repo.name.clone(),
-                    ai_assisted,
-                });
-                return;
-            }
-        }
-        let Some(current) = &mut self.current else {
-            return;
+        let path = if fields[2].is_empty() {
+            let _old = read_nul(&mut reader)?.ok_or_else(|| anyhow!("missing rename source"))?;
+            read_nul(&mut reader)?.ok_or_else(|| anyhow!("missing rename destination"))?
+        } else {
+            fields[2].to_vec()
         };
-        let fields: Vec<_> = line.splitn(3, '\t').collect();
-        if fields.len() != 3
-            || fields[0] == "-"
-            || fields[1] == "-"
-            || !should_count_path(fields[2], self.options.include_generated)
-        {
-            return;
+        if !should_count_path(&String::from_utf8_lossy(&path), options.include_generated) {
+            continue;
         }
-        if let (Ok(added), Ok(removed)) = (fields[0].parse::<i64>(), fields[1].parse::<i64>()) {
-            current.added = current.added.wrapping_add(added);
-            current.removed = current.removed.wrapping_add(removed);
+        let total = counts
+            .entry(current.clone())
+            .or_insert(LineCounts::default());
+        total.changed = true;
+        if fields[0] == b"-" || fields[1] == b"-" {
+            continue;
+        }
+        let added = std::str::from_utf8(fields[0])?.parse::<i64>()?;
+        let removed = std::str::from_utf8(fields[1])?.parse::<i64>()?;
+        if added < 0 || removed < 0 {
+            bail!("negative Git numstat line count");
+        }
+        total.added = total
+            .added
+            .checked_add(added)
+            .ok_or_else(|| anyhow!("line count overflow"))?;
+        total.removed = total
+            .removed
+            .checked_add(removed)
+            .ok_or_else(|| anyhow!("line count overflow"))?;
+    }
+    Ok(counts)
+}
+
+fn parsed_identity(value: &str) -> Option<Identity> {
+    let mut parser = MailboxParser { rest: value.trim() };
+    let email = parser.mailbox(true)?;
+    parser.skip_comments()?;
+    if !parser.rest.is_empty() {
+        return None;
+    }
+    let mut names = MailboxParser { rest: value.trim() };
+    let name = if names.address_spec().is_some() {
+        names.space();
+        names
+            .rest
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .unwrap_or(&email)
+            .to_owned()
+    } else if names.rest.starts_with('<') {
+        email.clone()
+    } else {
+        let name = names.phrase()?;
+        names.space();
+        if names.consume(':') {
+            return parsed_identity(names.rest.trim().strip_suffix(';')?);
+        }
+        name
+    };
+    Some(Identity {
+        name: if name.is_empty() { email.clone() } else { name },
+        email,
+    })
+}
+
+fn apply_coauthors(
+    ctx: &GitContext<'_>,
+    repo: &Repository,
+    options: &CollectOptions,
+    metadata: &mut [Metadata],
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let mut cache = HashMap::new();
+    let mut contacts = Vec::new();
+    for entry in metadata.iter() {
+        for trailer in &entry.trailers {
+            if cache.contains_key(trailer) {
+                continue;
+            }
+            let identity = parsed_identity(trailer);
+            if let Some(identity) = &identity {
+                contacts.push((
+                    trailer.clone(),
+                    format!(
+                        "{} <{}>",
+                        identity.name.replace(['\n', '\r'], " "),
+                        identity.email
+                    ),
+                ));
+            } else {
+                warnings.push(format!(
+                    "Commit {} contains an invalid coauthor trailer; it was not attributed.",
+                    &entry.record.commit_id[..12]
+                ));
+            }
+            cache.insert(trailer.clone(), identity);
         }
     }
+    for batch in contacts.chunks(128) {
+        let mut args = vec!["check-mailmap", "--"];
+        args.extend(batch.iter().map(|(_, contact)| contact.as_str()));
+        let output = git_output(ctx, &repo.path, &args)?;
+        let mapped: Vec<_> = output.lines().collect();
+        if mapped.len() != batch.len() {
+            bail!("unexpected check-mailmap output");
+        }
+        for ((trailer, _), mapped) in batch.iter().zip(mapped) {
+            let identity = mapped.rsplit_once('<').and_then(|(name, email)| {
+                Some(Identity {
+                    name: name.trim().to_owned(),
+                    email: email.strip_suffix('>')?.to_owned(),
+                })
+            });
+            cache.insert(trailer.clone(), identity);
+        }
+    }
+    for entry in metadata {
+        let mut seen = HashSet::new();
+        for trailer in &entry.trailers {
+            let Some(Some(identity)) = cache.get(trailer) else {
+                continue;
+            };
+            if is_ai(trailer, &options.ai_identities)
+                || is_ai(&identity.email, &options.ai_identities)
+            {
+                entry.record.ai_assisted = true;
+            } else if seen.insert(identity.email.to_lowercase()) {
+                entry.record.coauthors.push(identity.clone());
+            }
+        }
+    }
+    Ok(())
+}
 
-    fn finish(mut self) -> Vec<CommitRecord> {
-        self.flush();
-        self.records
+struct ObjectScratch {
+    path: PathBuf,
+    alternate: String,
+    disabled_drivers: Vec<String>,
+}
+impl ObjectScratch {
+    fn new(ctx: &GitContext<'_>, repo: &Path) -> Result<Self> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let alternate = git_output(
+            ctx,
+            repo,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "objects",
+            ],
+        )?;
+        let alternate = serde_json::to_string(alternate.trim())?;
+        let disabled_drivers = git_output(ctx, repo, &["config", "--list", "--name-only"])?
+            .lines()
+            .filter(|key| key.starts_with("merge.") && key.ends_with(".driver"))
+            .map(|key| format!("{key}=false"))
+            .collect::<Vec<_>>();
+        for _ in 0..100 {
+            let path = std::env::temp_dir().join(format!(
+                "bigboard-merge-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => {
+                    return Ok(Self {
+                        path,
+                        alternate,
+                        disabled_drivers,
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error).context("creating temporary merge object storage"),
+            }
+        }
+        bail!("unable to allocate temporary merge object storage")
+    }
+    fn command(&self, repo: &Path, args: &[&str]) -> Command {
+        let mut command = git_command(repo, &[]);
+        // Never execute repository-configured external merge drivers while
+        // reconstructing history; affected resolutions become unknown instead.
+        for driver in &self.disabled_drivers {
+            command.args(["-c", driver]);
+        }
+        command
+            .args(args)
+            .env("GIT_OBJECT_DIRECTORY", &self.path)
+            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", &self.alternate);
+        command
+    }
+}
+impl Drop for ObjectScratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
-fn effective_path(path: &str) -> String {
-    let path = path.trim();
-    if !path.contains("=>") {
-        return path.to_owned();
+fn merge_counts(
+    ctx: &GitContext<'_>,
+    repo: &Repository,
+    options: &CollectOptions,
+    entry: &Metadata,
+    scratch: &ObjectScratch,
+) -> Result<Option<LineCounts>> {
+    if entry.parents.len() != 2 {
+        return Ok(None);
     }
-    if let Some(open) = path.find('{')
-        && let Some(close) = path.find('}').filter(|close| *close > open)
-    {
-        let inner = &path[open + 1..close];
-        let destination = inner.split_once("=>").map_or(inner, |(_, value)| value);
-        return format!(
-            "{}{}{}",
-            &path[..open],
-            destination.trim(),
-            &path[close + 1..]
+    let child = scratch
+        .command(
+            &repo.path,
+            &[
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                "-z",
+                &entry.parents[0],
+                &entry.parents[1],
+            ],
         )
-        .trim()
-        .to_owned();
+        .spawn()?;
+    let output = run_child_output(ctx, child, |mut stdout| {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })?;
+    if output.status.code() == Some(1) {
+        return Ok(None);
     }
-    path.split_once("=>")
-        .map_or(path, |(_, value)| value)
-        .trim()
-        .to_owned()
+    if !output.status.success() {
+        bail!(
+            "merge baseline unavailable: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let tree = std::str::from_utf8(
+        output
+            .value
+            .split(|byte| *byte == 0 || *byte == b'\n')
+            .next()
+            .unwrap_or_default(),
+    )?;
+    if !is_oid(tree) {
+        bail!("invalid automatic merge-tree object");
+    }
+    let mut args = vec!["diff", "--numstat", "-z"];
+    args.extend(DIFF_OPTIONS);
+    args.extend([tree, &entry.record.commit_id, "--"]);
+    let child = scratch.command(&repo.path, &args).spawn()?;
+    let mut counts = run_child(ctx, child, |stdout| {
+        parse_numstat(BufReader::new(stdout), options, false)
+    })?;
+    Ok(Some(counts.remove("").unwrap_or_default()))
 }
 
 fn should_count_path(path: &str, include_generated: bool) -> bool {
     if include_generated {
         return true;
     }
-    let path = effective_path(path);
     if path
         .split('/')
         .any(|segment| IGNORED_DIRS.contains(&segment))
     {
         return false;
     }
-    let basename = path.rsplit('/').next().unwrap_or(&path);
+    let basename = path.rsplit('/').next().unwrap_or(path);
     !IGNORED_FILE_GLOBS
         .iter()
         .any(|pattern| glob::Pattern::new(pattern).is_ok_and(|pattern| pattern.matches(basename)))
@@ -563,10 +1090,10 @@ impl MailboxParser<'_> {
         Some(format!("{local}@{domain}"))
     }
 
-    fn phrase(&mut self) -> Option<()> {
-        let mut words = 0;
+    fn phrase(&mut self) -> Option<String> {
+        let mut words = Vec::new();
         loop {
-            if words > 0 {
+            if !words.is_empty() {
                 self.skip_comments()?;
             }
             self.space();
@@ -575,12 +1102,10 @@ impl MailboxParser<'_> {
             } else {
                 self.atom(true)
             };
-            if word.is_none() {
-                break;
-            }
-            words += 1;
+            let Some(word) = word else { break };
+            words.push(word);
         }
-        (words > 0).then_some(())
+        (!words.is_empty()).then(|| words.join(" "))
     }
 
     fn mailbox(&mut self, allow_group: bool) -> Option<String> {
@@ -618,9 +1143,7 @@ fn is_ai(value: &str, identities: &[String]) -> bool {
             return true;
         }
     }
-    if AI_DOMAINS.iter().any(|domain| address.ends_with(domain))
-        || AI_ADDRESSES.contains(&address.as_str())
-    {
+    if AI_ADDRESSES.contains(&address.as_str()) {
         return true;
     }
     if let Some(local) = address.strip_suffix("@users.noreply.github.com") {
@@ -712,12 +1235,18 @@ fn is_git_repo(path: &Path) -> bool {
 
 fn is_worktree(path: &Path) -> bool {
     let git_path = path.join(".git");
-    match std::fs::symlink_metadata(&git_path) {
-        Ok(metadata) if !metadata.is_dir() => {
-            std::fs::read(&git_path).is_ok_and(|bytes| bytes.starts_with(b"gitdir:"))
-        }
-        _ => false,
+    if !std::fs::symlink_metadata(&git_path).is_ok_and(|m| !m.is_dir()) {
+        return false;
     }
+    let Ok(contents) = std::fs::read_to_string(git_path) else {
+        return false;
+    };
+    let Some(git_dir) = contents.strip_prefix("gitdir:").map(str::trim) else {
+        return false;
+    };
+    // A linked worktree's private Git directory has a commondir backlink.
+    // Separate-git-dir repositories and submodules use gitfiles without it.
+    path.join(git_dir).join("commondir").is_file()
 }
 
 /// Discover in deterministic directory order, following and deduplicating
@@ -823,6 +1352,7 @@ mod tests {
             &AtomicBool::new(false),
         )
         .unwrap()
+        .records
     }
 
     #[test]
@@ -909,7 +1439,10 @@ mod tests {
         );
         git(root.path(), &["checkout", "--detach", "HEAD"]);
         git(root.path(), &["branch", "-D", "main"]);
-        assert_eq!(detect_default_branch(root.path()), "origin/main");
+        assert_eq!(
+            detect_default_branch(root.path()),
+            git(root.path(), &["rev-parse", "HEAD"]).trim()
+        );
         assert_eq!(collect(root.path(), &CollectOptions::default()).len(), 1);
     }
 
@@ -1016,18 +1549,21 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_short_branch_reference_can_resolve_a_tag() {
+    fn default_branch_is_not_confused_by_a_same_named_tag() {
         let root = TempDir::new().unwrap();
         init(root.path());
         commit(root.path(), "a.go", "a\n", "first");
         git(root.path(), &["tag", "main"]);
         commit(root.path(), "b.go", "b\n", "second");
-        assert_eq!(detect_default_branch(root.path()), "main");
-        assert_eq!(collect(root.path(), &CollectOptions::default()).len(), 1);
+        assert_eq!(
+            detect_default_branch(root.path()),
+            git(root.path(), &["rev-parse", "refs/heads/main"]).trim()
+        );
+        assert_eq!(collect(root.path(), &CollectOptions::default()).len(), 2);
     }
 
     #[test]
-    fn compatibility_local_branch_precedes_newer_remote_tracking_branch() {
+    fn remote_default_precedes_stale_local_branch() {
         let root = TempDir::new().unwrap();
         init(root.path());
         commit(root.path(), "a.go", "a\n", "first");
@@ -1046,12 +1582,14 @@ mod tests {
             ],
         );
         git(root.path(), &["checkout", "main"]);
-        assert_eq!(collect(root.path(), &CollectOptions::default()).len(), 1);
+        let records = collect(root.path(), &CollectOptions::default());
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|record| record.landed));
     }
 
     #[cfg(unix)]
     #[test]
-    fn compatibility_git_quoted_vendor_paths_are_counted() {
+    fn nul_delimited_vendor_paths_are_filtered() {
         let root = TempDir::new().unwrap();
         init(root.path());
         commit(root.path(), "normal.go", "one\n", "normal");
@@ -1066,12 +1604,12 @@ mod tests {
                 .iter()
                 .map(|record| record.added)
                 .sum::<i64>(),
-            4
+            1
         );
     }
 
     #[test]
-    fn compatibility_separate_git_directory_is_skipped() {
+    fn separate_git_directory_is_discovered() {
         let root = TempDir::new().unwrap();
         let repo = root.path().join("project");
         let metadata = root.path().join("metadata");
@@ -1086,12 +1624,15 @@ mod tests {
                 metadata.to_str().unwrap(),
             ],
         );
-        assert!(discover_repos_depth(&[repo], 1).is_empty());
+        assert_eq!(
+            discover_repos_depth(std::slice::from_ref(&repo), 1),
+            vec![repo]
+        );
     }
 
     #[test]
-    fn compatibility_vendor_employee_email_is_ai() {
-        assert!(is_ai("Human Dev <human.employee@openai.com>", &[]));
+    fn vendor_employee_email_is_not_ai() {
+        assert!(!is_ai("Human Dev <human.employee@openai.com>", &[]));
         assert!(!is_ai("Eve <person@openai.com.evil.example>", &[]));
         assert!(is_ai(
             "Worker <agent@custom.example>",
@@ -1109,45 +1650,26 @@ mod tests {
     }
 
     #[test]
-    fn parser_preserves_pipe_names_binary_skip_and_malformed_date_behavior() {
-        let repo = new_repositories(&[PathBuf::from("/repo")]).remove(0);
-        let options = CollectOptions::default();
-        let mut parser = LogParser::new(&repo, &options);
-        for line in [
-            "Bad|Name\x1ebad@example.com\x1e2026-01-01T00:00:00Z\x1e",
-            "7\t2\tcode.go",
-            "-\t-\timage.png",
-            "Ghost\x1eghost@example.com\x1enot-a-date\x1e",
-            "99\t99\tx.go",
-        ] {
-            parser.feed(line);
-        }
-        let records = parser.finish();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].author, "Bad|Name");
-        assert_eq!((records[0].added, records[0].removed), (7, 2));
-    }
-
-    #[test]
-    fn path_filter_and_rename_paths_match_go_policy() {
-        assert_eq!(
-            effective_path("src/{old => new}/file.go"),
-            "src/new/file.go"
-        );
-        assert_eq!(effective_path("old.go => new.go"), "new.go");
-        assert!(should_count_path("src/{old.go => new.go}", false));
-        assert!(!should_count_path("vendor/naïve.go", false));
+    fn nul_parser_handles_renames_literal_arrows_and_binary_files() {
+        let bytes = b"3\t1\t\0old\tname\0src/new\nname.go\0-\t-\timage.png\0";
+        let counts = parse_numstat(
+            BufReader::new(bytes.as_slice()),
+            &CollectOptions::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!((counts[""].added, counts[""].removed), (3, 1));
+        assert!(!should_count_path("vendor/x => src/x.go", false));
+        assert!(should_count_path("src/{a => b}.go", false));
         assert!(!should_count_path("src/build/x.go", false));
-        assert!(!should_count_path("src/foo.min.js", false));
-        assert!(should_count_path("src/build/x.go", true));
     }
 
     #[test]
-    fn scanner_rejects_oversized_lines() {
+    fn scanner_rejects_oversized_fields() {
         let bytes = vec![b'a'; MAX_LOG_LINE + 1];
-        let mut reader = BufReader::new(bytes.as_slice());
-        assert!(read_log_line(&mut reader, &mut Vec::new()).is_err());
+        assert!(read_nul(&mut BufReader::new(bytes.as_slice())).is_err());
     }
+
     #[cfg(unix)]
     fn sleeping_child() -> std::process::Child {
         Command::new("sleep")
@@ -1318,5 +1840,504 @@ mod tests {
             &[]
         ));
         assert!(!is_ai("Claude <noreply@anthropic.com> invalid", &[]));
+    }
+    fn scan(dir: &Path) -> ScanData {
+        scan_repository(
+            &new_repositories(&[dir.to_owned()])[0],
+            &CollectOptions::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn all_branch_history_excludes_tag_only_commits_and_marks_landed() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "base.go", "base\n", "base");
+        git(root.path(), &["checkout", "-b", "feature"]);
+        commit(root.path(), "feature.go", "feature\n", "feature");
+        let feature = git(root.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+        git(root.path(), &["checkout", "main"]);
+        commit(root.path(), "main.go", "main\n", "main");
+        git(root.path(), &["checkout", "--orphan", "tag-only"]);
+        git(root.path(), &["rm", "-rf", "."]);
+        commit(root.path(), "tag.go", "tag only\n", "tag only");
+        let tag = git(root.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+        git(root.path(), &["tag", "archive"]);
+        git(root.path(), &["checkout", "main"]);
+        git(root.path(), &["branch", "-D", "tag-only"]);
+        let data = scan(root.path());
+        assert_eq!(data.records.len(), 3);
+        assert_eq!(data.records.iter().filter(|r| r.landed).count(), 2);
+        assert!(
+            !data
+                .records
+                .iter()
+                .find(|r| r.commit_id == feature)
+                .unwrap()
+                .landed
+        );
+        assert!(!data.records.iter().any(|r| r.commit_id == tag));
+    }
+
+    #[test]
+    fn arbitrary_feature_head_is_not_assumed_to_be_default() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "base.go", "base\n", "base");
+        git(root.path(), &["branch", "-m", "feature"]);
+        let data = scan(root.path());
+        assert_eq!(data.records.len(), 1);
+        assert!(!data.records[0].landed);
+        assert!(
+            data.warnings
+                .iter()
+                .any(|w| w.contains("No available default branch"))
+        );
+    }
+
+    #[test]
+    fn coauthors_are_parsed_mailmapped_deduplicated_and_ai_is_separate() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(
+            root.path(),
+            "a.go",
+            "a\n",
+            "pairing\n\nCo-authored-by: Pat <old@example.com>\nCo-authored-by: Pat Canonical <pat@example.com>\nCo-authored-by: noreply@anthropic.com (Claude)\nCo-authored-by: Vendor Employee <human@openai.com>",
+        );
+        std::fs::write(
+            root.path().join(".mailmap"),
+            "Pat Canonical <pat@example.com> <old@example.com>\n",
+        )
+        .unwrap();
+        let records = scan(root.path()).records;
+        assert!(records[0].ai_assisted);
+        assert_eq!(records[0].coauthors.len(), 2);
+        assert!(records[0].coauthors.contains(&Identity {
+            name: "Pat Canonical".into(),
+            email: "pat@example.com".into()
+        }));
+        assert!(
+            records[0]
+                .coauthors
+                .iter()
+                .any(|i| i.email == "human@openai.com")
+        );
+    }
+
+    #[test]
+    fn copy_and_unusual_rename_paths_count_only_actual_line_edits() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "old\tname.go", "one\ntwo\nthree\n", "base");
+        std::fs::copy(
+            root.path().join("old\tname.go"),
+            root.path().join("copy.go"),
+        )
+        .unwrap();
+        git(root.path(), &["add", "-A"]);
+        git(root.path(), &["commit", "-m", "copy unchanged file"]);
+        git(root.path(), &["mv", "old\tname.go", "new\nname.go"]);
+        commit(
+            root.path(),
+            "new\nname.go",
+            "one\ntwo\nthree\nfour\n",
+            "rename and edit",
+        );
+        let records = scan(root.path()).records;
+        assert_eq!(records.iter().map(|r| r.added).sum::<i64>(), 4);
+        assert_eq!(records.iter().map(|r| r.removed).sum::<i64>(), 0);
+    }
+
+    #[test]
+    fn repository_environment_does_not_redirect_scan() {
+        const CHILD_DIR: &str = "BIGBOARD_ROUTING_TEST_DIR";
+        if let Some(path) = std::env::var_os(CHILD_DIR) {
+            let records = collect(Path::new(&path), &CollectOptions::default());
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].author, "Requested Repository");
+            assert_eq!(records[0].added, 2);
+            assert!(records[0].landed);
+            return;
+        }
+        let root = TempDir::new().unwrap();
+        let requested = root.path().join("requested");
+        let foreign = root.path().join("foreign");
+        init(&requested);
+        git(&requested, &["config", "user.name", "Requested Repository"]);
+        commit(&requested, "requested.rs", "one\ntwo\n", "requested");
+        init(&foreign);
+        commit(&foreign, "foreign.rs", "foreign\n", "foreign");
+        // Use a separate test process: changing the current process environment
+        // while other Git tests run would introduce an unrelated race.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "git::tests::repository_environment_does_not_redirect_scan",
+                "--nocapture",
+            ])
+            .env(CHILD_DIR, &requested)
+            .env("GIT_DIR", foreign.join(".git"))
+            .env("GIT_COMMON_DIR", foreign.join(".git"))
+            .env("GIT_WORK_TREE", &foreign)
+            .env("GIT_OBJECT_DIRECTORY", foreign.join(".git/objects"))
+            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", foreign.join("missing"))
+            .env("GIT_SHALLOW_FILE", foreign.join("missing-shallow"))
+            .env("GIT_GRAFT_FILE", foreign.join("missing-grafts"))
+            .env("GIT_INDEX_FILE", foreign.join(".git/index"))
+            .env("GIT_NAMESPACE", "foreign")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.bare")
+            .env("GIT_CONFIG_VALUE_0", "true")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated environment test failed: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn ambient_diff_settings_do_not_change_counts() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "old.go", "one\ntwo\nthree\n", "base");
+        git(root.path(), &["mv", "old.go", "new.go"]);
+        commit(root.path(), "new.go", "one\ntwo\nthree\nfour\n", "rename");
+        let before = scan(root.path()).records;
+        for (key, value) in [
+            ("log.showRoot", "false"),
+            ("diff.renames", "false"),
+            ("diff.algorithm", "histogram"),
+            ("diff.indentHeuristic", "true"),
+            ("diff.external", "false"),
+            ("log.showSignature", "true"),
+        ] {
+            git(root.path(), &["config", key, value]);
+        }
+        let after = scan(root.path()).records;
+        assert_eq!(
+            before
+                .iter()
+                .map(|r| (r.added, r.removed))
+                .collect::<Vec<_>>(),
+            after
+                .iter()
+                .map(|r| (r.added, r.removed))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(after.iter().map(|r| r.added).sum::<i64>(), 4);
+    }
+
+    fn prepare_partial_clone(root: &Path) -> PathBuf {
+        let source = root.join("source");
+        let partial = root.join("partial");
+        init(&source);
+        git(&source, &["config", "uploadpack.allowFilter", "true"]);
+        commit(&source, "a.go", "one\ntwo\n", "first");
+        commit(&source, "a.go", "one\ntwo\nthree\n", "second");
+        git(
+            root,
+            &[
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                &format!("file://{}", source.display()),
+                partial.to_str().unwrap(),
+            ],
+        );
+        partial
+    }
+
+    #[test]
+    fn partial_clone_missing_objects_are_not_fetched_and_totals_are_qualified() {
+        let root = TempDir::new().unwrap();
+        let partial = prepare_partial_clone(root.path());
+        let before = git(
+            &partial,
+            &["rev-list", "--objects", "--all", "--missing=print"],
+        );
+        assert_eq!(
+            before.lines().filter(|line| line.starts_with('?')).count(),
+            2
+        );
+        let data = scan(&partial);
+        assert!(data.records.is_empty());
+        let version = parse_git_version(&git(&partial, &["--version"])).unwrap();
+        if version >= (2, 45, 1) {
+            assert!(
+                data.warnings[0].contains("scan failed with automatic object fetching disabled")
+            );
+        } else {
+            assert!(data.warnings[0].contains("skipped"));
+        }
+        assert!(
+            data.warnings
+                .iter()
+                .any(|warning| warning.contains("Partial clone")
+                    && warning.contains("Totals exclude this repository"))
+        );
+        assert_eq!(
+            git(
+                &partial,
+                &["rev-list", "--objects", "--all", "--missing=print"]
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn older_git_skips_partial_clones_but_retains_complete_repositories() {
+        let root = TempDir::new().unwrap();
+        let partial = prepare_partial_clone(root.path());
+        let before = git(
+            &partial,
+            &["rev-list", "--objects", "--all", "--missing=print"],
+        );
+        let repo = new_repositories(std::slice::from_ref(&partial)).remove(0);
+        let cancel = AtomicBool::new(false);
+        let ctx = GitContext::new(&cancel);
+        let data =
+            scan_repository_with_version(&repo, &CollectOptions::default(), &ctx, (2, 44, 0))
+                .unwrap();
+        assert!(data.records.is_empty());
+        assert!(data.warnings[0].contains("Git 2.45.1 or newer"));
+        assert!(data.warnings[0].contains("Totals exclude this repository"));
+        assert_eq!(
+            git(
+                &partial,
+                &["rev-list", "--objects", "--all", "--missing=print"]
+            ),
+            before
+        );
+        let full = new_repositories(&[root.path().join("source")]).remove(0);
+        let data =
+            scan_repository_with_version(&full, &CollectOptions::default(), &ctx, (2, 31, 0))
+                .unwrap();
+        assert_eq!(data.records.len(), 2);
+        assert!(data.warnings.is_empty());
+        assert!(
+            scan_repository_with_version(&full, &CollectOptions::default(), &ctx, (2, 30, 0))
+                .unwrap_err()
+                .to_string()
+                .contains("Git 2.31")
+        );
+        assert_eq!(
+            parse_git_version("git version 2.50.1 (Apple Git-155)\n"),
+            Some((2, 50, 1))
+        );
+        assert_eq!(
+            parse_git_version("git version 2.45.1.windows.1"),
+            Some((2, 45, 1))
+        );
+        assert_eq!(parse_git_version("git version 2.31"), Some((2, 31, 0)));
+        assert_eq!(parse_git_version("invalid"), None);
+    }
+
+    #[test]
+    fn shallow_boundary_counts_are_unknown_instead_of_a_fake_root_diff() {
+        let root = TempDir::new().unwrap();
+        let source = root.path().join("source");
+        init(&source);
+        commit(&source, "a.go", "one\ntwo\nthree\n", "base");
+        commit(&source, "a.go", "one\ntwo\nthree\nfour\n", "edit");
+        let clone = root.path().join("clone");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "--depth=1",
+                &format!("file://{}", source.display()),
+                clone.to_str().unwrap(),
+            ],
+        );
+        let data = scan(&clone);
+        assert_eq!(data.records.len(), 1);
+        assert!(!data.records[0].lines_known);
+        assert_eq!((data.records[0].added, data.records[0].removed), (0, 0));
+        assert!(data.warnings.iter().any(|w| w.contains("Shallow")));
+    }
+
+    fn prepare_clean_merge(dir: &Path) {
+        init(dir);
+        commit(dir, "base.go", "base\n", "base");
+        git(dir, &["checkout", "-b", "feature"]);
+        commit(dir, "feature.go", "feature\n", "feature");
+        git(dir, &["checkout", "main"]);
+        commit(dir, "main.go", "main\n", "main");
+    }
+
+    #[test]
+    fn clean_integration_merges_are_omitted_without_recounting_branches() {
+        let root = TempDir::new().unwrap();
+        prepare_clean_merge(root.path());
+        git(
+            root.path(),
+            &["merge", "--no-ff", "feature", "-m", "integrate"],
+        );
+        let before = git(root.path(), &["count-objects", "-v"]);
+        let index = std::fs::read(root.path().join(".git/index")).unwrap();
+        let data = scan(root.path());
+        assert_eq!(data.records.len(), 3);
+        assert!(data.records.iter().all(|r| !r.is_merge && r.landed));
+        assert_eq!(data.records.iter().map(|r| r.added).sum::<i64>(), 3);
+        assert!(data.warnings.is_empty(), "{:?}", data.warnings);
+        assert_eq!(git(root.path(), &["count-objects", "-v"]), before);
+        assert_eq!(
+            std::fs::read(root.path().join(".git/index")).unwrap(),
+            index
+        );
+        assert!(git(root.path(), &["status", "--porcelain"]).is_empty());
+    }
+
+    #[test]
+    fn extra_edits_in_clean_merges_are_credited_without_branch_changes() {
+        let root = TempDir::new().unwrap();
+        prepare_clean_merge(root.path());
+        git(root.path(), &["merge", "--no-ff", "--no-commit", "feature"]);
+        commit(
+            root.path(),
+            "resolution.go",
+            "additional\nwork\n",
+            "extra merge work",
+        );
+        let data = scan(root.path());
+        let merge = data.records.iter().find(|r| r.is_merge).unwrap();
+        assert!(merge.lines_known);
+        assert_eq!((merge.added, merge.removed), (2, 0));
+        assert_eq!(data.records.len(), 4);
+        assert_eq!(data.records.iter().map(|r| r.added).sum::<i64>(), 5);
+        assert!(data.warnings.is_empty(), "{:?}", data.warnings);
+    }
+
+    #[test]
+    fn conflicted_merge_resolution_is_credited_with_unknown_lines() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "a.go", "base\n", "base");
+        git(root.path(), &["checkout", "-b", "feature"]);
+        commit(root.path(), "a.go", "theirs\n", "feature");
+        git(root.path(), &["checkout", "main"]);
+        commit(root.path(), "a.go", "ours\n", "main");
+        let output = Command::new("git")
+            .args(["merge", "--no-ff", "feature", "-m", "conflict"])
+            .current_dir(root.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        commit(
+            root.path(),
+            "a.go",
+            "resolved\nadditional\n",
+            "resolve conflict",
+        );
+        let data = scan(root.path());
+        let merge = data.records.iter().find(|r| r.is_merge).unwrap();
+        assert!(!merge.lines_known);
+        assert_eq!((merge.added, merge.removed), (0, 0));
+        assert_eq!(data.records.len(), 4);
+        assert!(
+            data.warnings
+                .iter()
+                .any(|w| w.contains("conflict-resolution"))
+        );
+    }
+    #[test]
+    fn external_merge_drivers_are_not_executed_by_scans() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(
+            root.path(),
+            ".gitattributes",
+            "a.go merge=custom\n",
+            "attributes",
+        );
+        commit(root.path(), "a.go", "base\n", "base");
+        git(root.path(), &["checkout", "-b", "feature"]);
+        commit(root.path(), "a.go", "theirs\n", "feature");
+        git(root.path(), &["checkout", "main"]);
+        commit(root.path(), "a.go", "ours\n", "main");
+        let output = Command::new("git")
+            .args(["merge", "--no-ff", "feature", "-m", "conflict"])
+            .current_dir(root.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        commit(root.path(), "a.go", "resolved\n", "resolve");
+        git(
+            root.path(),
+            &["config", "merge.custom.driver", "touch driver-ran; true"],
+        );
+        let data = scan(root.path());
+        assert!(!root.path().join("driver-ran").exists());
+        assert!(
+            !data
+                .records
+                .iter()
+                .find(|r| r.is_merge)
+                .unwrap()
+                .lines_known
+        );
+    }
+
+    #[test]
+    fn octopus_merges_are_explicit_unknowns() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "base.go", "base\n", "base");
+        git(root.path(), &["checkout", "-b", "left"]);
+        commit(root.path(), "left.go", "left\n", "left");
+        git(root.path(), &["checkout", "main"]);
+        git(root.path(), &["checkout", "-b", "right"]);
+        commit(root.path(), "right.go", "right\n", "right");
+        git(root.path(), &["checkout", "main"]);
+        commit(root.path(), "main.go", "main\n", "main");
+        git(
+            root.path(),
+            &["merge", "--no-ff", "left", "right", "-m", "octopus"],
+        );
+        let data = scan(root.path());
+        assert!(
+            !data
+                .records
+                .iter()
+                .find(|r| r.is_merge)
+                .unwrap()
+                .lines_known
+        );
+        assert!(
+            data.warnings
+                .iter()
+                .any(|w| w.contains("unsupported merge"))
+        );
+    }
+
+    #[test]
+    fn parsed_coauthor_names_preserve_quotes_and_mailmap_name_matching() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(
+            root.path(),
+            "a.go",
+            "a\n",
+            "pairing\n\nCo-authored-by: \"Pat, Developer\" (human) <old@example.com>",
+        );
+        std::fs::write(
+            root.path().join(".mailmap"),
+            "Pat Canonical <pat@example.com> Pat, Developer <old@example.com>\n",
+        )
+        .unwrap();
+        let data = scan(root.path());
+        assert_eq!(
+            data.records[0].coauthors,
+            vec![Identity {
+                name: "Pat Canonical".into(),
+                email: "pat@example.com".into()
+            }]
+        );
     }
 }

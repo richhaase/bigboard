@@ -193,22 +193,22 @@ pub(super) fn stat_boxes(
     p: &Palette,
 ) -> Vec<UiLine> {
     let mut values = vec![
-        (format_number(commits), "COMMITS", p.cyan),
+        (format_number(commits), "AUTHORED", p.cyan),
         (format!("+{}", format_number(added)), "ADDED", p.green),
         (format!("-{}", format_number(removed)), "REMOVED", p.magenta),
     ];
     if ai > 0 {
-        values.push((ai_value(commits, ai), "AI CO-AUTHORED", p.amber));
+        values.push((ai_value(commits, ai), "DETECTED AI", p.amber));
     }
     if width < 78 || compact {
         let mut spans = vec![
-            span("  COMMITS ", p.dim_cyan),
+            span("  AUTHORED ", p.dim_cyan),
             bold(format_number(commits), p.cyan),
         ];
         let mut used = 10 + format_number(commits).width();
         for (value, label, color) in values.iter().skip(1) {
-            let val = if *label == "AI CO-AUTHORED" {
-                format!("AI {value}")
+            let val = if *label == "DETECTED AI" {
+                format!("Detected AI {value}")
             } else {
                 value.clone()
             };

@@ -2,15 +2,10 @@ use anyhow::{Context, Result, bail};
 use bigboard::{
     config::{self, Cli},
     git,
-    model::{AnalysisOptions, Repository},
-    scan,
-    stats::{self, SortField},
+    identity::{self, IdentityStore},
+    model::AnalysisOptions,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    io::{self, Write},
-    process::ExitCode,
-};
+use std::process::ExitCode;
 
 fn version() -> String {
     format!(
@@ -22,7 +17,7 @@ fn version() -> String {
 }
 fn usage() {
     eprintln!(
-        "Usage: bigboard [flags] [paths...]\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -export\n        Print contributor stats as JSON and exit\n  -group string\n        Use a named repo group from the config file\n  -version\n        Print version and exit"
+        "Usage: bigboard [flags] [paths...]\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -group string\n        Use a named repo group from the config file\n  -version\n        Print version and exit"
     );
 }
 fn diagnostic(s: &str) -> String {
@@ -35,53 +30,6 @@ fn diagnostic(s: &str) -> String {
             }
         })
         .collect()
-}
-fn export(
-    repos: Vec<Repository>,
-    excluded: HashSet<String>,
-    sort: SortField,
-    options: AnalysisOptions,
-) -> Result<()> {
-    let session = scan::start_scan(repos.clone(), options.clone());
-    let mut results = HashMap::new();
-    while let Ok(result) = session.receiver.recv() {
-        results.insert(result.repository.id.clone(), result);
-    }
-    let mut all = Vec::new();
-    let mut failed = 0;
-    for repo in &repos {
-        let result = results
-            .remove(&repo.id)
-            .context("repository scan ended without a result")?;
-        if let Some(error) = result.error {
-            eprintln!(
-                "warning: skipping {}: {}",
-                diagnostic(&repo.path.to_string_lossy()),
-                diagnostic(&error)
-            );
-            failed += 1;
-        } else {
-            all.extend(result.records)
-        }
-    }
-    if failed > 0 && failed == repos.len() {
-        bail!("all {} repositories failed to scan", failed)
-    }
-    let filtered = stats::filter_by_repo(&all, &excluded);
-    let mut authors = stats::aggregate(
-        &filtered,
-        &stats::AggregateOptions {
-            fuzzy_matching: options.fuzzy_matching,
-            bot_identities: options.bot_identities,
-        },
-    );
-    stats::sort(&mut authors, sort);
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-    // Go's empty aggregation is a non-nil slice and encodes as [].
-    serde_json::to_writer_pretty(&mut out, &authors)?;
-    writeln!(&mut out)?;
-    Ok(())
 }
 fn run(cli: Cli) -> Result<()> {
     if cli.version {
@@ -106,24 +54,27 @@ fn run(cli: Cli) -> Result<()> {
     let repos = git::new_repositories(&found);
     let excluded = config::build_exclude_set(&repos, &cfg.exclude).context("invalid exclusion")?;
     let options = AnalysisOptions {
-        fuzzy_matching: cfg.fuzzy,
         include_generated: cfg.all_files,
-        ai_identities: cfg.ai_identities,
-        bot_identities: cfg.bot_identities,
+        ai_identities: cfg.ai_identities.clone(),
+        bot_identities: cfg.bot_identities.clone(),
+        timezone: config::reporting_timezone(&cfg)?,
     };
-    if cli.export {
-        export(repos, excluded, sort, options)
-    } else {
-        bigboard::tui::run(
-            repos,
-            sort,
-            excluded,
-            option_env!("BIGBOARD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
-            time_idx,
-            options,
-            &cfg.theme,
-        )
+    let identity_path = identity::default_global_path();
+    if !identity_path.is_absolute() {
+        bail!("set HOME or an absolute XDG_CONFIG_HOME to store global contributor mappings");
     }
+    let identities = IdentityStore::load(&identity_path)?;
+    bigboard::tui::run(
+        repos,
+        sort,
+        excluded,
+        option_env!("BIGBOARD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
+        time_idx,
+        options,
+        &cfg.theme,
+        identities,
+        identity_path,
+    )
 }
 fn main() -> ExitCode {
     let cli = match Cli::parse(std::env::args().skip(1)) {
