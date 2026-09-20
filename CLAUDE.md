@@ -1,66 +1,33 @@
-# Big Board - Claude Code Context
+# Big Board project context
 
-## Project Overview
-
-Cyberpunk-themed terminal dashboard for visualizing contributor statistics across multiple git repositories. Built with Go, Bubbletea, and Lipgloss.
+Cyberpunk terminal dashboard for contributor activity across Git repositories. The application is Rust, using Ratatui with the Crossterm backend; Git operations invoke the Git CLI.
 
 ## Architecture
 
-```
-cmd/bigboard/main.go    CLI entry (4 flags: --version/--config/--group/--export), config resolution, repo discovery
-cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): paths, excludes, groups, sort/since/depth, ai_identities/bot_identities
-cmd/bigboard/export.go  Headless --export (JSON only, ALL window, concurrent scans)
-git/git.go              Git ops: recursive discovery (follows symlinks), branch detection, streaming commit collection, path filtering, AI detection
-stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
-tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
-tui/styles.go           Color palette and lipgloss style definitions
-tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
-tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
-tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
-tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
-```
+- `src/main.rs`: CLI entry and JSON export.
+- `src/config.rs`: strict JSON config, the four existing flags, groups, paths, exclusions, preset validation.
+- `src/model.rs`: repository, commit, and analysis option types.
+- `src/git.rs`: repository discovery, default branch, streaming Git log parsing, path filters, AI identity matching, cancellation and timeout.
+- `src/stats.rs`: identity union, aggregation, bot tagging, filters, sorting, derived metrics.
+- `src/scan.rs`: bounded eight-worker repository scan sessions for export and TUI.
+- `src/tui/`: application state, Ratatui rendering, terminal lifecycle and keyboard handling.
+- `scripts/check_parity.py`: compares the Rust executable with the immutable Go reference.
 
-## Data Flow
+## Migration scope
 
-1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
-2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
-3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R`).
-4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
-5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
+This revision preserves Go behavior. Do not silently correct analytics during port maintenance. The deferred findings and policy decisions are in `docs/analytics-correction-backlog.md`. The immutable Go reference is recorded in `docs/rust-port.md` and CI.
 
-## Key Design Decisions
-
-- **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans. `git log` output is parsed as a stream (pipe + scanner), never buffered whole.
-- **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state.
-- **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
-- **Identity merging**: group by email, then exact normalized name; git's native `.mailmap` is honored (`%aN`/`%aE`). Substring fuzzy matching is **opt-in** (`--fuzzy`) because it over-merges distinct people. Output ordering is deterministic (sort tiebreaks; no map-iteration leaks).
-- **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; `--all-files` includes them.
-- **Repository identity**: repositories are keyed by absolute path; duplicate basenames receive shortest-unique display labels such as `org-a/api` and `org-b/api`.
-- **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity, including GitHub-noreply agent accounts (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, …); extensible via `ai_identities` (exact email or `@domain`). Surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
-- **Bots are counted, not excluded**: bot identities (`[bot]` names/emails, builtin roster, `bot_identities` config) get `AuthorStats.Bot` and a leaderboard `BOT` tag; the `b` key toggles visibility (default shown). Agents that do their own work rank like any contributor.
-- **Worktree detection**: `isWorktree()` checks if `.git` is a file containing `gitdir:` — skips these during discovery to avoid double-counting. Symlinked directories are followed, deduplicated by resolved path.
-- **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.
-
-## Build & Test
+## Checks
 
 ```bash
-go build ./cmd/bigboard
-go test ./...
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+cargo build --release --locked
 ```
 
-## CI
+Run `python3 scripts/check_parity.py --reference /path/to/go-bigboard` after building the debug binary to check the end-to-end migration fixtures. The shipped application needs Rust to build and Git at runtime; Go is used only for reference validation.
 
-- GitHub Actions: `go test` (+ `-race`), `go vet`, `gofmt -l .` check, golangci-lint v2, `staticcheck`, `govulncheck`, `gosec`.
-- GoReleaser for releases (`.goreleaser.yaml`); tag push (`vX.Y.Z`) publishes binaries + updates the Homebrew tap.
+## UI conventions
 
-> Note: golangci-lint's bundled staticcheck enables the `QF*` quickfix checks that the standalone `staticcheck` binary leaves off by default — the Lint job is stricter than the Staticcheck job. Run `make lint` locally before pushing.
-
-## Style Notes
-
-- All visible UI strings use "contributor" (not "operative")
-- Impact bars use gradient trailing glow: `████████▓▒░`
-- Top 3 ranks styled gold/silver/bronze
-- Negative net values rendered in red
-- Section headers in detail view use `──╸ LABEL ╺──` style
-- Heavy separator (`━`) between major sections
-- No animation: the separator is a static rule, and the loading screen uses plain language (no sci-fi flavor)
+Use contributor in visible labels. Preserve cyberpunk colors, the block banner, gold/silver/bronze ranks, negative net values in red, and gradient impact bars. Keep the original keyboard controls and static presentation. JSON export covers all time; interactive time/repository filters are computed in memory. Git scans are concurrent and cancelable, with a 120-second per-repository deadline.
