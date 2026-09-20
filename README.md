@@ -4,12 +4,14 @@ A cyberpunk-themed TUI for assessing contributor volumes across git repositories
 
 ## Install
 
-Big Board requires the `git` command-line client on `PATH`.
+Big Board requires the `git` command-line client on `PATH`. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
 
 ### From Source
 
 ```bash
-go install github.com/richhaase/bigboard/cmd/bigboard@latest
+git clone https://github.com/richhaase/bigboard.git
+cd bigboard
+cargo install --path . --locked
 ```
 
 ## Usage
@@ -39,10 +41,14 @@ bigboard --version
 
 The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 `since` in the config to choose the initial range. `--export` always covers
-all time; per-contributor first/last commit dates are included for downstream
-filtering.
+all time; per-contributor first/last commit dates describe the exported history.
+These aggregates cannot reconstruct counts for a narrower time range.
 
-## Accuracy notes
+## Compatibility and accuracy
+
+This Rust revision preserves the Go application’s analytics behavior. The migration is checked against the Go reference with synthetic repositories; it does not resolve the accuracy issues found during the audit. See [the correction backlog](docs/analytics-correction-backlog.md) for known limitations and [port validation](docs/rust-port.md) for the migration boundary.
+
+### Existing analytics policy
 
 - **Author identity** is resolved by git's native `.mailmap` (honored automatically for `%aN`/`%aE`), then grouped by email and exact name. Substring name merging (which can collapse distinct people like *Daniel* / *Daniela*) is **off by default** — enable it with `"fuzzy": true`. Add a `.mailmap` to a repo to canonicalize names/emails precisely.
 - **AI authorship** is detected from `Co-authored-by` trailers and AI author identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Add your own agents' emails or `@domains` under `ai_identities`.
@@ -108,8 +114,27 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 - Per-contributor drill-down: repo breakdown, gap-aware monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)
 - Scrollable, height-aware leaderboard with incremental `/` search — every contributor reachable
 - Headless `--export` (JSON, same pipeline and identity policy as the TUI), config file with named `--group`s, glob excludes, and recursive scan depth
-- Accurate-by-default: native `.mailmap`, generated/vendored files excluded, deterministic ordering, rename/copy-aware churn
+- Native `.mailmap`, generated/vendored file filtering, deterministic ordering, and rename/copy detection (with known limitations recorded in the correction backlog)
 - Git worktree detection (automatically skipped during repo discovery); symlinked repo directories are followed and deduplicated
+
+## Development
+
+```bash
+cargo build --locked
+cargo test --locked
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+```
+
+`make check` runs formatting, Clippy, and tests. `make build` creates the release binary at `target/release/bigboard`.
+
+To compare exports with a Go reference binary, run:
+
+```bash
+python3 scripts/check_parity.py --reference /path/to/go-bigboard
+```
+
+CI builds the immutable pre-port Go revision and runs this comparison on Linux and macOS. Tag releases build archives for both systems on x86-64 and ARM64.
 
 ## License
 

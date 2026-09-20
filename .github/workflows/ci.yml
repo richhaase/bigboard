@@ -1,110 +1,38 @@
 name: CI
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-
+    branches: [main]
+permissions:
+  contents: read
 jobs:
-  fmt:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Check formatting
-      run: |
-        unformatted=$(gofmt -l .)
-        if [ -n "$unformatted" ]; then
-          echo "The following files are not formatted:"
-          echo "$unformatted"
-          exit 1
-        fi
-
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Rust checks (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run tests with coverage
-      run: go test -coverprofile=coverage.out ./...
-    - name: Upload coverage
-      uses: actions/upload-artifact@v7
-      with:
-        name: coverage
-        path: coverage.out
-
-  test-race:
-    name: Test (Race Detection)
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run tests with race detector
-      run: go test -race ./...
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run lint
-      run: make lint
-
-  staticcheck:
-    name: Staticcheck
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run staticcheck
-      run: make staticcheck
-
-  vet:
-    name: Vet
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run vet
-      run: make vet
-
-  govulncheck:
-    name: Vulnerability Check
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Setup Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    - name: Run govulncheck
-      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked
+      - name: Extract the immutable Go reference
+        run: |
+          mkdir -p "$RUNNER_TEMP/bigboard-go"
+          git archive a0acd7677837fff81eb10d31afc3a6b030362009 | tar -x -C "$RUNNER_TEMP/bigboard-go"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ runner.temp }}/bigboard-go/go.mod
+          cache: false
+      - name: Build the Go reference and compare behavior
+        run: |
+          (cd "$RUNNER_TEMP/bigboard-go" && go build -o "$RUNNER_TEMP/go-bigboard" ./cmd/bigboard)
+          python3 scripts/check_parity.py --reference "$RUNNER_TEMP/go-bigboard"

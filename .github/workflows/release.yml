@@ -1,30 +1,94 @@
-name: Release
-
+name: Release packages
 on:
   push:
-    tags:
-      - 'v*'
-
+    tags: ['v*']
+  pull_request:
+    branches: [main]
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            platform: Linux_x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            platform: Linux_arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: Darwin_x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            platform: Darwin_arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          fetch-depth: 0
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: 'go.mod'
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
+          targets: ${{ matrix.target }}
+      - name: Install the native static C runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - name: Build and package
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_PLATFORM: ${{ matrix.platform }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            BIGBOARD_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            BIGBOARD_VERSION="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          fi
+          export BIGBOARD_VERSION
+          export BIGBOARD_COMMIT="$GITHUB_SHA"
+          BIGBOARD_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export BIGBOARD_BUILD_DATE
+          cargo test --locked --target "$BUILD_TARGET"
+          cargo build --release --locked --target "$BUILD_TARGET"
+          binary="target/$BUILD_TARGET/release/bigboard"
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            file "$binary"
+            if readelf -l "$binary" | grep -q INTERP; then
+              echo 'Linux release must not depend on a dynamic loader' >&2
+              exit 1
+            fi
+          fi
+          mkdir package
+          cp "$binary" README.md LICENSE package/
+          cp -R docs package/
+          tar -czf "bigboard_${BIGBOARD_VERSION}_${BUILD_PLATFORM}.tar.gz" -C package .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bigboard-${{ matrix.platform }}
+          path: '*.tar.gz'
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz > checksums.txt
+          flags=(--title "Big Board $GITHUB_REF_NAME" --generate-notes)
+          release_version="${GITHUB_REF_NAME%%+*}"
+          if [[ "$release_version" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" ./*.tar.gz checksums.txt "${flags[@]}"
