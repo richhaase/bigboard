@@ -1,8 +1,8 @@
 # Rust revision (historical 0.7 record)
 
-This document records the completed behavior-preserving port. Version 0.8 changes the analytics contract and removes JSON export and the parity script; see [current analytics behavior](analytics.md). The reproduction commands and results below apply to the 0.7 port revision.
+This document records the behavior-preserving port merged in [PR #17](https://github.com/richhaase/bigboard/pull/17) on 2026-09-20 at [`821f85d`](https://github.com/richhaase/bigboard/commit/821f85d53b86649df7f87c41aea73d2009afad40). Version 0.8 changes the analytics contract and removes JSON export and the parity script; see [current analytics behavior](analytics.md). The reproduction commands and results below apply to the 0.7 port revision.
 
-The user requested an isolated, behavior-preserving port before correcting the analytics. The Go reference is commit `a0acd7677837fff81eb10d31afc3a6b030362009`. The [analytics correction backlog](analytics-correction-backlog.md) records deferred work. The scope record in [the draft contract](contracts/rust-port.md) documents the conversational authorization; it is not a separately approved Steward contract.
+The user requested an isolated, behavior-preserving port before correcting the analytics. The Go reference is commit `a0acd7677837fff81eb10d31afc3a6b030362009`. The [analytics correction backlog](analytics-correction-backlog.md) retains the original findings, subsequently resolved in [PR #18](https://github.com/richhaase/bigboard/pull/18). The scope record in [the draft contract](contracts/rust-port.md) documents the conversational authorization; it is not a separately approved Steward contract.
 
 ## Structure
 
@@ -23,21 +23,27 @@ Ratatui provides styled cells, terminal layout, and a test backend; Crossterm ha
 - Config keys, four command-line flags, group/path precedence, repository labels, and JSON contributor fields are preserved.
 - Identity resolution, generated-file exclusions, bots, AI attribution, timestamps, time windows, and sorting preserve the Go revision, including recorded shortcomings.
 - Existing screens, time ranges, keyboard controls, cyberpunk palette, banner, contribution bars, timeline, and heatmap are retained. Rendering is implemented with Ratatui; byte-for-byte ANSI output is not a compatibility target.
-- The Go source remains available in Git history and is built in CI as an immutable reference. Rust is the shipped application; Go is needed only for the differential reference check.
+- The Go source remains available in Git history. The port's CI built it as an immutable reference; current CI no longer runs that comparison. Go is needed only to reproduce the historical differential check.
 - Release version/build metadata identifies the Rust revision and therefore differs from the Go executable.
 
 ## Validation
 
-Run `cargo test --locked` for module, configuration, scan coordination, and TUI tests. Run `cargo fmt --all -- --check` and `cargo clippy --all-targets --locked -- -D warnings` for Rust checks.
+The port was checked with `cargo test --locked`, `cargo fmt --all -- --check`, and `cargo clippy --all-targets --locked -- -D warnings`. See the [current development instructions](../README.md#development) for the active revision.
 
-Build the reference and compare complete parsed JSON and exit status with:
+To reproduce the historical comparison, run the following from a Big Board checkout containing both commits. It extracts the old Rust port as well as the Go reference because `scripts/check_parity.py` and `--export` were removed in 0.8:
 
 ```bash
+set -e
+port_dir=$(mktemp -d)
+git archive 821f85d53b86649df7f87c41aea73d2009afad40 | tar -x -C "$port_dir"
 reference_dir=$(mktemp -d)
 git archive a0acd7677837fff81eb10d31afc3a6b030362009 | tar -x -C "$reference_dir"
 (cd "$reference_dir" && go build -o "$reference_dir/go-bigboard" ./cmd/bigboard)
-cargo build --locked
-python3 scripts/check_parity.py --reference "$reference_dir/go-bigboard"
+(
+  cd "$port_dir"
+  cargo build --locked
+  python3 scripts/check_parity.py --reference "$reference_dir/go-bigboard"
+)
 ```
 
 The differential fixtures cover every sort mode, generated files, AI/bot overrides, fuzzy identities, time-independent export, config/group precedence, duplicate repository labels, exclusions, symlinks, mailmap, quoted paths, Git settings, tag collisions, shallow history, empty repositories, partial failures, and invalid input. Unit tests additionally cover deterministic identity resolution and TUI state transitions.
@@ -54,6 +60,6 @@ Validated on macOS ARM64 with Rust 1.98.1:
 - Automatic theme detection selected the light palette from an OSC11 response and fell back to dark after the bounded query timed out. Both pseudo-terminal sessions exited successfully and restored configured terminal modes, cursor, and alternate screen.
 - The optimized release build succeeded; the dependency audit reported no vulnerabilities and workflow validation passed.
 
-Release packaging preserves Linux and macOS on x86-64 and ARM64. Linux archives use musl and are checked for a dynamic loader dependency. The packaging workflow runs on pull requests, but publication is restricted to tags; prerelease tags remain prereleases. The nonlocal release targets require their CI runs for validation.
+Release packaging preserves Linux and macOS on x86-64 and ARM64. Linux archives use musl and are checked for a dynamic loader dependency. The packaging workflow runs on pull requests, but publication is restricted to tags; prerelease tags remain prereleases. The 0.8 revision's completed platform validation is recorded in [analytics validation](analytics.md#revision-and-validation).
 
-The Ratatui leaderboard compacts its header at short terminal heights to keep rows reachable, and the repository overlay follows the selected row. Oversized contributor details preserve Go’s last-screenful clipping. No analytics policy is changed.
+The Ratatui leaderboard compacts its header at short terminal heights to keep rows reachable, and the repository overlay follows the selected row. Oversized contributor details preserve Go’s last-screenful clipping. The 0.7 port made no analytics policy changes; 0.8 applies the separately agreed corrections.

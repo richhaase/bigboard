@@ -1,6 +1,6 @@
 # Big Board
 
-A cyberpunk-themed TUI for assessing contributor volumes across git repositories. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
+A cyberpunk-themed TUI for exploring team contribution activity across Git repositories. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
 
 ## Install
 
@@ -42,16 +42,16 @@ The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 
 ## Analytics
 
-- **Explicit identity:** matching canonical emails and Git `.mailmap` entries establish identity. Names alone never combine people. Highlight a contributor and press `M` to select another identity, choose a combined name, and confirm a merge. Saved merges apply across repositories and sessions.
+- **Explicit identity:** matching canonical emails and Git `.mailmap` entries establish identity. Names alone never combine people. Highlight a contributor and press `M` to select another identity, choose a combined name, and confirm a merge. Saved merges apply across repositories and sessions. See the [step-by-step merge flow](docs/analytics.md#identity-and-collaboration).
 - **History:** the default view shows landed work on the available default branch. Press `B` to include unmerged activity from local and remote-tracking branches already present on disk. Scanning does not fetch remote changes.
 - **Unique commits:** identical commit IDs count once across the board, retaining their repository associations. Repository subtotals can overlap. Cherry-picks and rebases with different IDs remain distinct commits.
 - **Collaboration:** authored and human-coauthored commit counts are separate. Line changes remain attributed to the primary author; coauthor metadata does not specify each person's line contribution.
 - **Detected AI:** known agent identities and recognized coauthor metadata indicate AI attribution. Human employees are not flagged solely by an AI company's domain. User-configured exact emails and domain overrides remain available. Missing attribution does not prove AI was absent.
 - **Activity metrics:** Lines changed means additions plus removals. Removed/added ratio is N/A with zero additions or unknown line counts. These metrics describe activity, not productivity or business value.
-- **Completeness:** shallow history, scan failures, and unallocatable merge-resolution line counts are visibly qualified. Unknown counts are not treated as measured zero. Clean integration-only merges do not add duplicate activity; additional merge edits receive credit where measurable.
-- **Bots and generated files:** bots remain counted and tagged, with `b` toggling visibility. Generated/vendor files are excluded from line counts by default; `all_files` includes them.
+- **Completeness:** shallow history, scan failures, and unallocatable merge-resolution line counts are visibly qualified. Unknown counts are not treated as measured zero. Clean integration-only merges are omitted when Git can reconstruct their baseline; extra merge edits receive credit where measurable.
+- **Bots and generated files:** bots are included and tagged by default; `b` excludes them from contributor rows and displayed totals. Generated/vendor files are excluded from line counts by default; `all_files` includes them.
 
-See [analytics behavior](docs/analytics.md) for the counting rules and limitations. The [original audit](docs/analytics-correction-backlog.md) and [Rust port record](docs/rust-port.md) remain historical references.
+See [analytics behavior](docs/analytics.md) for the counting rules and limitations. The [0.8 merge and validation record](docs/analytics.md#revision-and-validation) documents the completed revision. The [resolved original audit](docs/analytics-correction-backlog.md) and [Rust port record](docs/rust-port.md) remain historical references.
 
 ## Controls
 
@@ -64,7 +64,7 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `s` | Cycle sort column (commits / added / removed / net / ai / total) |
 | `S` | Reverse sort direction |
 | `/` | Filter contributors by name (incremental) |
-| `b` | Toggle bot contributors in/out |
+| `b` | Include/exclude bots from contributor rows and totals |
 | `B` | Toggle landed / all-branch activity |
 | `M` | Merge the selected contributor with another identity |
 | `r` | Open repo inclusion/exclusion overlay |
@@ -72,11 +72,11 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `R` | Refresh (re-scan all repos) |
 | `q` | Quit (clears an active filter first) |
 
-In the contributor detail view, `↑/↓` step to the previous/next contributor.
+In the contributor detail view, `↑/↓` step to the previous/next contributor. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
 
 ## Config file
 
-Optional, at `~/.config/bigboard/config.json` (override with `--config`).
+The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/bigboard/config.json`. `--config` selects a different file. Restart Big Board after editing preferences, including the timezone; `R` rescans repositories using the preferences already loaded.
 
 ```json
 {
@@ -106,6 +106,13 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 - `bot_identities` tags contributors as bots; entries are exact emails, `@domain` suffixes, or exact author names.
 - Select a group with `--group backend`. Author identities can also be canonicalized with a standard git `.mailmap` in each repo.
 
+## Upgrading to 0.8
+
+- Remove `fuzzy: true` (or change it to `false`) and use `M` for explicit identity merges. Equal names with different emails now stay separate.
+- `--export` is removed. The interactive dashboard is the supported interface.
+- Expect totals to change: shared commit IDs count once, landed work is the default, human coauthors have separate participation counts, and incomplete measurements are qualified. Calendar buckets now use UTC unless configured otherwise.
+- Saved identity mappings apply globally, including when using `--config` or named repository groups. See [analytics behavior](docs/analytics.md) for the full rules.
+
 ## Features
 
 - ASCII art banner with vertical color gradient
@@ -132,7 +139,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 Tests use synthetic Git repositories with known expected counts, including ambiguous refs, unusual filenames, duplicate clones, coauthors, shallow history, and merges. CI runs the Rust suite on Linux and macOS, and packages both systems on x86-64 and ARM64.
 
-Version 0.8 removes `--export`. The earlier Go comparison suite intentionally preserved defects and is no longer the correctness target.
+The earlier Go comparison suite intentionally preserved defects and is no longer the correctness target. See the [historical port record](docs/rust-port.md) to reproduce that comparison at its original revision.
 
 ## License
 

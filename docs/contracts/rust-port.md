@@ -21,6 +21,8 @@ Provide a working Rust revision of Big Board matching the existing Go applicatio
 
 The user explicitly authorized construction in an isolated worktree, local validation, and a pull request on completion. This draft records that conversational scope; it is not a separately approved Steward contract.
 
+Implementation was merged on 2026-09-20 in [PR #17](https://github.com/richhaase/bigboard/pull/17) at [`821f85d`](https://github.com/richhaase/bigboard/commit/821f85d53b86649df7f87c41aea73d2009afad40). See the [delivery and validation record](../rust-port.md). The draft metadata describes this scope record's approval status, not unfinished implementation.
+
 ## Scope
 
 Replace the Go application with Rust. Preserve current contribution analytics, CLI/config/export behavior, interactive controls, and cyberpunk presentation. Record known analytics defects for later corrections rather than changing their semantics during the port.
