@@ -2,16 +2,18 @@
 
 Go reference revision: `a0acd7677837fff81eb10d31afc3a6b030362009`. Audited 2026-09-20.
 
-The user chose a behavior-preserving Rust port first. The subsequent analytics revision addresses these findings under the decisions documented in [analytics behavior](analytics.md); this document retains the original audit evidence. All Go source references below refer to that immutable revision.
+Status: **resolved in the 0.8 analytics revision**, merged in [PR #18](https://github.com/richhaase/bigboard/pull/18) on 2026-09-20. The ten confirmed issues below were corrected, and the policy questions were settled under the decisions documented in [analytics behavior](analytics.md). See its [validation record](analytics.md#revision-and-validation) for the completed checks.
+
+The user chose a behavior-preserving Rust port before those corrections. This document retains the original audit evidence and questions; it is not an open backlog. All Go source references below refer to the immutable revision above.
 The initial audit was read-only and used isolated synthetic fixtures.
 
-## Baseline
+## Audited Go baseline
 
-The implementation contains approximately 3,438 Go lines across Git collection, statistics, CLI/config/export, and the Bubble Tea/Lipgloss interface. It already supports mailmap identity mapping, generated-file exclusions, bot tags, AI attribution, time/repository filtering, contributor detail, and JSON export.
+The audited implementation contained approximately 3,438 Go lines across Git collection, statistics, CLI/config/export, and the Bubble Tea/Lipgloss interface. It supported mailmap identity mapping, generated-file exclusions, bot tags, AI attribution, time/repository filtering, contributor detail, and JSON export.
 
 The Go baseline passed all four packages’ tests and `go vet ./...`. Passing the baseline did not cover the edge cases below.
 
-## Confirmed correctness issues
+## Confirmed Go correctness issues (corrected in 0.8)
 
 1. **Ambiguous branch names select the wrong history.** `git/git.go:211–229,263` returns and scans short names. A branch `main` containing two commits and a tag `main` at the first commit yields only one collected commit. Resolve fully qualified branch refs and scan a resolved commit object. Git documents tag-before-branch ambiguity: https://git-scm.com/docs/gitrevisions .
 
@@ -33,7 +35,9 @@ The Go baseline passed all four packages’ tests and `go vet ./...`. Passing th
 
 10. **Timezone mismatch hides past activity in the heatmap.** `tui/operativeview.go:106,124–138` groups by author-local date but draws and bounds cells using the display clock's timezone. At display time `2026-09-20T12:00Z`, a commit at `2026-09-21T00:30+14:00` is already 90 minutes old but yields no active cell. Use a consistent calendar timezone across grouping and rendering.
 
-## Decisions required before changing analytics
+## Policy questions raised by the audit (resolved in 0.8)
+
+The following were the original questions. The implemented policies are explicit identity merges, landed/all-branch scope, unique board commits, UTC-configurable author-date reporting, separate coauthor participation, honest metric names and unknown values, and removal of export.
 
 - **Meaning of rank:** current impact equals additions plus removals. It measures change volume, not delivered value or productivity. Current churn is deletions/additions, including a zero result for deletion-only activity; it does not track code being rewritten later.
 - **Identity policy:** `stats/stats.go:175–203` deliberately merges equal normalized names even with different emails. This joins work/personal aliases but also merges unrelated same-name people. Normalization removes spaces, dots, hyphens, and underscores. Existing tests explicitly require this behavior. Decide whether mailmap/explicit mappings should be authoritative and name-only merging optional.

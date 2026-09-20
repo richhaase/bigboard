@@ -21,6 +21,8 @@ Report trustworthy team contribution activity with explicit identity attribution
 
 The user explicitly authorized implementation in a fresh worktree, local validation, and a pull request after discussing these decisions. This draft records that conversational authorization; it is not a separately approved Steward artifact.
 
+Implementation was merged on 2026-09-20 in [PR #18](https://github.com/richhaase/bigboard/pull/18) at [`4c726d1`](https://github.com/richhaase/bigboard/commit/4c726d1ed02cd5b6d4acac5ef0f0aed34b65e0af). See the [delivery and validation record](../analytics.md#revision-and-validation). The draft metadata describes this scope record's approval status, not unfinished implementation.
+
 ## Scope
 
 Replace the port's retained analytics defects with the agreed behavior. Preserve the terminal dashboard and its existing navigation. Metrics describe activity, not productivity or business value. Analysis uses Git history already available locally.
