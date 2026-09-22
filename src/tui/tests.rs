@@ -702,7 +702,14 @@ fn roomy_dashboard_preserves_full_content_and_separates_major_sections() {
         .position(|line| line.contains("select") && line.contains("detail"))
         .unwrap();
 
-    for section in [activity, range, contributors, controls] {
+    assert!(
+        range < activity,
+        "range must precede the data it filters:\n{roomy}"
+    );
+    assert!(lines[range - 1].contains("LANDED"), "{roomy}");
+    assert!(lines[range].contains("RANGE"), "{roomy}");
+    assert!(lines[range + 1].trim().is_empty(), "{roomy}");
+    for section in [activity, contributors, controls] {
         assert!(
             lines[section - 1].trim().is_empty(),
             "section at row {section} has no breathing room:\n{roomy}"
@@ -777,6 +784,12 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
         .position(|line| line.contains("CONTRIBUTORS"))
         .unwrap();
     assert!(lines[activity - 1].trim().is_empty(), "{screen}");
+    let range = lines
+        .iter()
+        .position(|line| line.contains("RANGE"))
+        .unwrap();
+    assert_eq!(range + 2, activity, "{screen}");
+    assert!(lines[range - 1].contains("LANDED"), "{screen}");
     assert!(lines[activity + 1].contains("AUTHORED"), "{screen}");
     assert!(lines[activity + 2].contains("COAUTHORED"), "{screen}");
     assert!(lines[contributors - 1].trim().is_empty(), "{screen}");

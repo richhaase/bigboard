@@ -165,6 +165,26 @@ impl App {
             truncate(&left, width)
         };
         lines.push(text_line(context, p.dim_cyan));
+        if width >= 70 {
+            if width >= 82 {
+                let mut spans = vec![bold("  RANGE", p.cyan)];
+                spans.extend(time_picker(self.time_index, p).spans);
+                lines.push(Line::from(spans));
+            } else {
+                lines.push(time_picker(self.time_index, p));
+            }
+        } else {
+            lines.push(text_line(
+                truncate(
+                    &format!(
+                        "  ◂ RANGE ▐{}▌ ▸  [←→] change",
+                        TIME_PRESETS[self.time_index].0
+                    ),
+                    width,
+                ),
+                p.cyan,
+            ));
+        }
         if roomy {
             lines.push(blank());
         }
@@ -258,23 +278,6 @@ impl App {
             ));
         }
         lines.push(panel_footer(width, p));
-        if roomy {
-            lines.push(blank());
-        }
-        if width >= 70 {
-            lines.push(time_picker(self.time_index, p));
-        } else {
-            lines.push(text_line(
-                truncate(
-                    &format!(
-                        "  ◂ RANGE ▐{}▌ ▸  [←→] change",
-                        TIME_PRESETS[self.time_index].0
-                    ),
-                    width,
-                ),
-                p.cyan,
-            ));
-        }
         lines.extend(self.quality_lines());
         if let Some(notice) = &self.notice {
             lines.push(text_line(
