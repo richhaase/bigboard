@@ -759,6 +759,87 @@ fn roomy_dashboard_preserves_full_content_and_separates_major_sections() {
 }
 
 #[test]
+fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
+    let mut app = empty();
+    app.loaded_repos = vec![repo("engine")];
+    app.all_records = (0..14)
+        .map(|index| record(&format!("Contributor {index:02}"), "engine", 100))
+        .collect();
+    populate(&mut app);
+    let screen = draw(&mut app, 160, 40);
+    let lines: Vec<_> = screen.lines().collect();
+    let activity = lines
+        .iter()
+        .position(|line| line.contains("ACTIVITY"))
+        .unwrap();
+    let contributors = lines
+        .iter()
+        .position(|line| line.contains("CONTRIBUTORS"))
+        .unwrap();
+    assert!(lines[activity - 1].trim().is_empty(), "{screen}");
+    assert!(lines[activity + 1].contains("AUTHORED"), "{screen}");
+    assert!(lines[activity + 2].contains("COAUTHORED"), "{screen}");
+    assert!(lines[contributors - 1].trim().is_empty(), "{screen}");
+    let command_rows: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.contains("▐↑↓▌") || line.contains("▐s/S▌") || line.contains("▐r▌"))
+        .collect();
+    assert_eq!(command_rows.len(), 3, "{screen}");
+    let keycaps = |line: &str| {
+        line.chars()
+            .enumerate()
+            .filter_map(|(column, character)| (character == '▐').then_some(column))
+            .collect::<Vec<_>>()
+    };
+    let first = keycaps(command_rows[0].1);
+    assert_eq!(first.len(), 4, "{screen}");
+    assert_eq!(first, keycaps(command_rows[1].1), "{screen}");
+    assert_eq!(first[..3], keycaps(command_rows[2].1), "{screen}");
+    for pair in command_rows.windows(2) {
+        assert_eq!(pair[1].0, pair[0].0 + 2, "{screen}");
+        assert!(lines[pair[0].0 + 1].trim().is_empty(), "{screen}");
+    }
+    assert!(lines[command_rows[0].0 - 1].trim().is_empty(), "{screen}");
+    for index in 0..14 {
+        assert!(
+            screen.contains(&format!("Contributor {index:02}")),
+            "contributor {index} was hidden:\n{screen}"
+        );
+    }
+    for label in [
+        "sort/reverse",
+        "merge",
+        "history",
+        "bots:on",
+        "refresh",
+        "quit",
+    ] {
+        assert!(screen.contains(label), "missing {label}:\n{screen}");
+    }
+
+    let compact = draw(&mut app, 80, 24);
+    assert!(compact.contains("▐M▌ merge"), "{compact}");
+    assert!(compact.contains("▐q▌ quit"), "{compact}");
+    for (width, height) in [(104, 30), (120, 35), (160, 40)] {
+        let resized = draw(&mut app, width, height);
+        assert!(!resized.contains("LOW RESOLUTION"), "{resized}");
+        assert!(
+            app.lines()
+                .iter()
+                .all(|line| line.width() <= width as usize),
+            "command grid overflowed {width}×{height}"
+        );
+    }
+    app.all_records[0].lines_known = false;
+    populate(&mut app);
+    let incomplete = draw(&mut app, 160, 40);
+    assert!(incomplete.contains("? unknown lines"), "{incomplete}");
+    assert!(incomplete.contains("▐q▌ quit"), "{incomplete}");
+    assert!(incomplete.contains("Contributor 00"), "{incomplete}");
+}
+
+#[test]
 fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters() {
     let mut app = populated();
     let mut duplicate = app.all_records[0].clone();
