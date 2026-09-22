@@ -8,10 +8,14 @@ use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
 impl App {
+    fn spacious_commands(&self) -> bool {
+        self.width >= 104 && self.height >= 30
+    }
+
     fn roomy_aggregate(&self) -> bool {
         self.width >= 82
             && self.height >= 40
-            && self.authors.len() <= (self.height as usize).saturating_sub(27)
+            && self.authors.len() <= (self.height as usize).saturating_sub(26)
     }
 
     pub(super) fn lines(&self) -> Vec<UiLine> {
@@ -287,29 +291,28 @@ impl App {
     fn aggregate_help(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
-        let groups = [
-            vec![
-                ("↑↓", "select".into()),
-                ("↵", "detail".into()),
-                ("←→", "range".into()),
-                ("/", "find".into()),
-                ("s/S", "sort/reverse".into()),
-            ],
-            vec![
-                ("M", "merge".into()),
-                ("B", "history".into()),
-                (
-                    "b",
-                    format!("bots:{}", if self.hide_bots { "off" } else { "on" }),
-                ),
-                ("r", "repos".into()),
-                ("R", "refresh".into()),
-                ("q", "quit".into()),
-            ],
+        let bindings = [
+            ("↑↓", "select".to_owned()),
+            ("↵", "detail".to_owned()),
+            ("←→", "range".to_owned()),
+            ("/", "find".to_owned()),
+            ("s/S", "sort/reverse".to_owned()),
+            ("M", "merge".to_owned()),
+            ("B", "history".to_owned()),
+            (
+                "b",
+                format!("bots:{}", if self.hide_bots { "off" } else { "on" }),
+            ),
+            ("r", "repos".to_owned()),
+            ("R", "refresh".to_owned()),
+            ("q", "quit".to_owned()),
         ];
-        groups
-            .iter()
-            .flat_map(|group| wrap_help(group, width, p))
+        if self.spacious_commands() {
+            return command_grid(&bindings, width, p);
+        }
+        wrap_help(&bindings[..5], width, p)
+            .into_iter()
+            .chain(wrap_help(&bindings[5..], width, p))
             .collect()
     }
 
@@ -366,7 +369,7 @@ impl App {
                     + 3
                     + footer
                     + self.aggregate_help().len()
-                    + usize::from(self.roomy_aggregate()),
+                    + usize::from(self.roomy_aggregate() || self.spacious_commands()),
             )
             .max(1)
     }
@@ -374,7 +377,7 @@ impl App {
     fn aggregate_lines(&self) -> Vec<UiLine> {
         let mut lines = self.aggregate_above();
         lines.extend(self.table_lines());
-        if self.roomy_aggregate() {
+        if self.roomy_aggregate() || self.spacious_commands() {
             lines.push(blank());
         }
         lines.extend(self.aggregate_help());
@@ -618,6 +621,29 @@ impl App {
 
         lines
     }
+}
+
+fn command_grid(bindings: &[(&str, String)], width: usize, p: &Palette) -> Vec<UiLine> {
+    let cell_width = ((width.saturating_sub(4)) / 4).min(36);
+    let mut lines = Vec::new();
+    for row in bindings.chunks(4) {
+        if !lines.is_empty() {
+            lines.push(blank());
+        }
+        let mut spans = vec![Span::raw("  ")];
+        for (key, description) in row {
+            let content_width = key.width() + description.width() + 3;
+            spans.extend([
+                span("▐", p.dim_cyan),
+                bold(*key, p.cyan),
+                span("▌ ", p.dim_cyan),
+                span(description.clone(), p.dim_white),
+                Span::raw(" ".repeat(cell_width.saturating_sub(content_width))),
+            ]);
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
 }
 
 fn activity_metric_row(
