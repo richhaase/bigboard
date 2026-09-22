@@ -624,26 +624,33 @@ impl App {
 }
 
 fn command_grid(bindings: &[(&str, String)], width: usize, p: &Palette) -> Vec<UiLine> {
-    let cell_width = ((width.saturating_sub(4)) / 4).min(36);
-    let mut lines = Vec::new();
-    for row in bindings.chunks(4) {
-        if !lines.is_empty() {
-            lines.push(blank());
+    let rows = [&bindings[..5], &bindings[5..]];
+    let mut columns = [18; 5];
+    for row in rows {
+        for (index, (key, description)) in row.iter().take(5).enumerate() {
+            columns[index] = columns[index].max(key.width() + description.width() + 6);
         }
-        let mut spans = vec![Span::raw("  ")];
-        for (key, description) in row {
-            let content_width = key.width() + description.width() + 3;
-            spans.extend([
-                span("▐", p.dim_cyan),
-                bold(*key, p.cyan),
-                span("▌ ", p.dim_cyan),
-                span(description.clone(), p.dim_white),
-                Span::raw(" ".repeat(cell_width.saturating_sub(content_width))),
-            ]);
-        }
-        lines.push(Line::from(spans));
     }
-    lines
+    rows.into_iter()
+        .map(|row| {
+            let mut spans = vec![Span::raw("  ")];
+            for (index, (key, description)) in row.iter().enumerate() {
+                let content_width = key.width() + description.width() + 3;
+                spans.extend([
+                    span("▐", p.dim_cyan),
+                    bold(*key, p.cyan),
+                    span("▌ ", p.dim_cyan),
+                    span(description.clone(), p.dim_white),
+                ]);
+                if index < 5 {
+                    spans.push(Span::raw(" ".repeat(columns[index] - content_width)));
+                }
+            }
+            let line = Line::from(spans);
+            debug_assert!(line.width() <= width);
+            line
+        })
+        .collect()
 }
 
 fn activity_metric_row(

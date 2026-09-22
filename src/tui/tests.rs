@@ -783,9 +783,9 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
     let command_rows: Vec<_> = lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| line.contains("▐↑↓▌") || line.contains("▐s/S▌") || line.contains("▐r▌"))
+        .filter(|(_, line)| line.contains("▐↑↓▌") || line.contains("▐M▌"))
         .collect();
-    assert_eq!(command_rows.len(), 3, "{screen}");
+    assert_eq!(command_rows.len(), 2, "{screen}");
     let keycaps = |line: &str| {
         line.chars()
             .enumerate()
@@ -793,13 +793,12 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
             .collect::<Vec<_>>()
     };
     let first = keycaps(command_rows[0].1);
-    assert_eq!(first.len(), 4, "{screen}");
-    assert_eq!(first, keycaps(command_rows[1].1), "{screen}");
-    assert_eq!(first[..3], keycaps(command_rows[2].1), "{screen}");
-    for pair in command_rows.windows(2) {
-        assert_eq!(pair[1].0, pair[0].0 + 2, "{screen}");
-        assert!(lines[pair[0].0 + 1].trim().is_empty(), "{screen}");
-    }
+    let second = keycaps(command_rows[1].1);
+    assert_eq!(first.len(), 5, "{screen}");
+    assert_eq!(second.len(), 6, "{screen}");
+    assert_eq!(first, second[..5], "{screen}");
+    assert!(second[5] < 105, "commands spread too far: {screen}");
+    assert_eq!(command_rows[1].0, command_rows[0].0 + 1, "{screen}");
     assert!(lines[command_rows[0].0 - 1].trim().is_empty(), "{screen}");
     for index in 0..14 {
         assert!(
