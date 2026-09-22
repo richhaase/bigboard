@@ -706,7 +706,9 @@ fn roomy_dashboard_preserves_full_content_and_separates_major_sections() {
         range < activity,
         "range must precede the data it filters:\n{roomy}"
     );
-    assert!(lines[range - 1].contains("LANDED"), "{roomy}");
+    assert!(lines[range - 1].trim().is_empty(), "{roomy}");
+    assert!(lines[range - 2].contains("LANDED"), "{roomy}");
+    assert!(lines[range - 3].trim().is_empty(), "{roomy}");
     assert!(lines[range].contains("RANGE"), "{roomy}");
     assert!(lines[range + 1].trim().is_empty(), "{roomy}");
     for section in [activity, contributors, controls] {

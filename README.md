@@ -142,6 +142,7 @@ cargo clippy --all-targets --locked -- -D warnings
 ```
 
 `make check` runs formatting, Clippy, and tests. `make build` creates the release binary at `target/release/bigboard`.
+For local builds, the version shown in the dashboard and by `--version` comes from `Cargo.toml`; update `Cargo.lock` with it, and use a matching `vX.Y.Z` tag when publishing a release. Release builds reject tags that disagree with the package version.
 
 Tests use synthetic Git repositories with known expected counts, including ambiguous refs, unusual filenames, duplicate clones, coauthors, shallow history, and merges. CI runs the Rust suite on Linux and macOS, and packages both systems on x86-64 and ARM64.
 

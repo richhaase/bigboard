@@ -18,6 +18,10 @@ impl App {
             && self.authors.len() <= (self.height as usize).saturating_sub(26)
     }
 
+    fn spacious_header(&self) -> bool {
+        self.roomy_aggregate() && self.authors.len() <= (self.height as usize).saturating_sub(28)
+    }
+
     pub(super) fn lines(&self) -> Vec<UiLine> {
         if self.loading {
             return self.loading_lines();
@@ -146,6 +150,9 @@ impl App {
         let full_banner =
             self.height >= 40 && self.authors.len() <= (self.height as usize).saturating_sub(22);
         let mut lines = banner(width, !full_banner, p);
+        if self.spacious_header() {
+            lines.push(blank());
+        }
         let left = format!(
             "  {} · {} · {} · {}",
             repo_count(self.loaded_repos.len(), self.excluded_count()).trim(),
@@ -165,6 +172,9 @@ impl App {
             truncate(&left, width)
         };
         lines.push(text_line(context, p.dim_cyan));
+        if self.spacious_header() {
+            lines.push(blank());
+        }
         if width >= 70 {
             if width >= 82 {
                 let mut spans = vec![bold("  RANGE", p.cyan)];
