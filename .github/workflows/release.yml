@@ -41,10 +41,10 @@ jobs:
           BUILD_TARGET: ${{ matrix.target }}
           BUILD_PLATFORM: ${{ matrix.platform }}
         run: |
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            BIGBOARD_VERSION="${GITHUB_REF_NAME#v}"
-          else
-            BIGBOARD_VERSION="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          BIGBOARD_VERSION="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$BIGBOARD_VERSION" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match Cargo version v$BIGBOARD_VERSION" >&2
+            exit 1
           fi
           export BIGBOARD_VERSION
           export BIGBOARD_COMMIT="$GITHUB_SHA"
