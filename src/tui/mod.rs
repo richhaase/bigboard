@@ -1,6 +1,7 @@
 //! Ratatui presentation and keyboard state, retaining the Go dashboard's behavior.
 mod components;
 mod detail;
+mod github;
 mod merge;
 mod render;
 mod repositories;
@@ -42,9 +43,11 @@ enum Action {
     None,
     Quit,
     Refresh,
+    Github,
 }
 
 struct App {
+    github_source: bool,
     all_records: Vec<CommitRecord>,
     authors: Vec<AuthorStats>,
     contributors: Vec<AuthorStats>,
@@ -121,6 +124,7 @@ impl App {
             }
         }
         let mut app = Self {
+            github_source: false,
             all_records: vec![],
             authors: vec![],
             contributors: vec![],
@@ -387,6 +391,9 @@ impl App {
             return Action::None;
         }
         match key.code {
+            KeyCode::Char('g') if self.view == View::Aggregate && !self.loading => {
+                return Action::Github;
+            }
             KeyCode::Char('M') if self.view != View::Repositories && !self.loading => {
                 self.open_merge();
             }
@@ -585,8 +592,11 @@ pub fn run(
     theme: &str,
     identities: IdentityStore,
     identity_path: PathBuf,
+    github_start: bool,
 ) -> anyhow::Result<()> {
     let theme = theme::resolve(theme);
+    let local_repositories = repositories.clone();
+    let mut local_excluded = excluded.clone();
     let mut app = App::new(
         repositories,
         initial_sort,
@@ -608,7 +618,9 @@ pub fn run(
     }));
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     terminal.hide_cursor()?;
-    let mut session: Option<ScanSession> = if app.loading {
+    let mut open_github = github_start || app.repositories.is_empty();
+    let mut source: Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)> = None;
+    let mut session: Option<ScanSession> = if app.loading && !open_github {
         Some(scan::start_scan(
             app.repositories.clone(),
             app.options.clone(),
@@ -618,6 +630,45 @@ pub fn run(
     };
     let mut dirty = true;
     loop {
+        if open_github {
+            let choice = github::choose(
+                &mut terminal,
+                app.palette.clone(),
+                source.as_ref().map(|(_, repos)| repos.as_slice()),
+                !local_repositories.is_empty(),
+            )?;
+            match choice {
+                github::Choice::Quit => break,
+                github::Choice::Cancel if app.repositories.is_empty() => break,
+                github::Choice::Cancel => {}
+                github::Choice::Local => {
+                    source = None;
+                    app.github_source = false;
+                    app.repositories = local_repositories.clone();
+                    app.excluded = local_excluded.clone();
+                    app.reset_pending();
+                }
+                github::Choice::Repositories(client, repositories) => {
+                    if !app.github_source {
+                        local_excluded = app.excluded.clone();
+                    }
+                    app.github_source = true;
+                    app.repositories = repositories.iter().map(|r| client.repository(r)).collect();
+                    app.excluded.clear();
+                    source = Some((client, repositories));
+                    app.reset_pending();
+                }
+            }
+            if app.loading {
+                app.filter_query.clear();
+                app.selected = 0;
+                app.offset = 0;
+                app.notice = None;
+                session = Some(start_source_scan(&app, &source));
+            }
+            open_github = false;
+            dirty = true;
+        }
         if let Some(scan) = &session {
             while let Ok(result) = scan.receiver.try_recv() {
                 app.loaded(result);
@@ -643,11 +694,9 @@ pub fn run(
                         break;
                     }
                     Action::Refresh => {
-                        session = Some(scan::start_scan(
-                            app.repositories.clone(),
-                            app.options.clone(),
-                        ));
+                        session = Some(start_source_scan(&app, &source));
                     }
+                    Action::Github => open_github = true,
                     Action::None => {}
                 },
                 Event::Resize(width, height) => {
@@ -660,4 +709,16 @@ pub fn run(
         }
     }
     Ok(())
+}
+
+fn start_source_scan(
+    app: &App,
+    source: &Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)>,
+) -> ScanSession {
+    match source {
+        Some((client, repos)) => {
+            scan::start_github_scan(client.clone(), repos.clone(), app.options.clone())
+        }
+        None => scan::start_scan(app.repositories.clone(), app.options.clone()),
+    }
 }

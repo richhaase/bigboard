@@ -21,6 +21,7 @@ pub struct ScanResult {
 pub struct ScanSession {
     pub receiver: mpsc::Receiver<ScanResult>,
     cancel: Arc<AtomicBool>,
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl ScanSession {
@@ -32,11 +33,29 @@ impl ScanSession {
 impl Drop for ScanSession {
     fn drop(&mut self) {
         self.cancel();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
     }
 }
 
 pub fn start_scan(repositories: Vec<Repository>, options: AnalysisOptions) -> ScanSession {
     start_scan_with(repositories, options, git::scan_repository)
+}
+
+pub fn start_github_scan(
+    client: crate::github::Client,
+    remote: Vec<crate::github::RemoteRepository>,
+    options: AnalysisOptions,
+) -> ScanSession {
+    let repositories = remote.iter().map(|repo| client.repository(repo)).collect();
+    let remote: std::collections::HashMap<_, _> = remote
+        .into_iter()
+        .map(|repo| (client.repository(&repo).id, repo))
+        .collect();
+    start_scan_with(repositories, options, move |repo, options, cancel| {
+        client.scan(&remote[&repo.id], options, cancel)
+    })
 }
 
 fn start_scan_with<F>(
@@ -60,6 +79,7 @@ where
         ai_identities: options.ai_identities,
     });
     let scan = Arc::new(scan);
+    let mut workers = Vec::with_capacity(count);
     for _ in 0..count {
         let (repositories, next, options, cancel, sender, scan) = (
             Arc::clone(&repositories),
@@ -69,7 +89,7 @@ where
             sender.clone(),
             Arc::clone(&scan),
         );
-        std::thread::spawn(move || {
+        workers.push(std::thread::spawn(move || {
             loop {
                 if cancel.load(Ordering::Acquire) {
                     break;
@@ -96,10 +116,14 @@ where
                     break;
                 }
             }
-        });
+        }));
     }
     drop(sender);
-    ScanSession { receiver, cancel }
+    ScanSession {
+        receiver,
+        cancel,
+        workers,
+    }
 }
 
 #[cfg(test)]

@@ -175,6 +175,7 @@ impl<'de> Deserialize<'de> for Config {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct Cli {
     pub version: bool,
+    pub github: bool,
     pub group: String,
     pub config: String,
     pub paths: Vec<String>,
@@ -209,13 +210,17 @@ impl Cli {
                     break;
                 }
                 "export" => bail!("--export has been removed; use the interactive dashboard"),
-                "version" => {
+                "version" | "github" => {
                     let value = match supplied.unwrap_or("true") {
                         "1" | "t" | "T" | "TRUE" | "true" | "True" => true,
                         "0" | "f" | "F" | "FALSE" | "false" | "False" => false,
                         v => bail!("invalid boolean value {v:?} for -{key}"),
                     };
-                    result.version = value;
+                    if key == "github" {
+                        result.github = value;
+                    } else {
+                        result.version = value;
+                    }
                 }
                 "group" | "config" => {
                     let value = supplied
@@ -576,7 +581,10 @@ fn file_pattern_matches(mut pattern: &str, name: &str) -> Result<bool> {
 mod tests {
     use super::*;
     #[test]
-    fn cli_has_three_flags_and_export_is_removed() {
+    fn cli_github_entry_preserves_local_flags_and_export_is_removed() {
+        assert!(Cli::parse(["--github".into()]).unwrap().github);
+        assert!(!Cli::parse(["--github=false".into()]).unwrap().github);
+        assert!(Cli::parse(["--github=invalid".into()]).is_err());
         let cli = Cli::parse(
             ["--config=x.json", "--group", "backend", "repo", "--version"].map(String::from),
         )

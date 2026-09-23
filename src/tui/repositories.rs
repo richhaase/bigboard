@@ -98,7 +98,13 @@ impl App {
         let Some(repo) = choices.get(self.overlay_cursor) else {
             return wrapped("No repositories available.", width, p.dim_white);
         };
-        let mut lines = if let Some(path) = repo.path {
+        let mut lines = if let Some(host) = repo
+            .id
+            .strip_prefix("github:")
+            .and_then(|id| id.split(':').next())
+        {
+            wrapped(&format!("https://{host}/{}", repo.name), width, p.dim_white)
+        } else if let Some(path) = repo.path {
             wrapped(&path.to_string_lossy(), width, p.dim_white)
         } else {
             wrapped("Repository path unavailable.", width, p.dim_white)
