@@ -68,44 +68,51 @@ impl App {
     fn loading_lines(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let mut lines = banner(self.width as usize, self.height < 25, p);
+        let title = if self.github_source {
+            "SYNCING GITHUB HISTORY"
+        } else {
+            "SCANNING REPOSITORIES"
+        };
         lines.extend([
             blank(),
+            text_line(format!("  {} {title}", spinner(self.loading_tick)), p.cyan),
             text_line(
-                if self.github_source {
-                    "  ◈ SYNCING GITHUB HISTORY"
-                } else {
-                    "  ◈ SCANNING REPOSITORIES"
-                },
+                format!("  {}s elapsed · q cancels", self.loading_tick / 10),
                 p.dim_cyan,
             ),
             blank(),
         ]);
-        if self.github_source {
+        let available = (self.height as usize).saturating_sub(lines.len() + 3);
+        let active = self.scan_progress.len().min(available / 2);
+        for progress in self.scan_progress.values().take(active) {
             lines.push(text_line(
-                "  Fetching and analyzing selected repositories · q cancels",
+                truncate(
+                    &format!("  ▸ {}", display_text(&progress.repository_name)),
+                    self.width as usize,
+                ),
+                p.bright,
+            ));
+            lines.push(text_line(
+                truncate(&format!("    {}", progress.stage), self.width as usize),
                 p.dim_cyan,
             ));
         }
-        let max_shown = (self.height as usize)
-            .saturating_sub(lines.len() + 4)
-            .clamp(1, 14);
-        let start = self.boot_lines.len().saturating_sub(max_shown);
-        if start > 0 {
-            lines.push(text_line(format!("  … {start} earlier"), p.dim_white));
-        }
+        let remaining = available.saturating_sub(active * 2);
+        let start = self.boot_lines.len().saturating_sub(remaining.min(8));
         for (name, ok) in &self.boot_lines[start..] {
-            let c = if *ok { p.green } else { p.red };
-            lines.push(Line::from(vec![
-                span("  ▸ ", c),
-                span(display_text(name), p.bright),
-                span(if *ok { "  ✓" } else { "  ✗ unreadable" }, c),
-            ]));
+            lines.push(text_line(
+                truncate(
+                    &format!("  {} {}", if *ok { "✓" } else { "✗" }, display_text(name)),
+                    self.width as usize,
+                ),
+                if *ok { p.green } else { p.red },
+            ));
         }
         lines.extend([
             blank(),
             text_line(
                 format!(
-                    "  ▐ {}/{} repos ▌",
+                    "  ▐ {}/{} repos complete ▌",
                     self.boot_lines.len(),
                     self.boot_lines.len() + self.pending_remaining
                 ),

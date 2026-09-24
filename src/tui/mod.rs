@@ -11,12 +11,18 @@ mod theme;
 
 use crate::identity::IdentityStore;
 use crate::model::{AnalysisOptions, CommitRecord, HistoryScope, Repository};
+use crate::progress::ScanProgress;
 use crate::scan::{self, ScanResult, ScanSession};
 use crate::stats::{self, AggregateOptions, AuthorStats, SortField};
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
-use std::{collections::HashSet, io, path::PathBuf, time::Duration as StdDuration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io,
+    path::PathBuf,
+    time::{Duration as StdDuration, Instant},
+};
 
 use components::Palette;
 use merge::MergeFlow;
@@ -91,6 +97,9 @@ struct App {
     pending_failure_details: Vec<(String, String)>,
     pending_remaining: usize,
     boot_lines: Vec<(String, bool)>,
+    scan_progress: BTreeMap<String, ScanProgress>,
+    loading_started: Instant,
+    loading_tick: u128,
     palette: Palette,
 }
 
@@ -172,6 +181,9 @@ impl App {
             pending_failure_details: vec![],
             pending_remaining: 0,
             boot_lines: vec![],
+            scan_progress: BTreeMap::new(),
+            loading_started: Instant::now(),
+            loading_tick: 0,
             palette: Palette::for_theme(theme),
         };
         app.reset_pending();
@@ -179,6 +191,9 @@ impl App {
     }
 
     fn reset_pending(&mut self) {
+        self.scan_progress.clear();
+        self.loading_started = Instant::now();
+        self.loading_tick = 0;
         self.loading = true;
         self.pending_remaining = self.repositories.len();
         self.pending_records.clear();
@@ -194,6 +209,7 @@ impl App {
     }
 
     fn loaded(&mut self, result: ScanResult) {
+        self.scan_progress.remove(&result.repository.id);
         let ok = result.error.is_none();
         self.pending_warnings
             .extend(result.warnings.into_iter().map(|warning| {
@@ -357,6 +373,17 @@ impl App {
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Action::Quit;
+        }
+        if self.loading
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                Action::Quit
+            } else {
+                Action::None
+            };
         }
         if self.merge.is_some() {
             return self.merge_key(key);
@@ -670,6 +697,11 @@ pub fn run(
             dirty = true;
         }
         if let Some(scan) = &session {
+            while let Ok(progress) = scan.progress.try_recv() {
+                app.scan_progress
+                    .insert(progress.repository_id.clone(), progress);
+                dirty = true;
+            }
             while let Ok(result) = scan.receiver.try_recv() {
                 app.loaded(result);
                 dirty = true;
@@ -677,6 +709,13 @@ pub fn run(
         }
         if !app.loading {
             session = None;
+        }
+        if app.loading {
+            let tick = app.loading_started.elapsed().as_millis() / 100;
+            if tick != app.loading_tick {
+                app.loading_tick = tick;
+                dirty = true;
+            }
         }
         if dirty {
             terminal.draw(|frame| app.draw(frame))?;

@@ -496,6 +496,12 @@ fn center(s: &str, width: usize) -> String {
     format!("{}{s}{}", " ".repeat(pad / 2), " ".repeat(pad - pad / 2))
 }
 
+/// A heartbeat, not an estimate of work completed.
+pub(super) fn spinner(tick: u128) -> &'static str {
+    const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    FRAMES[(tick % FRAMES.len() as u128) as usize]
+}
+
 #[cfg(test)]
 mod component_tests {
     use super::*;

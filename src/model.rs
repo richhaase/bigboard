@@ -8,7 +8,7 @@ pub struct Repository {
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Identity {
     pub name: String,
     pub email: String,
@@ -28,7 +28,7 @@ pub fn identity_key(name: &str, email: &str, repo_id: &str) -> String {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CommitRecord {
     pub commit_id: String,
     pub author: String,
@@ -45,7 +45,7 @@ pub struct CommitRecord {
     pub is_merge: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ScanData {
     pub records: Vec<CommitRecord>,
     pub warnings: Vec<String>,

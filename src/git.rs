@@ -1,4 +1,5 @@
 use crate::model::{CommitRecord, Identity, Repository, ScanData};
+use crate::progress::{Reporter, ScanStage};
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::DateTime;
 use std::collections::{HashMap, HashSet};
@@ -70,6 +71,7 @@ pub struct CollectOptions {
 struct GitContext<'a> {
     deadline: Instant,
     cancel: &'a AtomicBool,
+    report: &'a Reporter<'a>,
 }
 
 impl<'a> GitContext<'a> {
@@ -77,6 +79,7 @@ impl<'a> GitContext<'a> {
         Self {
             deadline: Instant::now() + GIT_TIMEOUT,
             cancel,
+            report: &|_| {},
         }
     }
 
@@ -232,7 +235,23 @@ where
             }
             match child.try_wait() {
                 Ok(Some(status)) => break Ok(status),
-                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Ok(None) => {
+                    // Wake as soon as parsing completes instead of imposing a
+                    // 10ms floor on every short Git process (especially merges).
+                    if output.is_none() {
+                        match output_receiver.recv_timeout(Duration::from_millis(10)) {
+                            Ok(result) => output = Some(result),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                break Err(anyhow!("Git output reader stopped unexpectedly"));
+                            }
+                        }
+                    } else {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
                 Err(error) => {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -348,6 +367,7 @@ pub fn detect_default_branch(path: &Path) -> String {
 #[derive(Clone)]
 struct Metadata {
     record: CommitRecord,
+    tree: String,
     parents: Vec<String>,
     trailers: Vec<String>,
 }
@@ -359,7 +379,18 @@ pub fn scan_repository(
     options: &CollectOptions,
     cancel: &AtomicBool,
 ) -> Result<ScanData> {
-    let ctx = GitContext::new(cancel);
+    scan_repository_with_progress(repo, options, cancel, &|_| {})
+}
+
+pub(crate) fn scan_repository_with_progress(
+    repo: &Repository,
+    options: &CollectOptions,
+    cancel: &AtomicBool,
+    report: &Reporter<'_>,
+) -> Result<ScanData> {
+    let mut ctx = GitContext::new(cancel);
+    ctx.report = report;
+    report(ScanStage::ReadingHistory);
     let version_text = git_output(&ctx, &repo.path, &["--version"])?;
     let version = parse_git_version(&version_text)
         .ok_or_else(|| anyhow!("unrecognized Git version: {}", version_text.trim()))?;
@@ -484,7 +515,7 @@ fn collect_available_history(
         "--no-patch",
         "-z",
         "--no-show-signature",
-        "--format=%H%x00%P%x00%aN%x00%aE%x00%ae%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,unfold=true,separator=%x1f)",
+        "--format=%H%x00%P%x00%aN%x00%aE%x00%ae%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,unfold=true,separator=%x1f)%x00%T",
     ];
     args.extend(tips.iter().map(String::as_str));
     args.push("--");
@@ -496,7 +527,7 @@ fn collect_available_history(
                 continue;
             }
             let mut fields = vec![oid];
-            for _ in 0..6 {
+            for _ in 0..7 {
                 fields.push(
                     read_nul(&mut reader)?
                         .ok_or_else(|| anyhow!("truncated Git commit metadata"))?,
@@ -508,11 +539,12 @@ fn collect_available_history(
                     std::str::from_utf8(field).context("invalid UTF-8 in Git author metadata")
                 })
                 .collect::<Result<_>>()?;
-            if !is_oid(fields[0]) {
+            if !is_oid(fields[0]) || !is_oid(fields[7]) {
                 bail!("invalid Git commit OID");
             }
             let parents: Vec<_> = fields[1].split_whitespace().map(str::to_owned).collect();
             result.push(Metadata {
+                tree: fields[7].into(),
                 record: CommitRecord {
                     commit_id: fields[0].into(),
                     author: fields[2].trim().into(),
@@ -542,22 +574,18 @@ fn collect_available_history(
         Ok(result)
     })?;
     apply_coauthors(ctx, repo, options, &mut metadata, &mut warnings)?;
-    let mut diff_args = vec![
-        "log",
-        "--no-merges",
-        "--root",
-        "--format=%H",
-        "--numstat",
-        "-z",
-    ];
-    diff_args.extend(DIFF_OPTIONS);
-    diff_args.extend(tips.iter().map(String::as_str));
-    diff_args.push("--");
-    let counts = run_git(ctx, &repo.path, &diff_args, |stdout| {
-        parse_numstat(BufReader::new(stdout), options, true)
-    })?;
+    let counts = count_commit_changes(ctx, repo, options, &metadata)?;
     let mut result = Vec::with_capacity(metadata.len());
     let mut scratch = None;
+    let total_merges = metadata
+        .iter()
+        .filter(|entry| entry.parents.len() >= 2 && entry.record.lines_known)
+        .count();
+    let mut checked_merges = 0;
+    (ctx.report)(ScanStage::CheckingMerges {
+        done: 0,
+        total: total_merges,
+    });
     for mut entry in metadata {
         ctx.check()?;
         if !entry.record.lines_known {
@@ -595,6 +623,13 @@ fn collect_available_history(
                     result.push(entry.record);
                 }
             }
+            checked_merges += 1;
+            if checked_merges % 25 == 0 || checked_merges == total_merges {
+                (ctx.report)(ScanStage::CheckingMerges {
+                    done: checked_merges,
+                    total: total_merges,
+                });
+            }
         }
     }
     Ok(ScanData {
@@ -616,6 +651,103 @@ const DIFF_OPTIONS: &[&str] = &[
     "--find-copies-harder",
     "-l0",
 ];
+
+// A repository with many files makes exhaustive copy detection expensive.
+// Split independent commits into bounded batches, retaining every diff option.
+// The global permit also bounds CPU use when several repositories scan at once.
+static ACTIVE_DIFFS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+struct DiffPermit;
+impl DiffPermit {
+    fn acquire(ctx: &GitContext<'_>) -> Result<Self> {
+        let limit = thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(4);
+        loop {
+            ctx.check()?;
+            if ACTIVE_DIFFS
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                    (active < limit).then_some(active + 1)
+                })
+                .is_ok()
+            {
+                return Ok(Self);
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+impl Drop for DiffPermit {
+    fn drop(&mut self) {
+        ACTIVE_DIFFS.fetch_sub(1, Ordering::Release);
+    }
+}
+
+fn count_commit_changes(
+    ctx: &GitContext<'_>,
+    repo: &Repository,
+    options: &CollectOptions,
+    metadata: &[Metadata],
+) -> Result<HashMap<String, LineCounts>> {
+    let commits: Vec<_> = metadata
+        .iter()
+        .filter(|entry| entry.parents.len() < 2)
+        .map(|entry| entry.record.commit_id.as_str())
+        .collect();
+    let total = commits.len();
+    (ctx.report)(ScanStage::CountingChanges { done: 0, total });
+    let batches: Vec<_> = commits.chunks(64).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let completed = std::sync::Mutex::new(0);
+    let failed = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..batches.len().min(4) {
+            workers.push(scope.spawn(|| -> Result<HashMap<String, LineCounts>> {
+                let mut result = HashMap::new();
+                while !failed.load(Ordering::Acquire) {
+                    let Some(batch) = batches.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                        break;
+                    };
+                    let _permit = DiffPermit::acquire(ctx)?;
+                    let mut args = vec![
+                        "log",
+                        "--no-walk=unsorted",
+                        "--no-merges",
+                        "--root",
+                        "--format=%H",
+                        "--numstat",
+                        "-z",
+                    ];
+                    args.extend(DIFF_OPTIONS);
+                    args.extend_from_slice(batch);
+                    args.push("--");
+                    match run_git(ctx, &repo.path, &args, |stdout| {
+                        parse_numstat(BufReader::new(stdout), options, true)
+                    }) {
+                        Ok(counts) => result.extend(counts),
+                        Err(error) => {
+                            failed.store(true, Ordering::Release);
+                            return Err(error);
+                        }
+                    }
+                    let mut done = completed.lock().unwrap();
+                    *done += batch.len();
+                    (ctx.report)(ScanStage::CountingChanges { done: *done, total });
+                }
+                Ok(result)
+            }));
+        }
+        let mut result = HashMap::new();
+        for worker in workers {
+            result.extend(
+                worker
+                    .join()
+                    .map_err(|_| anyhow!("Git diff worker panicked"))??,
+            );
+        }
+        Ok(result)
+    })
+}
 
 fn is_oid(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -645,7 +777,7 @@ fn read_nul(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct LineCounts {
     added: i64,
     removed: i64,
@@ -920,6 +1052,11 @@ fn merge_counts(
     if !is_oid(tree) {
         bail!("invalid automatic merge-tree object");
     }
+    // Identical trees prove that the merge introduced no resolution changes.
+    // Avoid launching a separate diff process for the common clean-merge case.
+    if tree == entry.tree {
+        return Ok(Some(LineCounts::default()));
+    }
     let mut args = vec!["diff", "--numstat", "-z"];
     args.extend(DIFF_OPTIONS);
     args.extend([tree, &entry.record.commit_id, "--"]);
@@ -941,9 +1078,13 @@ fn should_count_path(path: &str, include_generated: bool) -> bool {
         return false;
     }
     let basename = path.rsplit('/').next().unwrap_or(path);
-    !IGNORED_FILE_GLOBS
-        .iter()
-        .any(|pattern| glob::Pattern::new(pattern).is_ok_and(|pattern| pattern.matches(basename)))
+    static PATTERNS: std::sync::LazyLock<Vec<glob::Pattern>> = std::sync::LazyLock::new(|| {
+        IGNORED_FILE_GLOBS
+            .iter()
+            .map(|pattern| glob::Pattern::new(pattern).expect("valid built-in glob"))
+            .collect()
+    });
+    !PATTERNS.iter().any(|pattern| pattern.matches(basename))
 }
 
 // Extract a single mailbox using the same address grammar as Go's net/mail:
@@ -1455,6 +1596,7 @@ mod tests {
         let ctx = GitContext {
             deadline: Instant::now() - Duration::from_secs(1),
             cancel: &cancel,
+            report: &|_| {},
         };
         assert!(
             git_output(&ctx, root.path(), &["status"])
@@ -1725,6 +1867,7 @@ mod tests {
         let ctx = GitContext {
             deadline: started + Duration::from_millis(30),
             cancel: &cancel,
+            report: &|_| {},
         };
         let error = run_child(&ctx, child, read_child_output).unwrap_err();
         assert!(error.to_string().contains("deadline exceeded"));
@@ -1996,6 +2139,75 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn batched_counts_match_full_walk_including_copies_and_renames() {
+        let root = TempDir::new().unwrap();
+        init(root.path());
+        commit(root.path(), "source.rs", "one\ntwo\nthree\nfour\n", "root");
+        for index in 0..66 {
+            commit(root.path(), "counter.rs", &format!("{index}\n"), "change");
+        }
+        commit(
+            root.path(),
+            "copy.rs",
+            "one\ntwo\nthree\nfour\nfive\n",
+            "copy and edit",
+        );
+        git(root.path(), &["mv", "copy.rs", "renamed.rs"]);
+        commit(
+            root.path(),
+            "renamed.rs",
+            "one\ntwo\nthree\nfour\nsix\n",
+            "rename and edit",
+        );
+        commit(root.path(), "generated.lock", "ignored\n", "generated file");
+        let repo = new_repositories(&[root.path().to_owned()]).remove(0);
+        let cancel = AtomicBool::new(false);
+        let ctx = GitContext::new(&cancel);
+        for include_generated in [false, true] {
+            let options = CollectOptions {
+                include_generated,
+                ..Default::default()
+            };
+            let events = std::sync::Mutex::new(Vec::new());
+            let data = scan_repository_with_progress(&repo, &options, &cancel, &|stage| {
+                events.lock().unwrap().push(stage)
+            })
+            .unwrap();
+            let mut args = vec![
+                "log",
+                "--no-merges",
+                "--root",
+                "--format=%H",
+                "--numstat",
+                "-z",
+            ];
+            args.extend(DIFF_OPTIONS);
+            args.extend(["--all", "--"]);
+            let expected = run_git(&ctx, root.path(), &args, |stdout| {
+                parse_numstat(BufReader::new(stdout), &options, true)
+            })
+            .unwrap();
+            assert_eq!(data.records.len(), expected.len());
+            for record in data.records {
+                let count = expected.get(&record.commit_id).unwrap();
+                assert_eq!((record.added, record.removed), (count.added, count.removed));
+            }
+            let progress: Vec<_> = events
+                .into_inner()
+                .unwrap()
+                .into_iter()
+                .filter_map(|event| match event {
+                    ScanStage::CountingChanges { done, total } => Some((done, total)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(progress.first(), Some(&(0, 70)));
+            assert_eq!(progress.last(), Some(&(70, 70)));
+            assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        }
     }
 
     #[test]

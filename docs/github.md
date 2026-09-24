@@ -38,11 +38,17 @@ The committed default-branch `.mailmap` is used in the cache. A local checkout w
 
 Downloads and scans run away from the terminal event loop. Quit cancels ongoing network work. Cache refresh and analysis hold a per-repository lock so concurrent Big Board instances cannot change the refs underneath a scan. Interrupted initial downloads are not published as completed caches. A failed refresh excludes that repository from new totals rather than silently using stale data; inspect its error with `r`. There is no offline fallback for GitHub mode in this revision.
 
+The sync screen shows an animated heartbeat, elapsed time, the active repository, and its current stage. Analysis reports completed commit batches and merge checks; the repository counter advances only when a repository finishes. The heartbeat indicates that the interface is responsive, not a percentage estimate for the download.
+
+Line-change analysis uses bounded parallel batches with the same exhaustive copy/rename rules. A first scan of a large history can still take time. After a successful fetch, unchanged repositories can reuse saved analysis. History refs, default branch, collection preferences, Git/Big Board versions, effective Git configuration, and external mailmap/attribute inputs are checked before reuse. Changed inputs or an unreadable snapshot trigger fresh analysis; unsupported fingerprint queries also fall back to scanning. Local repositories continue to be scanned directly.
+
 ## Local storage
 
 History is stored under `$XDG_CACHE_HOME/bigboard/github` when set, otherwise `~/Library/Caches/bigboard/github` on macOS or `~/.cache/bigboard/github` elsewhere. Cache directories are scoped by host and stable GitHub repository ID, so identically named repositories do not collide. They contain repository content, including private content when selected. Big Board restricts storage-directory permissions and leaves credential handling to `gh`.
 
 Removing a repository from the selected set stops future downloads but retains its cache. With Big Board closed, you can delete its GitHub cache directory to reclaim space; the next selection downloads fresh history. Identity merge preferences and saved repository selections live in the configuration directory and are unaffected by deleting history caches.
+
+Each managed repository may also contain `bigboard-analysis.json`, a derived analysis snapshot. It can be deleted while Big Board is closed to force fresh analysis without downloading history again.
 
 ## Validation
 

@@ -2,6 +2,7 @@
 use crate::{
     config, git,
     model::{Repository, ScanData},
+    progress::{Reporter, ScanStage},
 };
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
@@ -70,6 +71,12 @@ struct Selection {
     host: String,
     login: String,
     repositories: Vec<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AnalysisSnapshot {
+    fingerprint: String,
+    data: ScanData,
 }
 
 fn safe_component(value: &str) -> bool {
@@ -210,6 +217,17 @@ impl Client {
         options: &git::CollectOptions,
         cancel: &AtomicBool,
     ) -> Result<ScanData> {
+        self.scan_with_progress(remote, options, cancel, &|_| {})
+    }
+
+    pub(crate) fn scan_with_progress(
+        &self,
+        remote: &RemoteRepository,
+        options: &git::CollectOptions,
+        cancel: &AtomicBool,
+        report: &Reporter<'_>,
+    ) -> Result<ScanData> {
+        report(ScanStage::Metadata);
         remote.validate()?;
         let current: RemoteRepository = serde_json::from_slice(&self.api(
             &format!("repos/{}", remote.full_name),
@@ -222,11 +240,66 @@ impl Client {
         }
         let parent = self.cache_root.join(&self.host);
         private_directory(&parent)?;
+        report(ScanStage::WaitingForCache);
         let _lock = CacheLock::acquire(&parent.join(format!("{}.lock", remote.id)), cancel)?;
         let url = format!("https://{}/{}.git", self.host, current.full_name);
+        report(ScanStage::Downloading);
         self.sync(&current, &url, cancel)
             .context("GitHub history refresh failed; cached totals were not used")?;
-        git::scan_repository(&self.repository(&current), options, cancel)
+        self.analyze(&self.repository(&current), options, cancel, report)
+    }
+
+    /// Called only after a successful fetch, while holding the history lock.
+    fn analyze(
+        &self,
+        repo: &Repository,
+        options: &git::CollectOptions,
+        cancel: &AtomicBool,
+        report: &Reporter<'_>,
+    ) -> Result<ScanData> {
+        report(ScanStage::CheckingAnalysis);
+        // A missing/unsupported fingerprint input disables reuse rather than
+        // making assumptions about external Git configuration.
+        let fingerprint = analysis_fingerprint(repo, options, cancel).ok();
+        let path = repo.path.join("bigboard-analysis.json");
+        if let Some(expected) = &fingerprint
+            && let Ok(file) = File::open(&path)
+            && let Ok(snapshot) = serde_json::from_reader::<_, AnalysisSnapshot>(file)
+            && snapshot.fingerprint == *expected
+        {
+            check(cancel, Instant::now() + FETCH_TIMEOUT)?;
+            report(ScanStage::ReusingAnalysis);
+            return Ok(snapshot.data);
+        }
+        let data = git::scan_repository_with_progress(repo, options, cancel, report)?;
+        // Unsupported/conflicting merges are deterministic, but a transient
+        // failure reconstructing a merge must be retried on the next scan.
+        if let Some(fingerprint) = fingerprint
+            && !data
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("resolution line counts are unknown:"))
+        {
+            report(ScanStage::SavingAnalysis);
+            if analysis_fingerprint(repo, options, cancel).ok().as_ref() != Some(&fingerprint) {
+                return Ok(data);
+            }
+            // Failure to save an optimization never hides successfully read data.
+            let _ = (|| -> Result<()> {
+                let mut file = tempfile::NamedTempFile::new_in(&repo.path)?;
+                serde_json::to_writer(
+                    &mut file,
+                    &AnalysisSnapshot {
+                        fingerprint,
+                        data: data.clone(),
+                    },
+                )?;
+                file.as_file().sync_all()?;
+                file.persist(path)?;
+                Ok(())
+            })();
+        }
+        Ok(data)
     }
 
     fn sync(&self, remote: &RemoteRepository, url: &str, cancel: &AtomicBool) -> Result<()> {
@@ -308,6 +381,99 @@ impl Client {
         }
         Ok(())
     }
+}
+
+fn analysis_fingerprint(
+    repo: &Repository,
+    options: &git::CollectOptions,
+    cancel: &AtomicBool,
+) -> Result<String> {
+    let mut inputs = vec![
+        // The package version invalidates saved analysis when engine behavior changes.
+        env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
+        serde_json::to_vec(&(
+            &repo.id,
+            &repo.name,
+            options.include_generated,
+            &options.ai_identities,
+        ))?,
+        run_git(&repo.path, &["--version"], cancel)?,
+        run_git(
+            &repo.path,
+            &[
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00%(symref)",
+            ],
+            cancel,
+        )?,
+        run_git(&repo.path, &["symbolic-ref", "HEAD"], cancel)?,
+    ];
+    let config = run_git(&repo.path, &["config", "--null", "--list"], cancel)?;
+    let has_mailmap_file = config
+        .split(|byte| *byte == 0)
+        .any(|entry| entry.starts_with(b"mailmap.file\n"));
+    inputs.push(config);
+    let mut files = vec![
+        repo.path.join("info/attributes"),
+        repo.path.join("info/grafts"),
+        repo.path.join("shallow"),
+    ];
+    // Git resolves platform-specific defaults, user overrides, and ~ expansion.
+    // Older Git versions without these variables simply rescan normally.
+    for variable in ["GIT_ATTR_SYSTEM", "GIT_ATTR_GLOBAL"] {
+        let path = run_git(&repo.path, &["var", variable], cancel)?;
+        let path = std::str::from_utf8(&path)?.trim();
+        if !path.is_empty() {
+            files.push(PathBuf::from(path));
+        }
+    }
+    if has_mailmap_file {
+        let path = run_git(
+            &repo.path,
+            &["config", "--path", "--get", "mailmap.file"],
+            cancel,
+        )?;
+        files.push(PathBuf::from(std::str::from_utf8(&path)?.trim()));
+    }
+    for variable in ["GIT_ATTR_NOSYSTEM", "GIT_ATTR_SOURCE"] {
+        inputs.push(
+            std::env::var_os(variable)
+                .unwrap_or_default()
+                .as_encoded_bytes()
+                .to_vec(),
+        );
+    }
+    for path in files {
+        let path = if path.is_absolute() {
+            path
+        } else {
+            repo.path.join(path)
+        };
+        inputs.push(path.as_os_str().as_encoded_bytes().to_vec());
+        match fs::read(path) {
+            Ok(content) => {
+                inputs.push(vec![1]);
+                inputs.push(content);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => inputs.push(vec![0]),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    // Hash privately: effective Git configuration may contain credentials.
+    // Only the digest goes into the persistent analysis snapshot.
+    let mut file = tempfile::NamedTempFile::new()?;
+    serde_json::to_writer(&mut file, &inputs)?;
+    file.flush()?;
+    let hash = run_git(
+        &repo.path,
+        &[
+            "hash-object",
+            "--no-filters",
+            file.path().to_str().context("Invalid temporary path")?,
+        ],
+        cancel,
+    )?;
+    Ok(std::str::from_utf8(&hash)?.trim().into())
 }
 
 pub struct Discovery {
@@ -644,6 +810,165 @@ mod tests {
                 .sync(&changed, "/missing/bigboard-test-source", &cancel)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn analysis_reuse_invalidates_history_options_configuration_and_external_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        fs::create_dir(&source).unwrap();
+        git(&source, &["init", "-b", "main"]);
+        commit(&source, "code.rs", "one\ntwo\n", "initial");
+        commit(&source, "generated.lock", "generated\n", "generated");
+        let client = client(root.path());
+        let remote = remote(1, "org/project", "main");
+        let cancel = AtomicBool::new(false);
+        client
+            .sync(&remote, source.to_str().unwrap(), &cancel)
+            .unwrap();
+        let repo = client.repository(&remote);
+        let run = |options: &git::CollectOptions, reuse: bool| {
+            let events = std::sync::Mutex::new(Vec::new());
+            let data = client
+                .analyze(&repo, options, &cancel, &|stage| {
+                    events.lock().unwrap().push(stage)
+                })
+                .unwrap();
+            let events = events.into_inner().unwrap();
+            assert_eq!(
+                events.contains(&ScanStage::ReusingAnalysis),
+                reuse,
+                "{events:?}"
+            );
+            assert_eq!(
+                events.contains(&ScanStage::ReadingHistory),
+                !reuse,
+                "{events:?}"
+            );
+            data
+        };
+        let options = git::CollectOptions::default();
+        let fresh = run(&options, false);
+        // Older Git versions conservatively disable caching if they cannot
+        // resolve the external attribute paths. They still return fresh data.
+        if analysis_fingerprint(&repo, &options, &cancel).is_err() {
+            return;
+        }
+        let reused = run(&options, true);
+        assert_eq!(
+            serde_json::to_value(&fresh).unwrap(),
+            serde_json::to_value(&reused).unwrap()
+        );
+        let ai = git::CollectOptions {
+            ai_identities: vec!["raw@example.test".into()],
+            ..Default::default()
+        };
+        assert!(
+            run(&ai, false)
+                .records
+                .iter()
+                .all(|record| record.ai_assisted)
+        );
+        run(&ai, true);
+        let generated = git::CollectOptions {
+            include_generated: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            run(&generated, false)
+                .records
+                .iter()
+                .map(|r| r.added)
+                .sum::<i64>(),
+            3
+        );
+        run(&generated, true);
+        git(&repo.path, &["config", "core.abbrev", "10"]);
+        run(&generated, false);
+        let mailmap = root.path().join("mailmap");
+        fs::write(
+            &mailmap,
+            "Canonical <canonical@example.test> Raw Name <raw@example.test>\n",
+        )
+        .unwrap();
+        git(
+            &repo.path,
+            &["config", "mailmap.file", mailmap.to_str().unwrap()],
+        );
+        assert!(
+            run(&options, false)
+                .records
+                .iter()
+                .all(|r| r.author == "Canonical")
+        );
+        run(&options, true);
+        fs::write(
+            &mailmap,
+            "Renamed <renamed@example.test> Raw Name <raw@example.test>\n",
+        )
+        .unwrap();
+        assert!(
+            run(&options, false)
+                .records
+                .iter()
+                .all(|r| r.author == "Renamed")
+        );
+        fs::create_dir_all(repo.path.join("info")).unwrap();
+        fs::write(repo.path.join("info/attributes"), "*.rs binary\n").unwrap();
+        assert_eq!(
+            run(&options, false)
+                .records
+                .iter()
+                .map(|r| r.added)
+                .sum::<i64>(),
+            0
+        );
+        run(&options, true);
+        fs::write(repo.path.join("bigboard-analysis.json"), "truncated").unwrap();
+        run(&options, false);
+        commit(&source, "new.txt", "new\n", "new commit");
+        client
+            .sync(&remote, source.to_str().unwrap(), &cancel)
+            .unwrap();
+        assert_eq!(run(&options, false).records.len(), 3);
+        run(&options, true);
+        assert!(
+            client
+                .analyze(&repo, &options, &AtomicBool::new(true), &|_| {})
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_metadata_request_never_falls_back_to_saved_analysis() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let mut client = client(root.path());
+        let remote = remote(1, "org/project", "main");
+        let repo = client.repository(&remote);
+        fs::create_dir_all(&repo.path).unwrap();
+        fs::write(repo.path.join("bigboard-analysis.json"), "{}").unwrap();
+        let script = root.path().join("gh");
+        fs::write(
+            &script,
+            "#!/bin/sh\necho 'repository unavailable' >&2\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        client.gh_program = script;
+        let events = std::sync::Mutex::new(Vec::new());
+        assert!(
+            client
+                .scan_with_progress(
+                    &remote,
+                    &git::CollectOptions::default(),
+                    &AtomicBool::new(false),
+                    &|stage| events.lock().unwrap().push(stage)
+                )
+                .is_err()
+        );
+        assert_eq!(events.into_inner().unwrap(), [ScanStage::Metadata]);
     }
 
     #[test]
