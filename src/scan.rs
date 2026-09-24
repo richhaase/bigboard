@@ -2,6 +2,7 @@
 use crate::{
     git::{self, CollectOptions},
     model::{AnalysisOptions, CommitRecord, Repository, ScanData},
+    progress::{Reporter, ScanProgress},
 };
 use std::sync::{
     Arc,
@@ -20,6 +21,7 @@ pub struct ScanResult {
 
 pub struct ScanSession {
     pub receiver: mpsc::Receiver<ScanResult>,
+    pub progress: mpsc::Receiver<ScanProgress>,
     cancel: Arc<AtomicBool>,
     workers: Vec<std::thread::JoinHandle<()>>,
 }
@@ -40,7 +42,7 @@ impl Drop for ScanSession {
 }
 
 pub fn start_scan(repositories: Vec<Repository>, options: AnalysisOptions) -> ScanSession {
-    start_scan_with(repositories, options, git::scan_repository)
+    start_scan_reporting(repositories, options, git::scan_repository_with_progress)
 }
 
 pub fn start_github_scan(
@@ -53,11 +55,16 @@ pub fn start_github_scan(
         .into_iter()
         .map(|repo| (client.repository(&repo).id, repo))
         .collect();
-    start_scan_with(repositories, options, move |repo, options, cancel| {
-        client.scan(&remote[&repo.id], options, cancel)
-    })
+    start_scan_reporting(
+        repositories,
+        options,
+        move |repo, options, cancel, report| {
+            client.scan_with_progress(&remote[&repo.id], options, cancel, report)
+        },
+    )
 }
 
+#[cfg(test)]
 fn start_scan_with<F>(
     repositories: Vec<Repository>,
     options: AnalysisOptions,
@@ -69,8 +76,25 @@ where
         + Sync
         + 'static,
 {
+    start_scan_reporting(repositories, options, move |repo, options, cancel, _| {
+        scan(repo, options, cancel)
+    })
+}
+
+fn start_scan_reporting<F>(
+    repositories: Vec<Repository>,
+    options: AnalysisOptions,
+    scan: F,
+) -> ScanSession
+where
+    F: Fn(&Repository, &CollectOptions, &AtomicBool, &Reporter<'_>) -> anyhow::Result<ScanData>
+        + Send
+        + Sync
+        + 'static,
+{
     let cancel = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::channel();
+    let (progress_sender, progress) = mpsc::channel();
     let count = repositories.len().min(MAX_CONCURRENT_SCANS);
     let repositories = Arc::new(repositories);
     let next = Arc::new(AtomicUsize::new(0));
@@ -81,6 +105,7 @@ where
     let scan = Arc::new(scan);
     let mut workers = Vec::with_capacity(count);
     for _ in 0..count {
+        let progress_sender = progress_sender.clone();
         let (repositories, next, options, cancel, sender, scan) = (
             Arc::clone(&repositories),
             Arc::clone(&next),
@@ -98,7 +123,14 @@ where
                 let Some(repo) = repositories.get(index) else {
                     break;
                 };
-                let result = match scan(repo, &options, &cancel) {
+                let report = |stage| {
+                    let _ = progress_sender.send(ScanProgress {
+                        repository_id: repo.id.clone(),
+                        repository_name: repo.name.clone(),
+                        stage,
+                    });
+                };
+                let result = match scan(repo, &options, &cancel, &report) {
                     Ok(data) => ScanResult {
                         repository: repo.clone(),
                         records: data.records,
@@ -119,8 +151,10 @@ where
         }));
     }
     drop(sender);
+    drop(progress_sender);
     ScanSession {
         receiver,
+        progress,
         cancel,
         workers,
     }
@@ -142,6 +176,33 @@ mod tests {
                 path: PathBuf::from(format!("/repo/{index}")),
             })
             .collect()
+    }
+
+    #[test]
+    fn progress_arrives_before_repository_completion() {
+        use crate::progress::ScanStage;
+        let session = start_scan_reporting(
+            repositories(1),
+            AnalysisOptions::default(),
+            |_, _, cancel, report| {
+                report(ScanStage::Downloading);
+                while !cancel.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                anyhow::bail!("operation canceled")
+            },
+        );
+        let progress = session
+            .progress
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(progress.repository_id, "0");
+        assert_eq!(progress.stage, ScanStage::Downloading);
+        assert!(matches!(
+            session.receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        drop(session);
     }
 
     #[test]

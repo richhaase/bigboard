@@ -672,6 +672,50 @@ fn stat_boxes_fit_and_use_detected_attribution() {
     assert!(!boxes.contains("CO-AUTHORED"));
 }
 #[test]
+fn loading_shows_heartbeat_elapsed_stage_and_completed_counts() {
+    use crate::progress::{ScanProgress, ScanStage};
+    let mut app = populated();
+    app.github_source = true;
+    app.repositories = vec![repo("engine")];
+    app.reset_pending();
+    app.scan_progress.insert(
+        "/repos/engine".into(),
+        ScanProgress {
+            repository_id: "/repos/engine".into(),
+            repository_name: "org/engine".into(),
+            stage: ScanStage::CountingChanges {
+                done: 128,
+                total: 400,
+            },
+        },
+    );
+    for (width, height) in [(50, 12), (80, 24), (140, 36)] {
+        app.loading_tick = 31;
+        let screen = draw(&mut app, width, height);
+        assert!(screen.contains("3s elapsed"), "{screen}");
+        assert!(screen.contains("q cancels"), "{screen}");
+        assert!(screen.contains("org/engine"), "{screen}");
+        assert!(screen.contains("128/400 commits"), "{screen}");
+        assert!(screen.contains("0/1 repos complete"), "{screen}");
+        app.loading_tick += 1;
+        assert_ne!(screen, draw(&mut app, width, height));
+    }
+    app.loaded(ScanResult {
+        repository: repo("engine"),
+        records: vec![],
+        error: None,
+        warnings: vec![],
+    });
+    assert!(!app.loading);
+    assert!(app.scan_progress.is_empty());
+    app.reset_pending();
+    assert_eq!(app.loading_tick, 0);
+    app.filter_query = "old search".into();
+    app.searching = true;
+    assert_eq!(ch(&mut app, 'q'), Action::Quit);
+}
+
+#[test]
 fn views_render_at_tiny_and_large_sizes() {
     let mut app = populated();
     for (w, h) in [(1, 1), (10, 3), (40, 12), (80, 24), (120, 80)] {
