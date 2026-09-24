@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 impl App {
     fn spacious_commands(&self) -> bool {
-        self.width >= 104 && self.height >= 30
+        self.width >= 106 && self.height >= 30
     }
 
     fn roomy_aggregate(&self) -> bool {
@@ -42,7 +42,17 @@ impl App {
                 self.palette.red,
             ));
             lines.extend(self.quality_lines());
-            lines.extend([blank(), help(&[("q", "quit".into())], &self.palette)]);
+            lines.extend([
+                blank(),
+                help(
+                    &[
+                        ("g", "GitHub".into()),
+                        ("R", "retry".into()),
+                        ("q", "quit".into()),
+                    ],
+                    &self.palette,
+                ),
+            ]);
             return lines;
         }
         if let Some(flow) = &self.merge {
@@ -60,9 +70,22 @@ impl App {
         let mut lines = banner(self.width as usize, self.height < 25, p);
         lines.extend([
             blank(),
-            text_line("  ◈ SCANNING REPOSITORIES", p.dim_cyan),
+            text_line(
+                if self.github_source {
+                    "  ◈ SYNCING GITHUB HISTORY"
+                } else {
+                    "  ◈ SCANNING REPOSITORIES"
+                },
+                p.dim_cyan,
+            ),
             blank(),
         ]);
+        if self.github_source {
+            lines.push(text_line(
+                "  Fetching and analyzing selected repositories · q cancels",
+                p.dim_cyan,
+            ));
+        }
         let max_shown = (self.height as usize)
             .saturating_sub(lines.len() + 4)
             .clamp(1, 14);
@@ -130,7 +153,8 @@ impl App {
     pub(super) fn scope_line(&self) -> UiLine {
         text_line(
             format!(
-                "  {} · {} · as of {}",
+                "  {}{} · {} · as of {}",
+                if self.github_source { "GITHUB · " } else { "" },
                 self.scope.label(),
                 self.options.timezone,
                 self.cutoff
@@ -154,7 +178,8 @@ impl App {
             lines.push(blank());
         }
         let left = format!(
-            "  {} · {} · {} · {}",
+            "  {}{} · {} · {} · {}",
+            if self.github_source { "GITHUB · " } else { "" },
             repo_count(self.loaded_repos.len(), self.excluded_count()).trim(),
             self.scope.label(),
             self.options.timezone,
@@ -310,6 +335,7 @@ impl App {
             ("←→", "range".to_owned()),
             ("/", "find".to_owned()),
             ("s/S", "sort/reverse".to_owned()),
+            ("g", "GitHub".to_owned()),
             ("M", "merge".to_owned()),
             ("B", "history".to_owned()),
             (
@@ -323,9 +349,9 @@ impl App {
         if self.spacious_commands() {
             return command_grid(&bindings, width, p);
         }
-        wrap_help(&bindings[..5], width, p)
+        wrap_help(&bindings[..6], width, p)
             .into_iter()
-            .chain(wrap_help(&bindings[5..], width, p))
+            .chain(wrap_help(&bindings[6..], width, p))
             .collect()
     }
 
@@ -637,7 +663,7 @@ impl App {
 }
 
 fn command_grid(bindings: &[(&str, String)], width: usize, p: &Palette) -> Vec<UiLine> {
-    let rows = [&bindings[..5], &bindings[5..]];
+    let rows = [&bindings[..6], &bindings[6..]];
     let mut columns = [18; 5];
     for row in rows {
         for (index, (key, description)) in row.iter().take(5).enumerate() {

@@ -16,7 +16,7 @@ cargo install --path . --locked
 
 ## Usage
 
-Big Board is TUI-first: preferences live in the config file, and the CLI has three flags: `--version`, `--config`, and `--group`.
+Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, `--group`, and `--github`.
 
 ```bash
 # Analyze current directory
@@ -29,6 +29,9 @@ bigboard ~/src/
 # Use a named group from your config
 bigboard --group backend
 
+# Choose repositories from GitHub using your existing gh login
+bigboard --github
+
 # Use an alternate config file
 bigboard --config ./bigboard.json
 
@@ -39,6 +42,8 @@ bigboard --version
 The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 `since` in the config to choose the initial range. Dates use UTC unless you set
 `timezone` to an IANA timezone such as `America/Denver`.
+
+Press `g` from a local board to choose GitHub repositories. If no local repositories are found, Big Board opens that picker automatically. It uses your existing GitHub CLI (`gh`) account, lets you search and filter by owner or organization, and remembers your checked repositories. Only checked repositories are downloaded into Big Board's managed history cache; `R` on a GitHub board refreshes their history before recalculating the same analytics. See [GitHub source](docs/github.md) for authentication, controls, and cache details.
 
 ## Analytics
 
@@ -68,10 +73,11 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `B` | Toggle landed / all-branch activity |
 | `M` | Merge the selected contributor with another identity |
 | `r` | Open repository selection and details from the board |
+| `g` | Choose GitHub repositories (or return to local repos from that picker) |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
 | `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
 | `Home/End` | Jump to the top/bottom of contributor detail content |
-| `R` | Refresh (re-scan all repos) |
+| `R` | Refresh (re-scan local repos, or fetch then scan selected GitHub repos) |
 | `q` | Quit (clears an active filter first) |
 
 In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.

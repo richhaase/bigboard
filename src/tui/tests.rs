@@ -111,6 +111,18 @@ fn begin_merge(app: &mut App) {
 }
 
 #[test]
+fn github_picker_key_does_not_interrupt_search_or_active_scans() {
+    let mut app = populated();
+    assert_eq!(ch(&mut app, 'g'), Action::Github);
+    ch(&mut app, '/');
+    assert_eq!(ch(&mut app, 'g'), Action::None);
+    assert_eq!(app.filter_query, "g");
+    key(&mut app, KeyCode::Esc);
+    app.loading = true;
+    assert_eq!(ch(&mut app, 'g'), Action::None);
+}
+
+#[test]
 fn search_apply_clear_and_unicode_backspace() {
     let mut app = populated();
     ch(&mut app, '/');
@@ -809,9 +821,9 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
     };
     let first = keycaps(command_rows[0].1);
     let second = keycaps(command_rows[1].1);
-    assert_eq!(first.len(), 5, "{screen}");
+    assert_eq!(first.len(), 6, "{screen}");
     assert_eq!(second.len(), 6, "{screen}");
-    assert_eq!(first, second[..5], "{screen}");
+    assert_eq!(first, second, "{screen}");
     assert!(second[5] < 105, "commands spread too far: {screen}");
     assert_eq!(command_rows[1].0, command_rows[0].0 + 1, "{screen}");
     assert!(lines[command_rows[0].0 - 1].trim().is_empty(), "{screen}");

@@ -17,7 +17,7 @@ fn version() -> String {
 }
 fn usage() {
     eprintln!(
-        "Usage: bigboard [flags] [paths...]\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -group string\n        Use a named repo group from the config file\n  -version\n        Print version and exit"
+        "Usage: bigboard [flags] [paths...]\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -group string\n        Use a named repo group from the config file\n  -github\n        Choose GitHub repositories using your existing gh login\n  -version\n        Print version and exit"
     );
 }
 fn diagnostic(s: &str) -> String {
@@ -45,12 +45,16 @@ fn run(cli: Cli) -> Result<()> {
     let cfg = config::load_config(&path, explicit)
         .with_context(|| format!("reading config {}", path.display()))?;
     let (sort, time_idx) = config::validate_preferences(&cfg)?;
-    let paths = config::scan_paths(&cli, &cfg)?;
-    config::validate_scan_paths(&paths)?;
-    let found = git::discover_repos_depth(&paths, cfg.depth.max(1) as usize);
-    if found.is_empty() {
-        bail!("no git repositories found in {:?}", paths)
+    if cli.github && (!cli.paths.is_empty() || !cli.group.is_empty()) {
+        bail!("--github selects remote repositories; use paths or --group for a local board");
     }
+    let found = if cli.github {
+        Vec::new()
+    } else {
+        let paths = config::scan_paths(&cli, &cfg)?;
+        config::validate_scan_paths(&paths)?;
+        git::discover_repos_depth(&paths, cfg.depth.max(1) as usize)
+    };
     let repos = git::new_repositories(&found);
     let excluded = config::build_exclude_set(&repos, &cfg.exclude).context("invalid exclusion")?;
     let options = AnalysisOptions {
@@ -74,6 +78,7 @@ fn run(cli: Cli) -> Result<()> {
         &cfg.theme,
         identities,
         identity_path,
+        cli.github,
     )
 }
 fn main() -> ExitCode {
