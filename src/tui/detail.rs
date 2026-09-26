@@ -16,7 +16,7 @@ impl App {
             .chain(&self.contributors)
             .find(|author| author.id == self.active_id);
         let name = author.map_or("Contributor", |author| author.name.as_str());
-        vec![
+        let mut lines = vec![
             panel_header(&format!("CONTRIBUTOR: {}", name.to_uppercase()), width, p),
             text_line(truncate(&self.scope_line().to_string(), width), p.dim_cyan),
             if width >= 60 {
@@ -30,7 +30,11 @@ impl App {
                     p.cyan,
                 )
             },
-        ]
+        ];
+        if self.github_source {
+            lines.insert(2, self.api_basis());
+        }
+        lines
     }
 
     fn detail_footer(&self) -> Vec<UiLine> {
@@ -63,7 +67,7 @@ impl App {
                 p.green,
             ));
         }
-        for bindings in [
+        for mut bindings in [
             vec![
                 ("PgUp/PgDn", "scroll".into()),
                 ("Home/End", "top/bottom".into()),
@@ -77,6 +81,9 @@ impl App {
                 ("q", "quit".into()),
             ],
         ] {
+            if self.github_source {
+                bindings.retain(|(key, _)| *key != "B");
+            }
             lines.extend(wrap_help(&bindings, width, p));
         }
         lines

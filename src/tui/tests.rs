@@ -1499,3 +1499,36 @@ fn detail_navigation_resets_viewport_without_changing_existing_controls() {
     let screen = draw(&mut app, 80, 24);
     assert_detail_chrome(&app, &screen, 80, 24);
 }
+
+#[test]
+fn github_range_loads_new_window_and_history_stays_on_default_branch() {
+    let mut app = populated();
+    app.github_source = true;
+    app.repositories = app.loaded_repos.clone();
+    app.time_index = 2;
+    assert_eq!(ch(&mut app, 'B'), Action::None);
+    assert_eq!(app.scope, HistoryScope::Landed);
+    assert_eq!(key(&mut app, KeyCode::Right), Action::Refresh);
+    assert_eq!(app.time_index, 3);
+    assert!(app.loading);
+    let mut local = populated();
+    local.time_index = 2;
+    assert_eq!(key(&mut local, KeyCode::Right), Action::None);
+    assert!(!local.loading);
+}
+
+#[test]
+fn github_board_labels_api_basis_and_omits_local_history_control() {
+    let mut app = populated();
+    app.github_source = true;
+    for (width, height) in [(60, 24), (80, 24), (140, 40)] {
+        let screen = draw(&mut app, width, height);
+        assert!(screen.contains("GITHUB API"), "{screen}");
+        assert!(screen.contains("Commit date · all files"), "{screen}");
+        assert!(!screen.contains("history"), "{screen}");
+        key(&mut app, KeyCode::Enter);
+        let detail = draw(&mut app, width, height);
+        assert!(detail.contains("Commit date · all files"), "{detail}");
+        key(&mut app, KeyCode::Esc);
+    }
+}

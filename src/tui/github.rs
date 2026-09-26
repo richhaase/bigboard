@@ -277,7 +277,7 @@ impl Picker {
         }
         lines.push(panel_footer(width, p));
         let status = self.error.as_deref().map_or_else(
-            || "Selected repositories download Git history; first sync may take time.".into(),
+            || "API summaries for the selected range · no repositories cloned.".into(),
             display_text,
         );
         lines.push(text_line(
