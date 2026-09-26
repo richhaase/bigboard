@@ -3,7 +3,7 @@ use super::render::{heatmap, line_value, monthly_rows};
 use super::*;
 use crate::model::Identity;
 use crate::stats::RepoContribution;
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use ratatui::{backend::TestBackend, text::Line};
 use std::collections::BTreeMap;
 
@@ -54,8 +54,9 @@ fn empty() -> App {
     app
 }
 fn populate(app: &mut App) {
-    app.rebuild_contributors();
+    app.invalidate_contributors();
     app.recompute();
+    settle(app);
 }
 fn populated() -> App {
     let mut app = empty();
@@ -63,18 +64,23 @@ fn populated() -> App {
     app.all_records = vec![
         record("Ada Lovelace", "engine", 100),
         record("Grace Hopper", "compiler", 50),
-    ];
+    ]
+    .into();
     populate(&mut app);
     app
 }
 fn key(app: &mut App, code: KeyCode) -> Action {
-    app.key(KeyEvent::new(code, KeyModifiers::NONE))
+    let action = app.key(KeyEvent::new(code, KeyModifiers::NONE));
+    settle(app);
+    action
 }
 fn ch(app: &mut App, c: char) -> Action {
     key(app, KeyCode::Char(c))
 }
 fn ctrl(app: &mut App, c: char) -> Action {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    let action = app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    settle(app);
+    action
 }
 fn plain(lines: Vec<UiLine>) -> String {
     lines
@@ -145,6 +151,66 @@ fn search_apply_clear_and_unicode_backspace() {
     assert!(!app.searching);
     assert_eq!(key(&mut app, KeyCode::Esc), Action::Quit);
 }
+
+#[test]
+fn board_paging_and_endpoints_follow_the_filtered_list_after_resize() {
+    let mut app = empty();
+    app.all_records = (0..100)
+        .map(|i| record(&format!("Person {i:03}"), "engine", i + 1))
+        .collect::<Vec<_>>()
+        .into();
+    populate(&mut app);
+    draw(&mut app, 80, 24);
+    let page = app.table_viewport();
+    key(&mut app, KeyCode::PageDown);
+    assert_eq!((app.selected, app.offset), (page, page));
+    key(&mut app, KeyCode::PageUp);
+    assert_eq!((app.selected, app.offset), (0, 0));
+    key(&mut app, KeyCode::End);
+    assert_eq!(app.selected, 99);
+    let screen = draw(&mut app, 60, 20);
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains('▸') && line.contains("Person 000")),
+        "{screen}"
+    );
+    key(&mut app, KeyCode::Home);
+    assert_eq!((app.selected, app.offset), (0, 0));
+    app.filter_query = "Person 00".into();
+    key(&mut app, KeyCode::End);
+    assert_eq!(app.selected, 9);
+    app.filter_query = "no matches".into();
+    for code in [
+        KeyCode::PageDown,
+        KeyCode::PageUp,
+        KeyCode::End,
+        KeyCode::Home,
+    ] {
+        key(&mut app, code);
+        assert_eq!(app.selected, 0);
+    }
+}
+
+#[test]
+fn empty_states_offer_available_source_and_filter_controls() {
+    let mut app = empty();
+    app.github_source = true;
+    let screen = draw(&mut app, 80, 24);
+    assert!(screen.contains("choose repos"));
+    assert!(!screen.contains("all branches"));
+    app.view = View::Operative;
+    let screen = draw(&mut app, 80, 24);
+    assert!(!screen.contains("all branches"));
+    app.view = View::Aggregate;
+    app.github_source = false;
+    assert!(draw(&mut app, 80, 24).contains("B for all branches"));
+    app.hide_bots = true;
+    assert!(draw(&mut app, 80, 24).contains("b to include bots"));
+    app.loaded_repos.push(repo("engine"));
+    app.excluded.insert("/repos/engine".into());
+    assert!(draw(&mut app, 80, 24).contains("No repositories selected"));
+}
 #[test]
 fn sort_cycle_reverse_and_metric_ranks() {
     let mut app = populated();
@@ -183,13 +249,13 @@ fn repository_changes_apply_on_escape_and_enter_and_gate_keys() {
         key(&mut app, finish);
         assert!(app.excluded.contains("/repos/compiler"));
         assert_eq!(app.authors.len(), 1);
-        assert_eq!(app.filtered_records().len(), 1);
+        assert_eq!(app.totals().0, 1);
     }
 }
 #[test]
 fn landed_default_and_branch_toggle_change_both_board_and_detail() {
     let mut app = populated();
-    app.all_records[1].landed = false;
+    Arc::make_mut(&mut app.all_records)[1].landed = false;
     populate(&mut app);
     assert_eq!(app.scope, HistoryScope::Landed);
     assert_eq!(app.authors.len(), 1);
@@ -211,7 +277,7 @@ fn same_name_contributors_keep_distinct_ids_and_detail_selection() {
     let mut second = record("Alex", "compiler", 50);
     first.email = "alex.one@example.com".into();
     second.email = "alex.two@example.com".into();
-    app.all_records = vec![first, second];
+    app.all_records = vec![first, second].into();
     populate(&mut app);
     assert_eq!(app.authors.len(), 2);
     assert!(plain(app.table_lines()).contains("alex.one@example.com"));
@@ -233,12 +299,13 @@ fn time_changes_retain_id_across_display_name_changes() {
     old.email = "ada@example.com".into();
     let mut recent = record("Ada Lovelace", "engine", 50);
     recent.email = old.email.clone();
-    app.all_records = vec![old, recent];
+    app.all_records = vec![old, recent].into();
     populate(&mut app);
     key(&mut app, KeyCode::Enter);
     let id = app.active_id.clone();
     app.time_index = 2;
     app.recompute();
+    settle(&mut app);
     assert_eq!(app.active_id, id);
     assert_eq!(app.authors[0].id, id);
     assert!(!plain(app.detail_lines()).contains("NO SIGNAL"));
@@ -252,7 +319,7 @@ fn one_cutoff_applies_to_all_ranges_and_calendar() {
     let mut future = recent.clone();
     future.commit_id = "future".into();
     future.date += Duration::seconds(1);
-    app.all_records = vec![recent, future];
+    app.all_records = vec![recent, future].into();
     populate(&mut app);
     assert_eq!(app.authors[0].commits, 1);
     let cutoff = app.cutoff;
@@ -271,7 +338,7 @@ fn timezone_maps_drive_daily_monthly_and_heatmap() {
         .with_ymd_and_hms(2026, 6, 1, 1, 0, 0)
         .unwrap()
         .fixed_offset();
-    app.all_records = vec![r];
+    app.all_records = vec![r].into();
     populate(&mut app);
     let day = chrono::NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
     assert!(app.authors[0].daily.contains_key(&day));
@@ -291,7 +358,7 @@ fn unknown_and_coauthored_lines_are_not_rendered_as_zero() {
         name: "Grace".into(),
         email: "grace@example.com".into(),
     });
-    app.all_records = vec![r];
+    app.all_records = vec![r].into();
     populate(&mut app);
     assert_eq!(app.totals().0, 1);
     let table = plain(app.table_lines());
@@ -361,7 +428,7 @@ fn merged_commit_associations_not_summed_in_board() {
     let mut duplicate = r.clone();
     duplicate.repo_id = "/repos/compiler".into();
     duplicate.repo_name = "compiler".into();
-    app.all_records = vec![r, duplicate];
+    app.all_records = vec![r, duplicate].into();
     populate(&mut app);
     assert_eq!(app.totals(), (1, 100, 10, 0));
     assert_eq!(app.authors[0].per_repo.len(), 2);
@@ -371,13 +438,14 @@ fn merged_commit_associations_not_summed_in_board() {
 #[test]
 fn merge_picker_searches_all_loaded_dates_branches_repositories_and_emails() {
     let mut app = populated();
-    app.all_records[1].date = now() - Duration::days(100);
-    app.all_records[1].landed = false;
+    Arc::make_mut(&mut app.all_records)[1].date = now() - Duration::days(100);
+    Arc::make_mut(&mut app.all_records)[1].landed = false;
     app.excluded.insert("/repos/compiler".into());
     app.time_index = 0;
     populate(&mut app);
     app.time_index = 2;
     app.recompute();
+    settle(&mut app);
     assert_eq!(app.authors.len(), 1);
     ch(&mut app, 'M');
     assert_eq!(app.merge.as_ref().unwrap().candidates.len(), 1);
@@ -474,7 +542,8 @@ fn all_contributors_remain_reachable_after_resize() {
     let mut app = empty();
     app.all_records = (0..40)
         .map(|i| record(&format!("Person {i:02}"), "engine", 100 - i))
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     populate(&mut app);
     for (w, h) in [(120, 40), (100, 24), (80, 24), (60, 20), (40, 12)] {
         draw(&mut app, w, h);
@@ -501,7 +570,7 @@ fn table_labels_bot_toggle_and_detected_ai() {
     let mut app = populated();
     let mut bot = record("dependabot[bot]", "engine", 200);
     bot.ai_assisted = true;
-    app.all_records.push(bot);
+    Arc::make_mut(&mut app.all_records).push(bot);
     populate(&mut app);
     app.width = 144;
     let table = plain(app.table_lines());
@@ -529,19 +598,25 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
         "/unused".into(),
     );
     app.cutoff = now();
-    app.loaded(ScanResult {
-        repository: repos[0].clone(),
-        records: vec![record("Ada", "engine", 100)],
-        warnings: vec!["shallow history".into()],
-        error: None,
-    });
+    loaded(
+        &mut app,
+        ScanResult {
+            repository: repos[0].clone(),
+            records: vec![record("Ada", "engine", 100)],
+            warnings: vec!["shallow history".into()],
+            error: None,
+        },
+    );
     assert!(app.loading);
-    app.loaded(ScanResult {
-        repository: repos[1].clone(),
-        records: vec![],
-        warnings: vec![],
-        error: Some("unreadable".into()),
-    });
+    loaded(
+        &mut app,
+        ScanResult {
+            repository: repos[1].clone(),
+            records: vec![],
+            warnings: vec![],
+            error: Some("unreadable".into()),
+        },
+    );
     assert!(!app.loading);
     assert_eq!(app.authors.len(), 1);
     let summary = plain(app.lines());
@@ -553,12 +628,15 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
     assert_ne!(app.cutoff, old);
     assert_eq!(app.authors.len(), 1);
     for r in repos {
-        app.loaded(ScanResult {
-            repository: r,
-            records: vec![],
-            warnings: vec![],
-            error: Some("failed".into()),
-        });
+        loaded(
+            &mut app,
+            ScanResult {
+                repository: r,
+                records: vec![],
+                warnings: vec![],
+                error: Some("failed".into()),
+            },
+        );
     }
     assert!(plain(app.lines()).contains("totals unavailable"));
 }
@@ -700,12 +778,15 @@ fn loading_shows_heartbeat_elapsed_stage_and_completed_counts() {
         app.loading_tick += 1;
         assert_ne!(screen, draw(&mut app, width, height));
     }
-    app.loaded(ScanResult {
-        repository: repo("engine"),
-        records: vec![],
-        error: None,
-        warnings: vec![],
-    });
+    loaded(
+        &mut app,
+        ScanResult {
+            repository: repo("engine"),
+            records: vec![],
+            error: None,
+            warnings: vec![],
+        },
+    );
     assert!(!app.loading);
     assert!(app.scan_progress.is_empty());
     app.reset_pending();
@@ -829,7 +910,8 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
     app.loaded_repos = vec![repo("engine")];
     app.all_records = (0..14)
         .map(|index| record(&format!("Contributor {index:02}"), "engine", 100))
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     populate(&mut app);
     let screen = draw(&mut app, 160, 40);
     let lines: Vec<_> = screen.lines().collect();
@@ -901,7 +983,7 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
             "command grid overflowed {width}×{height}"
         );
     }
-    app.all_records[0].lines_known = false;
+    Arc::make_mut(&mut app.all_records)[0].lines_known = false;
     populate(&mut app);
     let incomplete = draw(&mut app, 160, 40);
     assert!(incomplete.contains("? unknown lines"), "{incomplete}");
@@ -910,16 +992,16 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
 }
 
 #[test]
-fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters() {
+fn conflicting_attribution_is_not_rendered_and_counts_follow_repository_filters() {
     let mut app = populated();
     let mut duplicate = app.all_records[0].clone();
     duplicate.repo_id = "/repos/compiler".into();
     duplicate.repo_name = "compiler".into();
     duplicate.author = "Different Person".into();
     duplicate.email = "different@example.com".into();
-    app.all_records.push(duplicate);
+    Arc::make_mut(&mut app.all_records).push(duplicate);
     populate(&mut app);
-    assert!(!app.attribution_warnings.is_empty());
+    assert_eq!(app.totals().0, 2);
     let summary = plain(app.lines());
     assert!(!summary.contains("1 warning"), "{summary}");
     assert!(
@@ -938,7 +1020,9 @@ fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters(
     key(&mut app, KeyCode::Esc);
     app.excluded.insert("/repos/compiler".into());
     app.recompute();
-    assert!(app.attribution_warnings.is_empty());
+    settle(&mut app);
+    assert_eq!(app.authors[0].name, "Ada Lovelace");
+    assert_eq!(app.totals(), (1, 100, 10, 0));
 }
 
 #[test]
@@ -946,7 +1030,7 @@ fn unknown_headers_are_qualified_and_detected_ai_remains_in_detail_breakdowns() 
     let mut app = empty();
     let mut unknown = record("Ada", "engine", 0);
     unknown.lines_known = false;
-    app.all_records = vec![unknown];
+    app.all_records = vec![unknown].into();
     populate(&mut app);
     let overview = plain(app.lines());
     for qualifier in [
@@ -968,9 +1052,9 @@ fn unknown_headers_are_qualified_and_detected_ai_remains_in_detail_breakdowns() 
     );
     key(&mut app, KeyCode::Enter);
     assert!(plain(app.detail_lines()).contains("Known line subtotal: added ? · removed ?"));
-    app.all_records[0].lines_known = true;
-    app.all_records[0].ai_assisted = true;
-    app.all_records[0].added = 100;
+    Arc::make_mut(&mut app.all_records)[0].lines_known = true;
+    Arc::make_mut(&mut app.all_records)[0].ai_assisted = true;
+    Arc::make_mut(&mut app.all_records)[0].added = 100;
     populate(&mut app);
     let detail = plain(app.detail_content());
     let repo = detail
@@ -1004,14 +1088,14 @@ fn conflicting_clone_identity_remains_mergeable_when_representative_is_excluded(
     alternate.email = "local-b@example.com".into();
     alternate.repo_id = "/repos/b-clone".into();
     alternate.repo_name = "b-clone".into();
-    app.all_records = vec![first, alternate];
+    app.all_records = vec![first, alternate].into();
     populate(&mut app);
     assert_eq!(app.authors.len(), 1);
     assert_eq!(app.authors[0].id, "email:local-a@example.com");
     assert_eq!(app.contributors.len(), 2);
-    assert_eq!(app.attribution_warnings.len(), 1);
     app.excluded.insert("/repos/a-clone".into());
     app.recompute();
+    settle(&mut app);
     assert_eq!(app.authors[0].id, "email:local-b@example.com");
     ch(&mut app, 'M');
     let flow = app
@@ -1027,7 +1111,7 @@ fn conflicting_clone_identity_remains_mergeable_when_representative_is_excluded(
     assert!(app.merge.is_none());
     app.excluded.clear();
     app.recompute();
-    assert!(app.attribution_warnings.is_empty());
+    settle(&mut app);
     assert_eq!(app.contributors.len(), 1);
     assert_eq!(app.authors.len(), 1);
     assert_eq!(app.authors[0].name, "Resolved Person");
@@ -1040,7 +1124,7 @@ fn warning_heavy_dashboard(theme: &str, unknown_lines: bool) -> App {
     app.loaded_repos = (0..15).map(|i| repo(&format!("repo-{i:02}"))).collect();
     let mut first = record("Ada Lovelace", "repo-00", 12_345);
     first.ai_assisted = true;
-    app.all_records = if unknown_lines {
+    app.all_records = (if unknown_lines {
         first.lines_known = false;
         first.coauthors.push(Identity {
             name: "Grace Hopper".into(),
@@ -1049,7 +1133,8 @@ fn warning_heavy_dashboard(theme: &str, unknown_lines: bool) -> App {
         vec![first]
     } else {
         vec![first, record("Grace Hopper", "repo-01", 6_789)]
-    };
+    })
+    .into();
     app.warnings = (0..19)
         .map(|i| (
             format!("/repos/repo-{:02}", i % 15),
@@ -1178,9 +1263,17 @@ fn table_headings_and_large_values_fit_every_sort_and_supported_width() {
                     text.contains("123,456"),
                     "authored value truncated at {width} {field:?}:\n{text}"
                 );
+                let expected_sorted_value = match field {
+                    SortField::Total => "381,369,247",
+                    SortField::Commits => "123,456",
+                    SortField::Added => "134,567,890",
+                    SortField::Removed => "246,801,357",
+                    SortField::Net => "-112,233,467",
+                    SortField::AI => "9%",
+                };
                 assert!(
-                    text.contains("381,369,247"),
-                    "line count truncated at {width} {field:?}:\n{text}"
+                    text.contains(expected_sorted_value),
+                    "active sort value missing at {width} {field:?}:\n{text}"
                 );
                 let header = table
                     .iter()
@@ -1192,6 +1285,12 @@ fn table_headings_and_large_values_fit_every_sort_and_supported_width() {
                         })
                     })
                     .unwrap();
+                assert!(
+                    header
+                        .to_string()
+                        .contains(if ascending { '↑' } else { '↓' }),
+                    "active sort column missing at {width} {field:?}:\n{text}"
+                );
                 let row = table
                     .iter()
                     .find(|line| line.spans.iter().any(|span| span.content.contains("Ada")))
@@ -1255,7 +1354,8 @@ fn many_row_navigation_preserves_selection_across_banner_height_boundary() {
     let mut app = empty();
     app.all_records = (0..40)
         .map(|i| record(&format!("Person {i:02}"), "engine", 100 - i))
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     populate(&mut app);
     for width in [80, 144] {
         for height in [29, 30, 29] {
@@ -1298,7 +1398,8 @@ fn long_contributor_detail() -> App {
             entry.lines_known = i != 0;
             entry
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     for offset in 0..11 {
         let month = 7 + offset;
         let (year, month) = if month > 12 {
@@ -1311,10 +1412,9 @@ fn long_contributor_detail() -> App {
             .with_ymd_and_hms(year, month, 1, 12, 0, 0)
             .unwrap()
             .fixed_offset();
-        app.all_records.push(entry);
+        Arc::make_mut(&mut app.all_records).push(entry);
     }
-    app.all_records
-        .push(record("Grace Hopper", "project-00", 1));
+    Arc::make_mut(&mut app.all_records).push(record("Grace Hopper", "project-00", 1));
     app.failed_repos = vec!["broken".into()];
     app.warnings = vec![(
         "/repos/project-00".into(),
@@ -1531,4 +1631,136 @@ fn github_board_labels_api_basis_and_omits_local_history_control() {
         assert!(detail.contains("Commit date · all files"), "{detail}");
         key(&mut app, KeyCode::Esc);
     }
+}
+
+#[test]
+fn pending_analysis_accepts_filters_and_only_publishes_the_latest_result() {
+    let mut app = populated();
+    let mut branch = record("Branch Author", "compiler", 40);
+    branch.landed = false;
+    let mut old = record("Old Author", "compiler", 30);
+    old.date = now() - Duration::days(60);
+    Arc::make_mut(&mut app.all_records).extend([
+        branch,
+        old,
+        record("worker[bot]", "compiler", 20),
+    ]);
+    app.invalidate_contributors();
+    app.recompute();
+    let first_generation = app.pending_analysis.as_ref().unwrap().generation;
+    // Do not poll the worker between inputs: an already completed older
+    // response must be ignored just as a canceled in-flight response is.
+    for code in [
+        KeyCode::Char('B'),
+        KeyCode::Left,
+        KeyCode::Left,
+        KeyCode::Left,
+        KeyCode::Char('b'),
+        KeyCode::Char('r'),
+        KeyCode::Down,
+        KeyCode::Char(' '),
+        KeyCode::Enter,
+    ] {
+        assert_eq!(
+            app.key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Action::None
+        );
+    }
+    assert!(app.pending_analysis.as_ref().unwrap().generation > first_generation);
+    assert_eq!(app.scope, HistoryScope::AllBranches);
+    assert_eq!(TIME_PRESETS[app.time_index].1, 30);
+    assert!(app.excluded.contains("/repos/engine"));
+    for code in [KeyCode::Enter, KeyCode::Char('M')] {
+        app.key(KeyEvent::new(code, KeyModifiers::NONE));
+        assert_eq!(app.view, View::Aggregate);
+        assert!(app.merge.is_none());
+    }
+    let pending = draw(&mut app, 80, 24);
+    assert!(pending.contains("Updating contributors"), "{pending}");
+    assert!(!pending.contains("Ada Lovelace"), "{pending}");
+    assert_eq!(
+        app.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+        Action::Quit
+    );
+    settle(&mut app);
+    assert!(app.hide_bots);
+    assert_eq!(app.totals(), (2, 90, 9, 0));
+    assert_eq!(app.authors.len(), 2);
+    assert!(app.authors.iter().all(|author| author.name != "Old Author"));
+    assert_eq!(app.contributors.len(), 5); // Catalog ignores view filters.
+    assert!(!app.catalog_dirty);
+}
+
+#[test]
+fn pending_filters_preserve_selection_and_refresh_discards_old_analysis() {
+    let mut app = populated();
+    app.select_id("email:gracehopper@example.com");
+    for code in [KeyCode::Left, KeyCode::Left, KeyCode::Char('B')] {
+        app.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+    settle(&mut app);
+    assert_eq!(
+        app.selected_id().as_deref(),
+        Some("email:gracehopper@example.com")
+    );
+
+    app.recompute();
+    app.repositories = vec![repo("replacement")];
+    assert_eq!(
+        app.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE)),
+        Action::Refresh
+    );
+    assert!(app.pending_analysis.is_none());
+    assert!(app.loading);
+    app.cutoff = now();
+    app.loaded(ScanResult {
+        repository: repo("replacement"),
+        records: vec![record("New Author", "replacement", 7)],
+        error: None,
+        warnings: vec![],
+    });
+    settle(&mut app);
+    assert_eq!(app.authors.len(), 1);
+    assert_eq!(app.authors[0].name, "New Author");
+    assert_eq!(app.contributors.len(), 1);
+    assert_eq!(app.totals(), (1, 7, 0, 0));
+}
+
+#[test]
+fn analysis_view_preserves_source_context_and_controls_after_resize() {
+    let mut app = populated();
+    app.recompute();
+    for github in [false, true] {
+        app.github_source = github;
+        for view in [View::Aggregate, View::Operative] {
+            app.view = view;
+            for (width, height) in [(80, 24), (60, 20)] {
+                let screen = draw(&mut app, width, height);
+                assert!(screen.contains("Updating contributors"), "{screen}");
+                assert!(screen.contains("RANGE"), "{screen}");
+                assert!(screen.contains("quit"), "{screen}");
+                assert_eq!(screen.contains("history"), !github, "{screen}");
+                if github {
+                    assert!(screen.contains("GITHUB API"), "{screen}");
+                    assert!(screen.contains("all files"), "{screen}");
+                    assert!(screen.contains("merges: ?"), "{screen}");
+                }
+            }
+        }
+    }
+    settle(&mut app);
+}
+
+pub(super) fn settle(app: &mut App) {
+    let deadline = Instant::now() + StdDuration::from_secs(5);
+    while app.pending_analysis.is_some() {
+        app.poll_analysis().unwrap();
+        assert!(Instant::now() < deadline, "analysis did not finish");
+        std::thread::yield_now();
+    }
+}
+
+fn loaded(app: &mut App, result: ScanResult) {
+    app.loaded(result);
+    settle(app);
 }

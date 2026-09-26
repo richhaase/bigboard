@@ -312,7 +312,9 @@ mod tests {
             .join("\n")
     }
     fn key(app: &mut App, code: KeyCode) -> Action {
-        app.key(KeyEvent::new(code, KeyModifiers::NONE))
+        let action = app.key(KeyEvent::new(code, KeyModifiers::NONE));
+        super::super::tests::settle(app);
+        action
     }
 
     #[test]
@@ -374,7 +376,6 @@ mod tests {
     fn healthy_repository_details_use_only_path_rows_and_ignore_warning_data() {
         let mut app = app(80, 24);
         app.warnings = vec![("/repos/node-00".into(), "RAW-COMMIT-WARNING".into())];
-        app.attribution_warnings = vec!["RAW-ATTRIBUTION-WARNING".into()];
         let details = text(&app.repository_details());
         assert_eq!(details, "/repos/node-00");
         let screen = text(&app.repository_lines());

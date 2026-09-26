@@ -13,13 +13,15 @@ To combine `Mike` and `mbiggly`:
 1. Highlight either contributor on the board, or open their detail view, and press `M`.
 2. Type a name, alias, email, or repository name to narrow the candidates. Use `↑/↓` to select the other identity and press `Enter`.
 3. Check the source and target emails and repositories. Edit the prefilled combined display name; `Ctrl+U` clears it.
-4. Press `Enter` to save. Big Board recomputes the view using the saved mapping. `Esc` cancels at either stage without changing mappings.
+4. Press `Enter` to save. Big Board recomputes the view in the background using the saved mapping and keeps the combined identity selected when it matches the remaining filters. `Esc` cancels at either stage without changing mappings.
 
 The picker includes identities from all loaded repositories, dates, and branches, even when hidden by the current view's filters or repository exclusions. Future-dated records remain excluded. Both identities must be present in the loaded history; saved mappings can then apply to those identities in other repository selections and future sessions. A successful merge clears the board's name search; the other view filters still apply to the combined contributor. A failed save is reported and does not apply an in-memory-only merge.
 
 Mappings live in `~/.config/bigboard/identities.json`, or `$XDG_CONFIG_HOME/bigboard/identities.json`. They apply to every repository and config profile. Saves reload the latest mapping under a file lock and replace it atomically. The chosen display name is a label; filtering and navigation use the resolved identity key.
 
 Human `Co-authored-by` metadata gives separate coauthored participation credit. A person who is both the primary author and a coauthor of the same commit receives authored credit only. Mapping two aliases together also merges their participation without double credit. The primary author retains line-change attribution because the metadata does not allocate lines among participants.
+
+In both sources, recognized AI coauthors mark detected AI attribution but do not receive human coauthored participation credit. This also applies to configured `ai_identities`. An AI identity that is the primary author still receives authored credit; the bot filter is a separate classification.
 
 ## History and unique counts
 
@@ -54,6 +56,8 @@ Missing boundary diffs in shallow history and unallocatable merge diffs remain u
 - **Detected AI:** authored commits with a recognized agent author/coauthor or user override. Built-in rules use specific identities, not entire AI-company domains. Display rounding does not affect sorting precision.
 
 Board totals reflect the selected repositories, history scope, time range, and bot inclusion. Bots are included initially; `b` changes both rows and totals. Name search (`/`) filters visible contributor rows without recalculating board totals. Repository breakdowns remain overlapping associations, not additional board commits.
+
+History aggregation and identity-catalog rebuilding run outside the terminal event loop. A new range, repository filter, or identity mapping supersedes the pending calculation. Canceled or superseded calculations never publish partial totals, and the merge catalog continues to include all loaded identities through the scan cutoff, independent of view filters. See [controls](../README.md#controls) for actions available during loading and calculation.
 
 Set `"timezone": "America/Denver"` (or another IANA zone) in the existing config file to override UTC, then restart Big Board. `R` refreshes Git data without reloading configuration. Interactive filters are session preferences; confirmed identity merges are saved globally. The obsolete `fuzzy: true` setting is rejected with instructions to use explicit merges; `false` is accepted for migration. `--export` has been removed, leaving `--version`, `--config`, and `--group`.
 

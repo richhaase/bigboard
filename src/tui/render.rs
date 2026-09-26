@@ -29,6 +29,9 @@ impl App {
         if self.view == View::Repositories {
             return self.repository_lines();
         }
+        if self.pending_analysis.is_some() {
+            return self.analysis_lines();
+        }
         if let Some(error) = &self.error {
             let mut lines = banner(self.width as usize, self.height < 25, &self.palette);
             lines.extend([
@@ -63,6 +66,61 @@ impl App {
             View::Operative => self.detail_lines(),
             View::Repositories => self.repository_lines(),
         }
+    }
+
+    fn analysis_lines(&self) -> Vec<UiLine> {
+        let p = &self.palette;
+        let width = self.width as usize;
+        let mut lines = banner(width, true, p);
+        lines.push(text_line(
+            truncate(&self.scope_line().to_string(), width),
+            p.dim_cyan,
+        ));
+        lines.push(text_line(
+            format!("  RANGE ▐{}▌", TIME_PRESETS[self.time_index].0),
+            p.cyan,
+        ));
+        if self.github_source {
+            lines.push(self.api_basis());
+        }
+        lines.extend(self.quality_lines());
+        lines.push(blank());
+        lines.push(text_line(
+            truncate(
+                &format!(
+                    "  {} Updating contributors · {} records",
+                    spinner(self.loading_tick),
+                    format_number(self.all_records.len() as i64)
+                ),
+                width,
+            ),
+            p.cyan,
+        ));
+        lines.push(text_line(
+            "  Filters remain available · q cancels",
+            p.dim_white,
+        ));
+        lines.push(blank());
+        let mut controls = vec![("←→", "range".into())];
+        if !self.github_source {
+            controls.push(("B", "history".into()));
+        }
+        if self.view == View::Aggregate {
+            controls.extend([
+                (
+                    "b",
+                    format!("bots:{}", if self.hide_bots { "off" } else { "on" }),
+                ),
+                ("r", "repos".into()),
+                ("R", "refresh".into()),
+                ("g", "GitHub".into()),
+            ]);
+        } else {
+            controls.push(("esc", "back".into()));
+        }
+        controls.push(("q", "quit".into()));
+        lines.extend(wrap_help(&controls, width, p));
+        lines
     }
 
     fn loading_lines(&self) -> Vec<UiLine> {
@@ -485,22 +543,28 @@ impl App {
         let p = &self.palette;
         let width = self.width as usize;
         if authors.is_empty() {
-            return vec![text_line(
-                truncate(
-                    &if self.searching || !self.filter_query.is_empty() {
-                        format!(
-                            "  ◈ NO MATCH for {:?} — esc to clear filter.",
-                            display_text(&self.filter_query)
-                        )
-                    } else {
-                        "  ◈ NO SIGNAL — no commit data in range. Widen time or toggle B for all branches.".into()
-                    },
-                    width,
-                ),
-                p.amber,
-            )];
+            let message = if self.searching || !self.filter_query.is_empty() {
+                format!(
+                    "  ◈ NO MATCH for {:?} — esc to clear filter.",
+                    display_text(&self.filter_query)
+                )
+            } else if !self.loaded_repos.is_empty()
+                && self.excluded_count() == self.loaded_repos.len()
+            {
+                "  ◈ No repositories selected. Press r to include repositories.".into()
+            } else if self.hide_bots {
+                "  ◈ No contributors in range. Press b to include bots or ←→ to widen the range."
+                    .into()
+            } else {
+                format!("  ◈ NO SIGNAL — {}", self.no_activity_hint())
+            };
+            return if self.searching || !self.filter_query.is_empty() {
+                vec![text_line(truncate(&message, width), p.amber)]
+            } else {
+                wrapped(&message, width, p.amber)
+            };
         }
-        let layout = TableLayout::new(width.saturating_sub(4), &authors);
+        let layout = TableLayout::new(width.saturating_sub(4), &authors, self.sort_field);
         let arrow = if self.sort_ascending { "↑" } else { "↓" };
         let mut header = vec![bold(
             format!(
@@ -691,10 +755,25 @@ impl App {
                 ));
             }
         } else {
-            lines.extend([blank(),text_line("  ◈ NO SIGNAL — no activity in this range. Change time or press B for all branches.",p.amber)]);
+            lines.push(blank());
+            lines.extend(wrapped(
+                &format!("  ◈ NO SIGNAL — {}", self.no_activity_hint()),
+                width,
+                p.amber,
+            ));
         }
 
         lines
+    }
+
+    fn no_activity_hint(&self) -> &'static str {
+        if self.github_source {
+            "Widen the range with ←→, or use g on the board to choose repos."
+        } else if self.scope == crate::model::HistoryScope::Landed {
+            "Use ←→ for more days or B for all branches."
+        } else {
+            "Widen the range with ←→, or use R on the board to refresh."
+        }
     }
 }
 
@@ -844,7 +923,7 @@ struct TableLayout {
     columns: Vec<TableColumn>,
 }
 impl TableLayout {
-    fn new(width: usize, authors: &[&AuthorStats]) -> Self {
+    fn new(width: usize, authors: &[&AuthorStats], sort: SortField) -> Self {
         let compact = width < 70;
         let fields = [
             (
@@ -899,7 +978,9 @@ impl TableLayout {
             if fixed(&columns) + min_name <= width {
                 break;
             }
-            columns.retain(|c| c.field != remove);
+            if remove.sort_field() != Some(sort) {
+                columns.retain(|c| c.field != remove);
+            }
         }
         Self {
             name: width.saturating_sub(fixed(&columns)),
