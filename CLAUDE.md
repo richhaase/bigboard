@@ -4,7 +4,7 @@ Cyberpunk terminal dashboard for contributor activity across Git repositories. R
 
 ## Architecture
 
-- `src/main.rs`, `src/config.rs`: four CLI flags, strict JSON preferences, timezone, groups, paths and exclusions. No JSON export.
+- `src/main.rs`, `src/config.rs`: three CLI flags, strict JSON preferences, timezone, groups, paths and exclusions. No paths/group means GitHub with saved selection; explicit paths/group means local with no automatic GitHub fallback. No JSON export.
 - `src/model.rs`: repository, identity, commit, scope, scan data and options.
 - `src/git.rs`: snapshot branch history, streaming collection, generated-file filtering, mailmap/coauthors, detected AI, completeness and merge accounting.
 - `src/identity.rs`: explicit user-global contributor mappings, atomic persistence with locking.

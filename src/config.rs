@@ -13,7 +13,6 @@ use std::{
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
-    pub paths: Vec<String>,
     pub exclude: Vec<String>,
     pub sort: String,
     pub since: String,
@@ -92,10 +91,6 @@ impl<'de> Deserialize<'de> for Config {
                 let mut list_buffers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
                 while let Some(key) = map.next_key::<String>()? {
                     match folded_config_key(&key).as_str() {
-                        "paths" => {
-                            config.paths =
-                                string_list(&mut map, list_buffers.entry("paths").or_default())?
-                        }
                         "exclude" => {
                             config.exclude =
                                 string_list(&mut map, list_buffers.entry("exclude").or_default())?
@@ -175,7 +170,6 @@ impl<'de> Deserialize<'de> for Config {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct Cli {
     pub version: bool,
-    pub github: bool,
     pub group: String,
     pub config: String,
     pub paths: Vec<String>,
@@ -183,6 +177,11 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Only explicit paths or a named group select local analysis.
+    pub fn github_mode(&self) -> bool {
+        self.paths.is_empty() && self.group.is_empty()
+    }
+
     /// Like Go's flag package, stop parsing flags at the first positional arg.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut result = Self::default();
@@ -210,17 +209,13 @@ impl Cli {
                     break;
                 }
                 "export" => bail!("--export has been removed; use the interactive dashboard"),
-                "version" | "github" => {
+                "version" => {
                     let value = match supplied.unwrap_or("true") {
                         "1" | "t" | "T" | "TRUE" | "true" | "True" => true,
                         "0" | "f" | "F" | "FALSE" | "false" | "False" => false,
                         v => bail!("invalid boolean value {v:?} for -{key}"),
                     };
-                    if key == "github" {
-                        result.github = value;
-                    } else {
-                        result.version = value;
-                    }
+                    result.version = value;
                 }
                 "group" | "config" => {
                     let value = supplied
@@ -347,12 +342,8 @@ pub fn scan_paths(cli: &Cli, config: &Config) -> Result<Vec<PathBuf>> {
             .with_context(|| format!("unknown group {:?}", cli.group))?
             .as_deref()
             .unwrap_or(&[])
-    } else if !cli.paths.is_empty() {
-        &cli.paths
-    } else if !config.paths.is_empty() {
-        &config.paths
     } else {
-        return Ok(vec![PathBuf::from(".")]);
+        &cli.paths
     };
     Ok(selected.iter().map(|p| expand_home(p)).collect())
 }
@@ -581,9 +572,26 @@ fn file_pattern_matches(mut pattern: &str, name: &str) -> Result<bool> {
 mod tests {
     use super::*;
     #[test]
-    fn cli_github_entry_preserves_local_flags_and_export_is_removed() {
-        assert!(Cli::parse(["--github".into()]).unwrap().github);
-        assert!(!Cli::parse(["--github=false".into()]).unwrap().github);
+    fn startup_defaults_to_github_unless_local_inputs_are_explicit() {
+        for args in [vec![], vec!["--config", "custom.json"]] {
+            let cli = Cli::parse(args.into_iter().map(str::to_owned)).unwrap();
+            assert!(cli.github_mode());
+        }
+        for args in [
+            vec!["."],
+            vec!["one", "two"],
+            vec!["--group", "team"],
+            vec!["--config", "custom.json", "."],
+        ] {
+            let cli = Cli::parse(args.into_iter().map(str::to_owned)).unwrap();
+            assert!(!cli.github_mode());
+        }
+    }
+
+    #[test]
+    fn cli_rejects_removed_flags_and_preserves_positional_arguments() {
+        assert!(Cli::parse(["--github".into()]).is_err());
+        assert!(Cli::parse(["--github=false".into()]).is_err());
         assert!(Cli::parse(["--github=invalid".into()]).is_err());
         let cli = Cli::parse(
             ["--config=x.json", "--group", "backend", "repo", "--version"].map(String::from),
@@ -638,14 +646,9 @@ mod tests {
             fs::write(&p, body).unwrap();
             assert!(load_config(&p, true).is_err());
         }
-        fs::write(
-            &p,
-            r#"{"paths":null,"fuzzy":null,"sort":null,"groups":{"empty":null}}"#,
-        )
-        .unwrap();
+        fs::write(&p, r#"{"fuzzy":null,"sort":null,"groups":{"empty":null}}"#).unwrap();
         let c = load_config(&p, true).unwrap();
         assert!(!c.fuzzy);
-        assert!(c.paths.is_empty());
         assert!(
             scan_paths(
                 &Cli {
@@ -658,6 +661,18 @@ mod tests {
             .is_empty()
         );
     }
+    #[test]
+    fn config_rejects_removed_startup_paths() {
+        for input in [
+            r#"{"paths":["~/src"]}"#,
+            r#"{"PATHS":[]}"#,
+            r#"{"paths":null}"#,
+        ] {
+            let error = serde_json::from_str::<Config>(input).unwrap_err();
+            assert!(error.to_string().contains("unknown field"));
+        }
+    }
+
     #[test]
     fn presets_are_validated() {
         assert_eq!(time_index_for_since("").unwrap(), 2);
@@ -681,14 +696,14 @@ mod tests {
     fn json_keys_duplicates_and_nulls_follow_go_decoding() {
         let config: Config = serde_json::from_str(
             r#"{
-            "PATHS":["first","second"],"Paths":["updated"],"paths":[null,null],
+            "EXCLUDE":["first","second"],"Exclude":["updated"],"exclude":[null,null],
             "Sort":"net","SORT":null,"FUZZY":true,"fuzzy":null,
             "depth":2,"Depth":null,"all_fileſ":true,
             "groups":{"one":["a"]},"GROUPS":{"two":[null],"one":null}
         }"#,
         )
         .unwrap();
-        assert_eq!(config.paths, ["updated", "second"]);
+        assert_eq!(config.exclude, ["updated", "second"]);
         assert_eq!(config.sort, "net");
         assert!(config.fuzzy);
         assert!(config.all_files);
@@ -697,13 +712,11 @@ mod tests {
         assert_eq!(config.groups["two"], Some(vec![String::new()]));
         let config: Config = serde_json::from_str(
             r#"{
-            "paths":["before"],"paths":null,"paths":[null],
             "groups":{"old":["a"]},"groups":null,"groups":{"new":[]},
             "exclude":[null],"AI_IDENTITIES":[null],"BOT_IDENTITIES":null
         }"#,
         )
         .unwrap();
-        assert_eq!(config.paths, [""]);
         assert_eq!(config.exclude, [""]);
         assert_eq!(config.ai_identities, [""]);
         assert!(config.bot_identities.is_empty());
@@ -716,7 +729,7 @@ mod tests {
         for invalid in [
             r#"{"fuzzy":1}"#,
             r#"{"depth":1.5}"#,
-            r#"{"paths":[42]}"#,
+            r#"{"exclude":[42]}"#,
             r#"{"groups":{"team":false}}"#,
             r#"{"UNKNOWN":null}"#,
             r#"[]"#,
@@ -767,7 +780,6 @@ mod tests {
     #[test]
     fn group_paths_take_precedence_and_names_remain_case_sensitive() {
         let config = Config {
-            paths: vec!["configured".into()],
             groups: BTreeMap::from([
                 ("Team".into(), Some(vec!["grouped".into()])),
                 ("empty".into(), None),
@@ -791,13 +803,11 @@ mod tests {
         assert!(scan_paths(&cli, &config).is_err());
         cli.group = "empty".into();
         assert!(scan_paths(&cli, &config).unwrap().is_empty());
-        assert_eq!(
-            scan_paths(&Cli::default(), &config).unwrap(),
-            [PathBuf::from("configured")]
-        );
-        assert_eq!(
-            scan_paths(&Cli::default(), &Config::default()).unwrap(),
-            [PathBuf::from(".")]
+        assert!(scan_paths(&Cli::default(), &config).unwrap().is_empty());
+        assert!(
+            scan_paths(&Cli::default(), &Config::default())
+                .unwrap()
+                .is_empty()
         );
     }
 

@@ -360,7 +360,15 @@ impl App {
             ("←→", "range".to_owned()),
             ("/", "find".to_owned()),
             ("s/S", "sort/reverse".to_owned()),
-            ("g", "GitHub".to_owned()),
+            (
+                "g",
+                if self.github_source {
+                    "choose repos"
+                } else {
+                    "GitHub"
+                }
+                .to_owned(),
+            ),
             ("M", "merge".to_owned()),
             ("B", "history".to_owned()),
             (

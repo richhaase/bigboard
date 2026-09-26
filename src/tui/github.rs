@@ -67,14 +67,29 @@ impl Picker {
             })
             .collect()
     }
-    fn ready(&mut self, catalog: Catalog) {
+    /// Resume only a complete saved selection; missing access needs a decision.
+    fn ready(&mut self, catalog: Catalog) -> bool {
         self.login = catalog.login;
         self.repositories = catalog.repositories;
         let available: HashSet<_> = self.repositories.iter().map(|repo| repo.id).collect();
+        let missing = self.selected.difference(&available).count();
         self.selected.retain(|id| available.contains(id));
+        if missing > 0 {
+            self.error = Some(format!(
+                "{missing} saved repositories unavailable; review your selection"
+            ));
+        }
         self.loading = false;
         self.cursor = 0;
         self.offset = 0;
+        !self.selected.is_empty() && self.error.is_none()
+    }
+    fn selected_repositories(&self) -> Vec<RemoteRepository> {
+        self.repositories
+            .iter()
+            .filter(|r| self.selected.contains(&r.id))
+            .cloned()
+            .collect()
     }
     fn key(&mut self, key: KeyEvent, can_local: bool, page: usize) -> PickerAction {
         if key.kind == KeyEventKind::Release {
@@ -301,6 +316,7 @@ pub(super) fn choose(
     palette: Palette,
     current: Option<&[RemoteRepository]>,
     can_local: bool,
+    mut resume_saved: bool,
 ) -> anyhow::Result<Choice> {
     let mut picker = Picker::new(
         palette,
@@ -343,7 +359,14 @@ pub(super) fn choose(
                             Err(error) => picker.error = Some(format!("{error:#}")),
                         }
                     }
-                    picker.ready(catalog);
+                    let can_resume = picker.ready(catalog);
+                    if resume_saved && can_resume {
+                        return Ok(Choice::Repositories(
+                            picker.client.as_ref().unwrap().clone(),
+                            picker.selected_repositories(),
+                        ));
+                    }
+                    resume_saved = false;
                     first = false;
                     discovery = None;
                     dirty = true;
@@ -384,6 +407,7 @@ pub(super) fn choose(
         let input = event::read()?;
         dirty = matches!(input, Event::Key(_) | Event::Resize(_, _));
         if let Event::Key(key) = input {
+            resume_saved = false;
             match picker.key(key, can_local, page) {
                 PickerAction::None => {}
                 PickerAction::Refresh => restart = true,
@@ -391,12 +415,7 @@ pub(super) fn choose(
                 PickerAction::Quit => return Ok(Choice::Quit),
                 PickerAction::Local => return Ok(Choice::Local),
                 PickerAction::Apply => {
-                    let repositories: Vec<_> = picker
-                        .repositories
-                        .iter()
-                        .filter(|r| picker.selected.contains(&r.id))
-                        .cloned()
-                        .collect();
+                    let repositories = picker.selected_repositories();
                     let Some(client) = picker.client.as_ref() else {
                         continue;
                     };
@@ -426,6 +445,31 @@ mod tests {
             disabled: false,
         }
     }
+    #[test]
+    fn saved_selection_resumes_only_when_complete_and_error_free() {
+        let catalog = || Catalog {
+            login: "alice".into(),
+            repositories: vec![repo(1, "org/one"), repo(2, "org/two")],
+        };
+        let mut p = Picker::new(Palette::for_theme("dark"), HashSet::from([2]));
+        assert!(p.ready(catalog()));
+        assert_eq!(p.selected_repositories()[0].id, 2);
+        let mut p = Picker::new(Palette::for_theme("dark"), HashSet::new());
+        assert!(!p.ready(catalog()));
+        let mut p = Picker::new(Palette::for_theme("dark"), HashSet::from([1, 3]));
+        assert!(!p.ready(catalog()));
+        assert!(
+            p.error
+                .as_ref()
+                .unwrap()
+                .contains("1 saved repositories unavailable")
+        );
+        assert_eq!(p.selected, HashSet::from([1]));
+        let mut p = Picker::new(Palette::for_theme("dark"), HashSet::from([1]));
+        p.error = Some("Cannot read saved selection".into());
+        assert!(!p.ready(catalog()));
+    }
+
     fn key(picker: &mut Picker, code: KeyCode) -> PickerAction {
         picker.key(KeyEvent::new(code, KeyModifiers::NONE), true, 5)
     }
