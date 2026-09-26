@@ -1,5 +1,4 @@
 use super::components::*;
-use super::merge::{wrap_help, wrapped};
 use super::{App, TIME_PRESETS, View};
 use crate::stats::{AuthorStats, RepoContribution, SortField};
 use chrono::{Datelike, Duration, Months, NaiveDate};
@@ -23,7 +22,7 @@ impl App {
     }
 
     pub(super) fn lines(&self) -> Vec<UiLine> {
-        if self.loading {
+        if self.loading() {
             return self.loading_lines();
         }
         if self.view == View::Repositories {
@@ -32,7 +31,7 @@ impl App {
         if self.pending_analysis.is_some() {
             return self.analysis_lines();
         }
-        if let Some(error) = &self.error {
+        if self.loaded_repos.is_empty() && !self.failed_repos.is_empty() {
             let mut lines = banner(self.width as usize, self.height < 25, &self.palette);
             lines.extend([
                 blank(),
@@ -40,7 +39,10 @@ impl App {
                 blank(),
             ]);
             lines.extend(wrapped(
-                &format!("  {error}"),
+                &format!(
+                    "  all {} repositories failed to scan",
+                    self.failed_repos.len()
+                ),
                 self.width as usize,
                 self.palette.red,
             ));
@@ -172,7 +174,7 @@ impl App {
                 format!(
                     "  ▐ {}/{} repos complete ▌",
                     self.boot_lines.len(),
-                    self.boot_lines.len() + self.pending_remaining
+                    self.boot_lines.len() + self.pending_scan.remaining
                 ),
                 p.dim_cyan,
             ),

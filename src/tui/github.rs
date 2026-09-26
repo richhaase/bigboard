@@ -1,8 +1,5 @@
 //! GitHub repository selection, kept responsive while discovery runs.
-use super::{
-    components::*,
-    merge::{wrap_help, wrapped},
-};
+use super::components::*;
 use crate::github::{Catalog, Client, Discovery, RemoteRepository};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line, widgets::Paragraph};

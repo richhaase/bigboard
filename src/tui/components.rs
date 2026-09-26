@@ -401,6 +401,38 @@ pub(super) fn help(bindings: &[(&str, String)], p: &Palette) -> UiLine {
     Line::from(spans)
 }
 
+pub(super) fn wrapped(text: &str, width: usize, color: Color) -> Vec<UiLine> {
+    let text = display_text(text);
+    if width == 0 {
+        return vec![blank()];
+    }
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for (end, c) in text.char_indices() {
+        if text[start..end + c.len_utf8()].width() > width && end > start {
+            lines.push(text_line(&text[start..end], color));
+            start = end;
+        }
+    }
+    lines.push(text_line(&text[start..], color));
+    lines
+}
+
+pub(super) fn wrap_help(bindings: &[(&str, String)], width: usize, p: &Palette) -> Vec<UiLine> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for end in 1..=bindings.len() {
+        if help(&bindings[start..end], p).width() > width && end > start + 1 {
+            lines.push(help(&bindings[start..end - 1], p));
+            start = end - 1;
+        }
+    }
+    if start < bindings.len() {
+        lines.push(help(&bindings[start..], p));
+    }
+    lines
+}
+
 pub(super) fn format_number(n: i64) -> String {
     let s = n.to_string();
     let (sign, digits) = if let Some(n) = s.strip_prefix('-') {
@@ -557,6 +589,22 @@ mod component_tests {
                 .iter()
                 .any(|s| s.style.fg == Some(p.magenta))
         );
+    }
+
+    #[test]
+    fn text_wrapping_preserves_unicode_controls_and_empty_rows() {
+        for (text, width, expected) in [
+            ("A日本B", 2, vec!["A", "日", "本", "B"]),
+            ("e\u{301}x", 1, vec!["e\u{301}", "x"]),
+            ("👩‍💻x", 2, vec!["👩‍💻", "x"]),
+            ("\u{1b}[31mA\nB\u{1b}[0m", 2, vec!["A ", "B"]),
+            ("", 10, vec![""]),
+            ("text", 0, vec![""]),
+            ("日", 1, vec!["日"]),
+        ] {
+            let lines = wrapped(text, width, Color::Cyan);
+            assert_eq!(lines.iter().map(plain).collect::<Vec<_>>(), expected);
+        }
     }
 
     #[test]
