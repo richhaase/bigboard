@@ -12,6 +12,7 @@ Cyberpunk terminal dashboard for contributor activity across Git repositories. R
 - `src/github.rs`: lightweight default-branch commit summaries through `gh api`, date coverage cache, pagination, and discovery. Never clone or fetch repositories.
 - `src/scan.rs`: bounded cancelable scan sessions.
 - `src/tui/`: stable contributor selection, merge flow, history toggle, completeness notices, rendering and terminal lifecycle.
+- `src/tui/analysis.rs`: one cancelable aggregation worker, shared immutable record snapshots, and latest-request result delivery. Never run history aggregation on the terminal event loop or publish partial/canceled totals.
 
 ## Analytics invariants
 

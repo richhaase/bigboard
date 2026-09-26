@@ -29,6 +29,9 @@ impl App {
         if self.view == View::Repositories {
             return self.repository_lines();
         }
+        if self.pending_analysis.is_some() {
+            return self.analysis_lines();
+        }
         if let Some(error) = &self.error {
             let mut lines = banner(self.width as usize, self.height < 25, &self.palette);
             lines.extend([
@@ -63,6 +66,61 @@ impl App {
             View::Operative => self.detail_lines(),
             View::Repositories => self.repository_lines(),
         }
+    }
+
+    fn analysis_lines(&self) -> Vec<UiLine> {
+        let p = &self.palette;
+        let width = self.width as usize;
+        let mut lines = banner(width, true, p);
+        lines.push(text_line(
+            truncate(&self.scope_line().to_string(), width),
+            p.dim_cyan,
+        ));
+        lines.push(text_line(
+            format!("  RANGE ▐{}▌", TIME_PRESETS[self.time_index].0),
+            p.cyan,
+        ));
+        if self.github_source {
+            lines.push(self.api_basis());
+        }
+        lines.extend(self.quality_lines());
+        lines.push(blank());
+        lines.push(text_line(
+            truncate(
+                &format!(
+                    "  {} Updating contributors · {} records",
+                    spinner(self.loading_tick),
+                    format_number(self.all_records.len() as i64)
+                ),
+                width,
+            ),
+            p.cyan,
+        ));
+        lines.push(text_line(
+            "  Filters remain available · q cancels",
+            p.dim_white,
+        ));
+        lines.push(blank());
+        let mut controls = vec![("←→", "range".into())];
+        if !self.github_source {
+            controls.push(("B", "history".into()));
+        }
+        if self.view == View::Aggregate {
+            controls.extend([
+                (
+                    "b",
+                    format!("bots:{}", if self.hide_bots { "off" } else { "on" }),
+                ),
+                ("r", "repos".into()),
+                ("R", "refresh".into()),
+                ("g", "GitHub".into()),
+            ]);
+        } else {
+            controls.push(("esc", "back".into()));
+        }
+        controls.push(("q", "quit".into()));
+        lines.extend(wrap_help(&controls, width, p));
+        lines
     }
 
     fn loading_lines(&self) -> Vec<UiLine> {

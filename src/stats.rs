@@ -417,16 +417,21 @@ pub fn attribution_warnings(records: &[CommitRecord], options: &AggregateOptions
 /// competing repository mailmaps for one object. Each row counts only copies in
 /// which that identity participates; these rows must not be summed as board totals.
 pub fn identity_catalog(records: &[CommitRecord], options: &AggregateOptions) -> Vec<AuthorStats> {
-    identity_catalog_iter(records, options)
+    identity_catalog_cancellable(records, options, &|| false)
+        .expect("uncancelled identity collection completes")
 }
 
-pub(crate) fn identity_catalog_iter<'a>(
+pub(crate) fn identity_catalog_cancellable<'a>(
     records: impl IntoIterator<Item = &'a CommitRecord>,
     options: &AggregateOptions,
-) -> Vec<AuthorStats> {
+    cancelled: &impl Fn() -> bool,
+) -> Option<Vec<AuthorStats>> {
     let mut identities: BTreeMap<String, BTreeMap<CommitKey<'_>, Vec<&CommitRecord>>> =
         BTreeMap::new();
     for (index, record) in records.into_iter().enumerate() {
+        if cancelled() {
+            return None;
+        }
         for id in participants(record, &[], options).into_keys() {
             let key = if record.commit_id.is_empty() {
                 CommitKey::Missing(index)
@@ -443,33 +448,49 @@ pub(crate) fn identity_catalog_iter<'a>(
     }
     let mut catalog = Vec::with_capacity(identities.len());
     for (id, commits) in identities {
-        catalog.extend(aggregate_groups(commits.into_values(), options, Some(&id)));
+        if cancelled() {
+            return None;
+        }
+        catalog.extend(aggregate_groups(
+            commits.into_values(),
+            options,
+            Some(&id),
+            cancelled,
+        ));
     }
     catalog.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
-    catalog
+    (!cancelled()).then_some(catalog)
 }
 
 /// Aggregate unique Git objects, retaining overlapping repository associations.
 /// Callers apply repository, history-scope, and query-time filters first.
 pub fn aggregate(records: &[CommitRecord], options: &AggregateOptions) -> Vec<AuthorStats> {
-    aggregate_iter(records, options)
+    aggregate_cancellable(records, options, &|| false).expect("uncancelled aggregation completes")
 }
 
-pub(crate) fn aggregate_iter<'a>(
+/// Canceled calculations never expose partially accumulated totals.
+pub(crate) fn aggregate_cancellable<'a>(
     records: impl IntoIterator<Item = &'a CommitRecord>,
     options: &AggregateOptions,
-) -> Vec<AuthorStats> {
-    aggregate_groups(commit_groups(records).into_values(), options, None)
+    cancelled: &impl Fn() -> bool,
+) -> Option<Vec<AuthorStats>> {
+    let groups = commit_groups(records.into_iter().take_while(|_| !cancelled()));
+    if cancelled() {
+        return None;
+    }
+    let authors = aggregate_groups(groups.into_values(), options, None, cancelled);
+    (!cancelled()).then_some(authors)
 }
 
 fn aggregate_groups<'a>(
     groups: impl IntoIterator<Item = Vec<&'a CommitRecord>>,
     options: &AggregateOptions,
     only_id: Option<&str>,
+    cancelled: &impl Fn() -> bool,
 ) -> Vec<AuthorStats> {
     let mut by_id: BTreeMap<String, AuthorStats> = BTreeMap::new();
     let mut name_counts: HashMap<String, BTreeMap<String, usize>> = HashMap::new();
-    for copies in groups {
+    for copies in groups.into_iter().take_while(|_| !cancelled()) {
         let record = representative(&copies);
         let ai_assisted = copies.iter().any(|record| record.ai_assisted);
         let mut repositories = BTreeMap::new();
@@ -570,6 +591,7 @@ fn aggregate_groups<'a>(
     }
     let mut authors: Vec<_> = by_id
         .into_values()
+        .take_while(|_| !cancelled())
         .map(|mut author| {
             author.name = options
                 .identities
@@ -719,6 +741,46 @@ mod tests {
 
     fn author<'a>(authors: &'a [AuthorStats], id: &str) -> &'a AuthorStats {
         authors.iter().find(|author| author.id == id).unwrap()
+    }
+
+    #[test]
+    fn cancellation_never_returns_partial_totals_or_identity_catalogs() {
+        use std::cell::Cell;
+
+        let records: Vec<_> = (0..12)
+            .map(|i| record(&i.to_string(), "Alice", "a@test", "a"))
+            .collect();
+        let options = AggregateOptions::default();
+        for catalog in [false, true] {
+            let calculate = |cancelled: &dyn Fn() -> bool| {
+                if catalog {
+                    identity_catalog_cancellable(&records, &options, &cancelled)
+                } else {
+                    aggregate_cancellable(&records, &options, &cancelled)
+                }
+            };
+            let checks = Cell::new(0);
+            let complete = calculate(&|| {
+                checks.set(checks.get() + 1);
+                false
+            })
+            .unwrap();
+            assert_eq!(complete[0].commits, 12);
+            // Cover collection, aggregation, and finalization, including the
+            // final cancellation check before a complete result is published.
+            for stop_after in 0..checks.get() {
+                let calls = Cell::new(0);
+                assert!(
+                    calculate(&|| {
+                        let cancelled = calls.get() >= stop_after;
+                        calls.set(calls.get() + 1);
+                        cancelled
+                    })
+                    .is_none(),
+                    "catalog={catalog}, stop_after={stop_after}"
+                );
+            }
+        }
     }
 
     #[test]

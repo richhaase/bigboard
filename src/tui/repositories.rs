@@ -312,7 +312,9 @@ mod tests {
             .join("\n")
     }
     fn key(app: &mut App, code: KeyCode) -> Action {
-        app.key(KeyEvent::new(code, KeyModifiers::NONE))
+        let action = app.key(KeyEvent::new(code, KeyModifiers::NONE));
+        super::super::tests::settle(app);
+        action
     }
 
     #[test]

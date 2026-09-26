@@ -82,6 +82,8 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 
 In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
 
+Contributor calculations run in the background. While the board shows “Updating contributors,” you can change filters again, select repositories, or press `q` to cancel and quit. Only the latest completed calculation is displayed.
+
 Incomplete line counts retain the `?` marker. Alerts identify repository scan failures or unavailable default-branch history; per-commit and attribution warning logs are not displayed. Press `r` to inspect repository paths and full scan errors; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its details while the list and controls stay visible. Failed repositories remain inspectable but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
 
 The dashboard keeps its neon cyberpunk panels and adapts to terminal size. If the board cannot fit its context, controls, and a contributor row, it shows a resize prompt.

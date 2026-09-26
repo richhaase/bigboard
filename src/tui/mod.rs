@@ -1,4 +1,5 @@
 //! Ratatui presentation and keyboard state, retaining the Go dashboard's behavior.
+mod analysis;
 mod components;
 mod detail;
 mod github;
@@ -14,13 +15,14 @@ use crate::model::{AnalysisOptions, CommitRecord, HistoryScope, Repository};
 use crate::progress::ScanProgress;
 use crate::scan::{self, ScanResult, ScanSession};
 use crate::stats::{self, AggregateOptions, AuthorStats, SortField};
-use chrono::{DateTime, Duration, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 use std::{
     collections::{BTreeMap, HashSet},
     io,
     path::PathBuf,
+    sync::{Arc, mpsc::TryRecvError},
     time::{Duration as StdDuration, Instant},
 };
 
@@ -54,7 +56,10 @@ enum Action {
 
 struct App {
     github_source: bool,
-    all_records: Vec<CommitRecord>,
+    analysis: analysis::Worker,
+    pending_analysis: Option<PendingAnalysis>,
+    catalog_dirty: bool,
+    all_records: Arc<Vec<CommitRecord>>,
     authors: Vec<AuthorStats>,
     contributors: Vec<AuthorStats>,
     identities: IdentityStore,
@@ -102,6 +107,11 @@ struct App {
     palette: Palette,
 }
 
+struct PendingAnalysis {
+    generation: u64,
+    selected_id: Option<String>,
+}
+
 impl App {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -133,7 +143,10 @@ impl App {
         }
         let mut app = Self {
             github_source: false,
-            all_records: vec![],
+            analysis: analysis::Worker::new(),
+            pending_analysis: None,
+            catalog_dirty: true,
+            all_records: Arc::default(),
             authors: vec![],
             contributors: vec![],
             identities,
@@ -189,6 +202,8 @@ impl App {
     }
 
     fn reset_pending(&mut self) {
+        self.analysis.cancel();
+        self.pending_analysis = None;
         self.scan_progress.clear();
         self.loading_started = Instant::now();
         self.loading_tick = 0;
@@ -236,7 +251,7 @@ impl App {
     fn finalize_load(&mut self) {
         self.pending_repos.sort_by(|a, b| a.name.cmp(&b.name));
         self.pending_failed.sort();
-        self.all_records = std::mem::take(&mut self.pending_records);
+        self.all_records = Arc::new(std::mem::take(&mut self.pending_records));
         self.loaded_repos = std::mem::take(&mut self.pending_repos);
         self.failed_repos = std::mem::take(&mut self.pending_failed);
         self.failure_details = std::mem::take(&mut self.pending_failure_details);
@@ -251,7 +266,7 @@ impl App {
             None
         };
         self.loading = false;
-        self.rebuild_contributors();
+        self.invalidate_contributors();
         self.recompute();
     }
 
@@ -263,29 +278,10 @@ impl App {
         }
     }
 
-    fn filtered_records(&self) -> impl Iterator<Item = &CommitRecord> {
-        let days = TIME_PRESETS[self.time_index].1;
-        let since = self.cutoff - Duration::days(days);
-        self.all_records.iter().filter(move |record| {
-            !self.excluded.contains(&record.repo_id)
-                && !self.excluded.contains(&record.repo_name)
-                && (self.scope == HistoryScope::AllBranches || record.landed)
-                && record.date <= self.cutoff
-                && (days == 0 || record.date > since)
-        })
-    }
-
-    fn rebuild_contributors(&mut self) {
+    fn invalidate_contributors(&mut self) {
         // Merge choices include every loaded repository and branch, independent
         // of view filters. Future-dated records remain excluded by the same cutoff.
-        self.contributors = stats::identity_catalog_iter(
-            self.all_records
-                .iter()
-                .filter(|record| record.date <= self.cutoff),
-            &self.aggregate_options(),
-        );
-        self.contributors
-            .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        self.catalog_dirty = true;
     }
 
     fn selected_id(&self) -> Option<String> {
@@ -296,6 +292,9 @@ impl App {
 
     fn select_id(&mut self, id: &str) {
         let canonical = self.identities.canonical_id(id);
+        if let Some(pending) = &mut self.pending_analysis {
+            pending.selected_id = Some(canonical.clone());
+        }
         if let Some(index) = self
             .displayed_authors()
             .iter()
@@ -308,17 +307,74 @@ impl App {
 
     fn recompute(&mut self) {
         self.detail_offset = 0;
-        let selected_id = self.selected_id();
-        let options = self.aggregate_options();
-        self.authors = stats::aggregate_iter(self.filtered_records(), &options);
-        if self.hide_bots {
-            self.authors.retain(|a| !a.bot);
+        let selected_id = self
+            .pending_analysis
+            .as_ref()
+            .map(|pending| pending.selected_id.clone())
+            .unwrap_or_else(|| self.selected_id());
+        if self.all_records.is_empty() {
+            self.analysis.cancel();
+            self.pending_analysis = None;
+            self.authors.clear();
+            self.contributors.clear();
+            self.catalog_dirty = false;
+            self.clamp_scroll();
+            return;
         }
-        self.sort_authors();
-        if let Some(id) = selected_id {
-            self.select_id(&id);
+        let generation = self.analysis.submit(analysis::Request {
+            records: self.all_records.clone(),
+            options: self.aggregate_options(),
+            excluded: self.excluded.clone(),
+            scope: self.scope,
+            days: TIME_PRESETS[self.time_index].1,
+            cutoff: self.cutoff,
+            rebuild_catalog: self.catalog_dirty,
+        });
+        self.pending_analysis = Some(PendingAnalysis {
+            generation,
+            selected_id,
+        });
+        self.loading_started = Instant::now();
+        self.loading_tick = 0;
+    }
+
+    fn poll_analysis(&mut self) -> anyhow::Result<bool> {
+        let mut changed = false;
+        loop {
+            let (generation, output) = match self.analysis.receiver.try_recv() {
+                Ok(result) => result,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    anyhow::bail!("Contributor analysis stopped unexpectedly")
+                }
+            };
+            if self
+                .pending_analysis
+                .as_ref()
+                .is_none_or(|pending| pending.generation != generation)
+            {
+                continue;
+            }
+            let pending = self
+                .pending_analysis
+                .take()
+                .expect("matching analysis request");
+            self.authors = output.authors;
+            if let Some(contributors) = output.contributors {
+                self.contributors = contributors;
+                self.catalog_dirty = false;
+            }
+            if self.hide_bots {
+                self.authors.retain(|a| !a.bot);
+            }
+            self.sort_authors();
+            if let Some(id) = pending.selected_id {
+                self.select_id(&id);
+            }
+            self.clamp_scroll();
+            changed = true;
         }
-        self.clamp_scroll();
+        Ok(changed)
     }
 
     fn sort_authors(&mut self) {
@@ -373,6 +429,14 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Action::Quit;
         }
+        if self.pending_analysis.is_some()
+            && key.code == KeyCode::Char('q')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return Action::Quit;
+        }
         if self.loading
             && !key
                 .modifiers
@@ -413,6 +477,20 @@ impl App {
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return Action::None;
+        }
+        // During calculation, only operate on controls independent of the old
+        // contributor list. New filters replace the pending request.
+        if self.pending_analysis.is_some()
+            && self.view != View::Repositories
+            && !matches!(
+                key.code,
+                KeyCode::Esc
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h' | 'l' | 'B' | 'b' | 'r' | 'R' | 'g' | 'q')
+            )
         {
             return Action::None;
         }
@@ -544,6 +622,9 @@ impl App {
                 self.recompute();
                 self.selected = 0;
                 self.offset = 0;
+                if let Some(pending) = &mut self.pending_analysis {
+                    pending.selected_id = None;
+                }
             }
             KeyCode::Char('r') if self.view == View::Aggregate => {
                 self.overlay_excluded = self.excluded.clone();
@@ -604,8 +685,10 @@ impl App {
     fn draw(&mut self, frame: &mut Frame<'_>) {
         self.width = frame.area().width;
         self.height = frame.area().height;
-        self.clamp_scroll();
-        if self.view == View::Operative && self.merge.is_none() {
+        if self.pending_analysis.is_none() {
+            self.clamp_scroll();
+        }
+        if self.pending_analysis.is_none() && self.view == View::Operative && self.merge.is_none() {
             self.clamp_detail_scroll();
         }
         let mut lines = self.lines();
@@ -745,7 +828,8 @@ pub fn run(
         if !app.loading {
             session = None;
         }
-        if app.loading {
+        dirty |= app.poll_analysis()?;
+        if app.loading || app.pending_analysis.is_some() {
             let tick = app.loading_started.elapsed().as_millis() / 100;
             if tick != app.loading_tick {
                 app.loading_tick = tick;

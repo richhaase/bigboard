@@ -100,7 +100,7 @@ impl App {
                             ) {
                                 Ok((identities, id)) => {
                                     self.identities = identities;
-                                    self.rebuild_contributors();
+                                    self.invalidate_contributors();
                                     // A saved rename can no longer match the old search text.
                                     // Clear it so the merged identity remains selected and visible.
                                     self.filter_query.clear();
