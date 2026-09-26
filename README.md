@@ -19,8 +19,11 @@ cargo install --path . --locked
 Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, `--group`, and `--github`.
 
 ```bash
-# Analyze current directory
+# Open saved GitHub repositories, or choose them on first launch
 bigboard
+
+# Analyze the current directory locally
+bigboard .
 
 # Analyze specific repos or scan directories for repos
 bigboard ~/src/repo1 ~/src/repo2
@@ -29,7 +32,7 @@ bigboard ~/src/
 # Use a named group from your config
 bigboard --group backend
 
-# Choose repositories from GitHub using your existing gh login
+# Explicit alias for the default GitHub mode
 bigboard --github
 
 # Use an alternate config file
@@ -43,7 +46,7 @@ The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 `since` in the config to choose the initial range. Dates use UTC unless you set
 `timezone` to an IANA timezone such as `America/Denver`.
 
-Press `g` from a local board to choose GitHub repositories. If no local repositories are found, Big Board opens that picker automatically. It uses your existing GitHub CLI (`gh`) account, lets you search and filter by owner or organization, and remembers your checked repositories. GitHub mode loads compact commit summaries for the selected date range, with progress and caching. It never clones or fetches repositories. For deeper analysis, clone the repositories yourself and use local mode; GitHub summaries have different date, file, and merge-counting semantics. See [GitHub source](docs/github.md) for authentication, controls, and cache details.
+With no paths or named group, Big Board uses GitHub mode and opens your saved selection automatically. On first launch, or if saved repositories are unavailable, it shows the picker. Press `g` on the board to choose or change GitHub repositories. Supplying paths (including `.`) or `--group` selects local mode; an empty local scan reports an error without switching sources. It uses your existing GitHub CLI (`gh`) account, lets you search and filter by owner or organization, and remembers your checked repositories. GitHub mode loads compact commit summaries for the selected date range, with progress and caching. It never clones or fetches repositories. For deeper analysis, clone the repositories yourself and use local mode; GitHub summaries have different date, file, and merge-counting semantics. See [GitHub source](docs/github.md) for authentication, controls, and cache details.
 
 ## Analytics
 
@@ -73,7 +76,7 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `B` | Toggle landed / all-branch activity (local mode) |
 | `M` | Merge the selected contributor with another identity |
 | `r` | Open repository selection and details from the board |
-| `g` | Choose GitHub repositories (or return to local repos from that picker) |
+| `g` | Choose/change GitHub repositories (or return to local repos from that picker) |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
 | `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
 | `Home/End` | Jump to the top/bottom of contributor detail content |
@@ -92,7 +95,6 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 
 ```json
 {
-  "paths": ["~/src"],
   "exclude": ["vendor-*", "org-a/api"],
   "sort": "net",
   "since": "90d",
@@ -109,6 +111,7 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 }
 ```
 
+- Bare `bigboard` uses GitHub even inside a local repository. Legacy config `paths` no longer selects local startup; pass paths explicitly or use `--group`. `--config` selects preferences without changing the source mode.
 - `timezone` defaults to `UTC` and accepts IANA names such as `America/Denver`.
 - Saved merges live in `~/.config/bigboard/identities.json` (or `$XDG_CONFIG_HOME/bigboard/identities.json`), independent of repo groups and `--config`.
 - Legacy `fuzzy: false` is accepted. `fuzzy: true` now gives an actionable error; use `M` for explicit merges.

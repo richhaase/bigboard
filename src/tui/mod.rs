@@ -654,7 +654,8 @@ pub fn run(
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     terminal.hide_cursor()?;
     let mut local_scope = app.scope;
-    let mut open_github = github_start || app.repositories.is_empty();
+    let mut open_github = github_start;
+    let mut resume_saved = github_start;
     let mut source: Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)> = None;
     let mut session: Option<ScanSession> = if app.loading && !open_github {
         Some(scan::start_scan(
@@ -672,7 +673,9 @@ pub fn run(
                 app.palette.clone(),
                 source.as_ref().map(|(_, repos)| repos.as_slice()),
                 !local_repositories.is_empty(),
+                resume_saved,
             )?;
+            resume_saved = false;
             match choice {
                 github::Choice::Quit => break,
                 github::Choice::Cancel if app.repositories.is_empty() => break,

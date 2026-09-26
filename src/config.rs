@@ -183,6 +183,16 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Source selection depends on explicit local inputs, not the working
+    /// directory or legacy configured paths. --github remains a compatible alias.
+    pub fn github_mode(&self) -> Result<bool> {
+        let local = !self.paths.is_empty() || !self.group.is_empty();
+        if self.github && local {
+            bail!("--github selects remote repositories; use paths or --group for a local board");
+        }
+        Ok(!local)
+    }
+
     /// Like Go's flag package, stop parsing flags at the first positional arg.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut result = Self::default();
@@ -580,6 +590,32 @@ fn file_pattern_matches(mut pattern: &str, name: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_defaults_to_github_unless_local_inputs_are_explicit() {
+        for args in [
+            vec![],
+            vec!["--github"],
+            vec!["--config", "custom.json"],
+            vec!["--github=false"],
+        ] {
+            let cli = Cli::parse(args.into_iter().map(str::to_owned)).unwrap();
+            assert!(cli.github_mode().unwrap());
+        }
+        for args in [
+            vec!["."],
+            vec!["one", "two"],
+            vec!["--group", "team"],
+            vec!["--config", "custom.json", "."],
+        ] {
+            let cli = Cli::parse(args.into_iter().map(str::to_owned)).unwrap();
+            assert!(!cli.github_mode().unwrap());
+        }
+        for args in [vec!["--github", "."], vec!["--github", "--group", "team"]] {
+            let cli = Cli::parse(args.into_iter().map(str::to_owned)).unwrap();
+            assert!(cli.github_mode().is_err());
+        }
+    }
+
     #[test]
     fn cli_github_entry_preserves_local_flags_and_export_is_removed() {
         assert!(Cli::parse(["--github".into()]).unwrap().github);
