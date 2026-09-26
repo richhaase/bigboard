@@ -1,5 +1,8 @@
 //! GitHub repository selection, kept responsive while discovery runs.
-use super::{components::*, merge::wrap_help};
+use super::{
+    components::*,
+    merge::{wrap_help, wrapped},
+};
 use crate::github::{Catalog, Client, Discovery, RemoteRepository};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line, widgets::Paragraph};
@@ -33,6 +36,8 @@ struct Picker {
     offset: usize,
     loading: bool,
     error: Option<String>,
+    error_offset: Option<usize>,
+    page_size: usize,
     palette: Palette,
 }
 impl Picker {
@@ -49,6 +54,8 @@ impl Picker {
             offset: 0,
             loading: true,
             error: None,
+            error_offset: None,
+            page_size: 1,
             palette,
         }
     }
@@ -91,7 +98,7 @@ impl Picker {
             .cloned()
             .collect()
     }
-    fn key(&mut self, key: KeyEvent, can_local: bool, page: usize) -> PickerAction {
+    fn key(&mut self, key: KeyEvent, can_local: bool) -> PickerAction {
         if key.kind == KeyEventKind::Release {
             return PickerAction::None;
         }
@@ -102,6 +109,24 @@ impl Picker {
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
         {
+            return PickerAction::None;
+        }
+        if let Some(offset) = &mut self.error_offset {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('e') => self.error_offset = None,
+                KeyCode::Char('q') => return PickerAction::Quit,
+                KeyCode::Char('R') => {
+                    self.error_offset = None;
+                    return PickerAction::Refresh;
+                }
+                KeyCode::Up | KeyCode::Char('k') => *offset = offset.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => *offset = offset.saturating_add(1),
+                KeyCode::PageUp => *offset = offset.saturating_sub(self.page_size),
+                KeyCode::PageDown => *offset = offset.saturating_add(self.page_size),
+                KeyCode::Home => *offset = 0,
+                KeyCode::End => *offset = usize::MAX,
+                _ => {}
+            }
             return PickerAction::None;
         }
         if self.searching {
@@ -126,6 +151,7 @@ impl Picker {
             KeyCode::Esc => return PickerAction::Cancel,
             KeyCode::Char('l') if can_local => return PickerAction::Local,
             KeyCode::Char('R') => return PickerAction::Refresh,
+            KeyCode::Char('e') if self.error.is_some() => self.error_offset = Some(0),
             _ if self.loading => return PickerAction::None,
             KeyCode::Char('/') => {
                 self.searching = true;
@@ -136,9 +162,14 @@ impl Picker {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.cursor = (self.cursor + 1).min(self.visible().len().saturating_sub(1))
             }
-            KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(page),
+            KeyCode::PageUp => {
+                self.cursor = self.cursor.saturating_sub(self.page_size);
+                self.offset = self.offset.saturating_sub(self.page_size);
+            }
             KeyCode::PageDown => {
-                self.cursor = (self.cursor + page).min(self.visible().len().saturating_sub(1))
+                self.cursor =
+                    (self.cursor + self.page_size).min(self.visible().len().saturating_sub(1));
+                self.offset = self.offset.saturating_add(self.page_size);
             }
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.visible().len().saturating_sub(1),
@@ -196,6 +227,9 @@ impl Picker {
         PickerAction::None
     }
     fn lines(&mut self, width: usize, height: usize, can_local: bool) -> Vec<UiLine> {
+        if self.error_offset.is_some() {
+            return self.error_lines(width, height);
+        }
         let p = &self.palette;
         if height < 12 || width < 50 {
             return vec![
@@ -215,6 +249,9 @@ impl Picker {
         if can_local {
             bindings.push(("l", "local repos".into()));
         }
+        if self.error.is_some() {
+            bindings.push(("e", "error details".into()));
+        }
         bindings.extend([("esc", "back".into()), ("q", "quit".into())]);
         let help = wrap_help(&bindings, width, p);
         let mut lines = banner(width, true, p);
@@ -226,7 +263,11 @@ impl Picker {
                     "{} · {}",
                     c.host,
                     if self.login.is_empty() {
-                        "connecting"
+                        if self.loading {
+                            "connecting"
+                        } else {
+                            "not connected"
+                        }
                     } else {
                         &self.login
                     }
@@ -253,9 +294,16 @@ impl Picker {
         lines.push(panel_header("REPOSITORIES", width, p));
         let visible = self.visible();
         let help_gap = usize::from(height >= 16);
+        if height <= lines.len() + help.len() + 2 + help_gap {
+            return vec![
+                text_line("  Resize to show repositories and controls", p.amber),
+                text_line("  e error details · Esc back · q quit", p.dim_white),
+            ];
+        }
         let row_count = height
             .saturating_sub(lines.len() + help.len() + 2 + help_gap)
             .max(1);
+        self.page_size = row_count;
         self.cursor = self.cursor.min(visible.len().saturating_sub(1));
         self.offset = self.offset.min(self.cursor);
         if self.cursor >= self.offset + row_count {
@@ -268,7 +316,14 @@ impl Picker {
                 p.dim_cyan,
             ));
         } else if visible.is_empty() {
-            lines.push(text_line("  No matching repositories", p.dim_white));
+            lines.push(text_line(
+                if self.error.is_some() && self.repositories.is_empty() {
+                    "  Repository list unavailable · e for error details"
+                } else {
+                    "  No matching repositories"
+                },
+                p.dim_white,
+            ));
         } else {
             for (position, &index) in visible.iter().enumerate().skip(self.offset).take(row_count) {
                 let repo = &self.repositories[index];
@@ -309,6 +364,47 @@ impl Picker {
         lines.extend(help);
         lines
     }
+
+    fn error_lines(&mut self, width: usize, height: usize) -> Vec<UiLine> {
+        let p = &self.palette;
+        let help = wrap_help(
+            &[
+                ("PgUp/PgDn", "scroll".into()),
+                ("esc", "back".into()),
+                ("R", "retry".into()),
+                ("q", "quit".into()),
+            ],
+            width,
+            p,
+        );
+        if width < 40 || height < help.len() + 5 {
+            return vec![
+                text_line(
+                    truncate("  Resize to read GitHub error details", width),
+                    p.amber,
+                ),
+                text_line(truncate("  Esc back · q quit", width), p.dim_white),
+            ]
+            .into_iter()
+            .take(height)
+            .collect();
+        }
+        let body = wrapped(self.error.as_deref().unwrap_or_default(), width, p.amber);
+        self.page_size = height - help.len() - 4;
+        let offset = self.error_offset.get_or_insert(0);
+        *offset = (*offset).min(body.len().saturating_sub(self.page_size));
+        let end = (*offset + self.page_size).min(body.len());
+        let mut lines = vec![panel_header("GITHUB ERROR", width, p), blank()];
+        lines.extend(body[*offset..end].iter().cloned());
+        lines.resize_with(height - help.len() - 2, blank);
+        lines.push(text_line(
+            format!("  LINES {}–{end} / {}", *offset + 1, body.len()),
+            p.dim_cyan,
+        ));
+        lines.push(blank());
+        lines.extend(help);
+        lines
+    }
 }
 
 pub(super) fn choose(
@@ -325,12 +421,12 @@ pub(super) fn choose(
     let mut discovery = None;
     let mut restart = true;
     let mut first = true;
-    let mut page = 1;
     let mut dirty = true;
     loop {
         if restart {
             discovery = None;
             picker.error = None;
+            picker.error_offset = None;
             picker.loading = true;
             match Client::from_env() {
                 Ok(client) => {
@@ -389,7 +485,6 @@ pub(super) fn choose(
         if dirty {
             terminal.draw(|frame| {
                 let area = frame.area();
-                page = (area.height as usize).saturating_sub(12).max(1);
                 frame.render_widget(
                     Paragraph::new(picker.lines(
                         area.width as usize,
@@ -408,7 +503,7 @@ pub(super) fn choose(
         dirty = matches!(input, Event::Key(_) | Event::Resize(_, _));
         if let Event::Key(key) = input {
             resume_saved = false;
-            match picker.key(key, can_local, page) {
+            match picker.key(key, can_local) {
                 PickerAction::None => {}
                 PickerAction::Refresh => restart = true,
                 PickerAction::Cancel => return Ok(Choice::Cancel),
@@ -471,7 +566,7 @@ mod tests {
     }
 
     fn key(picker: &mut Picker, code: KeyCode) -> PickerAction {
-        picker.key(KeyEvent::new(code, KeyModifiers::NONE), true, 5)
+        picker.key(KeyEvent::new(code, KeyModifiers::NONE), true)
     }
     #[test]
     fn selection_survives_search_and_owner_filters() {
@@ -513,6 +608,19 @@ mod tests {
                 .collect(),
         });
         for (w, h) in [(80, 24), (140, 40), (50, 12)] {
+            key(&mut picker, KeyCode::Home);
+            picker.lines(w, h, true);
+            let page = picker.page_size;
+            key(&mut picker, KeyCode::PageDown);
+            picker.lines(w, h, true);
+            assert_eq!(picker.cursor, page);
+            assert_eq!(
+                picker.offset,
+                page.min(picker.repositories.len().saturating_sub(page))
+            );
+            key(&mut picker, KeyCode::PageUp);
+            picker.lines(w, h, true);
+            assert_eq!((picker.cursor, picker.offset), (0, 0));
             key(&mut picker, KeyCode::End);
             let lines = picker.lines(w, h, true);
             assert!(lines.len() <= h, "{} rows at {w}×{h}", lines.len());
@@ -524,5 +632,50 @@ mod tests {
             assert!(screen.contains("repo-59"), "{screen}");
             assert!(screen.contains("quit"), "{screen}");
         }
+    }
+
+    #[test]
+    fn complete_errors_are_pageable_and_keep_recovery_controls_visible() {
+        let mut picker = Picker::new(Palette::for_theme("dark"), HashSet::new());
+        picker.loading = false;
+        picker.error = Some(format!(
+            "Cannot start GitHub tooling; install the GitHub CLI (gh): {}END-OF-ERROR",
+            "diagnostic context ".repeat(100),
+        ));
+        let preview = picker
+            .lines(80, 24, false)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(preview.contains("install the GitHub CLI (gh)"));
+        assert!(preview.contains("error details"));
+        key(&mut picker, KeyCode::Char('e'));
+        for (width, height) in [(80, 24), (50, 12)] {
+            key(&mut picker, KeyCode::Home);
+            let top = picker.lines(width, height, false);
+            assert!(top.iter().any(|l| l.to_string().contains("Cannot start")));
+            key(&mut picker, KeyCode::PageDown);
+            assert!(picker.error_offset.unwrap() > 0);
+            key(&mut picker, KeyCode::End);
+            let bottom = picker.lines(width, height, false);
+            let text = bottom
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("END-OF-ERROR"), "{text}");
+            assert!(
+                text.contains("retry") && text.contains("back") && text.contains("quit"),
+                "{text}"
+            );
+            assert!(bottom.len() <= height);
+            assert!(bottom.iter().all(|l| l.width() <= width));
+        }
+        assert_eq!(key(&mut picker, KeyCode::Esc), PickerAction::None);
+        assert!(picker.error_offset.is_none());
+        key(&mut picker, KeyCode::Char('e'));
+        assert_eq!(key(&mut picker, KeyCode::Char('R')), PickerAction::Refresh);
+        assert!(picker.error_offset.is_none());
     }
 }

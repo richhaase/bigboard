@@ -251,7 +251,6 @@ impl Client {
         }
         command.env("GH_PROMPT_DISABLED", "1");
         run_command(command, cancel, API_TIMEOUT)
-            .context("GitHub request failed; check your GitHub CLI login and repository access")
     }
 
     pub fn discover(&self, cancel: &AtomicBool) -> Result<Catalog> {
@@ -336,9 +335,7 @@ impl Client {
             .args(["api", "--hostname", &self.host, "graphql", "--input"])
             .arg(input.path())
             .env("GH_PROMPT_DISABLED", "1");
-        let bytes = run_command(command, cancel, API_TIMEOUT).context(
-            "GitHub request failed; check gh login, repository access, and API rate limits",
-        )?;
+        let bytes = run_command(command, cancel, API_TIMEOUT)?;
         let response: Value = serde_json::from_slice(&bytes).context("Reading GitHub response")?;
         if let Some(errors) = response.get("errors").and_then(Value::as_array)
             && !errors.is_empty()
@@ -389,10 +386,14 @@ impl Client {
             .context("No accessible default branch; use local mode for other branches")?;
         let bounds = window.cache_bounds();
         let parent = self.cache_root.join(&self.host);
-        private_directory(&parent)?;
-        let path = self.repository(remote).path;
-        let cached = File::open(&path)
+        // Storage is an optimization. If it cannot be made private, neither
+        // read nor write it; the API can still supply a complete snapshot.
+        let cache_path = private_directory(&parent)
             .ok()
+            .map(|()| self.repository(remote).path);
+        let cached = cache_path
+            .as_ref()
+            .and_then(|path| File::open(path).ok())
             .and_then(|file| serde_json::from_reader::<_, Snapshot>(file).ok())
             .filter(|s| {
                 s.schema == 1
@@ -484,13 +485,15 @@ impl Client {
         snapshot.commits.retain(|c| seen.insert(c.oid.clone()));
         // Complete pages only; atomic replacement also makes concurrent readers
         // safe. A racing writer can lose an optimization, never mix totals.
-        let _ = (|| -> Result<()> {
-            let mut file = tempfile::NamedTempFile::new_in(&parent)?;
-            serde_json::to_writer(&mut file, &snapshot)?;
-            file.as_file().sync_all()?;
-            file.persist(&path)?;
-            Ok(())
-        })();
+        if let Some(path) = cache_path {
+            let _ = (|| -> Result<()> {
+                let mut file = tempfile::NamedTempFile::new_in(&parent)?;
+                serde_json::to_writer(&mut file, &snapshot)?;
+                file.as_file().sync_all()?;
+                file.persist(path)?;
+                Ok(())
+            })();
+        }
         check(cancel, Instant::now() + API_TIMEOUT)?;
         let mut repository = self.repository(remote);
         repository.name = repo["nameWithOwner"]
@@ -534,7 +537,7 @@ impl ApiCommit {
             (email, name)
         };
         let mut seen = HashSet::from([identity_key(&self.author)]);
-        let coauthors: Vec<_> = self
+        let mut coauthors: Vec<_> = self
             .authors
             .nodes
             .iter()
@@ -545,6 +548,13 @@ impl ApiCommit {
                 email: a.email.clone(),
             })
             .collect();
+        let ai_assisted = git::is_ai(&self.author.email, &options.ai_identities)
+            || coauthors
+                .iter()
+                .any(|a| git::is_ai(&a.email, &options.ai_identities));
+        // Match local collection: recognized agents mark AI attribution but
+        // do not receive the human coauthored participation credit.
+        coauthors.retain(|a| !git::is_ai(&a.email, &options.ai_identities));
         let is_merge = self.parents.total_count > 1;
         // API merge diffs include branch changes already counted in ancestors.
         // Do not attribute those changes a second time or fabricate a baseline.
@@ -558,10 +568,7 @@ impl ApiCommit {
             removed: if lines_known { self.deletions } else { 0 },
             repo_id: repo.id.clone(),
             repo_name: repo.name.clone(),
-            ai_assisted: git::is_ai(&self.author.email, &options.ai_identities)
-                || coauthors
-                    .iter()
-                    .any(|a| git::is_ai(&a.email, &options.ai_identities)),
+            ai_assisted,
             coauthors,
             lines_known,
             landed: true,
@@ -985,6 +992,7 @@ printf '\n' >> requests
                 page(vec![merge], None),
                 json!({"data":{"repository":{"object":{"authors":{
                 "nodes":[{"name":"Claude","email":"noreply@anthropic.com"},
+                         {"name":"Bob","email":"bob@example.test"},
                          {"name":"Alice","email":"alice@example.test"}],
                 "pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}),
             ],
@@ -995,6 +1003,17 @@ printf '\n' >> requests
         assert!(!r.lines_known);
         assert_eq!((r.added, r.removed), (0, 0));
         assert_eq!(r.coauthors.len(), 1);
+        assert_eq!(r.coauthors[0].name, "Bob");
+        let authors = crate::stats::aggregate(&data.records, &Default::default());
+        assert_eq!(authors.len(), 2);
+        assert_eq!(
+            authors
+                .iter()
+                .find(|a| a.name == "Bob")
+                .unwrap()
+                .coauthored_commits,
+            1
+        );
         assert_eq!(requests(root.path())[2]["variables"]["head"], "merge");
         let mut unknown: ApiCommit =
             serde_json::from_value(commit("unknown", "2026-09-25T12:00:00Z")).unwrap();
@@ -1007,6 +1026,76 @@ printf '\n' >> requests
                 )
                 .lines_known
         );
+    }
+
+    #[test]
+    fn ai_overrides_exclude_agents_from_human_participation_but_keep_primary_authors() {
+        let mut value = commit("agents", "2026-09-25T12:00:00Z");
+        value["authors"]["nodes"].as_array_mut().unwrap().extend([
+            json!({"name":"Claude","email":"noreply@anthropic.com"}),
+            json!({"name":"Custom Agent","email":"build@agents.example.test"}),
+            json!({"name":"Human","email":"human@anthropic.com"}),
+            json!({"name":"Human Alias","email":"human@anthropic.com"}),
+        ]);
+        let options = git::CollectOptions {
+            ai_identities: vec!["@agents.example.test".into()],
+            ..Default::default()
+        };
+        let repo = client(Path::new("/unused")).repository(&remote(1, "org/project", "main"));
+        let mut commit: ApiCommit = serde_json::from_value(value).unwrap();
+        let record = commit.record(&repo, &options);
+        assert!(record.ai_assisted);
+        assert_eq!(
+            record.coauthors,
+            [Identity {
+                name: "Human".into(),
+                email: "human@anthropic.com".into()
+            }]
+        );
+        let authors = crate::stats::aggregate(&[record], &Default::default());
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors.iter().map(|a| a.coauthored_commits).sum::<i64>(), 1);
+        commit.author = Actor {
+            name: "Claude".into(),
+            email: "noreply@anthropic.com".into(),
+        };
+        let record = commit.record(&repo, &options);
+        let authors = crate::stats::aggregate(&[record], &Default::default());
+        assert_eq!(
+            authors.iter().find(|a| a.name == "Claude").unwrap().commits,
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unavailable_or_unsafe_cache_does_not_block_complete_api_data() {
+        for symlink in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let c = fake_graphql(
+                root.path(),
+                vec![
+                    metadata("head", "alice"),
+                    page(vec![commit("recent", "2026-09-25T12:00:00Z")], None),
+                ],
+            );
+            let obstacle = if symlink {
+                let target = root.path().join("outside-cache");
+                fs::create_dir(&target).unwrap();
+                fs::create_dir(&c.cache_root).unwrap();
+                std::os::unix::fs::symlink(&target, c.cache_root.join(&c.host)).unwrap();
+                target.join("1.json")
+            } else {
+                c.cache_root.clone()
+            };
+            fs::write(&obstacle, "untouched").unwrap();
+            let data = load(&c, 14).unwrap();
+            assert_eq!(data.records.len(), 1);
+            assert_eq!(data.records[0].commit_id, "recent");
+            assert_eq!(data.records[0].added, 10);
+            assert_eq!(requests(root.path()).len(), 2);
+            assert_eq!(fs::read_to_string(&obstacle).unwrap(), "untouched");
+        }
     }
 
     #[cfg(unix)]

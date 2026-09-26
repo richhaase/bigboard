@@ -75,8 +75,8 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `r` | Open repository selection and details from the board |
 | `g` | Choose/change GitHub repositories (or return to local repos from that picker) |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
-| `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
-| `Home/End` | Jump to the top/bottom of contributor detail content |
+| `PgUp/PgDn` | Page contributor rows, contributor detail content, or selected repository details |
+| `Home/End` | Jump to the first/last contributor, or the top/bottom of contributor details |
 | `R` | Refresh local analysis or selected GitHub API summaries |
 | `q` | Quit (clears an active filter first) |
 
@@ -85,6 +85,7 @@ In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` ju
 Incomplete line counts retain the `?` marker. Alerts identify repository scan failures or unavailable default-branch history; per-commit and attribution warning logs are not displayed. Press `r` to inspect repository paths and full scan errors; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its details while the list and controls stay visible. Failed repositories remain inspectable but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
 
 The dashboard keeps its neon cyberpunk panels and adapts to terminal size. If the board cannot fit its context, controls, and a contributor row, it shows a resize prompt.
+The active sort column stays visible in compact layouts, so you can compare the values that determine the row order.
 
 ## Config file
 

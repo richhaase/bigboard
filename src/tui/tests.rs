@@ -145,6 +145,65 @@ fn search_apply_clear_and_unicode_backspace() {
     assert!(!app.searching);
     assert_eq!(key(&mut app, KeyCode::Esc), Action::Quit);
 }
+
+#[test]
+fn board_paging_and_endpoints_follow_the_filtered_list_after_resize() {
+    let mut app = empty();
+    app.all_records = (0..100)
+        .map(|i| record(&format!("Person {i:03}"), "engine", i + 1))
+        .collect();
+    populate(&mut app);
+    draw(&mut app, 80, 24);
+    let page = app.table_viewport();
+    key(&mut app, KeyCode::PageDown);
+    assert_eq!((app.selected, app.offset), (page, page));
+    key(&mut app, KeyCode::PageUp);
+    assert_eq!((app.selected, app.offset), (0, 0));
+    key(&mut app, KeyCode::End);
+    assert_eq!(app.selected, 99);
+    let screen = draw(&mut app, 60, 20);
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains('▸') && line.contains("Person 000")),
+        "{screen}"
+    );
+    key(&mut app, KeyCode::Home);
+    assert_eq!((app.selected, app.offset), (0, 0));
+    app.filter_query = "Person 00".into();
+    key(&mut app, KeyCode::End);
+    assert_eq!(app.selected, 9);
+    app.filter_query = "no matches".into();
+    for code in [
+        KeyCode::PageDown,
+        KeyCode::PageUp,
+        KeyCode::End,
+        KeyCode::Home,
+    ] {
+        key(&mut app, code);
+        assert_eq!(app.selected, 0);
+    }
+}
+
+#[test]
+fn empty_states_offer_available_source_and_filter_controls() {
+    let mut app = empty();
+    app.github_source = true;
+    let screen = draw(&mut app, 80, 24);
+    assert!(screen.contains("choose repos"));
+    assert!(!screen.contains("all branches"));
+    app.view = View::Operative;
+    let screen = draw(&mut app, 80, 24);
+    assert!(!screen.contains("all branches"));
+    app.view = View::Aggregate;
+    app.github_source = false;
+    assert!(draw(&mut app, 80, 24).contains("B for all branches"));
+    app.hide_bots = true;
+    assert!(draw(&mut app, 80, 24).contains("b to include bots"));
+    app.loaded_repos.push(repo("engine"));
+    app.excluded.insert("/repos/engine".into());
+    assert!(draw(&mut app, 80, 24).contains("No repositories selected"));
+}
 #[test]
 fn sort_cycle_reverse_and_metric_ranks() {
     let mut app = populated();
@@ -183,7 +242,7 @@ fn repository_changes_apply_on_escape_and_enter_and_gate_keys() {
         key(&mut app, finish);
         assert!(app.excluded.contains("/repos/compiler"));
         assert_eq!(app.authors.len(), 1);
-        assert_eq!(app.filtered_records().len(), 1);
+        assert_eq!(app.filtered_records().count(), 1);
     }
 }
 #[test]
@@ -910,7 +969,7 @@ fn wide_dashboard_commands_align_and_have_room_with_many_contributors() {
 }
 
 #[test]
-fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters() {
+fn conflicting_attribution_is_not_rendered_and_counts_follow_repository_filters() {
     let mut app = populated();
     let mut duplicate = app.all_records[0].clone();
     duplicate.repo_id = "/repos/compiler".into();
@@ -919,7 +978,7 @@ fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters(
     duplicate.email = "different@example.com".into();
     app.all_records.push(duplicate);
     populate(&mut app);
-    assert!(!app.attribution_warnings.is_empty());
+    assert_eq!(app.totals().0, 2);
     let summary = plain(app.lines());
     assert!(!summary.contains("1 warning"), "{summary}");
     assert!(
@@ -938,7 +997,8 @@ fn attribution_diagnostics_are_not_rendered_and_still_follow_repository_filters(
     key(&mut app, KeyCode::Esc);
     app.excluded.insert("/repos/compiler".into());
     app.recompute();
-    assert!(app.attribution_warnings.is_empty());
+    assert_eq!(app.authors[0].name, "Ada Lovelace");
+    assert_eq!(app.totals(), (1, 100, 10, 0));
 }
 
 #[test]
@@ -1009,7 +1069,6 @@ fn conflicting_clone_identity_remains_mergeable_when_representative_is_excluded(
     assert_eq!(app.authors.len(), 1);
     assert_eq!(app.authors[0].id, "email:local-a@example.com");
     assert_eq!(app.contributors.len(), 2);
-    assert_eq!(app.attribution_warnings.len(), 1);
     app.excluded.insert("/repos/a-clone".into());
     app.recompute();
     assert_eq!(app.authors[0].id, "email:local-b@example.com");
@@ -1027,7 +1086,6 @@ fn conflicting_clone_identity_remains_mergeable_when_representative_is_excluded(
     assert!(app.merge.is_none());
     app.excluded.clear();
     app.recompute();
-    assert!(app.attribution_warnings.is_empty());
     assert_eq!(app.contributors.len(), 1);
     assert_eq!(app.authors.len(), 1);
     assert_eq!(app.authors[0].name, "Resolved Person");
@@ -1178,9 +1236,17 @@ fn table_headings_and_large_values_fit_every_sort_and_supported_width() {
                     text.contains("123,456"),
                     "authored value truncated at {width} {field:?}:\n{text}"
                 );
+                let expected_sorted_value = match field {
+                    SortField::Total => "381,369,247",
+                    SortField::Commits => "123,456",
+                    SortField::Added => "134,567,890",
+                    SortField::Removed => "246,801,357",
+                    SortField::Net => "-112,233,467",
+                    SortField::AI => "9%",
+                };
                 assert!(
-                    text.contains("381,369,247"),
-                    "line count truncated at {width} {field:?}:\n{text}"
+                    text.contains(expected_sorted_value),
+                    "active sort value missing at {width} {field:?}:\n{text}"
                 );
                 let header = table
                     .iter()
@@ -1192,6 +1258,12 @@ fn table_headings_and_large_values_fit_every_sort_and_supported_width() {
                         })
                     })
                     .unwrap();
+                assert!(
+                    header
+                        .to_string()
+                        .contains(if ascending { '↑' } else { '↓' }),
+                    "active sort column missing at {width} {field:?}:\n{text}"
+                );
                 let row = table
                     .iter()
                     .find(|line| line.spans.iter().any(|span| span.content.contains("Ada")))

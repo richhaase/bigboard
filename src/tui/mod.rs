@@ -64,7 +64,6 @@ struct App {
     scope: HistoryScope,
     cutoff: DateTime<FixedOffset>,
     warnings: Vec<(String, String)>,
-    attribution_warnings: Vec<String>,
     pending_warnings: Vec<(String, String)>,
     repositories: Vec<Repository>,
     loaded_repos: Vec<Repository>,
@@ -144,7 +143,6 @@ impl App {
             scope: HistoryScope::Landed,
             cutoff: Utc::now().fixed_offset(),
             warnings: vec![],
-            attribution_warnings: vec![],
             pending_warnings: vec![],
             repositories,
             loaded_repos: vec![],
@@ -265,22 +263,25 @@ impl App {
         }
     }
 
-    fn filtered_records(&self) -> Vec<CommitRecord> {
-        stats::filter_by_time_at(
-            &stats::filter_by_scope(
-                &stats::filter_by_repo(&self.all_records, &self.excluded),
-                self.scope,
-            ),
-            Duration::days(TIME_PRESETS[self.time_index].1),
-            self.cutoff,
-        )
+    fn filtered_records(&self) -> impl Iterator<Item = &CommitRecord> {
+        let days = TIME_PRESETS[self.time_index].1;
+        let since = self.cutoff - Duration::days(days);
+        self.all_records.iter().filter(move |record| {
+            !self.excluded.contains(&record.repo_id)
+                && !self.excluded.contains(&record.repo_name)
+                && (self.scope == HistoryScope::AllBranches || record.landed)
+                && record.date <= self.cutoff
+                && (days == 0 || record.date > since)
+        })
     }
 
     fn rebuild_contributors(&mut self) {
         // Merge choices include every loaded repository and branch, independent
         // of view filters. Future-dated records remain excluded by the same cutoff.
-        self.contributors = stats::identity_catalog(
-            &stats::filter_by_time_at(&self.all_records, Duration::zero(), self.cutoff),
+        self.contributors = stats::identity_catalog_iter(
+            self.all_records
+                .iter()
+                .filter(|record| record.date <= self.cutoff),
             &self.aggregate_options(),
         );
         self.contributors
@@ -308,10 +309,8 @@ impl App {
     fn recompute(&mut self) {
         self.detail_offset = 0;
         let selected_id = self.selected_id();
-        let records = self.filtered_records();
         let options = self.aggregate_options();
-        self.attribution_warnings = stats::attribution_warnings(&records, &options);
-        self.authors = stats::aggregate(&records, &options);
+        self.authors = stats::aggregate_iter(self.filtered_records(), &options);
         if self.hide_bots {
             self.authors.retain(|a| !a.bot);
         }
@@ -475,6 +474,27 @@ impl App {
                     self.clamp_scroll();
                 }
             },
+            KeyCode::PageUp if self.view == View::Aggregate => {
+                let page = self.table_viewport();
+                self.selected = self.selected.saturating_sub(page);
+                self.offset = self.offset.saturating_sub(page);
+                self.clamp_scroll();
+            }
+            KeyCode::PageDown if self.view == View::Aggregate => {
+                let page = self.table_viewport();
+                self.selected =
+                    (self.selected + page).min(self.displayed_authors().len().saturating_sub(1));
+                self.offset = self.offset.saturating_add(page);
+                self.clamp_scroll();
+            }
+            KeyCode::Home if self.view == View::Aggregate => {
+                self.selected = 0;
+                self.clamp_scroll();
+            }
+            KeyCode::End if self.view == View::Aggregate => {
+                self.selected = self.displayed_authors().len().saturating_sub(1);
+                self.clamp_scroll();
+            }
             KeyCode::PageUp if self.view == View::Operative => self.page_detail(false),
             KeyCode::PageDown if self.view == View::Operative => self.page_detail(true),
             KeyCode::Home if self.view == View::Operative => self.detail_offset = 0,

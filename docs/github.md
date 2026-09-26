@@ -24,6 +24,7 @@ The picker lists repositories accessible to the authenticated account as an owne
 | `a` | Select/deselect all repositories visible under the current filter |
 | `Enter` | Save the checked selection and analyze it |
 | `R` | Reload the repository list |
+| `e` | Read the full error when discovery or saving fails; `PgUp/PgDn` scroll, `Esc` returns, and `R` retries discovery |
 | `l` | Return to the local repository set, when one was discovered |
 | `Esc` | Cancel without changing the current board; exit if there is no board |
 | `q`, `Ctrl-C` | Quit |
@@ -64,7 +65,7 @@ The loading screen shows a spinner, elapsed time, active repositories, and compl
 
 Only summaries are cached. Coverage is rounded to UTC day boundaries for reuse, then filtered to the exact selected window and shared cutoff before display. An unchanged head can reuse covered dates and fetch just missing date intervals. A changed head reloads the requested window, which also handles rebases, force-pushes, and default-branch changes safely. Switching GitHub accounts invalidates reuse. Unknown non-merge diff counts are retried even when the head is unchanged.
 
-The snapshot is replaced atomically after every page succeeds. Concurrent instances may replace one another's cache coverage, but each load uses its own complete snapshot. Cache write failures do not hide successfully loaded data. Larger requested windows can take longer and occupy more summary storage; no Git object history accumulates.
+The snapshot is replaced atomically after every page succeeds. Concurrent instances may replace one another's cache coverage, but each load uses its own complete snapshot. If cache storage is unavailable or cannot be secured, collection proceeds without reading or writing that cache. Cache write failures do not hide successfully loaded data. Larger requested windows can take longer and occupy more summary storage; no Git object history accumulates.
 
 ## Local storage and migration
 
