@@ -16,7 +16,7 @@ cargo install --path . --locked
 
 ## Usage
 
-Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, and `--group`.
+Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, and `--group`, plus `--help` for usage. Put flags before positional paths; use `--` before paths that begin with a dash.
 
 ```bash
 # Open saved GitHub repositories, or choose them on first launch
@@ -47,14 +47,14 @@ With no paths or named group, Big Board uses GitHub mode and opens your saved se
 
 ## Analytics
 
-- **Explicit identity:** matching canonical emails and Git `.mailmap` entries establish identity. Names alone never combine people. Highlight a contributor and press `M` to select another identity, choose a combined name, and confirm a merge. Saved merges apply across repositories and sessions. See the [step-by-step merge flow](docs/analytics.md#identity-and-collaboration).
-- **History:** the default view shows landed work on the available default branch. Press `B` to include unmerged activity from local and remote-tracking branches already present on disk. Scanning does not fetch remote changes.
+- **Explicit identity:** matching canonical emails establish identity; local mode also applies Git `.mailmap` entries. Names alone never combine people. Highlight a contributor and press `M` to select another identity, choose a combined name, and confirm a merge. Saved merges apply across repositories and sessions. See the [step-by-step merge flow](docs/analytics.md#identity-and-collaboration).
+- **History:** the default view shows work on the available default branch. In local mode, press `B` to include unmerged activity from local and remote-tracking branches already present on disk. GitHub mode stays on the default branch. Scanning does not fetch Git objects or update local repositories.
 - **Unique commits:** identical commit IDs count once across the board, retaining their repository associations. Repository subtotals can overlap. Cherry-picks and rebases with different IDs remain distinct commits.
 - **Collaboration:** authored and human-coauthored commit counts are separate. Line changes remain attributed to the primary author; coauthor metadata does not specify each person's line contribution.
-- **Detected AI:** known agent identities and recognized coauthor metadata indicate AI attribution. Human employees are not flagged solely by an AI company's domain. User-configured exact emails and domain overrides remain available. Missing attribution does not prove AI was absent.
+- **Detected AI:** known agent identities and recognized coauthor metadata indicate AI attribution. Recognized AI coauthors do not receive human participation credit; primary authors retain their authored credit. Human employees are not flagged solely by an AI company's domain. User-configured exact emails and domain overrides remain available. Missing attribution does not prove AI was absent.
 - **Activity metrics:** Lines changed means additions plus removals. Removed/added ratio is N/A with zero additions or unknown line counts. These metrics describe activity, not productivity or business value.
-- **Completeness:** shallow history, scan failures, and unallocatable merge-resolution line counts are visibly qualified. Unknown counts are not treated as measured zero. Clean integration-only merges are omitted when Git can reconstruct their baseline; extra merge edits receive credit where measurable.
-- **Bots and generated files:** bots are included and tagged by default; `b` excludes them from contributor rows and displayed totals. Generated/vendor files are excluded from line counts by default; `all_files` includes them.
+- **Completeness:** scan failures and unknown line counts are visibly qualified. In local mode, shallow-boundary diffs and unallocatable merge-resolution line counts remain unknown; clean integration-only merges are omitted when Git can reconstruct their baseline, and extra merge edits receive credit where measurable. GitHub mode retains merge participation with unknown lines. Unknown counts are not treated as measured zero.
+- **Bots and generated files:** bots are included and tagged by default; `b` excludes them from contributor rows and displayed totals. Local mode excludes generated/vendor files from line counts by default; `all_files` includes them. GitHub summaries always cover all files.
 
 See [analytics behavior](docs/analytics.md) for the counting rules and limitations. The [0.8 merge and validation record](docs/analytics.md#revision-and-validation) documents the completed revision. The [resolved original audit](docs/analytics-correction-backlog.md) and [Rust port record](docs/rust-port.md) remain historical references.
 
@@ -78,11 +78,12 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `PgUp/PgDn` | Page contributor rows, contributor detail content, or selected repository details |
 | `Home/End` | Jump to the first/last contributor, or the top/bottom of contributor details |
 | `R` | Refresh local analysis or selected GitHub API summaries |
-| `q` | Quit (clears an active filter first) |
+| `q` | Quit (on the ready board, clears an applied name filter first) |
+| `Ctrl-C` | Quit from any screen, including text entry or loading |
 
-In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.
+In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals; `Enter` finishes editing and `Esc` clears it. While entering search text or a merge name, character keys such as `q` enter text. History, time, bot, sorting, and repository filters apply to the current session; use the config file for supported startup preferences. The GitHub picker's checked repository selection is saved separately.
 
-Contributor calculations run in the background. While the board shows “Updating contributors,” you can change filters again, select repositories, or press `q` to cancel and quit. Only the latest completed calculation is displayed.
+Collection and contributor calculations run in the background. While repositories are loading, `q`, `Esc`, or `Ctrl-C` cancels and quits. During “Updating contributors,” you can change the range or local history scope again; from the board, bot inclusion, repository selection, refresh, and GitHub selection also remain available. New requests replace pending calculations, and only the latest result is displayed. Contributor navigation, sorting, search, and identity merging resume when that result is ready. Press `q` or `Ctrl-C` to cancel and quit during calculation.
 
 Incomplete line counts retain the `?` marker. Alerts identify repository scan failures or unavailable default-branch history; per-commit and attribution warning logs are not displayed. Press `r` to inspect repository paths and full scan errors; from contributor details, press `Esc` first. Use `↑/↓` or `j/k` to select a repository and `PgUp/PgDn` to page its details while the list and controls stay visible. Failed repositories remain inspectable but cannot be toggled into the totals. Both `Enter` and `Esc` apply repository selections and return to the board.
 
@@ -111,17 +112,28 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 }
 ```
 
-- Bare `bigboard` uses GitHub even inside a local repository. The old `--github` flag and config `paths` setting are removed and rejected; pass paths explicitly or use `--group` for local analysis. `--config` selects preferences without changing the source mode.
+- Bare `bigboard` uses GitHub even inside a local repository. `--config` selects preferences without changing the source mode; see [migration notes](#upgrading) for removed options.
+- `sort` accepts `total` (the default), `commits`, `added`, `removed`, `net`, or `ai`.
+- `theme` accepts `auto` (the default), `light`, or `dark`.
 - `timezone` defaults to `UTC` and accepts IANA names such as `America/Denver`.
 - Saved merges live in `~/.config/bigboard/identities.json` (or `$XDG_CONFIG_HOME/bigboard/identities.json`), independent of repo groups and `--config`.
 - Legacy `fuzzy: false` is accepted. `fuzzy: true` now gives an actionable error; use `M` for explicit merges.
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`.
-- `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.
+- In local mode, `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either. In GitHub mode, choose repositories in `g` and filter loaded repositories with `r`.
+- `depth` controls local repository discovery (default/minimum: 1). `all_files` affects local line counts only; GitHub summaries always include all files.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
 - `bot_identities` tags contributors as bots; entries are exact emails, `@domain` suffixes, or exact author names.
 - Select a group with `--group backend`. Author identities can also be canonicalized with a standard git `.mailmap` in each repo.
 
-## Upgrading to 0.8
+## Upgrading
+
+### Current startup and GitHub changes (0.11)
+
+- Bare `bigboard` opens saved GitHub repositories or the first-run picker. Use `bigboard .`, explicit paths, or `--group` for local analysis.
+- The old `--github` flag and config `paths` setting are removed and rejected.
+- GitHub mode now uses API summaries instead of managed clones. Date, file, and merge-counting semantics differ from local analysis. See [GitHub source](docs/github.md#lightweight-activity-and-local-analysis) and [old-cache cleanup](docs/github.md#local-storage-and-migration).
+
+### Earlier analytics changes (0.8)
 
 - Remove `fuzzy: true` (or change it to `false`) and use `M` for explicit identity merges. Equal names with different emails now stay separate.
 - `--export` is removed. The interactive dashboard is the supported interface.
@@ -132,6 +144,7 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 
 - ASCII art banner with vertical color gradient and neon framed activity panels
 - Streaming repository-scan loader that surfaces unreadable repos as they load
+- Cancelable background contributor calculations that keep filters responsive on large histories
 - Gradient activity bars with trailing glow; gold/silver/bronze rank styling
 - Detected AI attribution in the leaderboard, monthly activity, and repository breakdown
 - Bot contributors counted and tagged (`BOT`), with a one-key toggle to hide them
