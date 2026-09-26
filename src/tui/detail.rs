@@ -1,6 +1,5 @@
 //! Contributor analytics scroll independently of their context and controls.
 use super::components::*;
-use super::merge::wrap_help;
 use super::{App, TIME_PRESETS};
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;

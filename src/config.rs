@@ -72,6 +72,16 @@ fn folded_config_key(key: &str) -> String {
         .collect()
 }
 
+fn read_non_null<'de, T: Deserialize<'de>, A: MapAccess<'de>>(
+    map: &mut A,
+    field: &mut T,
+) -> std::result::Result<(), A::Error> {
+    if let Some(value) = map.next_value::<Option<T>>()? {
+        *field = value;
+    }
+    Ok(())
+}
+
 impl<'de> Deserialize<'de> for Config {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         struct ConfigVisitor;
@@ -107,41 +117,13 @@ impl<'de> Deserialize<'de> for Config {
                                 list_buffers.entry("bot_identities").or_default(),
                             )?
                         }
-                        "sort" => {
-                            if let Some(value) = map.next_value::<Option<String>>()? {
-                                config.sort = value
-                            }
-                        }
-                        "since" => {
-                            if let Some(value) = map.next_value::<Option<String>>()? {
-                                config.since = value
-                            }
-                        }
-                        "theme" => {
-                            if let Some(value) = map.next_value::<Option<String>>()? {
-                                config.theme = value
-                            }
-                        }
-                        "timezone" => {
-                            if let Some(value) = map.next_value::<Option<String>>()? {
-                                config.timezone = value;
-                            }
-                        }
-                        "fuzzy" => {
-                            if let Some(value) = map.next_value::<Option<bool>>()? {
-                                config.fuzzy = value
-                            }
-                        }
-                        "all_files" => {
-                            if let Some(value) = map.next_value::<Option<bool>>()? {
-                                config.all_files = value
-                            }
-                        }
-                        "depth" => {
-                            if let Some(value) = map.next_value::<Option<i64>>()? {
-                                config.depth = value
-                            }
-                        }
+                        "sort" => read_non_null(&mut map, &mut config.sort)?,
+                        "since" => read_non_null(&mut map, &mut config.since)?,
+                        "theme" => read_non_null(&mut map, &mut config.theme)?,
+                        "timezone" => read_non_null(&mut map, &mut config.timezone)?,
+                        "fuzzy" => read_non_null(&mut map, &mut config.fuzzy)?,
+                        "all_files" => read_non_null(&mut map, &mut config.all_files)?,
+                        "depth" => read_non_null(&mut map, &mut config.depth)?,
                         "groups" => {
                             type Groups = BTreeMap<String, Option<Vec<ConfigString>>>;
                             if let Some(groups) = map.next_value::<Option<Groups>>()? {
@@ -698,13 +680,18 @@ mod tests {
             r#"{
             "EXCLUDE":["first","second"],"Exclude":["updated"],"exclude":[null,null],
             "Sort":"net","SORT":null,"FUZZY":true,"fuzzy":null,
-            "depth":2,"Depth":null,"all_fileſ":true,
+            "depth":2,"Depth":null,"all_fileſ":true,"all_files":null,
+            "since":"90d","since":null,"theme":"dark","theme":null,
+            "timezone":"Asia/Tokyo","timezone":null,
             "groups":{"one":["a"]},"GROUPS":{"two":[null],"one":null}
         }"#,
         )
         .unwrap();
         assert_eq!(config.exclude, ["updated", "second"]);
         assert_eq!(config.sort, "net");
+        assert_eq!(config.since, "90d");
+        assert_eq!(config.theme, "dark");
+        assert_eq!(config.timezone, "Asia/Tokyo");
         assert!(config.fuzzy);
         assert!(config.all_files);
         assert_eq!(config.depth, 2);

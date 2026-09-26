@@ -26,23 +26,10 @@ const IGNORED_DIRS: &[&str] = &[
     "Pods",
     "Carthage",
 ];
-const IGNORED_FILE_GLOBS: &[&str] = &[
-    "*.min.js",
-    "*.min.css",
-    "*.map",
-    "*.snap",
-    "*.lock",
-    "*.pb.go",
-    "*_pb2.py",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "go.sum",
-    "Cargo.lock",
-    "composer.lock",
-    "Gemfile.lock",
-    "poetry.lock",
+const IGNORED_FILE_SUFFIXES: &[&str] = &[
+    ".min.js", ".min.css", ".map", ".snap", ".lock", ".pb.go", "_pb2.py",
 ];
+const IGNORED_FILES: &[&str] = &["package-lock.json", "pnpm-lock.yaml", "go.sum"];
 const AI_ADDRESSES: &[&str] = &[
     "noreply@anthropic.com",
     "noreply@openai.com",
@@ -942,13 +929,12 @@ fn apply_coauthors(
 }
 
 struct ObjectScratch {
-    path: PathBuf,
+    directory: tempfile::TempDir,
     alternate: String,
     disabled_drivers: Vec<String>,
 }
 impl ObjectScratch {
     fn new(ctx: &GitContext<'_>, repo: &Path) -> Result<Self> {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let alternate = git_output(
             ctx,
             repo,
@@ -965,25 +951,15 @@ impl ObjectScratch {
             .filter(|key| key.starts_with("merge.") && key.ends_with(".driver"))
             .map(|key| format!("{key}=false"))
             .collect::<Vec<_>>();
-        for _ in 0..100 {
-            let path = std::env::temp_dir().join(format!(
-                "bigboard-merge-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            match std::fs::create_dir(&path) {
-                Ok(()) => {
-                    return Ok(Self {
-                        path,
-                        alternate,
-                        disabled_drivers,
-                    });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error).context("creating temporary merge object storage"),
-            }
-        }
-        bail!("unable to allocate temporary merge object storage")
+        let directory = tempfile::Builder::new()
+            .prefix("bigboard-merge-")
+            .tempdir()
+            .context("creating temporary merge object storage")?;
+        Ok(Self {
+            directory,
+            alternate,
+            disabled_drivers,
+        })
     }
     fn command(&self, repo: &Path, args: &[&str]) -> Command {
         let mut command = git_command(repo, &[]);
@@ -994,17 +970,11 @@ impl ObjectScratch {
         }
         command
             .args(args)
-            .env("GIT_OBJECT_DIRECTORY", &self.path)
+            .env("GIT_OBJECT_DIRECTORY", self.directory.path())
             .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", &self.alternate);
         command
     }
 }
-impl Drop for ObjectScratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
 fn merge_counts(
     ctx: &GitContext<'_>,
     repo: &Repository,
@@ -1078,13 +1048,10 @@ fn should_count_path(path: &str, include_generated: bool) -> bool {
         return false;
     }
     let basename = path.rsplit('/').next().unwrap_or(path);
-    static PATTERNS: std::sync::LazyLock<Vec<glob::Pattern>> = std::sync::LazyLock::new(|| {
-        IGNORED_FILE_GLOBS
+    !IGNORED_FILES.contains(&basename)
+        && !IGNORED_FILE_SUFFIXES
             .iter()
-            .map(|pattern| glob::Pattern::new(pattern).expect("valid built-in glob"))
-            .collect()
-    });
-    !PATTERNS.iter().any(|pattern| pattern.matches(basename))
+            .any(|suffix| basename.ends_with(suffix))
 }
 
 // Extract a single mailbox using the same address grammar as Go's net/mail:
@@ -1786,6 +1753,48 @@ mod tests {
             "49699333+dependabot[bot]@users.noreply.github.com",
             &[]
         ));
+    }
+
+    #[test]
+    fn generated_file_filters_preserve_exact_names_suffixes_and_overrides() {
+        for path in [
+            "src/app.min.js",
+            "src/app.min.css",
+            "src/app.js.map",
+            "src/component.snap",
+            "src/Cargo.lock",
+            "src/yarn.lock",
+            "src/composer.lock",
+            "src/Gemfile.lock",
+            "src/poetry.lock",
+            "src/api.pb.go",
+            "src/api_pb2.py",
+            "src/package-lock.json",
+            "src/pnpm-lock.yaml",
+            "src/go.sum",
+            ".lock",
+            "_pb2.py",
+            "src/日本語.min.js",
+            "vendor/file.rs",
+            "src/node_modules/file.js",
+        ] {
+            assert!(!should_count_path(path, false), "{path}");
+            assert!(should_count_path(path, true), "all_files: {path}");
+        }
+        for path in [
+            "src/app.js",
+            "src/app.MIN.JS",
+            "src/Cargo.LOCK",
+            "src/app.min.js.bak",
+            "src/my-package-lock.json",
+            "src/pnpm-lock.yml",
+            "src/go.sum.txt",
+            "src/vendor-api/file.rs",
+            "src/.min.js/file.rs",
+            "src/api_pb2.pyi",
+        ] {
+            assert!(should_count_path(path, false), "{path}");
+        }
     }
 
     #[test]

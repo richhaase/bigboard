@@ -1,7 +1,7 @@
 //! Contributor identity, unique-commit accounting, and reporting-calendar totals.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, SecondsFormat, TimeZone, Utc};
@@ -482,14 +482,18 @@ pub(crate) fn aggregate_cancellable<'a>(
     (!cancelled()).then_some(authors)
 }
 
+struct AuthorAccumulator {
+    stats: AuthorStats,
+    name_counts: BTreeMap<String, usize>,
+}
+
 fn aggregate_groups<'a>(
     groups: impl IntoIterator<Item = Vec<&'a CommitRecord>>,
     options: &AggregateOptions,
     only_id: Option<&str>,
     cancelled: &impl Fn() -> bool,
 ) -> Vec<AuthorStats> {
-    let mut by_id: BTreeMap<String, AuthorStats> = BTreeMap::new();
-    let mut name_counts: HashMap<String, BTreeMap<String, usize>> = HashMap::new();
+    let mut by_id: BTreeMap<String, AuthorAccumulator> = BTreeMap::new();
     for copies in groups.into_iter().take_while(|_| !cancelled()) {
         let record = representative(&copies);
         let ai_assisted = copies.iter().any(|record| record.ai_assisted);
@@ -517,10 +521,16 @@ fn aggregate_groups<'a>(
             if only_id.is_some_and(|selected| selected != id) {
                 continue;
             }
-            let author = by_id.entry(id.clone()).or_insert_with(|| AuthorStats {
-                id: id.clone(),
-                ..AuthorStats::default()
-            });
+            let accumulator = by_id
+                .entry(id.clone())
+                .or_insert_with(|| AuthorAccumulator {
+                    stats: AuthorStats {
+                        id,
+                        ..AuthorStats::default()
+                    },
+                    name_counts: BTreeMap::new(),
+                });
+            let author = &mut accumulator.stats;
             for identity in participant.identities {
                 author.aliases.insert(identity.name.to_owned());
                 author.member_ids.insert(identity.member_id());
@@ -531,9 +541,8 @@ fn aggregate_groups<'a>(
                 author.bot |=
                     is_bot_identity(identity.name, identity.email, &options.bot_identities);
             }
-            *name_counts
-                .entry(id)
-                .or_default()
+            *accumulator
+                .name_counts
                 .entry(participant.preferred_name.to_owned())
                 .or_default() += 1;
             let date = local_date.fixed_offset();
@@ -592,13 +601,15 @@ fn aggregate_groups<'a>(
     let mut authors: Vec<_> = by_id
         .into_values()
         .take_while(|_| !cancelled())
-        .map(|mut author| {
+        .map(|accumulator| {
+            let mut author = accumulator.stats;
             author.name = options
                 .identities
                 .display_name(&author.id)
                 .map(str::to_owned)
                 .unwrap_or_else(|| {
-                    name_counts[&author.id]
+                    accumulator
+                        .name_counts
                         .iter()
                         .max_by(|(name_a, count_a), (name_b, count_b)| {
                             count_a

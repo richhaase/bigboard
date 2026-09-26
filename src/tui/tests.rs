@@ -124,7 +124,7 @@ fn github_picker_key_does_not_interrupt_search_or_active_scans() {
     assert_eq!(ch(&mut app, 'g'), Action::None);
     assert_eq!(app.filter_query, "g");
     key(&mut app, KeyCode::Esc);
-    app.loading = true;
+    app.pending_scan.remaining = 1;
     assert_eq!(ch(&mut app, 'g'), Action::None);
 }
 
@@ -243,7 +243,7 @@ fn repository_changes_apply_on_escape_and_enter_and_gate_keys() {
         ch(&mut app, 'B');
         ch(&mut app, 'M');
         assert_eq!(app.time_index, time);
-        assert!(!app.loading);
+        assert!(!app.loading());
         assert!(app.merge.is_none());
         assert_eq!(app.scope, HistoryScope::Landed);
         key(&mut app, finish);
@@ -381,7 +381,10 @@ fn unknown_and_coauthored_lines_are_not_rendered_as_zero() {
 #[test]
 fn scan_failures_remain_visible_without_per_commit_warnings() {
     let mut app = populated();
-    app.failed_repos = vec!["broken".into()];
+    app.failed_repos = vec![RepositoryFailure {
+        repository: repo("broken"),
+        error: "unreadable repository".into(),
+    }];
     app.warnings = vec![("/repos/engine".into(), "engine: shallow history".into())];
     let screen = draw(&mut app, 100, 28);
     assert!(screen.contains("1 unreadable"), "{screen}");
@@ -607,7 +610,7 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
             error: None,
         },
     );
-    assert!(app.loading);
+    assert!(app.loading());
     loaded(
         &mut app,
         ScanResult {
@@ -617,7 +620,7 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
             error: Some("unreadable".into()),
         },
     );
-    assert!(!app.loading);
+    assert!(!app.loading());
     assert_eq!(app.authors.len(), 1);
     let summary = plain(app.lines());
     assert!(summary.contains("1 unreadable"), "{summary}");
@@ -638,6 +641,17 @@ fn streaming_load_qualifies_partial_failures_and_refreshes_cutoff() {
             },
         );
     }
+    assert!(!app.loading());
+    assert!(app.all_records.is_empty());
+    assert!(app.loaded_repos.is_empty());
+    assert!(app.warnings.is_empty());
+    assert_eq!(app.failed_repos.len(), 2);
+    assert!(
+        app.failed_repos
+            .iter()
+            .all(|failure| failure.error == "failed")
+    );
+    assert!(plain(app.lines()).contains("all 2 repositories failed to scan"));
     assert!(plain(app.lines()).contains("totals unavailable"));
 }
 #[test]
@@ -787,7 +801,7 @@ fn loading_shows_heartbeat_elapsed_stage_and_completed_counts() {
             warnings: vec![],
         },
     );
-    assert!(!app.loading);
+    assert!(!app.loading());
     assert!(app.scan_progress.is_empty());
     app.reset_pending();
     assert_eq!(app.loading_tick, 0);
@@ -811,12 +825,15 @@ fn views_render_at_tiny_and_large_sizes() {
         key(&mut app, KeyCode::Enter);
         draw(&mut app, w, h);
         key(&mut app, KeyCode::Esc);
-        app.loading = true;
+        app.pending_scan.remaining = 1;
         draw(&mut app, w, h);
-        app.loading = false;
-        app.error = Some("failure".into());
-        draw(&mut app, w, h);
-        app.error = None;
+        app.pending_scan.remaining = 0;
+        let mut failed = empty();
+        failed.failed_repos.push(RepositoryFailure {
+            repository: repo("broken"),
+            error: "failure".into(),
+        });
+        draw(&mut failed, w, h);
     }
 }
 
@@ -1415,7 +1432,10 @@ fn long_contributor_detail() -> App {
         Arc::make_mut(&mut app.all_records).push(entry);
     }
     Arc::make_mut(&mut app.all_records).push(record("Grace Hopper", "project-00", 1));
-    app.failed_repos = vec!["broken".into()];
+    app.failed_repos = vec![RepositoryFailure {
+        repository: repo("broken"),
+        error: "unreadable repository".into(),
+    }];
     app.warnings = vec![(
         "/repos/project-00".into(),
         "per-commit diagnostic must not be rendered".into(),
@@ -1610,11 +1630,49 @@ fn github_range_loads_new_window_and_history_stays_on_default_branch() {
     assert_eq!(app.scope, HistoryScope::Landed);
     assert_eq!(key(&mut app, KeyCode::Right), Action::Refresh);
     assert_eq!(app.time_index, 3);
-    assert!(app.loading);
+    assert!(app.loading());
     let mut local = populated();
     local.time_index = 2;
     assert_eq!(key(&mut local, KeyCode::Right), Action::None);
-    assert!(!local.loading);
+    assert!(!local.loading());
+}
+
+#[test]
+fn time_navigation_aliases_stop_at_bounds_without_starting_work() {
+    for github_source in [false, true] {
+        for (back, forward) in [
+            (KeyCode::Left, KeyCode::Right),
+            (KeyCode::Char('h'), KeyCode::Char('l')),
+        ] {
+            let mut app = populated();
+            app.github_source = github_source;
+            app.repositories = app.loaded_repos.clone();
+            for (index, code) in [(0, back), (TIME_PRESETS.len() - 1, forward)] {
+                app.time_index = index;
+                let cutoff = app.cutoff;
+                assert_eq!(
+                    app.key(KeyEvent::new(code, KeyModifiers::NONE)),
+                    Action::None
+                );
+                assert_eq!(app.time_index, index);
+                assert_eq!(app.cutoff, cutoff);
+                assert!(!app.loading());
+                assert!(app.pending_analysis.is_none());
+            }
+            app.time_index = 2;
+            let action = if github_source {
+                Action::Refresh
+            } else {
+                Action::None
+            };
+            assert_eq!(key(&mut app, back), action);
+            assert_eq!(app.time_index, 1);
+            // Finish the simulated load before navigating forward again.
+            app.pending_scan.remaining = 0;
+            assert_eq!(key(&mut app, forward), action);
+            assert_eq!(app.time_index, 2);
+        }
+    }
 }
 
 #[test]
@@ -1711,7 +1769,7 @@ fn pending_filters_preserve_selection_and_refresh_discards_old_analysis() {
         Action::Refresh
     );
     assert!(app.pending_analysis.is_none());
-    assert!(app.loading);
+    assert!(app.loading());
     app.cutoff = now();
     app.loaded(ScanResult {
         repository: repo("replacement"),

@@ -1,14 +1,12 @@
 //! Bounded repository selection with pageable paths and scan failures.
 use super::App;
 use super::components::*;
-use super::merge::{wrap_help, wrapped};
+use crate::model::Repository;
 use ratatui::text::Line;
 
 struct RepositoryChoice<'a> {
-    id: &'a str,
-    name: &'a str,
-    path: Option<&'a std::path::Path>,
-    failed: bool,
+    repository: &'a Repository,
+    error: Option<&'a str>,
 }
 
 struct RepositoryLayout {
@@ -19,42 +17,17 @@ struct RepositoryLayout {
 
 impl App {
     fn repository_choices(&self) -> Vec<RepositoryChoice<'_>> {
-        let mut choices: Vec<_> = self
-            .loaded_repos
+        self.loaded_repos
             .iter()
             .map(|repo| RepositoryChoice {
-                id: &repo.id,
-                name: &repo.name,
-                path: Some(&repo.path),
-                failed: false,
+                repository: repo,
+                error: None,
             })
-            .collect();
-        for name in &self.failed_repos {
-            // Names are presentation labels; only a recorded failure ID can
-            // identify its error when multiple repositories share a label.
-            let eligible = |repo: &&crate::model::Repository| {
-                &repo.name == name && !choices.iter().any(|choice| choice.id == repo.id)
-            };
-            let repo = self
-                .repositories
-                .iter()
-                .filter(eligible)
-                .find(|repo| self.failure_details.iter().any(|(id, _)| id == &repo.id))
-                .or_else(|| {
-                    // Legacy/incomplete scan state may have only a failed name.
-                    // Show a path only when the remaining candidate is unambiguous.
-                    let mut remaining = self.repositories.iter().filter(eligible);
-                    let only = remaining.next()?;
-                    remaining.next().is_none().then_some(only)
-                });
-            choices.push(RepositoryChoice {
-                id: repo.map_or(name.as_str(), |repo| &repo.id),
-                name,
-                path: repo.map(|repo| repo.path.as_path()),
-                failed: true,
-            });
-        }
-        choices
+            .chain(self.failed_repos.iter().map(|failure| RepositoryChoice {
+                repository: &failure.repository,
+                error: Some(&failure.error),
+            }))
+            .collect()
     }
 
     fn repository_layout(&self) -> RepositoryLayout {
@@ -75,7 +48,7 @@ impl App {
         let choices = self.repository_choices();
         let failed = choices
             .get(self.overlay_cursor)
-            .is_some_and(|repo| repo.failed);
+            .is_some_and(|choice| choice.error.is_some());
         let detail_limit = if failed {
             available.saturating_sub((available / 3).clamp(1, 8))
         } else {
@@ -95,28 +68,22 @@ impl App {
         let p = &self.palette;
         let width = (self.width as usize).saturating_sub(4).max(1);
         let choices = self.repository_choices();
-        let Some(repo) = choices.get(self.overlay_cursor) else {
+        let Some(choice) = choices.get(self.overlay_cursor) else {
             return wrapped("No repositories available.", width, p.dim_white);
         };
+        let repo = choice.repository;
         let mut lines = if let Some(host) = repo
             .id
             .strip_prefix("github:")
             .and_then(|id| id.split(':').next())
         {
             wrapped(&format!("https://{host}/{}", repo.name), width, p.dim_white)
-        } else if let Some(path) = repo.path {
-            wrapped(&path.to_string_lossy(), width, p.dim_white)
         } else {
-            wrapped("Repository path unavailable.", width, p.dim_white)
+            wrapped(&repo.path.to_string_lossy(), width, p.dim_white)
         };
-        if repo.failed {
-            let failure = self.failure_details.iter().find(|(id, _)| id == repo.id);
-            let detail = failure.map_or(
-                "Scan failed; this repository is absent from the totals.",
-                |(_, error)| error.as_str(),
-            );
+        if let Some(detail) = choice.error {
             lines.extend(wrapped(&format!("SCAN FAILED // {detail}"), width, p.red));
-        } else if self.repository_history_unavailable(repo.id) {
+        } else if self.repository_history_unavailable(&repo.id) {
             lines.extend(wrapped(
                 "Default branch unavailable locally; use B on the board for all branches.",
                 width,
@@ -141,8 +108,8 @@ impl App {
         let id = self
             .repository_choices()
             .get(self.overlay_cursor)
-            .filter(|repo| !repo.failed)
-            .map(|repo| repo.id.to_owned());
+            .filter(|choice| choice.error.is_none())
+            .map(|choice| choice.repository.id.clone());
         if let Some(id) = id
             && !self.overlay_excluded.remove(&id)
         {
@@ -199,10 +166,11 @@ impl App {
             .saturating_add(1)
             .saturating_sub(layout.list_rows);
         for index in start..start + layout.list_rows {
-            let content = if let Some(repo) = choices.get(index) {
+            let content = if let Some(choice) = choices.get(index) {
+                let repo = choice.repository;
                 let selected = index == self.overlay_cursor;
-                let excluded = self.overlay_excluded.contains(repo.id);
-                let color = if repo.failed {
+                let excluded = self.overlay_excluded.contains(&repo.id);
+                let color = if choice.error.is_some() {
                     p.red
                 } else if excluded {
                     p.dim_white
@@ -212,7 +180,7 @@ impl App {
                 Line::from(vec![
                     bold(if selected { "▸ " } else { "  " }, p.magenta),
                     span(
-                        if repo.failed {
+                        if choice.error.is_some() {
                             "[!] "
                         } else if excluded {
                             "[ ] "
@@ -221,7 +189,7 @@ impl App {
                         },
                         color,
                     ),
-                    span(display_text(repo.name), color),
+                    span(display_text(&repo.name), color),
                 ])
                 .style(p.row(selected, index))
             } else if choices.is_empty() && index == 0 {
@@ -321,14 +289,12 @@ mod tests {
     fn long_scan_errors_are_pageable_without_hiding_selection_or_help() {
         for (width, height) in [(40, 12), (60, 18), (80, 24), (140, 45)] {
             let mut app = app(width, height);
-            app.loaded_repos.remove(0);
-            app.failed_repos = vec!["node-00".into()];
-            app.failure_details = vec![(
-                "/repos/node-00".into(),
-                (0..120)
+            app.failed_repos = vec![super::super::RepositoryFailure {
+                repository: app.loaded_repos.remove(0),
+                error: (0..120)
                     .map(|index| format!("ERROR-{index:03}: unreadable object; "))
                     .collect(),
-            )];
+            }];
             app.overlay_cursor = app.loaded_repos.len();
             let expected: HashSet<_> = app
                 .repository_details()
@@ -404,7 +370,7 @@ mod tests {
         let broken = repo(40);
         app.repositories.push(broken.clone());
         app.loaded_repos.clear();
-        app.pending_remaining = 1;
+        app.pending_scan.remaining = 1;
         app.loaded(crate::scan::ScanResult {
             repository: broken.clone(),
             records: vec![],
@@ -432,16 +398,23 @@ mod tests {
         let first = named("broken-a");
         let second = named("broken-b");
         app.repositories = vec![healthy.clone(), first.clone(), second.clone()];
-        app.loaded_repos = vec![healthy.clone()];
-        app.failed_repos = vec!["shared".into(), "shared".into()];
-        app.failure_details = vec![
-            (second.id.clone(), "ERROR-B".into()),
-            (first.id.clone(), "ERROR-A".into()),
-        ];
+        app.reset_pending();
+        for (repository, error) in [
+            (second.clone(), Some("ERROR-B")),
+            (healthy.clone(), None),
+            (first.clone(), Some("ERROR-A")),
+        ] {
+            app.loaded(crate::scan::ScanResult {
+                repository,
+                records: vec![],
+                warnings: vec![],
+                error: error.map(str::to_owned),
+            });
+        }
         let ids: Vec<_> = app
             .repository_choices()
             .iter()
-            .map(|choice| choice.id.to_owned())
+            .map(|choice| choice.repository.id.to_owned())
             .collect();
         assert_eq!(ids, [healthy.id, first.id.clone(), second.id.clone()]);
         for (index, expected, error, other_error) in [

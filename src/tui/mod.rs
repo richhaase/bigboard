@@ -1,4 +1,4 @@
-//! Ratatui presentation and keyboard state, retaining the Go dashboard's behavior.
+//! Ratatui presentation, keyboard state, and background analysis coordination.
 mod analysis;
 mod components;
 mod detail;
@@ -69,11 +69,9 @@ struct App {
     scope: HistoryScope,
     cutoff: DateTime<FixedOffset>,
     warnings: Vec<(String, String)>,
-    pending_warnings: Vec<(String, String)>,
     repositories: Vec<Repository>,
     loaded_repos: Vec<Repository>,
-    failed_repos: Vec<String>,
-    failure_details: Vec<(String, String)>,
+    failed_repos: Vec<RepositoryFailure>,
     excluded: HashSet<String>,
     overlay_excluded: HashSet<String>,
     overlay_cursor: usize,
@@ -92,14 +90,8 @@ struct App {
     version: String,
     width: u16,
     height: u16,
-    loading: bool,
-    error: Option<String>,
     options: AnalysisOptions,
-    pending_records: Vec<CommitRecord>,
-    pending_repos: Vec<Repository>,
-    pending_failed: Vec<String>,
-    pending_failure_details: Vec<(String, String)>,
-    pending_remaining: usize,
+    pending_scan: PendingScan,
     boot_lines: Vec<(String, bool)>,
     scan_progress: BTreeMap<String, ScanProgress>,
     loading_started: Instant,
@@ -110,6 +102,20 @@ struct App {
 struct PendingAnalysis {
     generation: u64,
     selected_id: Option<String>,
+}
+
+struct RepositoryFailure {
+    repository: Repository,
+    error: String,
+}
+
+#[derive(Default)]
+struct PendingScan {
+    remaining: usize,
+    records: Vec<CommitRecord>,
+    repositories: Vec<Repository>,
+    failures: Vec<RepositoryFailure>,
+    warnings: Vec<(String, String)>,
 }
 
 impl App {
@@ -156,11 +162,9 @@ impl App {
             scope: HistoryScope::Landed,
             cutoff: Utc::now().fixed_offset(),
             warnings: vec![],
-            pending_warnings: vec![],
             repositories,
             loaded_repos: vec![],
             failed_repos: vec![],
-            failure_details: vec![],
             excluded: normalized,
             overlay_excluded: HashSet::new(),
             overlay_cursor: 0,
@@ -183,14 +187,8 @@ impl App {
             version: version.into(),
             width: 80,
             height: 24,
-            loading: true,
-            error: None,
             options,
-            pending_records: vec![],
-            pending_repos: vec![],
-            pending_failed: vec![],
-            pending_failure_details: vec![],
-            pending_remaining: 0,
+            pending_scan: PendingScan::default(),
             boot_lines: vec![],
             scan_progress: BTreeMap::new(),
             loading_started: Instant::now(),
@@ -201,71 +199,75 @@ impl App {
         app
     }
 
+    fn loading(&self) -> bool {
+        self.pending_scan.remaining > 0
+    }
+
     fn reset_pending(&mut self) {
         self.analysis.cancel();
         self.pending_analysis = None;
         self.scan_progress.clear();
         self.loading_started = Instant::now();
         self.loading_tick = 0;
-        self.loading = true;
-        self.pending_remaining = self.repositories.len();
-        self.pending_records.clear();
-        self.pending_repos.clear();
-        self.pending_failed.clear();
-        self.pending_failure_details.clear();
-        self.pending_warnings.clear();
+        self.pending_scan = PendingScan {
+            remaining: self.repositories.len(),
+            ..PendingScan::default()
+        };
         self.cutoff = Utc::now().fixed_offset();
         self.boot_lines.clear();
-        if self.pending_remaining == 0 {
+        if self.pending_scan.remaining == 0 {
             self.finalize_load();
         }
     }
 
     fn loaded(&mut self, result: ScanResult) {
         self.scan_progress.remove(&result.repository.id);
-        let ok = result.error.is_none();
-        self.pending_warnings
+        let pending = &mut self.pending_scan;
+        pending
+            .warnings
             .extend(result.warnings.into_iter().map(|warning| {
                 (
                     result.repository.id.clone(),
                     format!("{}: {warning}", result.repository.name),
                 )
             }));
-        self.boot_lines.push((result.repository.name.clone(), ok));
-        if ok {
-            self.pending_records.extend(result.records);
-            self.pending_repos.push(result.repository);
+        self.boot_lines
+            .push((result.repository.name.clone(), result.error.is_none()));
+        if let Some(error) = result.error {
+            pending.failures.push(RepositoryFailure {
+                repository: result.repository,
+                error,
+            });
         } else {
-            if let Some(error) = result.error {
-                self.pending_failure_details
-                    .push((result.repository.id, error));
-            }
-            self.pending_failed.push(result.repository.name);
+            pending.records.extend(result.records);
+            pending.repositories.push(result.repository);
         }
-        self.pending_remaining = self.pending_remaining.saturating_sub(1);
-        if self.pending_remaining == 0 {
+        pending.remaining = pending.remaining.saturating_sub(1);
+        if pending.remaining == 0 {
             self.finalize_load();
         }
     }
 
     fn finalize_load(&mut self) {
-        self.pending_repos.sort_by(|a, b| a.name.cmp(&b.name));
-        self.pending_failed.sort();
-        self.all_records = Arc::new(std::mem::take(&mut self.pending_records));
-        self.loaded_repos = std::mem::take(&mut self.pending_repos);
-        self.failed_repos = std::mem::take(&mut self.pending_failed);
-        self.failure_details = std::mem::take(&mut self.pending_failure_details);
-        self.warnings = std::mem::take(&mut self.pending_warnings);
+        let pending = std::mem::take(&mut self.pending_scan);
+        self.all_records = Arc::new(pending.records);
+        self.loaded_repos = pending.repositories;
+        self.loaded_repos.sort_by(|a, b| a.name.cmp(&b.name));
+        self.failed_repos = pending.failures;
+        self.failed_repos.sort_by(|a, b| {
+            a.repository.name.cmp(&b.repository.name).then_with(|| {
+                // Equal labels retain the selected repository order, independent
+                // of the order in which background scans finish.
+                let position = |failure: &RepositoryFailure| {
+                    self.repositories
+                        .iter()
+                        .position(|repo| repo.id == failure.repository.id)
+                };
+                position(a).cmp(&position(b))
+            })
+        });
+        self.warnings = pending.warnings;
         self.warnings.sort();
-        self.error = if self.loaded_repos.is_empty() && !self.failed_repos.is_empty() {
-            Some(format!(
-                "all {} repositories failed to scan",
-                self.failed_repos.len()
-            ))
-        } else {
-            None
-        };
-        self.loading = false;
         self.invalidate_contributors();
         self.recompute();
     }
@@ -429,19 +431,13 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Action::Quit;
         }
-        if self.pending_analysis.is_some()
-            && key.code == KeyCode::Char('q')
-            && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
+        let modified = key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if self.pending_analysis.is_some() && key.code == KeyCode::Char('q') && !modified {
             return Action::Quit;
         }
-        if self.loading
-            && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
+        if self.loading() && !modified {
             return if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
                 Action::Quit
             } else {
@@ -461,23 +457,14 @@ impl App {
                 KeyCode::Backspace => {
                     self.filter_query.pop();
                 }
-                KeyCode::Char(c)
-                    if !key
-                        .modifiers
-                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                {
-                    self.filter_query.push(c)
-                }
+                KeyCode::Char(c) if !modified => self.filter_query.push(c),
                 _ => {}
             }
             self.selected = 0;
             self.offset = 0;
             return Action::None;
         }
-        if key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
+        if modified {
             return Action::None;
         }
         // During calculation, only operate on controls independent of the old
@@ -495,10 +482,10 @@ impl App {
             return Action::None;
         }
         match key.code {
-            KeyCode::Char('g') if self.view == View::Aggregate && !self.loading => {
+            KeyCode::Char('g') if self.view == View::Aggregate => {
                 return Action::Github;
             }
-            KeyCode::Char('M') if self.view != View::Repositories && !self.loading => {
+            KeyCode::Char('M') if self.view != View::Repositories => {
                 self.open_merge();
             }
             KeyCode::Char('B') if self.view != View::Repositories && !self.github_source => {
@@ -513,7 +500,7 @@ impl App {
                     return Action::Quit;
                 }
             }
-            KeyCode::Char('R') if self.view == View::Aggregate && !self.loading => {
+            KeyCode::Char('R') if self.view == View::Aggregate => {
                 self.reset_pending();
                 return Action::Refresh;
             }
@@ -535,35 +522,34 @@ impl App {
                 }
                 View::Aggregate => return Action::Quit,
             },
-            KeyCode::Up | KeyCode::Char('k') => match self.view {
-                View::Repositories => self.step_repository(-1),
-                View::Operative => self.step_operative(-1),
-                View::Aggregate => {
-                    self.selected = self.selected.saturating_sub(1);
-                    self.clamp_scroll();
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
+                let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
+                    -1
+                } else {
+                    1
+                };
+                match self.view {
+                    View::Repositories => self.step_repository(delta),
+                    View::Operative => self.step_operative(delta),
+                    View::Aggregate => {
+                        self.selected = self.selected.saturating_add_signed(delta);
+                        self.clamp_scroll();
+                    }
                 }
-            },
-            KeyCode::Down | KeyCode::Char('j') => match self.view {
-                View::Repositories => self.step_repository(1),
-                View::Operative => self.step_operative(1),
-                View::Aggregate => {
-                    self.selected =
-                        (self.selected + 1).min(self.displayed_authors().len().saturating_sub(1));
-                    self.clamp_scroll();
-                }
-            },
-            KeyCode::PageUp if self.view == View::Aggregate => {
-                let page = self.table_viewport();
-                self.selected = self.selected.saturating_sub(page);
-                self.offset = self.offset.saturating_sub(page);
-                self.clamp_scroll();
             }
-            KeyCode::PageDown if self.view == View::Aggregate => {
-                let page = self.table_viewport();
-                self.selected =
-                    (self.selected + page).min(self.displayed_authors().len().saturating_sub(1));
-                self.offset = self.offset.saturating_add(page);
-                self.clamp_scroll();
+            KeyCode::PageUp | KeyCode::PageDown => {
+                let forward = key.code == KeyCode::PageDown;
+                match self.view {
+                    View::Aggregate => {
+                        let page = self.table_viewport() as isize;
+                        let delta = if forward { page } else { -page };
+                        self.selected = self.selected.saturating_add_signed(delta);
+                        self.offset = self.offset.saturating_add_signed(delta);
+                        self.clamp_scroll();
+                    }
+                    View::Operative => self.page_detail(forward),
+                    View::Repositories => self.page_repository_diagnostics(forward),
+                }
             }
             KeyCode::Home if self.view == View::Aggregate => {
                 self.selected = 0;
@@ -573,21 +559,24 @@ impl App {
                 self.selected = self.displayed_authors().len().saturating_sub(1);
                 self.clamp_scroll();
             }
-            KeyCode::PageUp if self.view == View::Operative => self.page_detail(false),
-            KeyCode::PageDown if self.view == View::Operative => self.page_detail(true),
             KeyCode::Home if self.view == View::Operative => self.detail_offset = 0,
             KeyCode::End if self.view == View::Operative => {
                 self.detail_offset = self.detail_max_offset();
             }
-            KeyCode::PageUp if self.view == View::Repositories => {
-                self.page_repository_diagnostics(false);
-            }
-            KeyCode::PageDown if self.view == View::Repositories => {
-                self.page_repository_diagnostics(true);
-            }
-            KeyCode::Left | KeyCode::Char('h') if self.view != View::Repositories => {
-                if self.time_index > 0 {
-                    self.time_index -= 1;
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+                if self.view != View::Repositories =>
+            {
+                let delta = if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                    -1
+                } else {
+                    1
+                };
+                let next = self
+                    .time_index
+                    .saturating_add_signed(delta)
+                    .min(TIME_PRESETS.len() - 1);
+                if next != self.time_index {
+                    self.time_index = next;
                     if self.github_source {
                         self.reset_pending();
                         return Action::Refresh;
@@ -595,24 +584,12 @@ impl App {
                     self.recompute();
                 }
             }
-            KeyCode::Right | KeyCode::Char('l') if self.view != View::Repositories => {
-                if self.time_index + 1 < TIME_PRESETS.len() {
-                    self.time_index += 1;
-                    if self.github_source {
-                        self.reset_pending();
-                        return Action::Refresh;
-                    }
-                    self.recompute();
+            KeyCode::Char('s' | 'S') if self.view == View::Aggregate => {
+                if key.code == KeyCode::Char('s') {
+                    self.sort_field = self.sort_field.next();
+                } else {
+                    self.sort_ascending = !self.sort_ascending;
                 }
-            }
-            KeyCode::Char('s') if self.view == View::Aggregate => {
-                self.sort_field = self.sort_field.next();
-                self.sort_authors();
-                self.selected = 0;
-                self.offset = 0;
-            }
-            KeyCode::Char('S') if self.view == View::Aggregate => {
-                self.sort_ascending = !self.sort_ascending;
                 self.sort_authors();
                 self.selected = 0;
                 self.offset = 0;
@@ -760,7 +737,7 @@ pub fn run(
     let mut open_github = github_start;
     let mut resume_saved = github_start;
     let mut source: Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)> = None;
-    let mut session: Option<ScanSession> = if app.loading && !open_github {
+    let mut session: Option<ScanSession> = if app.loading() && !open_github {
         Some(scan::start_scan(
             app.repositories.clone(),
             app.options.clone(),
@@ -804,7 +781,7 @@ pub fn run(
                     app.reset_pending();
                 }
             }
-            if app.loading {
+            if app.loading() {
                 app.filter_query.clear();
                 app.selected = 0;
                 app.offset = 0;
@@ -825,11 +802,11 @@ pub fn run(
                 dirty = true;
             }
         }
-        if !app.loading {
+        if !app.loading() {
             session = None;
         }
         dirty |= app.poll_analysis()?;
-        if app.loading || app.pending_analysis.is_some() {
+        if app.loading() || app.pending_analysis.is_some() {
             let tick = app.loading_started.elapsed().as_millis() / 100;
             if tick != app.loading_tick {
                 app.loading_tick = tick;
@@ -845,12 +822,7 @@ pub fn run(
             dirty = matches!(event, Event::Key(_) | Event::Resize(_, _));
             match event {
                 Event::Key(key) => match app.key(key) {
-                    Action::Quit => {
-                        if let Some(scan) = &session {
-                            scan.cancel();
-                        }
-                        break;
-                    }
+                    Action::Quit => break,
                     Action::Refresh => {
                         session = Some(start_source_scan(&app, &source));
                     }

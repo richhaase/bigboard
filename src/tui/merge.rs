@@ -3,7 +3,6 @@ use super::{Action, App, View};
 use crate::{identity::IdentityStore, stats::AuthorStats};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Line;
-use unicode_width::UnicodeWidthStr;
 
 pub(super) struct MergeFlow {
     pub source: AuthorStats,
@@ -275,39 +274,5 @@ fn preview(label: &str, author: &AuthorStats, width: usize, p: &Palette) -> Vec<
         width,
         p.dim_cyan,
     ));
-    lines
-}
-
-pub(super) fn wrapped(text: &str, width: usize, color: ratatui::style::Color) -> Vec<UiLine> {
-    let text = display_text(text);
-    if width == 0 {
-        return vec![blank()];
-    }
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for c in text.chars() {
-        let mut next = current.clone();
-        next.push(c);
-        if next.width() > width && !current.is_empty() {
-            lines.push(text_line(std::mem::take(&mut current), color));
-        }
-        current.push(c);
-    }
-    lines.push(text_line(current, color));
-    lines
-}
-
-pub(super) fn wrap_help(bindings: &[(&str, String)], width: usize, p: &Palette) -> Vec<UiLine> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    for end in 1..=bindings.len() {
-        if help(&bindings[start..end], p).width() > width && end > start + 1 {
-            lines.push(help(&bindings[start..end - 1], p));
-            start = end - 1;
-        }
-    }
-    if start < bindings.len() {
-        lines.push(help(&bindings[start..], p));
-    }
     lines
 }
