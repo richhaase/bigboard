@@ -424,7 +424,7 @@ impl App {
             KeyCode::Char('M') if self.view != View::Repositories && !self.loading => {
                 self.open_merge();
             }
-            KeyCode::Char('B') if self.view != View::Repositories => {
+            KeyCode::Char('B') if self.view != View::Repositories && !self.github_source => {
                 self.scope = self.scope.toggle();
                 self.recompute();
             }
@@ -490,12 +490,20 @@ impl App {
             KeyCode::Left | KeyCode::Char('h') if self.view != View::Repositories => {
                 if self.time_index > 0 {
                     self.time_index -= 1;
+                    if self.github_source {
+                        self.reset_pending();
+                        return Action::Refresh;
+                    }
                     self.recompute();
                 }
             }
             KeyCode::Right | KeyCode::Char('l') if self.view != View::Repositories => {
                 if self.time_index + 1 < TIME_PRESETS.len() {
                     self.time_index += 1;
+                    if self.github_source {
+                        self.reset_pending();
+                        return Action::Refresh;
+                    }
                     self.recompute();
                 }
             }
@@ -645,6 +653,7 @@ pub fn run(
     }));
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     terminal.hide_cursor()?;
+    let mut local_scope = app.scope;
     let mut open_github = github_start || app.repositories.is_empty();
     let mut source: Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)> = None;
     let mut session: Option<ScanSession> = if app.loading && !open_github {
@@ -671,6 +680,7 @@ pub fn run(
                 github::Choice::Local => {
                     source = None;
                     app.github_source = false;
+                    app.scope = local_scope;
                     app.repositories = local_repositories.clone();
                     app.excluded = local_excluded.clone();
                     app.reset_pending();
@@ -678,8 +688,10 @@ pub fn run(
                 github::Choice::Repositories(client, repositories) => {
                     if !app.github_source {
                         local_excluded = app.excluded.clone();
+                        local_scope = app.scope;
                     }
                     app.github_source = true;
+                    app.scope = HistoryScope::Landed;
                     app.repositories = repositories.iter().map(|r| client.repository(r)).collect();
                     app.excluded.clear();
                     source = Some((client, repositories));
@@ -755,9 +767,15 @@ fn start_source_scan(
     source: &Option<(crate::github::Client, Vec<crate::github::RemoteRepository>)>,
 ) -> ScanSession {
     match source {
-        Some((client, repos)) => {
-            scan::start_github_scan(client.clone(), repos.clone(), app.options.clone())
-        }
+        Some((client, repos)) => scan::start_github_scan(
+            client.clone(),
+            repos.clone(),
+            app.options.clone(),
+            crate::github::Window::new(
+                TIME_PRESETS[app.time_index].1,
+                app.cutoff.with_timezone(&Utc),
+            ),
+        ),
         None => scan::start_scan(app.repositories.clone(), app.options.clone()),
     }
 }

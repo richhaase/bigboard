@@ -2,11 +2,8 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScanStage {
     Metadata,
-    WaitingForCache,
-    Downloading,
-    CheckingAnalysis,
-    ReusingAnalysis,
-    SavingAnalysis,
+    ReusingSummaries,
+    FetchingSummaries { pages: usize, commits: usize },
     ReadingHistory,
     CountingChanges { done: usize, total: usize },
     CheckingMerges { done: usize, total: usize },
@@ -16,11 +13,10 @@ impl std::fmt::Display for ScanStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Metadata => f.write_str("Checking GitHub repository"),
-            Self::WaitingForCache => f.write_str("Waiting for history cache"),
-            Self::Downloading => f.write_str("Downloading history"),
-            Self::CheckingAnalysis => f.write_str("Checking saved analysis"),
-            Self::ReusingAnalysis => f.write_str("History unchanged · reusing analysis"),
-            Self::SavingAnalysis => f.write_str("Saving analysis for the next refresh"),
+            Self::ReusingSummaries => f.write_str("Default branch unchanged · reusing summaries"),
+            Self::FetchingSummaries { pages, commits } => {
+                write!(f, "Loading summaries · {pages} pages · {commits} commits")
+            }
             Self::ReadingHistory => f.write_str("Reading commit history"),
             Self::CountingChanges { done, total } => {
                 write!(f, "Counting changes {done}/{total} commits")

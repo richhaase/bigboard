@@ -1268,7 +1268,7 @@ impl MailboxParser<'_> {
     }
 }
 
-fn is_ai(value: &str, identities: &[String]) -> bool {
+pub(crate) fn is_ai(value: &str, identities: &[String]) -> bool {
     let address = normalize_address(value);
     if address.is_empty() {
         return false;

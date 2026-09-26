@@ -1,15 +1,16 @@
-//! GitHub discovery through the user's `gh` account and managed bare Git caches.
+//! Lightweight GitHub activity: API metadata only, never Git objects or working files.
 use crate::{
     config, git,
-    model::{Repository, ScanData},
+    model::{CommitRecord, Identity, Repository, ScanData},
     progress::{Reporter, ScanStage},
 };
 use anyhow::{Context, Result, bail};
-use fs2::FileExt;
+use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::{
     collections::HashSet,
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -23,7 +24,7 @@ use std::{
 };
 
 const API_TIMEOUT: Duration = Duration::from_secs(120);
-const FETCH_TIMEOUT: Duration = Duration::from_secs(900);
+const MAX_PAGES: usize = 500; // Bound new requests per load; never publish partial totals.
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct RemoteRepository {
@@ -73,11 +74,128 @@ struct Selection {
     repositories: Vec<u64>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct AnalysisSnapshot {
-    fingerprint: String,
-    data: ScanData,
+/// One shared cutoff for server-side collection and dashboard filtering.
+#[derive(Clone, Copy, Debug)]
+pub struct Window {
+    pub since: DateTime<Utc>,
+    pub until: DateTime<Utc>,
 }
+impl Window {
+    pub fn new(days: i64, until: DateTime<Utc>) -> Self {
+        Self {
+            since: if days == 0 {
+                Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap()
+            } else {
+                until - chrono::Duration::days(days)
+            },
+            until,
+        }
+    }
+    // Cache whole UTC days so a moving cutoff can reuse an unchanged head.
+    // Returned records are still filtered to the exact requested window.
+    fn cache_bounds(self) -> Self {
+        Self {
+            since: self
+                .since
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
+            until: self
+                .until
+                .date_naive()
+                .succ_opt()
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Actor {
+    name: String,
+    email: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Authors {
+    nodes: Vec<Actor>,
+    page_info: PageInfo,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Parents {
+    total_count: usize,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiCommit {
+    oid: String,
+    committed_date: DateTime<Utc>,
+    author: Actor,
+    authors: Authors,
+    parents: Parents,
+    additions: i64,
+    deletions: i64,
+    changed_files_if_available: Option<usize>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct History {
+    nodes: Vec<ApiCommit>,
+    page_info: PageInfo,
+}
+#[derive(Serialize, Deserialize)]
+struct Snapshot {
+    schema: u32,
+    viewer: String,
+    repository: u64,
+    head: String,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+    commits: Vec<ApiCommit>,
+}
+const METADATA: &str = r#"query($owner:String!, $name:String!) {
+  viewer { id }
+  repository(owner:$owner, name:$name) {
+    databaseId nameWithOwner isEmpty
+    defaultBranchRef { target { oid } }
+  }
+}"#;
+const HISTORY: &str = r#"query($owner:String!, $name:String!, $head:GitObjectID!,
+                             $since:GitTimestamp!, $until:GitTimestamp!, $cursor:String) {
+  repository(owner:$owner, name:$name) {
+    object(oid:$head) { ... on Commit {
+      history(first:100, after:$cursor, since:$since, until:$until) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          oid committedDate additions deletions changedFilesIfAvailable
+          author { name email }
+          authors(first:10) { nodes { name email } pageInfo { hasNextPage endCursor } }
+          parents { totalCount }
+        }
+      }
+    } }
+  }
+}"#;
+const AUTHORS: &str = r#"query($owner:String!, $name:String!, $head:GitObjectID!, $cursor:String) {
+  repository(owner:$owner, name:$name) {
+    object(oid:$head) { ... on Commit {
+      authors(first:100, after:$cursor) {
+        nodes { name email } pageInfo { hasNextPage endCursor }
+      }
+    } }
+  }
+}"#;
 
 fn safe_component(value: &str) -> bool {
     !value.is_empty()
@@ -112,14 +230,14 @@ impl Client {
                         })
                     })
             })
-            .context("Set HOME or XDG_CACHE_HOME to store GitHub history")?;
+            .context("Set HOME or XDG_CACHE_HOME to store GitHub summaries")?;
         let selection_path = config::default_config_path().with_file_name("github.json");
         if !base.is_absolute() || !selection_path.is_absolute() {
             bail!("GitHub cache and configuration paths must be absolute");
         }
         Ok(Self {
             host,
-            cache_root: base.join("bigboard/github"),
+            cache_root: base.join("bigboard/github-api"),
             selection_path,
             gh_program: "gh".into(),
         })
@@ -204,276 +322,252 @@ impl Client {
             path: self
                 .cache_root
                 .join(&self.host)
-                .join(format!("{}.git", remote.id)),
+                .join(format!("{}.json", remote.id)),
             name: remote.full_name.clone(),
         }
     }
 
-    /// Hold the per-repository cache lock through collection, so another Big
-    /// Board process cannot replace refs while the analytics traverse them.
-    pub fn scan(
-        &self,
-        remote: &RemoteRepository,
-        options: &git::CollectOptions,
-        cancel: &AtomicBool,
-    ) -> Result<ScanData> {
-        self.scan_with_progress(remote, options, cancel, &|_| {})
+    fn graphql(&self, query: &str, variables: Value, cancel: &AtomicBool) -> Result<Value> {
+        let mut input = tempfile::NamedTempFile::new()?;
+        serde_json::to_writer(&mut input, &json!({"query":query,"variables":variables}))?;
+        input.flush()?;
+        let mut command = Command::new(&self.gh_program);
+        command
+            .args(["api", "--hostname", &self.host, "graphql", "--input"])
+            .arg(input.path())
+            .env("GH_PROMPT_DISABLED", "1");
+        let bytes = run_command(command, cancel, API_TIMEOUT).context(
+            "GitHub request failed; check gh login, repository access, and API rate limits",
+        )?;
+        let response: Value = serde_json::from_slice(&bytes).context("Reading GitHub response")?;
+        if let Some(errors) = response.get("errors").and_then(Value::as_array)
+            && !errors.is_empty()
+        {
+            bail!(
+                "GitHub returned incomplete data: {}",
+                errors
+                    .iter()
+                    .filter_map(|e| e["message"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+        response
+            .get("data")
+            .filter(|d| !d.is_null())
+            .cloned()
+            .context("GitHub returned no data")
     }
 
     pub(crate) fn scan_with_progress(
         &self,
         remote: &RemoteRepository,
         options: &git::CollectOptions,
+        window: Window,
         cancel: &AtomicBool,
         report: &Reporter<'_>,
     ) -> Result<ScanData> {
         report(ScanStage::Metadata);
         remote.validate()?;
-        let current: RemoteRepository = serde_json::from_slice(&self.api(
-            &format!("repos/{}", remote.full_name),
-            false,
-            cancel,
-        )?)?;
-        current.validate()?;
-        if current.id != remote.id || current.disabled {
+        let (owner, name) = remote.full_name.split_once('/').unwrap();
+        let vars = json!({"owner":owner,"name":name});
+        // Validate access on every load, even when reusing summaries. Pin one
+        // head throughout pagination so advancing branches cannot mix snapshots.
+        let metadata = self.graphql(METADATA, vars.clone(), cancel)?;
+        let viewer = metadata["viewer"]["id"]
+            .as_str()
+            .context("Missing GitHub account")?;
+        let repo = &metadata["repository"];
+        if repo["databaseId"].as_u64() != Some(remote.id) {
             bail!("Repository identity or access changed; reopen the GitHub picker");
         }
+        if repo["isEmpty"] == true {
+            return Ok(ScanData::default());
+        }
+        let head = repo["defaultBranchRef"]["target"]["oid"]
+            .as_str()
+            .context("No accessible default branch; use local mode for other branches")?;
+        let bounds = window.cache_bounds();
         let parent = self.cache_root.join(&self.host);
         private_directory(&parent)?;
-        report(ScanStage::WaitingForCache);
-        let _lock = CacheLock::acquire(&parent.join(format!("{}.lock", remote.id)), cancel)?;
-        let url = format!("https://{}/{}.git", self.host, current.full_name);
-        report(ScanStage::Downloading);
-        self.sync(&current, &url, cancel)
-            .context("GitHub history refresh failed; cached totals were not used")?;
-        self.analyze(&self.repository(&current), options, cancel, report)
-    }
-
-    /// Called only after a successful fetch, while holding the history lock.
-    fn analyze(
-        &self,
-        repo: &Repository,
-        options: &git::CollectOptions,
-        cancel: &AtomicBool,
-        report: &Reporter<'_>,
-    ) -> Result<ScanData> {
-        report(ScanStage::CheckingAnalysis);
-        // A missing/unsupported fingerprint input disables reuse rather than
-        // making assumptions about external Git configuration.
-        let fingerprint = analysis_fingerprint(repo, options, cancel).ok();
-        let path = repo.path.join("bigboard-analysis.json");
-        if let Some(expected) = &fingerprint
-            && let Ok(file) = File::open(&path)
-            && let Ok(snapshot) = serde_json::from_reader::<_, AnalysisSnapshot>(file)
-            && snapshot.fingerprint == *expected
-        {
-            check(cancel, Instant::now() + FETCH_TIMEOUT)?;
-            report(ScanStage::ReusingAnalysis);
-            return Ok(snapshot.data);
+        let path = self.repository(remote).path;
+        let cached = File::open(&path)
+            .ok()
+            .and_then(|file| serde_json::from_reader::<_, Snapshot>(file).ok())
+            .filter(|s| {
+                s.schema == 1
+                    && s.viewer == viewer
+                    && s.repository == remote.id
+                    && s.head == head
+                    && s.since <= s.until
+                    && s.commits.iter().all(|c| {
+                        c.parents.total_count > 1 || c.changed_files_if_available.is_some()
+                    })
+            });
+        let mut snapshot = cached.unwrap_or_else(|| Snapshot {
+            schema: 1,
+            viewer: viewer.into(),
+            repository: remote.id,
+            head: head.into(),
+            since: bounds.since,
+            until: bounds.since,
+            commits: vec![],
+        });
+        let mut intervals = Vec::new();
+        if bounds.since < snapshot.since {
+            intervals.push((bounds.since, snapshot.since));
         }
-        let data = git::scan_repository_with_progress(repo, options, cancel, report)?;
-        // Unsupported/conflicting merges are deterministic, but a transient
-        // failure reconstructing a merge must be retried on the next scan.
-        if let Some(fingerprint) = fingerprint
-            && !data
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("resolution line counts are unknown:"))
-        {
-            report(ScanStage::SavingAnalysis);
-            if analysis_fingerprint(repo, options, cancel).ok().as_ref() != Some(&fingerprint) {
-                return Ok(data);
+        if bounds.until > snapshot.until {
+            intervals.push((snapshot.until, bounds.until));
+        }
+        // Disjoint ranges should not download the unrequested gap.
+        if bounds.until < snapshot.since || bounds.since > snapshot.until {
+            snapshot.commits.clear();
+            snapshot.since = bounds.since;
+            snapshot.until = bounds.since;
+            intervals = vec![(bounds.since, bounds.until)];
+        }
+        if intervals.is_empty() {
+            report(ScanStage::ReusingSummaries);
+        }
+        let mut pages = 0;
+        for (since, until) in intervals {
+            let mut variables = vars.clone();
+            variables["head"] = json!(head);
+            variables["since"] = json!(since.to_rfc3339());
+            variables["until"] = json!(until.to_rfc3339());
+            variables["cursor"] = Value::Null;
+            let mut cursors = HashSet::new();
+            loop {
+                if pages >= MAX_PAGES {
+                    bail!(
+                        "GitHub load exceeds 500 history pages; choose a shorter range or use local mode. No partial totals were used"
+                    );
+                }
+                report(ScanStage::FetchingSummaries {
+                    pages,
+                    commits: snapshot.commits.len(),
+                });
+                let data = self.graphql(HISTORY, variables.clone(), cancel)?;
+                let mut history: History =
+                    serde_json::from_value(data["repository"]["object"]["history"].clone())
+                        .context("GitHub commit history was incomplete; retry or use local mode")?;
+                pages += 1;
+                for commit in &mut history.nodes {
+                    let mut seen = HashSet::new();
+                    while commit.authors.page_info.has_next_page {
+                        let cursor = next_cursor(&commit.authors.page_info, &mut seen)?;
+                        let mut author_vars = vars.clone();
+                        author_vars["head"] = json!(commit.oid);
+                        author_vars["cursor"] = json!(cursor);
+                        let data = self.graphql(AUTHORS, author_vars, cancel)?;
+                        let authors: Authors = serde_json::from_value(
+                            data["repository"]["object"]["authors"].clone(),
+                        )?;
+                        commit.authors.nodes.extend(authors.nodes);
+                        commit.authors.page_info = authors.page_info;
+                        if seen.len() > 100 {
+                            bail!("GitHub author list is too large; no partial totals were used");
+                        }
+                    }
+                }
+                snapshot.commits.extend(history.nodes);
+                if !history.page_info.has_next_page {
+                    break;
+                }
+                variables["cursor"] = json!(next_cursor(&history.page_info, &mut cursors)?);
             }
-            // Failure to save an optimization never hides successfully read data.
-            let _ = (|| -> Result<()> {
-                let mut file = tempfile::NamedTempFile::new_in(&repo.path)?;
-                serde_json::to_writer(
-                    &mut file,
-                    &AnalysisSnapshot {
-                        fingerprint,
-                        data: data.clone(),
-                    },
-                )?;
-                file.as_file().sync_all()?;
-                file.persist(path)?;
-                Ok(())
-            })();
         }
-        Ok(data)
-    }
-
-    fn sync(&self, remote: &RemoteRepository, url: &str, cancel: &AtomicBool) -> Result<()> {
-        let repo = self.repository(remote);
-        let parent = repo.path.parent().context("Missing cache directory")?;
-        private_directory(parent)?;
-        let pending;
-        let path = if repo.path.exists() {
-            if fs::symlink_metadata(&repo.path)?.file_type().is_symlink() {
-                bail!("Refusing a symlink in the managed GitHub cache");
-            }
-            let bare = run_git(&repo.path, &["rev-parse", "--is-bare-repository"], cancel)?;
-            let marker = run_git(
-                &repo.path,
-                &["config", "--get", "bigboard.repository"],
-                cancel,
-            )?;
-            if String::from_utf8_lossy(&bare).trim() != "true"
-                || String::from_utf8_lossy(&marker).trim() != repo.id
-            {
-                bail!("Directory is not a Big Board cache for this repository");
-            }
-            &repo.path
-        } else {
-            pending = tempfile::Builder::new()
-                .prefix(".fetch-")
-                .tempdir_in(parent)?;
-            run_git(pending.path(), &["init", "--bare", "--template="], cancel)?;
-            run_git(
-                pending.path(),
-                &["config", "bigboard.repository", &repo.id],
-                cancel,
-            )?;
-            pending.path()
-        };
-        run_git(path, &["config", "remote.origin.url", url], cancel)?;
-        run_git(
-            path,
-            &[
-                "config",
-                "remote.origin.fetch",
-                "+refs/heads/*:refs/remotes/origin/*",
-            ],
-            cancel,
-        )?;
-        run_git(
-            path,
-            &[
-                "fetch",
-                "--atomic",
-                "--prune",
-                "--no-tags",
-                "--no-write-fetch-head",
-                "origin",
-            ],
-            cancel,
-        )?;
-        if let Some(branch) = remote.default_branch.as_deref().filter(|s| !s.is_empty()) {
-            let target = format!("refs/remotes/origin/{branch}");
-            run_git(path, &["check-ref-format", &target], cancel)?;
-            run_git(
-                path,
-                &["symbolic-ref", "refs/remotes/origin/HEAD", &target],
-                cancel,
-            )?;
-            run_git(path, &["symbolic-ref", "HEAD", &target], cancel)?;
-        } else {
-            // Empty repositories have no branch. Remove any previous default
-            // pointer rather than presenting a formerly landed branch as current.
-            run_git(
-                path,
-                &["update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD"],
-                cancel,
-            )?;
-        }
-        run_git(path, &["config", "mailmap.blob", "HEAD:.mailmap"], cancel)?;
-        if path != repo.path {
-            fs::rename(path, &repo.path).context("Publishing downloaded history")?;
-        }
-        Ok(())
+        snapshot.since = snapshot.since.min(bounds.since);
+        snapshot.until = snapshot.until.max(bounds.until);
+        let mut seen = HashSet::new();
+        snapshot.commits.retain(|c| seen.insert(c.oid.clone()));
+        // Complete pages only; atomic replacement also makes concurrent readers
+        // safe. A racing writer can lose an optimization, never mix totals.
+        let _ = (|| -> Result<()> {
+            let mut file = tempfile::NamedTempFile::new_in(&parent)?;
+            serde_json::to_writer(&mut file, &snapshot)?;
+            file.as_file().sync_all()?;
+            file.persist(&path)?;
+            Ok(())
+        })();
+        check(cancel, Instant::now() + API_TIMEOUT)?;
+        let mut repository = self.repository(remote);
+        repository.name = repo["nameWithOwner"]
+            .as_str()
+            .context("Missing repository name")?
+            .into();
+        let records = snapshot
+            .commits
+            .iter()
+            .filter(|c| c.committed_date >= window.since && c.committed_date <= window.until)
+            .map(|c| c.record(&repository, options))
+            .collect();
+        Ok(ScanData {
+            records,
+            warnings: vec![],
+        })
     }
 }
 
-fn analysis_fingerprint(
-    repo: &Repository,
-    options: &git::CollectOptions,
-    cancel: &AtomicBool,
-) -> Result<String> {
-    let mut inputs = vec![
-        // The package version invalidates saved analysis when engine behavior changes.
-        env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
-        serde_json::to_vec(&(
-            &repo.id,
-            &repo.name,
-            options.include_generated,
-            &options.ai_identities,
-        ))?,
-        run_git(&repo.path, &["--version"], cancel)?,
-        run_git(
-            &repo.path,
-            &[
-                "for-each-ref",
-                "--format=%(refname)%00%(objectname)%00%(symref)",
-            ],
-            cancel,
-        )?,
-        run_git(&repo.path, &["symbolic-ref", "HEAD"], cancel)?,
-    ];
-    let config = run_git(&repo.path, &["config", "--null", "--list"], cancel)?;
-    let has_mailmap_file = config
-        .split(|byte| *byte == 0)
-        .any(|entry| entry.starts_with(b"mailmap.file\n"));
-    inputs.push(config);
-    let mut files = vec![
-        repo.path.join("info/attributes"),
-        repo.path.join("info/grafts"),
-        repo.path.join("shallow"),
-    ];
-    // Git resolves platform-specific defaults, user overrides, and ~ expansion.
-    // Older Git versions without these variables simply rescan normally.
-    for variable in ["GIT_ATTR_SYSTEM", "GIT_ATTR_GLOBAL"] {
-        let path = run_git(&repo.path, &["var", variable], cancel)?;
-        let path = std::str::from_utf8(&path)?.trim();
-        if !path.is_empty() {
-            files.push(PathBuf::from(path));
-        }
+fn next_cursor(info: &PageInfo, seen: &mut HashSet<String>) -> Result<String> {
+    let cursor = info
+        .end_cursor
+        .as_ref()
+        .filter(|c| !c.is_empty())
+        .context("GitHub pagination was incomplete")?;
+    if !seen.insert(cursor.clone()) {
+        bail!("GitHub pagination repeated a page; no partial totals were used");
     }
-    if has_mailmap_file {
-        let path = run_git(
-            &repo.path,
-            &["config", "--path", "--get", "mailmap.file"],
-            cancel,
-        )?;
-        files.push(PathBuf::from(std::str::from_utf8(&path)?.trim()));
-    }
-    for variable in ["GIT_ATTR_NOSYSTEM", "GIT_ATTR_SOURCE"] {
-        inputs.push(
-            std::env::var_os(variable)
-                .unwrap_or_default()
-                .as_encoded_bytes()
-                .to_vec(),
-        );
-    }
-    for path in files {
-        let path = if path.is_absolute() {
-            path
-        } else {
-            repo.path.join(path)
+    Ok(cursor.clone())
+}
+
+impl ApiCommit {
+    fn record(&self, repo: &Repository, options: &git::CollectOptions) -> CommitRecord {
+        let identity_key = |a: &Actor| {
+            let email = a.email.trim().to_lowercase();
+            let name = if email.is_empty() {
+                a.name.clone()
+            } else {
+                String::new()
+            };
+            (email, name)
         };
-        inputs.push(path.as_os_str().as_encoded_bytes().to_vec());
-        match fs::read(path) {
-            Ok(content) => {
-                inputs.push(vec![1]);
-                inputs.push(content);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => inputs.push(vec![0]),
-            Err(error) => return Err(error.into()),
+        let mut seen = HashSet::from([identity_key(&self.author)]);
+        let coauthors: Vec<_> = self
+            .authors
+            .nodes
+            .iter()
+            .skip(1)
+            .filter(|a| seen.insert(identity_key(a)))
+            .map(|a| Identity {
+                name: a.name.clone(),
+                email: a.email.clone(),
+            })
+            .collect();
+        let is_merge = self.parents.total_count > 1;
+        // API merge diffs include branch changes already counted in ancestors.
+        // Do not attribute those changes a second time or fabricate a baseline.
+        let lines_known = !is_merge && self.changed_files_if_available.is_some();
+        CommitRecord {
+            commit_id: self.oid.clone(),
+            author: self.author.name.clone(),
+            email: self.author.email.clone(),
+            date: self.committed_date.fixed_offset(),
+            added: if lines_known { self.additions } else { 0 },
+            removed: if lines_known { self.deletions } else { 0 },
+            repo_id: repo.id.clone(),
+            repo_name: repo.name.clone(),
+            ai_assisted: git::is_ai(&self.author.email, &options.ai_identities)
+                || coauthors
+                    .iter()
+                    .any(|a| git::is_ai(&a.email, &options.ai_identities)),
+            coauthors,
+            lines_known,
+            landed: true,
+            is_merge,
         }
     }
-    // Hash privately: effective Git configuration may contain credentials.
-    // Only the digest goes into the persistent analysis snapshot.
-    let mut file = tempfile::NamedTempFile::new()?;
-    serde_json::to_writer(&mut file, &inputs)?;
-    file.flush()?;
-    let hash = run_git(
-        &repo.path,
-        &[
-            "hash-object",
-            "--no-filters",
-            file.path().to_str().context("Invalid temporary path")?,
-        ],
-        cancel,
-    )?;
-    Ok(std::str::from_utf8(&hash)?.trim().into())
 }
 
 pub struct Discovery {
@@ -522,34 +616,6 @@ fn private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-struct CacheLock(File);
-impl CacheLock {
-    fn acquire(path: &Path, cancel: &AtomicBool) -> Result<Self> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(path)?;
-        let deadline = Instant::now() + FETCH_TIMEOUT;
-        loop {
-            check(cancel, deadline)?;
-            match file.try_lock_exclusive() {
-                Ok(()) => return Ok(Self(file)),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(40))
-                }
-                Err(e) => return Err(e).context("Locking GitHub history cache"),
-            }
-        }
-    }
-}
-impl Drop for CacheLock {
-    fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.0);
-    }
-}
-
 fn check(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
         bail!("Operation canceled");
@@ -560,51 +626,11 @@ fn check(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
     Ok(())
 }
 
-fn run_git(path: &Path, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
-    let mut command = Command::new("git");
-    // Credentials stay with gh. No token is read, written into a remote URL,
-    // or persisted in our cache. Hooks and interactive credential prompts are off.
-    command
-        .args([
-            "-c",
-            "credential.helper=",
-            "-c",
-            "credential.helper=!gh auth git-credential",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "gc.auto=0",
-        ])
-        .args(args)
-        .current_dir(path)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "never")
-        .env("GH_PROMPT_DISABLED", "1");
-    for key in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_INDEX_FILE",
-        "GIT_NAMESPACE",
-        "GIT_CONFIG",
-        "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_SHALLOW_FILE",
-        "GIT_GRAFT_FILE",
-        "GIT_TEMPLATE_DIR",
-    ] {
-        command.env_remove(key);
-    }
-    run_command(command, cancel, FETCH_TIMEOUT).with_context(|| format!("Git {} failed", args[0]))
-}
-
 fn run_command(mut command: Command, cancel: &AtomicBool, timeout: Duration) -> Result<Vec<u8>> {
     let deadline = Instant::now() + timeout;
     check(cancel, deadline)?;
     // File-backed output prevents pipe deadlocks if a credential helper exits
-    // late, and keeps large fetch progress off the alternate-screen terminal.
+    // late, and keeps API output off the alternate-screen terminal.
     let mut stdout = tempfile::tempfile()?;
     let mut stderr = tempfile::tempfile()?;
     command
@@ -618,7 +644,7 @@ fn run_command(mut command: Command, cancel: &AtomicBool, timeout: Duration) -> 
     }
     let mut child = command
         .spawn()
-        .context("Cannot start GitHub tooling; install Git and the GitHub CLI (gh)")?;
+        .context("Cannot start GitHub tooling; install the GitHub CLI (gh)")?;
     let status = loop {
         if let Err(error) = check(cancel, deadline) {
             #[cfg(unix)]
@@ -669,338 +695,6 @@ mod tests {
             disabled: false,
         }
     }
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "Raw Name")
-            .env("GIT_AUTHOR_EMAIL", "raw@example.test")
-            .env("GIT_COMMITTER_NAME", "Raw Name")
-            .env("GIT_COMMITTER_EMAIL", "raw@example.test")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().into()
-    }
-    fn commit(dir: &Path, file: &str, content: &str, message: &str) {
-        fs::write(dir.join(file), content).unwrap();
-        git(dir, &["add", "--", file]);
-        git(dir, &["commit", "-m", message]);
-    }
-    #[test]
-    fn bare_cache_matches_local_analytics_and_refreshes_branch_history() {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        fs::create_dir(&source).unwrap();
-        git(&source, &["init", "-b", "trunk"]);
-        commit(
-            &source,
-            ".mailmap",
-            "Canonical <canonical@example.test> Raw Name <raw@example.test>\n",
-            "identity",
-        );
-        commit(
-            &source,
-            "code.rs",
-            "a\nb\n",
-            "feature\n\nCo-authored-by: Teammate <team@example.test>",
-        );
-        commit(&source, "generated.lock", "a\nb\nc\n", "generated");
-        git(&source, &["checkout", "-b", "feature"]);
-        commit(&source, "merged.rs", "landed\n", "feature branch");
-        git(&source, &["checkout", "trunk"]);
-        commit(&source, "parallel.rs", "parallel\n", "parallel work");
-        git(
-            &source,
-            &["merge", "--no-ff", "feature", "-m", "merge feature"],
-        );
-        git(&source, &["checkout", "-b", "unlanded"]);
-        commit(&source, "draft.rs", "draft\n", "work in progress");
-        git(&source, &["checkout", "trunk"]);
-        git(
-            &source,
-            &[
-                "symbolic-ref",
-                "refs/remotes/origin/HEAD",
-                "refs/heads/trunk",
-            ],
-        );
-        let client = client(root.path());
-        let repo = remote(1, "org/project", "trunk");
-        let cancel = AtomicBool::new(false);
-        client
-            .sync(&repo, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        let options = git::CollectOptions::default();
-        let local = git::scan_repository(
-            &Repository {
-                id: "local".into(),
-                path: source.clone(),
-                name: "local".into(),
-            },
-            &options,
-            &cancel,
-        )
-        .unwrap();
-        let cached = git::scan_repository(&client.repository(&repo), &options, &cancel).unwrap();
-        assert_eq!(local.records.len(), cached.records.len());
-        for expected in &local.records {
-            let actual = cached
-                .records
-                .iter()
-                .find(|r| r.commit_id == expected.commit_id)
-                .unwrap();
-            assert_eq!(
-                (
-                    &actual.author,
-                    &actual.email,
-                    actual.date,
-                    actual.added,
-                    actual.removed,
-                    actual.landed,
-                    actual.lines_known,
-                    actual.ai_assisted,
-                    &actual.coauthors
-                ),
-                (
-                    &expected.author,
-                    &expected.email,
-                    expected.date,
-                    expected.added,
-                    expected.removed,
-                    expected.landed,
-                    expected.lines_known,
-                    expected.ai_assisted,
-                    &expected.coauthors
-                )
-            );
-        }
-        assert!(cached.records.iter().any(|r| !r.landed));
-        assert!(cached.records.iter().all(|r| r.author == "Canonical"));
-        git(&source, &["branch", "-D", "unlanded"]);
-        git(&source, &["branch", "-m", "release"]);
-        commit(&source, "later.rs", "new\n", "later");
-        let changed = remote(1, "org/project", "release");
-        client
-            .sync(&changed, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        let updated =
-            git::scan_repository(&client.repository(&changed), &options, &cancel).unwrap();
-        assert!(updated.records.iter().all(|r| r.landed));
-        assert!(
-            updated
-                .records
-                .iter()
-                .any(|r| r.commit_id == git(&source, &["rev-parse", "HEAD"]))
-        );
-        let refs = git(
-            &client.repository(&changed).path,
-            &["for-each-ref", "--format=%(refname)"],
-        );
-        assert!(!refs.contains("unlanded"));
-        assert!(!refs.contains("origin/trunk"));
-        assert!(
-            client
-                .sync(&changed, "/missing/bigboard-test-source", &cancel)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn analysis_reuse_invalidates_history_options_configuration_and_external_files() {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        fs::create_dir(&source).unwrap();
-        git(&source, &["init", "-b", "main"]);
-        commit(&source, "code.rs", "one\ntwo\n", "initial");
-        commit(&source, "generated.lock", "generated\n", "generated");
-        let client = client(root.path());
-        let remote = remote(1, "org/project", "main");
-        let cancel = AtomicBool::new(false);
-        client
-            .sync(&remote, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        let repo = client.repository(&remote);
-        let run = |options: &git::CollectOptions, reuse: bool| {
-            let events = std::sync::Mutex::new(Vec::new());
-            let data = client
-                .analyze(&repo, options, &cancel, &|stage| {
-                    events.lock().unwrap().push(stage)
-                })
-                .unwrap();
-            let events = events.into_inner().unwrap();
-            assert_eq!(
-                events.contains(&ScanStage::ReusingAnalysis),
-                reuse,
-                "{events:?}"
-            );
-            assert_eq!(
-                events.contains(&ScanStage::ReadingHistory),
-                !reuse,
-                "{events:?}"
-            );
-            data
-        };
-        let options = git::CollectOptions::default();
-        let fresh = run(&options, false);
-        // Older Git versions conservatively disable caching if they cannot
-        // resolve the external attribute paths. They still return fresh data.
-        if analysis_fingerprint(&repo, &options, &cancel).is_err() {
-            return;
-        }
-        let reused = run(&options, true);
-        assert_eq!(
-            serde_json::to_value(&fresh).unwrap(),
-            serde_json::to_value(&reused).unwrap()
-        );
-        let ai = git::CollectOptions {
-            ai_identities: vec!["raw@example.test".into()],
-            ..Default::default()
-        };
-        assert!(
-            run(&ai, false)
-                .records
-                .iter()
-                .all(|record| record.ai_assisted)
-        );
-        run(&ai, true);
-        let generated = git::CollectOptions {
-            include_generated: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            run(&generated, false)
-                .records
-                .iter()
-                .map(|r| r.added)
-                .sum::<i64>(),
-            3
-        );
-        run(&generated, true);
-        git(&repo.path, &["config", "core.abbrev", "10"]);
-        run(&generated, false);
-        let mailmap = root.path().join("mailmap");
-        fs::write(
-            &mailmap,
-            "Canonical <canonical@example.test> Raw Name <raw@example.test>\n",
-        )
-        .unwrap();
-        git(
-            &repo.path,
-            &["config", "mailmap.file", mailmap.to_str().unwrap()],
-        );
-        assert!(
-            run(&options, false)
-                .records
-                .iter()
-                .all(|r| r.author == "Canonical")
-        );
-        run(&options, true);
-        fs::write(
-            &mailmap,
-            "Renamed <renamed@example.test> Raw Name <raw@example.test>\n",
-        )
-        .unwrap();
-        assert!(
-            run(&options, false)
-                .records
-                .iter()
-                .all(|r| r.author == "Renamed")
-        );
-        fs::create_dir_all(repo.path.join("info")).unwrap();
-        fs::write(repo.path.join("info/attributes"), "*.rs binary\n").unwrap();
-        assert_eq!(
-            run(&options, false)
-                .records
-                .iter()
-                .map(|r| r.added)
-                .sum::<i64>(),
-            0
-        );
-        run(&options, true);
-        fs::write(repo.path.join("bigboard-analysis.json"), "truncated").unwrap();
-        run(&options, false);
-        commit(&source, "new.txt", "new\n", "new commit");
-        client
-            .sync(&remote, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        assert_eq!(run(&options, false).records.len(), 3);
-        run(&options, true);
-        assert!(
-            client
-                .analyze(&repo, &options, &AtomicBool::new(true), &|_| {})
-                .is_err()
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_metadata_request_never_falls_back_to_saved_analysis() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
-        let mut client = client(root.path());
-        let remote = remote(1, "org/project", "main");
-        let repo = client.repository(&remote);
-        fs::create_dir_all(&repo.path).unwrap();
-        fs::write(repo.path.join("bigboard-analysis.json"), "{}").unwrap();
-        let script = root.path().join("gh");
-        fs::write(
-            &script,
-            "#!/bin/sh\necho 'repository unavailable' >&2\nexit 1\n",
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
-        client.gh_program = script;
-        let events = std::sync::Mutex::new(Vec::new());
-        assert!(
-            client
-                .scan_with_progress(
-                    &remote,
-                    &git::CollectOptions::default(),
-                    &AtomicBool::new(false),
-                    &|stage| events.lock().unwrap().push(stage)
-                )
-                .is_err()
-        );
-        assert_eq!(events.into_inner().unwrap(), [ScanStage::Metadata]);
-    }
-
-    #[test]
-    fn empty_remote_has_no_activity_and_can_receive_its_first_commit() {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        fs::create_dir(&source).unwrap();
-        git(&source, &["init", "-b", "trunk"]);
-        let client = client(root.path());
-        let mut repo = remote(1, "org/empty", "trunk");
-        repo.default_branch = None;
-        let cancel = AtomicBool::new(false);
-        client
-            .sync(&repo, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        let options = git::CollectOptions::default();
-        assert!(
-            git::scan_repository(&client.repository(&repo), &options, &cancel)
-                .unwrap()
-                .records
-                .is_empty()
-        );
-        commit(&source, "first.rs", "first\n", "initial commit");
-        repo.default_branch = Some("trunk".into());
-        client
-            .sync(&repo, source.to_str().unwrap(), &cancel)
-            .unwrap();
-        let data = git::scan_repository(&client.repository(&repo), &options, &cancel).unwrap();
-        assert_eq!(data.records.len(), 1);
-        assert!(data.records[0].landed);
-    }
-
     #[cfg(unix)]
     #[test]
     fn dropping_discovery_waits_for_network_cancellation() {
@@ -1031,32 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn cache_rejects_unmanaged_directories_and_isolates_repository_ids() {
-        let root = tempfile::tempdir().unwrap();
-        let client = client(root.path());
-        let one = remote(1, "one/same", "main");
-        let two = remote(2, "two/same", "main");
-        assert_ne!(client.repository(&one).path, client.repository(&two).path);
-        let path = client.repository(&one).path;
-        fs::create_dir_all(&path).unwrap();
-        git(&path, &["init", "--bare"]);
-        assert!(
-            client
-                .sync(&one, "/unused", &AtomicBool::new(false))
-                .is_err()
-        );
-        for name in [
-            "../project",
-            "org/../project",
-            "org/repo?token=secret",
-            "org/repo\n",
-            "org/",
-        ] {
-            assert!(remote(1, name, "main").validate().is_err());
-        }
-    }
-
-    #[test]
     fn saved_selection_is_scoped_to_account_and_host() {
         let root = tempfile::tempdir().unwrap();
         let mut client = client(root.path());
@@ -1070,19 +738,6 @@ mod tests {
         assert!(client.saved_selection("alice").unwrap().is_empty());
         fs::write(&client.selection_path, "invalid").unwrap();
         assert!(client.saved_selection("alice").is_err());
-    }
-
-    #[test]
-    fn waiting_for_another_cache_scan_can_be_canceled() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("lock");
-        let _lock = CacheLock::acquire(&path, &AtomicBool::new(false)).unwrap();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&cancel);
-        let worker = thread::spawn(move || CacheLock::acquire(&path, &flag).is_err());
-        thread::sleep(Duration::from_millis(50));
-        cancel.store(true, Ordering::Relaxed);
-        assert!(worker.join().unwrap());
     }
 
     #[cfg(unix)]
@@ -1136,5 +791,294 @@ esac
             .to_string()
             .contains("canceled")
         );
+    }
+    fn metadata(head: &str, viewer: &str) -> Value {
+        json!({"data":{"viewer":{"id":viewer},"repository":{
+            "databaseId":1,"nameWithOwner":"org/project","isEmpty":false,
+            "defaultBranchRef":{"target":{"oid":head}}
+        }}})
+    }
+    fn commit(oid: &str, date: &str) -> Value {
+        json!({"oid":oid,"committedDate":date,"additions":10,"deletions":3,
+            "changedFilesIfAvailable":1,"author":{"name":"Alice","email":"alice@example.test"},
+            "authors":{"nodes":[{"name":"Alice","email":"alice@example.test"}],
+                       "pageInfo":{"hasNextPage":false,"endCursor":null}},
+            "parents":{"totalCount":1}})
+    }
+    fn page(nodes: Vec<Value>, cursor: Option<&str>) -> Value {
+        json!({"data":{"repository":{"object":{"history":{"nodes":nodes,
+            "pageInfo":{"hasNextPage":cursor.is_some(),"endCursor":cursor}}}}}})
+    }
+    fn window(days: i64) -> Window {
+        Window::new(days, Utc.with_ymd_and_hms(2026, 9, 26, 12, 0, 0).unwrap())
+    }
+    #[cfg(unix)]
+    fn fake_graphql(root: &Path, responses: Vec<Value>) -> Client {
+        use std::os::unix::fs::PermissionsExt;
+        for (i, response) in responses.iter().enumerate() {
+            fs::write(
+                root.join(format!("response-{i}")),
+                serde_json::to_vec(response).unwrap(),
+            )
+            .unwrap();
+        }
+        let script = root.join("gh");
+        // Only the API command is accepted. All request variables are retained
+        // for assertions; no network, credentials, or Git executable is needed.
+        fs::write(&script, format!(r##"#!/bin/sh
+set -eu
+[ "$1" = api ] && [ "$2" = --hostname ] && [ "$3" = github.com ] && [ "$4" = graphql ] && [ "$5" = --input ] || exit 4
+cd '{}'
+n=0
+if [ -f count ]; then read -r n < count; fi
+printf '%s\n' "$((n+1))" > count
+/bin/cat "$6" >> requests
+printf '\n' >> requests
+/bin/cat "response-$n"
+"##, root.display())).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut c = client(root);
+        c.gh_program = script;
+        c
+    }
+    fn requests(root: &Path) -> Vec<Value> {
+        fs::read_to_string(root.join("requests"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+    fn load(c: &Client, days: i64) -> Result<ScanData> {
+        c.scan_with_progress(
+            &remote(1, "org/project", "main"),
+            &git::CollectOptions::default(),
+            window(days),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn summary_pagination_pins_head_and_filters_exact_window() {
+        let root = tempfile::tempdir().unwrap();
+        let c = fake_graphql(
+            root.path(),
+            vec![
+                metadata("head-one", "alice"),
+                page(
+                    vec![
+                        commit("recent", "2026-09-25T12:00:00Z"),
+                        commit("early", "2026-09-12T01:00:00Z"),
+                    ],
+                    Some("page-two"),
+                ),
+                page(
+                    vec![
+                        commit("future", "2026-09-26T15:00:00Z"),
+                        commit("older", "2026-09-14T00:00:00Z"),
+                    ],
+                    None,
+                ),
+            ],
+        );
+        let result = load(&c, 14).unwrap();
+        assert_eq!(
+            result
+                .records
+                .iter()
+                .map(|r| r.commit_id.as_str())
+                .collect::<Vec<_>>(),
+            ["recent", "older"]
+        );
+        assert_eq!(
+            (result.records[0].added, result.records[0].removed),
+            (10, 3)
+        );
+        let req = requests(root.path());
+        assert_eq!(req.len(), 3);
+        for r in &req[1..] {
+            assert_eq!(r["variables"]["head"], "head-one");
+            assert_eq!(r["variables"]["since"], "2026-09-12T00:00:00+00:00");
+            assert_eq!(r["variables"]["until"], "2026-09-27T00:00:00+00:00");
+            assert!(!r["query"].as_str().unwrap().contains("message"));
+        }
+        assert_eq!(req[2]["variables"]["cursor"], "page-two");
+        let path = c.repository(&remote(1, "org/project", "main")).path;
+        assert_eq!(path.extension().unwrap(), "json");
+        assert!(!root.path().join("cache/github.com/1.git").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_reuses_coverage_extends_only_missing_dates_and_replaces_changed_head() {
+        let root = tempfile::tempdir().unwrap();
+        let c = fake_graphql(
+            root.path(),
+            vec![
+                metadata("head-one", "alice"),
+                page(vec![commit("recent", "2026-09-25T12:00:00Z")], None),
+                metadata("head-one", "alice"), // smaller range: metadata only
+                metadata("head-one", "alice"),
+                page(vec![commit("older", "2026-09-05T12:00:00Z")], None), // extension
+                metadata("head-two", "alice"),
+                page(vec![commit("replacement", "2026-09-25T12:00:00Z")], None),
+                metadata("head-two", "bob"),
+                page(vec![commit("replacement", "2026-09-25T12:00:00Z")], None),
+            ],
+        );
+        assert_eq!(load(&c, 14).unwrap().records.len(), 1);
+        assert_eq!(load(&c, 7).unwrap().records.len(), 1);
+        assert_eq!(requests(root.path()).len(), 3);
+        assert_eq!(load(&c, 30).unwrap().records.len(), 2);
+        let req = requests(root.path());
+        assert_eq!(req[4]["variables"]["since"], "2026-08-27T00:00:00+00:00");
+        assert_eq!(req[4]["variables"]["until"], "2026-09-12T00:00:00+00:00");
+        let result = load(&c, 14).unwrap();
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].commit_id, "replacement");
+        load(&c, 14).unwrap(); // switching gh account must not reuse another account's summaries
+        assert_eq!(requests(root.path()).len(), 9);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn api_errors_never_publish_partial_or_stale_totals() {
+        let root = tempfile::tempdir().unwrap();
+        let mut error = page(vec![commit("partial", "2026-09-25T12:00:00Z")], None);
+        error["errors"] = json!([{"message":"API rate limit exceeded"}]);
+        let c = fake_graphql(
+            root.path(),
+            vec![
+                metadata("one", "alice"),
+                page(vec![commit("old", "2026-09-25T12:00:00Z")], None),
+                metadata("two", "alice"),
+                page(vec![], Some("next")),
+                error,
+                json!({"data":{"repository":null},"errors":[{"message":"Access denied"}]}),
+            ],
+        );
+        load(&c, 14).unwrap();
+        let path = c.repository(&remote(1, "org/project", "main")).path;
+        let cached = fs::read(&path).unwrap();
+        assert!(load(&c, 14).unwrap_err().to_string().contains("rate limit"));
+        assert_eq!(fs::read(&path).unwrap(), cached);
+        assert!(
+            load(&c, 14)
+                .unwrap_err()
+                .to_string()
+                .contains("Access denied")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn coauthor_pagination_and_unknown_merge_counts_preserve_credit() {
+        let root = tempfile::tempdir().unwrap();
+        let mut merge = commit("merge", "2026-09-25T12:00:00Z");
+        merge["parents"]["totalCount"] = json!(2);
+        merge["authors"]["pageInfo"] = json!({"hasNextPage":true,"endCursor":"more-authors"});
+        let c = fake_graphql(
+            root.path(),
+            vec![
+                metadata("head", "alice"),
+                page(vec![merge], None),
+                json!({"data":{"repository":{"object":{"authors":{
+                "nodes":[{"name":"Claude","email":"noreply@anthropic.com"},
+                         {"name":"Alice","email":"alice@example.test"}],
+                "pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}),
+            ],
+        );
+        let data = load(&c, 14).unwrap();
+        let r = &data.records[0];
+        assert!(r.is_merge && r.landed && r.ai_assisted);
+        assert!(!r.lines_known);
+        assert_eq!((r.added, r.removed), (0, 0));
+        assert_eq!(r.coauthors.len(), 1);
+        assert_eq!(requests(root.path())[2]["variables"]["head"], "merge");
+        let mut unknown: ApiCommit =
+            serde_json::from_value(commit("unknown", "2026-09-25T12:00:00Z")).unwrap();
+        unknown.changed_files_if_available = None;
+        assert!(
+            !unknown
+                .record(
+                    &c.repository(&remote(1, "org/project", "main")),
+                    &git::CollectOptions::default()
+                )
+                .lines_known
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_cursor_missing_branch_and_empty_repository_are_distinct() {
+        let root = tempfile::tempdir().unwrap();
+        let mut empty = metadata("head", "alice");
+        empty["data"]["repository"]["isEmpty"] = json!(true);
+        empty["data"]["repository"]["defaultBranchRef"] = Value::Null;
+        let mut missing = empty.clone();
+        missing["data"]["repository"]["isEmpty"] = json!(false);
+        let c = fake_graphql(
+            root.path(),
+            vec![
+                empty,
+                missing,
+                metadata("head", "alice"),
+                page(vec![], Some("same")),
+                page(vec![], Some("same")),
+            ],
+        );
+        assert!(load(&c, 14).unwrap().records.is_empty());
+        assert!(
+            load(&c, 14)
+                .unwrap_err()
+                .to_string()
+                .contains("default branch")
+        );
+        assert!(load(&c, 14).unwrap_err().to_string().contains("repeated"));
+        assert!(
+            !c.repository(&remote(1, "org/project", "main"))
+                .path
+                .exists()
+        );
+    }
+
+    #[test]
+    #[ignore = "read-only network check using the current gh login"]
+    fn live_public_summary_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let mut c = client(root.path());
+        if let Ok(program) = std::env::var("BIGBOARD_TEST_GH") {
+            c.gh_program = program.into();
+        }
+        let cancel = AtomicBool::new(false);
+        let remote: RemoteRepository =
+            serde_json::from_slice(&c.api("repos/richhaase/bigboard", false, &cancel).unwrap())
+                .unwrap();
+        let window = Window::new(14, Utc::now());
+        for label in ["cold", "warm"] {
+            let start = Instant::now();
+            let data = c
+                .scan_with_progress(
+                    &remote,
+                    &git::CollectOptions::default(),
+                    window,
+                    &cancel,
+                    &|stage| eprintln!("{stage}"),
+                )
+                .unwrap();
+            eprintln!(
+                "{label}: {} summaries, {:.3}s, {} cache bytes",
+                data.records.len(),
+                start.elapsed().as_secs_f64(),
+                fs::metadata(c.repository(&remote).path).unwrap().len()
+            );
+            assert!(!data.records.is_empty());
+            assert!(
+                data.records
+                    .iter()
+                    .all(|r| r.date >= window.since && r.date <= window.until)
+            );
+        }
     }
 }

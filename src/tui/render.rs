@@ -69,7 +69,7 @@ impl App {
         let p = &self.palette;
         let mut lines = banner(self.width as usize, self.height < 25, p);
         let title = if self.github_source {
-            "SYNCING GITHUB HISTORY"
+            "LOADING GITHUB ACTIVITY"
         } else {
             "SCANNING REPOSITORIES"
         };
@@ -157,11 +157,22 @@ impl App {
         )]
     }
 
+    pub(super) fn api_basis(&self) -> UiLine {
+        text_line(
+            "  Commit date · all files · merges: ? lines",
+            self.palette.dim_cyan,
+        )
+    }
+
     pub(super) fn scope_line(&self) -> UiLine {
         text_line(
             format!(
                 "  {}{} · {} · as of {}",
-                if self.github_source { "GITHUB · " } else { "" },
+                if self.github_source {
+                    "GITHUB API · "
+                } else {
+                    ""
+                },
                 self.scope.label(),
                 self.options.timezone,
                 self.cutoff
@@ -186,7 +197,11 @@ impl App {
         }
         let left = format!(
             "  {}{} · {} · {} · {}",
-            if self.github_source { "GITHUB · " } else { "" },
+            if self.github_source {
+                "GITHUB API · "
+            } else {
+                ""
+            },
             repo_count(self.loaded_repos.len(), self.excluded_count()).trim(),
             self.scope.label(),
             self.options.timezone,
@@ -204,6 +219,9 @@ impl App {
             truncate(&left, width)
         };
         lines.push(text_line(context, p.dim_cyan));
+        if self.github_source {
+            lines.push(self.api_basis());
+        }
         if self.spacious_header() {
             lines.push(blank());
         }
@@ -336,7 +354,7 @@ impl App {
     fn aggregate_help(&self) -> Vec<UiLine> {
         let p = &self.palette;
         let width = self.width as usize;
-        let bindings = [
+        let mut bindings = vec![
             ("↑↓", "select".to_owned()),
             ("↵", "detail".to_owned()),
             ("←→", "range".to_owned()),
@@ -353,6 +371,9 @@ impl App {
             ("R", "refresh".to_owned()),
             ("q", "quit".to_owned()),
         ];
+        if self.github_source {
+            bindings.retain(|(key, _)| *key != "B");
+        }
         if self.spacious_commands() {
             return command_grid(&bindings, width, p);
         }

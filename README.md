@@ -4,7 +4,7 @@ A cyberpunk-themed TUI for exploring team contribution activity across Git repos
 
 ## Install
 
-Big Board requires Git **2.31 or newer** on `PATH`. Git **2.38 or newer** supports reconstructed merge baselines; on older versions, merge activity is retained with unknown line counts. Partial clones require **2.45.1 or newer** so automatic object fetching can be disabled; older partial clones are excluded as scan failures. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
+Local mode requires Git **2.31 or newer** on `PATH`. GitHub mode requires the authenticated GitHub CLI (`gh`) and downloads API summaries only. Git **2.38 or newer** supports reconstructed merge baselines; on older versions, merge activity is retained with unknown line counts. Partial clones require **2.45.1 or newer** so automatic object fetching can be disabled; older partial clones are excluded as scan failures. This revision is written in Rust with Ratatui and Crossterm. Building from source also requires a current stable Rust toolchain.
 
 ### From Source
 
@@ -43,7 +43,7 @@ The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 `since` in the config to choose the initial range. Dates use UTC unless you set
 `timezone` to an IANA timezone such as `America/Denver`.
 
-Press `g` from a local board to choose GitHub repositories. If no local repositories are found, Big Board opens that picker automatically. It uses your existing GitHub CLI (`gh`) account, lets you search and filter by owner or organization, and remembers your checked repositories. Only checked repositories are downloaded into Big Board's managed history cache; `R` on a GitHub board refreshes their history before recalculating the same analytics. See [GitHub source](docs/github.md) for authentication, controls, and cache details.
+Press `g` from a local board to choose GitHub repositories. If no local repositories are found, Big Board opens that picker automatically. It uses your existing GitHub CLI (`gh`) account, lets you search and filter by owner or organization, and remembers your checked repositories. GitHub mode loads compact commit summaries for the selected date range, with progress and caching. It never clones or fetches repositories. For deeper analysis, clone the repositories yourself and use local mode; GitHub summaries have different date, file, and merge-counting semantics. See [GitHub source](docs/github.md) for authentication, controls, and cache details.
 
 ## Analytics
 
@@ -70,14 +70,14 @@ See [analytics behavior](docs/analytics.md) for the counting rules and limitatio
 | `S` | Reverse sort direction |
 | `/` | Filter contributors by name (incremental) |
 | `b` | Include/exclude bots from contributor rows and totals |
-| `B` | Toggle landed / all-branch activity |
+| `B` | Toggle landed / all-branch activity (local mode) |
 | `M` | Merge the selected contributor with another identity |
 | `r` | Open repository selection and details from the board |
 | `g` | Choose GitHub repositories (or return to local repos from that picker) |
 | `space` | Toggle a loaded repo in/out (within repository selection) |
 | `PgUp/PgDn` | Scroll contributor detail content or selected repository details |
 | `Home/End` | Jump to the top/bottom of contributor detail content |
-| `R` | Refresh (re-scan local repos, or fetch then scan selected GitHub repos) |
+| `R` | Refresh local analysis or selected GitHub API summaries |
 | `q` | Quit (clears an active filter first) |
 
 In the contributor detail view, `PgUp/PgDn` scroll the content and `Home/End` jump to its top/bottom while the header and footer stay fixed. `↑/↓` still step to the previous/next contributor, and `←/→` change the time range. Search (`/`) narrows the visible rows without changing board totals. History, time, bot, sorting, and repository selections apply to the current session; use the config file for supported startup preferences.

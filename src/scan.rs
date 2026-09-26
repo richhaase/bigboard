@@ -49,6 +49,7 @@ pub fn start_github_scan(
     client: crate::github::Client,
     remote: Vec<crate::github::RemoteRepository>,
     options: AnalysisOptions,
+    window: crate::github::Window,
 ) -> ScanSession {
     let repositories = remote.iter().map(|repo| client.repository(repo)).collect();
     let remote: std::collections::HashMap<_, _> = remote
@@ -59,7 +60,7 @@ pub fn start_github_scan(
         repositories,
         options,
         move |repo, options, cancel, report| {
-            client.scan_with_progress(&remote[&repo.id], options, cancel, report)
+            client.scan_with_progress(&remote[&repo.id], options, window, cancel, report)
         },
     )
 }
@@ -185,7 +186,7 @@ mod tests {
             repositories(1),
             AnalysisOptions::default(),
             |_, _, cancel, report| {
-                report(ScanStage::Downloading);
+                report(ScanStage::Metadata);
                 while !cancel.load(Ordering::Acquire) {
                     std::thread::sleep(Duration::from_millis(1));
                 }
@@ -197,7 +198,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .unwrap();
         assert_eq!(progress.repository_id, "0");
-        assert_eq!(progress.stage, ScanStage::Downloading);
+        assert_eq!(progress.stage, ScanStage::Metadata);
         assert!(matches!(
             session.receiver.try_recv(),
             Err(mpsc::TryRecvError::Empty)
