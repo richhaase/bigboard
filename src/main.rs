@@ -17,7 +17,7 @@ fn version() -> String {
 }
 fn usage() {
     eprintln!(
-        "Usage: bigboard [flags] [paths...]\n  No paths: open saved GitHub repos, or choose them on first launch.\n  With paths: analyze local repos (use . for the current directory).\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -group string\n        Use a named repo group from the config file\n  -github\n        Use GitHub mode (the default); press g to change repos\n  -version\n        Print version and exit"
+        "Usage: bigboard [flags] [paths...]\n  No paths: open saved GitHub repos, or choose them on first launch.\n  With paths: analyze local repos (use . for the current directory).\n  -config string\n        Config file path (default ~/.config/bigboard/config.json)\n  -group string\n        Use a named repo group from the config file\n  -version\n        Print version and exit"
     );
 }
 fn diagnostic(s: &str) -> String {
@@ -45,7 +45,7 @@ fn run(cli: Cli) -> Result<()> {
     let cfg = config::load_config(&path, explicit)
         .with_context(|| format!("reading config {}", path.display()))?;
     let (sort, time_idx) = config::validate_preferences(&cfg)?;
-    let github_mode = cli.github_mode()?;
+    let github_mode = cli.github_mode();
     let found = if github_mode {
         Vec::new()
     } else {

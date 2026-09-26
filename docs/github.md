@@ -6,11 +6,11 @@ Big Board can discover repositories through your existing GitHub CLI account and
 
 Install the [GitHub CLI](https://cli.github.com/), then authenticate once with `gh auth login` if needed. An existing browser login by itself is not a CLI login. Private repositories require permission to read their contents; organization SSO policies may require authorizing the CLI account.
 
-Run `bigboard` to open your saved GitHub repositories automatically, or show the picker if you have not selected any. If a saved repository is unavailable, the picker opens for review instead of silently loading a smaller selection. `bigboard --github` remains an alias for this default mode and cannot be combined with paths or `--group`.
+Run `bigboard` to open your saved GitHub repositories automatically, or show the picker if you have not selected any. If a saved repository is unavailable, the picker opens for review instead of silently loading a smaller selection.
 
 Press `g` on the board (labeled **choose repos** in GitHub mode) to change the saved selection. The picker opens for editing even when repositories have already been saved. Authentication or selection-file errors stay visible for correction; Big Board does not silently switch to local mode.
 
-Pass a path to use local mode: `bigboard .` analyzes the current directory, and `bigboard ~/src` searches that directory for repositories. `--group NAME` also selects local mode. An empty local scan reports an error without opening GitHub. `--config` changes preferences only; legacy configured `paths` do not override the new GitHub default. From a local board, `g` opens GitHub selection and the picker can later return you to that local repository set.
+Pass a path to use local mode: `bigboard .` analyzes the current directory, and `bigboard ~/src` searches that directory for repositories. `--group NAME` also selects local mode. An empty local scan reports an error without opening GitHub. `--config` changes preferences only; the old config `paths` setting and `--github` flag are removed and rejected. From a local board, `g` opens GitHub selection and the picker can later return you to that local repository set.
 
 The picker lists repositories accessible to the authenticated account as an owner, collaborator, or organization member. It follows all API pages. It does not claim to enumerate every public repository on GitHub or repositories hidden from your account. Archived repositories and forks remain available and are labeled. Disabled repositories are excluded.
 

@@ -16,7 +16,7 @@ cargo install --path . --locked
 
 ## Usage
 
-Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, `--group`, and `--github`.
+Big Board is TUI-first: preferences live in the config file, and the CLI supports `--version`, `--config`, and `--group`.
 
 ```bash
 # Open saved GitHub repositories, or choose them on first launch
@@ -31,9 +31,6 @@ bigboard ~/src/
 
 # Use a named group from your config
 bigboard --group backend
-
-# Explicit alias for the default GitHub mode
-bigboard --github
 
 # Use an alternate config file
 bigboard --config ./bigboard.json
@@ -111,7 +108,7 @@ The optional config file is `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CO
 }
 ```
 
-- Bare `bigboard` uses GitHub even inside a local repository. Legacy config `paths` no longer selects local startup; pass paths explicitly or use `--group`. `--config` selects preferences without changing the source mode.
+- Bare `bigboard` uses GitHub even inside a local repository. The old `--github` flag and config `paths` setting are removed and rejected; pass paths explicitly or use `--group` for local analysis. `--config` selects preferences without changing the source mode.
 - `timezone` defaults to `UTC` and accepts IANA names such as `America/Denver`.
 - Saved merges live in `~/.config/bigboard/identities.json` (or `$XDG_CONFIG_HOME/bigboard/identities.json`), independent of repo groups and `--config`.
 - Legacy `fuzzy: false` is accepted. `fuzzy: true` now gives an actionable error; use `M` for explicit merges.

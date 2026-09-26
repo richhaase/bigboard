@@ -55,7 +55,7 @@ Missing boundary diffs in shallow history and unallocatable merge diffs remain u
 
 Board totals reflect the selected repositories, history scope, time range, and bot inclusion. Bots are included initially; `b` changes both rows and totals. Name search (`/`) filters visible contributor rows without recalculating board totals. Repository breakdowns remain overlapping associations, not additional board commits.
 
-Set `"timezone": "America/Denver"` (or another IANA zone) in the existing config file to override UTC, then restart Big Board. `R` refreshes Git data without reloading configuration. Interactive filters are session preferences; confirmed identity merges are saved globally. The obsolete `fuzzy: true` setting is rejected with instructions to use explicit merges; `false` is accepted for migration. `--export` has been removed, leaving `--version`, `--config`, `--group`, and `--github`.
+Set `"timezone": "America/Denver"` (or another IANA zone) in the existing config file to override UTC, then restart Big Board. `R` refreshes Git data without reloading configuration. Interactive filters are session preferences; confirmed identity merges are saved globally. The obsolete `fuzzy: true` setting is rejected with instructions to use explicit merges; `false` is accepted for migration. `--export` has been removed, leaving `--version`, `--config`, and `--group`.
 
 ## Revision and validation
 
