@@ -80,6 +80,57 @@ func TestCalendarChartsUseLocalDatesAndUniqueCommits(t *testing.T) {
 	}
 }
 
+func TestMonthTimelineAcrossMidnightDSTTransition(t *testing.T) {
+	zone, err := time.LoadLocation("America/Asuncion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := time.Local
+	time.Local = zone
+	t.Cleanup(func() { time.Local = original })
+
+	// October 1, 2023 starts with a skipped midnight in this timezone.
+	for _, tt := range []struct {
+		name    string
+		months  []time.Month
+		labels  []string
+		commits []int
+	}{
+		{"single month", []time.Month{time.October}, []string{"Oct 2023"}, []int{1}},
+		{"gap across transition", []time.Month{time.September, time.December}, []string{"Sep 2023", "Oct 2023", "Nov 2023", "Dec 2023"}, []int{1, 0, 0, 1}},
+		{"activity across transition", []time.Month{time.September, time.October, time.December}, []string{"Sep 2023", "Oct 2023", "Nov 2023", "Dec 2023"}, []int{1, 1, 0, 1}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var records []git.CommitRecord
+			for _, month := range tt.months {
+				records = append(records, git.CommitRecord{
+					Author: "A", Email: "a@test", RepoName: "r", Added: 3,
+					Date: time.Date(2023, month, 15, 12, 0, 0, 0, time.UTC),
+				})
+			}
+			months := aggregateByMonth(records)
+			if len(months) != len(tt.labels) {
+				t.Fatalf("expected %d months, got %+v", len(tt.labels), months)
+			}
+			for i, month := range months {
+				if label := month.Month.Format("Jan 2006"); label != tt.labels[i] {
+					t.Errorf("month %d: expected %s, got %s", i, tt.labels[i], label)
+				}
+				if month.Commits != tt.commits[i] || month.Added != 3*tt.commits[i] {
+					t.Errorf("month %d: expected %d commits and %d additions, got %+v", i, tt.commits[i], 3*tt.commits[i], month)
+				}
+			}
+			author := stats.Aggregate(records)[0]
+			out := OperativeView{}.RenderOperativeDetail(author.Name, &author, records, 120, DefaultTimeIndex, 1, 0)
+			for _, label := range tt.labels {
+				if strings.Count(out, label) != 1 {
+					t.Errorf("expected exactly one %s label in detail:\n%s", label, out)
+				}
+			}
+		})
+	}
+}
+
 func TestUnknownCountsAreQualifiedAtWideAndNarrowWidths(t *testing.T) {
 	m := NewModelWithOptions(nil, stats.SortByTotal, nil, "test", 6, Options{})
 	m.height = 50

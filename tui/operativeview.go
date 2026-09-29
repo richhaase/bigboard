@@ -344,7 +344,9 @@ func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
 		if !ok {
 			y, m, _ := date.Date()
 			ma = &MonthActivity{
-				Month: time.Date(y, m, 1, 0, 0, 0, 0, time.Local),
+				// Use UTC as a marker for the local calendar month: local midnight
+				// may fall in a DST gap and normalize into the previous month.
+				Month: time.Date(y, m, 1, 0, 0, 0, 0, time.UTC),
 			}
 			byMonth[key] = ma
 		}
