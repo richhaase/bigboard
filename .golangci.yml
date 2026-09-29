@@ -1,0 +1,58 @@
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - misspell
+    - unused
+    - errcheck
+    - staticcheck
+    - gosec
+    - nolintlint
+
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+  settings:
+    misspell:
+      locale: US
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Println
+        - fmt.Printf
+    gosec:
+      excludes:
+        - G104
+        - G204
+        - G304
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+output:
+  formats:
+    text:
+      print-linter-name: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
