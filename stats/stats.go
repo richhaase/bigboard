@@ -1,7 +1,9 @@
 package stats
 
 import (
+	"cmp"
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 	"time"
@@ -24,12 +26,12 @@ const (
 	numSortFields
 )
 
-// FuzzyMatching is retained for compatibility with Aggregate, NamesMatch, and
-// MergeAuthorName. New code should pass AggregateOptions to
-// AggregateWithOptions instead.
+// FuzzyMatching is retained for legacy name-comparison helpers. Aggregation
+// always uses email/mailmap identities, irrespective of this setting.
 var FuzzyMatching = false
 
-// AggregateOptions controls contributor identity resolution.
+// AggregateOptions controls contributor classification. FuzzyMatching is
+// accepted for compatibility but no longer merges contributor identities.
 type AggregateOptions struct {
 	FuzzyMatching bool
 	BotIdentities []string
@@ -37,20 +39,22 @@ type AggregateOptions struct {
 
 // AuthorStats holds aggregated contribution data for a single author.
 type AuthorStats struct {
-	Name        string                       `json:"name"`
-	Commits     int                          `json:"commits"`
-	Added       int                          `json:"added"`
-	Removed     int                          `json:"removed"`
-	Net         int                          `json:"net"`
-	TotalChange int                          `json:"total_change"`
-	AICommits   int                          `json:"ai_commits"`
-	Bot         bool                         `json:"bot"`
-	FirstCommit time.Time                    `json:"first_commit"`
-	LastCommit  time.Time                    `json:"last_commit"`
-	ActiveDays  int                          `json:"active_days"`
-	PerRepo     map[string]*RepoContribution `json:"per_repo,omitempty"`
-	// Aliases is the set of raw author-name spellings that merged into this
-	// canonical identity, so consumers can match raw records back to it.
+	ID                 string                       `json:"-"`
+	UnknownLineCommits int                          `json:"unknown_line_commits,omitempty"`
+	Name               string                       `json:"name"`
+	Commits            int                          `json:"commits"`
+	Added              int                          `json:"added"`
+	Removed            int                          `json:"removed"`
+	Net                int                          `json:"net"`
+	TotalChange        int                          `json:"total_change"`
+	AICommits          int                          `json:"ai_commits"`
+	Bot                bool                         `json:"bot"`
+	FirstCommit        time.Time                    `json:"first_commit"`
+	LastCommit         time.Time                    `json:"last_commit"`
+	ActiveDays         int                          `json:"active_days"`
+	PerRepo            map[string]*RepoContribution `json:"per_repo,omitempty"`
+	// Aliases contains observed name spellings. Use ID to match records;
+	// a name can belong to more than one person.
 	Aliases map[string]bool `json:"-"`
 }
 
@@ -73,12 +77,13 @@ func (a AuthorStats) AIPercent() int {
 
 // RepoContribution holds per-repository stats for an author.
 type RepoContribution struct {
-	Commits     int `json:"commits"`
-	Added       int `json:"added"`
-	Removed     int `json:"removed"`
-	Net         int `json:"net"`
-	TotalChange int `json:"total_change"`
-	AICommits   int `json:"ai_commits"`
+	UnknownLineCommits int `json:"unknown_line_commits,omitempty"`
+	Commits            int `json:"commits"`
+	Added              int `json:"added"`
+	Removed            int `json:"removed"`
+	Net                int `json:"net"`
+	TotalChange        int `json:"total_change"`
+	AICommits          int `json:"ai_commits"`
 }
 
 // FilterByTime returns records within d from now. d == 0 returns all records.
@@ -118,197 +123,170 @@ func Aggregate(records []git.CommitRecord) []AuthorStats {
 	return AggregateWithOptions(records, AggregateOptions{FuzzyMatching: FuzzyMatching})
 }
 
-// AggregateWithOptions groups records by contributor identity using explicit
-// options and returns totals in deterministic name order.
-func AggregateWithOptions(records []git.CommitRecord, options AggregateOptions) []AuthorStats {
-	canonical := resolveCanonicalNames(records, options.FuzzyMatching)
-	return aggregateByCanonical(records, canonical, options)
+// IdentityID uses mailmapped email, never name similarity. Missing-email
+// identities remain local to their repository and exact author name.
+func IdentityID(r git.CommitRecord) string {
+	if email := strings.ToLower(strings.TrimSpace(r.Email)); email != "" {
+		return "email:" + email
+	}
+	repo := r.RepoID
+	if repo == "" {
+		repo = r.RepoName
+	}
+	return fmt.Sprintf("missing:%q:%q", repo, r.Author)
 }
 
-type identityKey struct {
-	author string
-	email  string
-}
-
-func keyForRecord(record git.CommitRecord) identityKey {
-	return identityKey{
-		author: record.Author,
-		email:  strings.ToLower(strings.TrimSpace(record.Email)),
-	}
-}
-
-type disjointSet []int
-
-func newDisjointSet(n int) disjointSet {
-	set := make(disjointSet, n)
-	for i := range set {
-		set[i] = i
-	}
-	return set
-}
-
-func (s disjointSet) find(i int) int {
-	root := i
-	for s[root] != root {
-		root = s[root]
-	}
-	for s[i] != i {
-		parent := s[i]
-		s[i] = root
-		i = parent
-	}
-	return root
-}
-
-func (s disjointSet) union(a, b int) {
-	a, b = s.find(a), s.find(b)
-	if a == b {
-		return
-	}
-	if a < b {
-		s[b] = a
-	} else {
-		s[a] = b
-	}
-}
-
-func resolveCanonicalNames(records []git.CommitRecord, fuzzy bool) map[identityKey]string {
-	pairIndex := make(map[identityKey]int)
-	pairs := make([]identityKey, 0)
-	for _, record := range records {
-		key := keyForRecord(record)
-		if _, ok := pairIndex[key]; ok {
-			continue
-		}
-		pairIndex[key] = len(pairs)
-		pairs = append(pairs, key)
-	}
-
-	set := newDisjointSet(len(pairs))
-	byEmail := make(map[string]int)
-	byName := make(map[string]int)
-	for i, pair := range pairs {
-		if pair.email != "" {
-			if previous, ok := byEmail[pair.email]; ok {
-				set.union(i, previous)
-			} else {
-				byEmail[pair.email] = i
-			}
-		}
-		name := normalizedName(pair.author)
-		if name == "" {
-			continue
-		}
-		if previous, ok := byName[name]; ok {
-			set.union(i, previous)
-		} else {
-			byName[name] = i
-		}
-	}
-
-	if fuzzy {
-		names := make([]string, 0, len(byName))
-		for name := range byName {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for i, name := range names {
-			for _, candidate := range names[i+1:] {
-				if similarNormalizedNames(name, candidate) {
-					set.union(byName[name], byName[candidate])
-				}
-			}
-		}
-	}
-
-	nameCounts := make(map[int]map[string]int)
-	for _, record := range records {
-		root := set.find(pairIndex[keyForRecord(record)])
-		if nameCounts[root] == nil {
-			nameCounts[root] = make(map[string]int)
-		}
-		nameCounts[root][record.Author]++
-	}
-
-	canonicalByRoot := make(map[int]string, len(nameCounts))
-	for root, counts := range nameCounts {
-		best := ""
-		bestCount := -1
-		for name, count := range counts {
-			if count > bestCount || (count == bestCount && preferCanonical(name, best)) {
-				best = name
-				bestCount = count
-			}
-		}
-		canonicalByRoot[root] = best
-	}
-
-	canonical := make(map[identityKey]string, len(pairs))
-	for i, pair := range pairs {
-		canonical[pair] = canonicalByRoot[set.find(i)]
-	}
-	return canonical
-}
-
-func aggregateByCanonical(records []git.CommitRecord, canonical map[identityKey]string, options AggregateOptions) []AuthorStats {
-	byName := make(map[string]*AuthorStats)
-	activeDays := make(map[string]map[string]bool)
+func groupCommits(records []git.CommitRecord) [][]git.CommitRecord {
+	var groups [][]git.CommitRecord
+	byID := make(map[string]int)
 	for _, r := range records {
-		name := canonical[keyForRecord(r)]
-		as, ok := byName[name]
-		if !ok {
-			as = &AuthorStats{
-				Name:    name,
-				PerRepo: make(map[string]*RepoContribution),
-				Aliases: make(map[string]bool),
+		if index, ok := byID[r.CommitID]; r.CommitID != "" && ok {
+			groups[index] = append(groups[index], r)
+		} else {
+			if r.CommitID != "" {
+				byID[r.CommitID] = len(groups)
 			}
-			byName[name] = as
+			groups = append(groups, []git.CommitRecord{r})
 		}
-		if !as.Bot && IsBotIdentity(r.Author, r.Email, options.BotIdentities) {
-			as.Bot = true
+	}
+	return groups
+}
+
+// Prefer a complete copy, then choose attribution deterministically if clones
+// have conflicting mailmaps. Repository associations do not duplicate totals.
+func preferredCopy(copies []git.CommitRecord) git.CommitRecord {
+	best := copies[0]
+	for _, r := range copies[1:] {
+		if (best.LinesUnknown && !r.LinesUnknown) || (best.LinesUnknown == r.LinesUnknown &&
+			(r.RepoID < best.RepoID || (r.RepoID == best.RepoID && IdentityID(r)+"\x00"+r.Author < IdentityID(best)+"\x00"+best.Author))) {
+			best = r
 		}
+	}
+	return best
+}
+
+// UniqueRecords supplies the same commit selection to detail charts and totals.
+// Records without object IDs are distinct (including legacy API callers).
+func UniqueRecords(records []git.CommitRecord) []git.CommitRecord {
+	groups := groupCommits(records)
+	result := make([]git.CommitRecord, 0, len(groups))
+	for _, copies := range groups {
+		result = append(result, preferredCopy(copies))
+	}
+	return result
+}
+
+// AggregateWithOptions groups unique commits by email/mailmap identity and
+// returns totals in deterministic name order, retaining repository associations.
+func AggregateWithOptions(records []git.CommitRecord, options AggregateOptions) []AuthorStats {
+	byID := make(map[string]*AuthorStats)
+	names := make(map[string]map[string]int)
+	days := make(map[string]map[string]bool)
+	for _, copies := range groupCommits(records) {
+		r := preferredCopy(copies)
+		id := IdentityID(r)
+		as := byID[id]
+		if as == nil {
+			as = &AuthorStats{ID: id, PerRepo: make(map[string]*RepoContribution), Aliases: make(map[string]bool)}
+			byID[id] = as
+			names[id] = make(map[string]int)
+			days[id] = make(map[string]bool)
+		}
+		names[id][r.Author]++
+		for _, copy := range copies {
+			if IdentityID(copy) == id {
+				as.Aliases[copy.Author] = true
+			}
+		}
+		as.Bot = as.Bot || IsBotIdentity(r.Author, r.Email, options.BotIdentities)
 		as.Commits++
-		as.Added += r.Added
-		as.Removed += r.Removed
-		as.Net += r.Added - r.Removed
-		as.TotalChange += r.Added + r.Removed
-		as.Aliases[r.Author] = true
-		if as.FirstCommit.IsZero() || r.Date.Before(as.FirstCommit) {
-			as.FirstCommit = r.Date
+		added, removed := r.Added, r.Removed
+		if r.LinesUnknown {
+			added, removed = 0, 0
+			as.UnknownLineCommits++
 		}
-		if r.Date.After(as.LastCommit) {
-			as.LastCommit = r.Date
+		as.Added += added
+		as.Removed += removed
+		as.Net += added - removed
+		as.TotalChange += added + removed
+		date := r.Date.In(time.Local)
+		if as.FirstCommit.IsZero() || date.Before(as.FirstCommit) {
+			as.FirstCommit = date
 		}
-		if activeDays[name] == nil {
-			activeDays[name] = make(map[string]bool)
+		if date.After(as.LastCommit) {
+			as.LastCommit = date
 		}
-		activeDays[name][r.Date.Format("2006-01-02")] = true
+		days[id][date.Format("2006-01-02")] = true
 		if r.AIAssisted {
 			as.AICommits++
 		}
-
-		rc, ok := as.PerRepo[r.RepoName]
-		if !ok {
-			rc = &RepoContribution{}
-			as.PerRepo[r.RepoName] = rc
+		repos := make(map[string]bool)
+		for _, copy := range copies {
+			repos[copy.RepoName] = true
 		}
-		rc.Commits++
-		rc.Added += r.Added
-		rc.Removed += r.Removed
-		rc.Net += r.Added - r.Removed
-		rc.TotalChange += r.Added + r.Removed
-		if r.AIAssisted {
-			rc.AICommits++
+		for name := range repos {
+			rc := as.PerRepo[name]
+			if rc == nil {
+				rc = &RepoContribution{}
+				as.PerRepo[name] = rc
+			}
+			rc.Commits++
+			rc.Added += added
+			rc.Removed += removed
+			rc.Net += added - removed
+			rc.TotalChange += added + removed
+			if r.LinesUnknown {
+				rc.UnknownLineCommits++
+			}
+			if r.AIAssisted {
+				rc.AICommits++
+			}
 		}
 	}
-
-	result := make([]AuthorStats, 0, len(byName))
-	for _, as := range byName {
-		as.ActiveDays = len(activeDays[as.Name])
+	result := make([]AuthorStats, 0, len(byID))
+	for id, as := range byID {
+		bestCount := -1
+		for name, count := range names[id] {
+			if count > bestCount || (count == bestCount && preferCanonical(name, as.Name)) {
+				as.Name, bestCount = name, count
+			}
+		}
+		as.ActiveDays = len(days[id])
 		result = append(result, *as)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].ID < result[j].ID
+	})
 	return result
+}
+
+// Compare nonnegative fractions with a 128-bit product so precision is not
+// lost to display rounding or multiplication overflow.
+func compareAIRatio(a, b AuthorStats) int {
+	an, ad := unsignedCount(a.AICommits), unsignedCount(a.Commits)
+	bn, bd := unsignedCount(b.AICommits), unsignedCount(b.Commits)
+	if ad == 0 {
+		an, ad = 0, 1
+	}
+	if bd == 0 {
+		bn, bd = 0, 1
+	}
+	ah, al := bits.Mul64(an, bd)
+	bh, bl := bits.Mul64(bn, ad)
+	if c := cmp.Compare(ah, bh); c != 0 {
+		return c
+	}
+	return cmp.Compare(al, bl)
+}
+
+func unsignedCount(value int) uint64 {
+	if value < 0 {
+		return 0
+	}
+	return uint64(value)
 }
 
 func metricValue(s AuthorStats, field SortField) int {
@@ -334,7 +312,11 @@ func metricValue(s AuthorStats, field SortField) int {
 func Sort(stats []AuthorStats, field SortField) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		a, b := stats[i], stats[j]
-		if va, vb := metricValue(a, field), metricValue(b, field); va != vb {
+		if field == SortByAI {
+			if c := compareAIRatio(a, b); c != 0 {
+				return c > 0
+			}
+		} else if va, vb := metricValue(a, field), metricValue(b, field); va != vb {
 			return va > vb
 		}
 		if a.TotalChange != b.TotalChange {
@@ -343,7 +325,10 @@ func Sort(stats []AuthorStats, field SortField) {
 		if a.Commits != b.Commits {
 			return a.Commits > b.Commits
 		}
-		return a.Name < b.Name
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
 	})
 }
 
@@ -373,15 +358,12 @@ func SortFieldFromString(s string) SortField {
 	return field
 }
 
-// NamesMatch reports whether two raw author names are the same identity under
-// the current merge policy: normalized-name equality always, plus substring
-// similarity when FuzzyMatching is enabled.
+// NamesMatch is a legacy name-similarity helper, not an identity test.
 func NamesMatch(a, b string) bool {
 	return namesMatch(a, b, FuzzyMatching)
 }
 
-// NamesMatchWithOptions reports whether two raw author names are the same
-// identity under the supplied merge policy.
+// NamesMatchWithOptions compares name similarity for legacy callers.
 func NamesMatchWithOptions(a, b string, options AggregateOptions) bool {
 	return namesMatch(a, b, options.FuzzyMatching)
 }

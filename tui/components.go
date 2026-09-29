@@ -86,15 +86,15 @@ func aiBoxValue(commits, aiCommits int) string {
 	return fmt.Sprintf("%d%% (%d)", pct, aiCommits)
 }
 
-func renderStatLineCompact(commits, added, removed, aiCommits, width int) string {
+func renderStatLineCompact(commits, added, removed, aiCommits, width, unknown int) string {
 	color := func(c lipgloss.TerminalColor, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Bold(true).Render(s)
 	}
 	commitsPlain := "COMMITS " + FormatNumber(commits)
 	segs := []struct{ plain, styled string }{
 		{commitsPlain, StyleStatLabel.Render("COMMITS ") + color(ColorCyan, FormatNumber(commits))},
-		{"+" + FormatNumber(added), color(ColorGreen, "+"+FormatNumber(added))},
-		{"-" + FormatNumber(removed), color(ColorMagenta, "-"+FormatNumber(removed))},
+		{"+" + formatLineCount(added, unknown), color(ColorGreen, "+"+formatLineCount(added, unknown))},
+		{"-" + formatLineCount(removed, unknown), color(ColorMagenta, "-"+formatLineCount(removed, unknown))},
 	}
 	if aiCommits > 0 {
 		ai := aiBoxValue(commits, aiCommits)
@@ -131,8 +131,12 @@ func renderStatLineCompact(commits, added, removed, aiCommits, width int) string
 // falling back to a stacked or compact single line so the row never overflows
 // the given terminal width.
 func RenderStatBoxes(commits, added, removed, aiCommits, width int) string {
+	return renderStatBoxes(commits, added, removed, aiCommits, width, 0)
+}
+
+func renderStatBoxes(commits, added, removed, aiCommits, width, unknown int) string {
 	if width > 0 && width < midTableWidth {
-		return renderStatLineCompact(commits, added, removed, aiCommits, width)
+		return renderStatLineCompact(commits, added, removed, aiCommits, width, unknown)
 	}
 
 	box := func(value, label string, valColor lipgloss.TerminalColor) string {
@@ -143,8 +147,8 @@ func RenderStatBoxes(commits, added, removed, aiCommits, width int) string {
 	}
 
 	c := box(FormatNumber(commits), "COMMITS", ColorCyan)
-	a := box("+"+FormatNumber(added), "ADDED", ColorGreen)
-	r := box("-"+FormatNumber(removed), "REMOVED", ColorMagenta)
+	a := box("+"+formatLineCount(added, unknown), "ADDED", ColorGreen)
+	r := box("-"+formatLineCount(removed, unknown), "REMOVED", ColorMagenta)
 
 	boxes := []string{c, " ", a, " ", r}
 
@@ -161,6 +165,23 @@ func RenderStatBoxes(commits, added, removed, aiCommits, width int) string {
 		}
 	}
 	return lipgloss.NewStyle().MarginLeft(2).Render(joined)
+}
+
+func formatLineCount(value, unknown int) string {
+	if unknown == 0 {
+		return FormatNumber(value)
+	}
+	if value == 0 {
+		return "?"
+	}
+	return FormatNumber(value) + "?"
+}
+
+func renderKnownNet(value, width, unknown int) string {
+	if unknown == 0 {
+		return renderNet(value, width)
+	}
+	return StyleAmber.Render(fmt.Sprintf("%*s", width, formatLineCount(value, unknown)))
 }
 
 // RenderTimePicker renders time presets with the active one styled differently.

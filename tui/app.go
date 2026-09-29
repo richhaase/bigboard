@@ -40,6 +40,7 @@ type Model struct {
 	sortAsc         bool
 	hideBots        bool
 	activeOperative string
+	activeAuthorID  string
 	sortField       stats.SortField
 	timeIdx         int
 	version         string
@@ -287,6 +288,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ViewOperative:
 			m.viewMode = ViewAggregate
 			m.activeOperative = ""
+			m.activeAuthorID = ""
 		default:
 			if m.filterQuery != "" {
 				m.filterQuery = ""
@@ -397,6 +399,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			disp := m.displayedAuthors()
 			if m.selectedRow < len(disp) {
 				m.activeOperative = disp[m.selectedRow].Name
+				m.activeAuthorID = disp[m.selectedRow].ID
 				m.viewMode = ViewOperative
 			}
 		}
@@ -414,6 +417,10 @@ func (m *Model) filteredRecords() []git.CommitRecord {
 }
 
 func (m *Model) recomputeAuthors() {
+	selectedID := ""
+	if list := m.displayedAuthors(); m.selectedRow >= 0 && m.selectedRow < len(list) {
+		selectedID = list[m.selectedRow].ID
+	}
 	authors := stats.AggregateWithOptions(m.filteredRecords(), stats.AggregateOptions{
 		FuzzyMatching: m.options.FuzzyMatching,
 		BotIdentities: m.options.BotIdentities,
@@ -429,6 +436,12 @@ func (m *Model) recomputeAuthors() {
 	}
 	m.authors = authors
 	m.sortAuthors()
+	for i, author := range m.displayedAuthors() {
+		if selectedID != "" && author.ID == selectedID {
+			m.selectedRow = i
+			break
+		}
+	}
 	m.clampScroll()
 }
 
@@ -475,7 +488,10 @@ func (m Model) tableViewport() int {
 	if len(m.failedRepos) > 0 {
 		above = append(above, m.failedReposLine())
 	}
-	above = append(above, "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width), "")
+	if notice := m.historyNotice(); notice != "" {
+		above = append(above, notice)
+	}
+	above = append(above, "", RenderTimePicker(m.timeIdx), "", renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()), "")
 	help := RenderHelpBar(HelpContext{View: "aggregate"})
 	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
@@ -514,7 +530,7 @@ func (m *Model) stepOperative(delta int) {
 	}
 	idx := -1
 	for i, a := range list {
-		if a.Name == m.activeOperative {
+		if (m.activeAuthorID != "" && a.ID == m.activeAuthorID) || (m.activeAuthorID == "" && a.Name == m.activeOperative) {
 			idx = i
 			break
 		}
@@ -531,6 +547,7 @@ func (m *Model) stepOperative(delta int) {
 		idx = len(list) - 1
 	}
 	m.activeOperative = list[idx].Name
+	m.activeAuthorID = list[idx].ID
 	m.selectedRow = idx
 	m.clampScroll()
 }
@@ -623,11 +640,14 @@ func (m Model) renderAggregateView() string {
 	}
 	sections = append(sections, "")
 
+	if notice := m.historyNotice(); notice != "" {
+		sections = append(sections, StyleAmber.Render(notice))
+	}
 	sections = append(sections, RenderTimePicker(m.timeIdx))
 	sections = append(sections, "")
 
 	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
-	sections = append(sections, RenderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width))
+	sections = append(sections, renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()))
 	sections = append(sections, "")
 
 	sections = append(sections, AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
@@ -655,16 +675,24 @@ func (m Model) renderAggregateView() string {
 func (m Model) renderOperativeView() string {
 	var as *stats.AuthorStats
 	for i := range m.authors {
-		if m.authors[i].Name == m.activeOperative {
+		if (m.activeAuthorID != "" && m.authors[i].ID == m.activeAuthorID) || (m.activeAuthorID == "" && m.authors[i].Name == m.activeOperative) {
 			as = &m.authors[i]
 			break
 		}
 	}
 
 	filtered := m.filteredRecords()
+	name := m.activeOperative
+	if as != nil {
+		name = as.Name
+	} else if m.activeAuthorID != "" {
+		// A selected identity with no activity in range must not fall back to
+		// a different person who happens to have the same display name.
+		filtered = nil
+	}
 
 	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
-		m.activeOperative,
+		name,
 		as,
 		filtered,
 		m.width,
@@ -694,4 +722,21 @@ func (m Model) excludedRepoCount() int {
 		}
 	}
 	return count
+}
+
+func (m Model) unknownLineCommits() int {
+	n := 0
+	for _, a := range m.authors {
+		n += a.UnknownLineCommits
+	}
+	return n
+}
+
+func (m Model) historyNotice() string {
+	for _, r := range m.allRecords {
+		if r.LinesUnknown && !m.excludedRepos[r.RepoID] {
+			return Truncate("  ⚠ Shallow history; ? marks unknown line counts.", m.width)
+		}
+	}
+	return ""
 }

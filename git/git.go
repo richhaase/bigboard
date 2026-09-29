@@ -8,17 +8,12 @@ import (
 	"fmt"
 	"net/mail"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
-const (
-	fieldSep    = "\x1e"
-	coAuthorSep = "\x1f"
-)
+const coAuthorSep = "\x1f"
 
 const gitTimeout = 120 * time.Second
 
@@ -82,7 +77,7 @@ func (f pathFilter) shouldCount(path string) bool {
 	if f.includeGenerated {
 		return true
 	}
-	p := effectivePath(path)
+	p := path
 	for _, seg := range strings.Split(p, "/") {
 		for _, d := range f.ignoredDirs {
 			if seg == d {
@@ -102,28 +97,9 @@ func (f pathFilter) shouldCount(path string) bool {
 	return true
 }
 
-func effectivePath(p string) string {
-	p = strings.TrimSpace(p)
-	if !strings.Contains(p, "=>") {
-		return p
-	}
-	if open := strings.Index(p, "{"); open >= 0 {
-		if closeIdx := strings.Index(p, "}"); closeIdx > open {
-			inner := p[open+1 : closeIdx]
-			if i := strings.Index(inner, "=>"); i >= 0 {
-				inner = inner[i+2:]
-			}
-			return strings.TrimSpace(p[:open] + strings.TrimSpace(inner) + p[closeIdx+1:])
-		}
-	}
-	if i := strings.Index(p, "=>"); i >= 0 {
-		return strings.TrimSpace(p[i+2:])
-	}
-	return p
-}
-
 // CommitRecord holds aggregated stats for a single commit.
 type CommitRecord struct {
+	CommitID   string
 	Author     string
 	Email      string
 	Date       time.Time
@@ -132,6 +108,8 @@ type CommitRecord struct {
 	RepoID     string
 	RepoName   string
 	AIAssisted bool
+	// LinesUnknown identifies shallow boundaries whose parents are unavailable.
+	LinesUnknown bool
 }
 
 // Repository identifies a repository independently from its display name.
@@ -200,8 +178,8 @@ func pathSuffix(parts []string, depth int) string {
 	return strings.Join(parts[len(parts)-depth:], "/")
 }
 
-// DetectDefaultBranch tries to determine the default branch of the repo at dir.
-// It tries origin/HEAD, then main, then master, then falls back to HEAD.
+// DetectDefaultBranch resolves the available default branch to a commit ID.
+// Cached remote history takes precedence over a potentially stale local branch.
 func DetectDefaultBranch(dir string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
@@ -209,28 +187,26 @@ func DetectDefaultBranch(dir string) string {
 }
 
 func detectDefaultBranch(ctx context.Context, dir string) string {
-	out, err := runGitContext(ctx, dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	out, err := runGitContext(ctx, dir, "symbolic-ref", "refs/remotes/origin/HEAD")
 	if err == nil {
-		if ref := strings.TrimSpace(out); ref != "" {
-			local := strings.TrimPrefix(ref, "origin/")
-			if local != ref {
-				_, localErr := runGitContext(ctx, dir, "rev-parse", "--verify", "refs/heads/"+local)
-				if localErr == nil {
-					return local
-				}
-			}
-			return ref
+		if oid := resolveCommit(ctx, dir, strings.TrimSpace(out)); oid != "" {
+			return oid
 		}
 	}
-
-	for _, branch := range []string{"main", "master"} {
-		_, err := runGitContext(ctx, dir, "rev-parse", "--verify", branch)
-		if err == nil {
-			return branch
+	for _, ref := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master", "HEAD"} {
+		if oid := resolveCommit(ctx, dir, ref); oid != "" {
+			return oid
 		}
 	}
-
 	return "HEAD"
+}
+
+func resolveCommit(ctx context.Context, dir, ref string) string {
+	out, err := runGitContext(ctx, dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // CollectCommits runs git log on the repo at dir using the given ref and returns
@@ -255,15 +231,47 @@ func CollectRepository(repo Repository, ref string, options CollectOptions) ([]C
 func ScanRepository(ctx context.Context, repo Repository, options CollectOptions) ([]CommitRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	ref := detectDefaultBranch(ctx, repo.Path)
-	return collectRepository(ctx, repo, ref, defaultPathFilter(options), newAIMatcher(options.AIIdentities))
+	return collectRepository(ctx, repo, "", defaultPathFilter(options), newAIMatcher(options.AIIdentities))
 }
 
 func collectRepository(ctx context.Context, repo Repository, ref string, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
-	args := []string{"-c", "core.quotePath=false", "log", ref, "--no-merges", "-M", "-C",
-		"--format=%aN%x1e%aE%x1e%aI%x1e%(trailers:key=Co-authored-by,valueonly,separator=%x1f)", "--numstat"}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repo.Path
+	partial, err := partialClone(ctx, repo.Path)
+	if err != nil {
+		return nil, err
+	}
+	if partial {
+		version, err := runGitContext(ctx, repo.Path, "--version")
+		if err != nil {
+			return nil, err
+		}
+		var major, minor, patch int
+		if _, err := fmt.Sscanf(version, "git version %d.%d.%d", &major, &minor, &patch); err != nil || major < 2 || (major == 2 && (minor < 45 || (minor == 45 && patch < 1))) {
+			return nil, fmt.Errorf("partial clone %s requires Git 2.45.1 or newer to scan without fetching", repo.Path)
+		}
+	}
+	if ref == "" {
+		ref = detectDefaultBranch(ctx, repo.Path)
+	}
+	// Public callers may supply a short branch name. Prefer an actual branch
+	// before letting Git resolve a tag or another revision expression.
+	if !isCommitID(ref) && !strings.HasPrefix(ref, "refs/") && ref != "HEAD" {
+		for _, prefix := range []string{"refs/heads/", "refs/remotes/"} {
+			if oid := resolveCommit(ctx, repo.Path, prefix+ref); oid != "" {
+				ref = oid
+				break
+			}
+		}
+	}
+	shallow, err := shallowCommits(ctx, repo.Path)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"log", "--no-merges", "--root", "-M50%", "-C50%", "-l0",
+		"--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--no-show-signature",
+		"--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none",
+		"--format=%x00%H%x00%aN%x00%aE%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00",
+		"--numstat", "-z", ref, "--"}
+	cmd := gitCommand(ctx, repo.Path, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -273,13 +281,14 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("git log in %s: %w", repo.Path, err)
 	}
-	parser := newLogParser(repo, filter, ai)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		parser.feed(scanner.Text())
+	scanner.Split(splitNUL)
+	records, scanErr := parseLog(scanner, repo, filter, ai)
+	if scanErr != nil {
+		// A parse failure must stop the producer before waiting for its exit.
+		_ = cmd.Process.Kill()
 	}
-	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if waitErr != nil || scanErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -292,15 +301,24 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 			return nil, nil
 		}
 		cause := waitErr
-		if cause == nil {
+		if scanErr != nil {
 			cause = scanErr
+		}
+		if partial {
+			return nil, fmt.Errorf("partial clone %s could not be scanned with automatic fetching disabled: %w: %s", repo.Path, cause, strings.TrimSpace(stderr.String()))
 		}
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {
 			return nil, fmt.Errorf("git log failed in %s: %w: %s", repo.Path, cause, detail)
 		}
 		return nil, fmt.Errorf("git log failed in %s: %w", repo.Path, cause)
 	}
-	return parser.finish(), nil
+	for i := range records {
+		if shallow[records[i].CommitID] {
+			records[i].LinesUnknown = true
+			records[i].Added, records[i].Removed = 0, 0
+		}
+	}
+	return records, nil
 }
 
 // DiscoverReposDepth scans paths for git repositories, descending up to maxDepth
@@ -374,105 +392,11 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 	return result
 }
 
-func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
-	repo := Repository{ID: repoName, Path: repoName, Name: repoName}
-	return parseGitLogForRepository(output, repo, legacyPathFilter(), newAIMatcher(nil))
-}
-
-func parseGitLogForRepository(output string, repo Repository, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
-	parser := newLogParser(repo, filter, ai)
-	for _, line := range strings.Split(output, "\n") {
-		parser.feed(line)
-	}
-	return parser.finish(), nil
-}
-
-type logParser struct {
-	repo    Repository
-	filter  pathFilter
-	ai      aiMatcher
-	records []CommitRecord
-	current *CommitRecord
-}
-
-func newLogParser(repo Repository, filter pathFilter, ai aiMatcher) *logParser {
-	return &logParser{repo: repo, filter: filter, ai: ai}
-}
-
-func (p *logParser) flush() {
-	if p.current != nil {
-		p.records = append(p.records, *p.current)
-		p.current = nil
-	}
-}
-
-func (p *logParser) feed(line string) {
-	if line == "" {
-		return
-	}
-
-	if strings.Contains(line, fieldSep) {
-		parts := strings.SplitN(line, fieldSep, 4)
-		if len(parts) >= 3 {
-			t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
-			if err != nil {
-				p.flush()
-				return
-			}
-			p.flush()
-			email := strings.TrimSpace(parts[1])
-			aiAssisted := p.ai.isAI(email) || (len(parts) == 4 && p.ai.isAICoAuthor(parts[3]))
-			p.current = &CommitRecord{
-				Author:     strings.TrimSpace(parts[0]),
-				Email:      email,
-				Date:       t,
-				RepoID:     p.repo.ID,
-				RepoName:   p.repo.Name,
-				AIAssisted: aiAssisted,
-			}
-			return
-		}
-	}
-
-	if p.current == nil {
-		return
-	}
-	fields := strings.SplitN(line, "\t", 3)
-	if len(fields) != 3 {
-		return
-	}
-	addedStr := fields[0]
-	removedStr := fields[1]
-	if addedStr == "-" || removedStr == "-" {
-		return
-	}
-	if !p.filter.shouldCount(fields[2]) {
-		return
-	}
-	added, err1 := strconv.Atoi(addedStr)
-	removed, err2 := strconv.Atoi(removedStr)
-	if err1 != nil || err2 != nil {
-		return
-	}
-	p.current.Added += added
-	p.current.Removed += removed
-}
-
-func (p *logParser) finish() []CommitRecord {
-	p.flush()
-	return p.records
-}
-
-var aiEmailDomains = []string{
-	"@anthropic.com",
-	"@openai.com",
-	"@cursor.com",
-	"@cursor.sh",
-	"@codeium.com",
-	"@windsurf.com",
-}
-
 var aiEmailAddresses = []string{
+	"noreply@anthropic.com",
+	"noreply@openai.com",
+	"hi@cursor.com",
+	"hi@cursor.sh",
 	"copilot@github.com",
 	"devin@cognition.ai",
 	"noreply@aider.chat",
@@ -538,11 +462,6 @@ func normalizeAddress(value string) string {
 }
 
 func isAIAddress(address string) bool {
-	for _, domain := range aiEmailDomains {
-		if strings.HasSuffix(address, domain) {
-			return true
-		}
-	}
 	for _, addr := range aiEmailAddresses {
 		if address == addr {
 			return true
@@ -561,9 +480,7 @@ func isAIAddress(address string) bool {
 }
 
 func runGitContext(ctx context.Context, dir string, args ...string) (string, error) {
-	full := append([]string{"-c", "core.quotePath=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Dir = dir
+	cmd := gitCommand(ctx, dir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -602,11 +519,14 @@ func isWorktree(dir string) bool {
 	if err != nil || fi.IsDir() {
 		return false
 	}
-	data, err := os.ReadFile(p)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	gitDir, err := runGitContext(ctx, dir, "rev-parse", "--path-format=absolute", "--git-dir")
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(string(data), "gitdir:")
+	commonDir, err := runGitContext(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	return err == nil && strings.TrimSpace(gitDir) != strings.TrimSpace(commonDir)
 }
 
 func absPath(p string) string {

@@ -97,9 +97,9 @@ func TestAreSimilarNames(t *testing.T) {
 func TestAggregate(t *testing.T) {
 	now := time.Now()
 	records := []git.CommitRecord{
-		{Author: "Alice Smith", Date: now, Added: 100, Removed: 20, RepoName: "repo-a"},
-		{Author: "Alice Smith", Date: now, Added: 50, Removed: 10, RepoName: "repo-a"},
-		{Author: "Alice Smith", Date: now, Added: 30, Removed: 5, RepoName: "repo-b"},
+		{Author: "Alice Smith", Email: "alice@test", Date: now, Added: 100, Removed: 20, RepoName: "repo-a"},
+		{Author: "Alice Smith", Email: "alice@test", Date: now, Added: 50, Removed: 10, RepoName: "repo-a"},
+		{Author: "Alice Smith", Email: "alice@test", Date: now, Added: 30, Removed: 5, RepoName: "repo-b"},
 		{Author: "Bob Jones", Date: now, Added: 200, Removed: 80, RepoName: "repo-a"},
 	}
 
@@ -448,38 +448,21 @@ func TestAggregateWithOptionsDoesNotUseGlobalPolicy(t *testing.T) {
 	}
 }
 
-func TestAggregateMergesSameNameDifferentEmail(t *testing.T) {
-	now := time.Now()
-	// Same person, two emails (work + personal), identical name → one row.
-	records := []git.CommitRecord{
-		{Author: "Rich Haase", Email: "rich@work.com", Date: now, Added: 10, RepoName: "r"},
-		{Author: "Rich Haase", Email: "rich@personal.com", Date: now, Added: 20, RepoName: "r"},
-	}
-	result := stats.Aggregate(records)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 merged author, got %d", len(result))
-	}
-	if result[0].Added != 30 {
-		t.Errorf("expected merged Added=30, got %d", result[0].Added)
-	}
-}
-
-func TestAggregateMergesNormalizedNameTiedCounts(t *testing.T) {
-	now := time.Now()
-	records := []git.CommitRecord{
-		{Author: "Alice Smith", Email: "alice@work.com", Date: now, Added: 10, RepoName: "r"},
-		{Author: "alice smith", Email: "alice@home.com", Date: now, Added: 20, RepoName: "r"},
-	}
-	result := stats.Aggregate(records)
-	if len(result) != 1 {
-		names := make([]string, len(result))
-		for i, a := range result {
-			names[i] = a.Name
+func TestAggregateKeepsSameNamesAndDifferentEmailsSeparate(t *testing.T) {
+	for _, secondName := range []string{"Rich Haase", "richhaase", "Rich H"} {
+		records := []git.CommitRecord{
+			{Author: "Rich Haase", Email: "rich@work.com", Added: 10, RepoName: "r"},
+			{Author: secondName, Email: "rich@personal.com", Added: 20, RepoName: "r"},
 		}
-		t.Fatalf("normalized-equal names with tied counts did not merge: got %d rows %v", len(result), names)
-	}
-	if result[0].Added != 30 {
-		t.Errorf("merged Added = %d, want 30", result[0].Added)
+		for _, fuzzy := range []bool{false, true} {
+			result := stats.AggregateWithOptions(records, stats.AggregateOptions{FuzzyMatching: fuzzy})
+			if len(result) != 2 || result[0].ID == result[1].ID {
+				t.Fatalf("name-based identity merge: %+v", result)
+			}
+			if result[0].Added+result[1].Added != 30 {
+				t.Fatalf("lost lines: %+v", result)
+			}
+		}
 	}
 }
 
