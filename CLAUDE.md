@@ -1,32 +1,66 @@
-# Big Board project context
+# Big Board - Claude Code Context
 
-Cyberpunk terminal dashboard for contributor activity across Git repositories. Rust with Ratatui/Crossterm; Git operations invoke the local Git CLI.
+## Project Overview
+
+Cyberpunk-themed terminal dashboard for visualizing contributor statistics across multiple git repositories. Built with Go, Bubbletea, and Lipgloss.
 
 ## Architecture
 
-- `src/main.rs`, `src/config.rs`: three CLI flags, strict JSON preferences, timezone, groups, paths and exclusions. No paths/group means GitHub with saved selection; explicit paths/group means local with no automatic GitHub fallback. No JSON export.
-- `src/model.rs`: repository, identity, commit, scope, scan data and options.
-- `src/git.rs`: snapshot branch history, streaming collection, generated-file filtering, mailmap/coauthors, detected AI, completeness and merge accounting.
-- `src/identity.rs`: explicit user-global contributor mappings, atomic persistence with locking.
-- `src/stats.rs`: identity aggregation, unique commit counting, participation, consistent calendar buckets, bot tags, filters and exact-ratio sorting.
-- `src/github.rs`: lightweight default-branch commit summaries through `gh api`, date coverage cache, pagination, and discovery. Never clone or fetch repositories.
-- `src/scan.rs`: bounded cancelable scan sessions.
-- `src/tui/`: stable contributor selection, merge flow, history toggle, completeness notices, rendering and terminal lifecycle.
-- `src/tui/analysis.rs`: one cancelable aggregation worker, shared immutable record snapshots, and latest-request result delivery. Never run history aggregation on the terminal event loop or publish partial/canceled totals.
-
-## Analytics invariants
-
-Follow `docs/analytics.md` and the user-approved conversational scope recorded in `docs/contracts/analytics-accuracy.md`. Names are labels, never automatic identity joins. Commit totals are globally unique across selected repositories, whose subtotals may overlap. Human coauthored credit is separate from authored commits/lines. Missing measurements must stay visibly unknown. Calendar buckets use the configured timezone and a shared cutoff. Metrics describe activity, not productivity.
-
-Local mode uses only locally available Git history; do not fetch or modify the user's working tree/index/refs during analysis. Keep reconstruction objects temporary. Prefer targeted synthetic fixtures with known expected outcomes to old Go parity, which deliberately preserved defects.
-
-## Checks
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-cargo build --release --locked
+```
+cmd/bigboard/main.go    CLI entry (4 flags: --version/--config/--group/--export), config resolution, repo discovery
+cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): paths, excludes, groups, sort/since/depth, ai_identities/bot_identities
+cmd/bigboard/export.go  Headless --export (JSON only, ALL window, concurrent scans)
+git/git.go              Git ops: recursive discovery (follows symlinks), branch detection, streaming commit collection, path filtering, AI detection
+stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
+tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
+tui/styles.go           Color palette and lipgloss style definitions
+tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
+tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
+tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
+tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 ```
 
-CI checks Linux/macOS and release packaging on x86-64/ARM64. Preserve existing keyboard controls and cyberpunk presentation. `M` merges identities and `B` toggles local history scope. GitHub mode stays on the default branch and labels commit dates, all-file counts, and unknown merge lines; see `docs/github.md`. The initial scope is landed work. Known-data qualifiers must remain visible at small terminal sizes.
+## Data Flow
+
+1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
+2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
+3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R`).
+4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
+5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
+
+## Key Design Decisions
+
+- **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans. `git log` output is parsed as a stream (pipe + scanner), never buffered whole.
+- **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state.
+- **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
+- **Identity merging**: group by email, then exact normalized name; git's native `.mailmap` is honored (`%aN`/`%aE`). Substring fuzzy matching is **opt-in** (`--fuzzy`) because it over-merges distinct people. Output ordering is deterministic (sort tiebreaks; no map-iteration leaks).
+- **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; `--all-files` includes them.
+- **Repository identity**: repositories are keyed by absolute path; duplicate basenames receive shortest-unique display labels such as `org-a/api` and `org-b/api`.
+- **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity, including GitHub-noreply agent accounts (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, …); extensible via `ai_identities` (exact email or `@domain`). Surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
+- **Bots are counted, not excluded**: bot identities (`[bot]` names/emails, builtin roster, `bot_identities` config) get `AuthorStats.Bot` and a leaderboard `BOT` tag; the `b` key toggles visibility (default shown). Agents that do their own work rank like any contributor.
+- **Worktree detection**: `isWorktree()` checks if `.git` is a file containing `gitdir:` — skips these during discovery to avoid double-counting. Symlinked directories are followed, deduplicated by resolved path.
+- **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.
+
+## Build & Test
+
+```bash
+go build ./cmd/bigboard
+go test ./...
+```
+
+## CI
+
+- GitHub Actions: `go test` (+ `-race`), `go vet`, `gofmt -l .` check, golangci-lint v2, `staticcheck`, `govulncheck`, `gosec`.
+- GoReleaser for releases (`.goreleaser.yaml`); tag push (`vX.Y.Z`) publishes binaries + updates the Homebrew tap.
+
+> Note: golangci-lint's bundled staticcheck enables the `QF*` quickfix checks that the standalone `staticcheck` binary leaves off by default — the Lint job is stricter than the Staticcheck job. Run `make lint` locally before pushing.
+
+## Style Notes
+
+- All visible UI strings use "contributor" (not "operative")
+- Impact bars use gradient trailing glow: `████████▓▒░`
+- Top 3 ranks styled gold/silver/bronze
+- Negative net values rendered in red
+- Section headers in detail view use `──╸ LABEL ╺──` style
+- Heavy separator (`━`) between major sections
+- No animation: the separator is a static rule, and the loading screen uses plain language (no sci-fi flavor)

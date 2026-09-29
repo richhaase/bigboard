@@ -1,11 +1,26 @@
-# Rust build output
-/target/
-/bin/
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
 
-# Local environment and editor settings
-.env
-.claude/settings.local.json
-
-# Legacy analysis output
-coverage.*
+# Coverage
 *.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace
+go.work
+go.work.sum
+
+# Env
+.env
+
+# Build output
+bin/
+
+# Editor
+.claude/settings.local.json
