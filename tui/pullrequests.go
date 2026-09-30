@@ -231,10 +231,7 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	return prs
 }
 func (m Model) prStatus() string {
-	if m.prState.loading {
-		return "GitHub PRs refreshing · previous snapshot shown"
-	}
-	partial, failed := false, false
+	partial, failed, hasSnapshot := false, false, false
 	reason := "fetch failed"
 	var checked time.Time
 	for _, repo := range m.loadedRepos {
@@ -247,7 +244,8 @@ func (m Model) prStatus() string {
 				reason = prFailureReason(err)
 			}
 		}
-		snapshot := m.prState.snapshots[m.prState.repositories[repo.ID]]
+		snapshot, exists := m.prState.snapshots[m.prState.repositories[repo.ID]]
+		hasSnapshot = hasSnapshot || exists
 		partial = partial || snapshot.partial
 		failed = failed || snapshot.err != nil
 		if snapshot.err != nil {
@@ -261,12 +259,32 @@ func (m Model) prStatus() string {
 	if failed && count == 0 {
 		return "GitHub PRs unavailable · " + reason + " · p details"
 	}
-	label := fmt.Sprintf("GitHub · %d known open PRs", count)
+	if !hasSnapshot {
+		if m.prState.loading {
+			return "GitHub PRs refreshing · no snapshot yet"
+		}
+		return "GitHub PRs unknown · p details"
+	}
+	// Lead with evidence quality: fixed-width sidebars must never truncate
+	// STALE/PARTIAL after counts. A new request cannot make retained data fresh.
+	label := "GitHub"
 	if failed {
-		label += " · STALE · " + reason
+		label += " · STALE"
 	} else if partial {
 		label += " · PARTIAL"
 	}
+	if partial && count == 0 {
+		label += " · PR count unknown"
+	} else {
+		label += fmt.Sprintf(" · %d known open PRs", count)
+	}
+	if failed {
+		label += " · " + reason
+	}
+	if m.prState.loading {
+		label += " · refreshing · previous snapshot shown"
+	}
+
 	if !checked.IsZero() {
 		label += " · checked " + checked.Local().Format("15:04 MST")
 	}
