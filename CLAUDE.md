@@ -71,3 +71,14 @@ go test ./...
 ## Automatic PR context
 
 GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the p/P overlay. PR handles/data never enter CommitRecord, contributor stats, or export. Local refresh cancels obsolete remote generations; complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
+
+## Progressive disclosure
+
+`tui/glance*.go` owns the awareness overview and focused Activity/People/Related/
+Subareas navigation. `s` cycles volume/recency/name scope sorts, separate from
+aggregate contributor statistics. Scope/person/commit identity survives navigation
+and sorting; stale or filtered-out detail must not silently switch to a new area.
+`stats.Subareas` refines automatic areas by literal child directories and direct
+files, without changing configured grouping or canonical identities. Area/subarea
+commit counts overlap. `tui/prglance.go` summarizes only explicit PR evidence;
+p/P keeps the parent area/all-open scope, independent of local filters.

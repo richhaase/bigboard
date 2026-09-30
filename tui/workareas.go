@@ -1,11 +1,8 @@
 package tui
 
 import (
-	"fmt"
 	"sort"
-	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 )
@@ -139,11 +136,11 @@ func (m *Model) rebuildAreaDefinitions() {
 func (m Model) activityAreas() []repositoryActivity {
 	var result []repositoryActivity
 	for _, area := range m.currentWorkAreas() {
-		activity := repositoryActivity{repo: git.Repository{ID: area.ID, Name: area.Name}}
+		activity := repositoryActivity{repo: git.Repository{ID: area.ID, Name: area.Name}, commits: len(stats.UniqueRecords(area.Records))}
 		activity.people = stats.AggregateWithOptions(area.Records, stats.AggregateOptions{BotIdentities: m.options.BotIdentities})
 		sort.Slice(activity.people, func(i, j int) bool {
-			if !activity.people[i].LastCommit.Equal(activity.people[j].LastCommit) {
-				return activity.people[i].LastCommit.After(activity.people[j].LastCommit)
+			if activity.people[i].Name != activity.people[j].Name {
+				return activity.people[i].Name < activity.people[j].Name
 			}
 			return activity.people[i].ID < activity.people[j].ID
 		})
@@ -155,44 +152,8 @@ func (m Model) activityAreas() []repositoryActivity {
 		}
 		result = append(result, activity)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if !result[i].latest.Equal(result[j].latest) {
-			return result[i].latest.After(result[j].latest)
-		}
-		return result[i].repo.Name < result[j].repo.Name
-	})
+	sortRepositoryActivities(result, m.overviewSort)
 	return result
-}
-
-func (m Model) awarenessBreadcrumb() string {
-	if repo, ok := m.areaRepository(); ok {
-		return "  REPOSITORIES › " + displayText(repo.Name) + " › WORK AREAS · Esc back"
-	}
-	return "  WORK RELATIONSHIPS · Local Git history · author dates"
-}
-
-func changedPathSummary(r git.CommitRecord) string {
-	if r.PathsUnknown {
-		return "Paths unknown: shallow history boundary"
-	}
-	if len(r.Changes) == 0 {
-		return "No file changes"
-	}
-	labels := make([]string, 0, len(r.Changes))
-	for _, change := range r.Changes {
-		label := displayText(change.Path)
-		if change.PreviousPath != "" {
-			label += " (from " + displayText(change.PreviousPath) + ")"
-		}
-		if change.Generated {
-			label += " [excluded]"
-		}
-		labels = append(labels, label)
-	}
-	if len(labels) > 3 {
-		return strings.Join(labels[:3], ", ") + fmt.Sprintf(" · +%d paths", len(labels)-3)
-	}
-	return strings.Join(labels, ", ")
 }
 
 func (m Model) scopeEvidenceKey(scope repositoryActivity) string {
@@ -200,32 +161,6 @@ func (m Model) scopeEvidenceKey(scope repositoryActivity) string {
 		return scope.repo.ID
 	}
 	return scope.repo.Name
-}
-
-func (m Model) renderPathInspector(r git.CommitRecord, width, height int) string {
-	lines := renderBanner(min(width, bannerMinWidth-1))
-	lines = append(lines, RenderSectionHeader("CHANGED PATHS", width), "  "+displayText(r.Subject), "  "+r.Date.Local().Format("2006-01-02 15:04 MST")+" · "+displayText(r.Author), "  Commit "+displayText(r.CommitID))
-	if repo, ok := m.areaRepository(); ok {
-		lines = append(lines, "  Repository: "+displayText(repo.Name)+" · selected area paths")
-	}
-	if r.PathsUnknown {
-		lines = append(lines, "  Paths unknown: shallow history boundary")
-	}
-	if len(r.Changes) == 0 && !r.PathsUnknown {
-		lines = append(lines, "  No file changes")
-	}
-	pathLines := wrappedPathLines(r, width)
-	budget := max(1, height-len(lines)-2)
-	offset := max(0, min(m.pathOffset, len(pathLines)-1))
-	lines = append(lines, pathLines[offset:min(len(pathLines), offset+budget)]...)
-	if len(pathLines) > 0 {
-		lines = append(lines, fmt.Sprintf("  %d paths · lines %d–%d/%d", len(r.Changes), offset+1, min(len(pathLines), offset+budget), len(pathLines)))
-	}
-	lines = append(lines, "  ↑↓ paths · Enter/Esc back · q quit")
-	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, width, "…")
-	}
-	return strings.Join(lines, "\n")
 }
 
 // Wrap every literal path so long filenames and rename/copy origins remain

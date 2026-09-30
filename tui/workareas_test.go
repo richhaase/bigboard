@@ -42,7 +42,7 @@ func TestMonorepoAreasAndCrossAreaEvidence(t *testing.T) {
 	if !foundBilling {
 		t.Fatal("billing area missing")
 	}
-	for _, want := range []string{"WORK AREAS", "services/auth", "apps/web", "Connected areas:", "Renew sessions", "services/auth/session.go"} {
+	for _, want := range []string{"WORK AREAS", "services/auth", "apps/web", "Renew sessions"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
@@ -51,9 +51,17 @@ func TestMonorepoAreasAndCrossAreaEvidence(t *testing.T) {
 	if len(evidence) != 1 || len(evidence[0].Changes) != 1 || evidence[0].Changes[0].Path != "services/auth/session.go" {
 		t.Fatalf("wrong area evidence: %+v", evidence)
 	}
-	if strings.Contains(out, "apps/web/login.tsx") {
-		t.Fatal("other-area file leaked into selected evidence")
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "3")
+	if !strings.Contains(m.View(), "apps/web") || !strings.Contains(m.View(), "1 shared people") {
+		t.Fatal("related area evidence unavailable")
 	}
+	m = pressAwareness(m, "1")
+	m = pressAwareness(m, "enter")
+	if !strings.Contains(m.View(), "All changed paths") || !strings.Contains(m.View(), "apps/web/login.tsx") {
+		t.Fatal("full commit paths unavailable in inspector")
+	}
+
 }
 
 func TestSingleRepositoryOpensAreasAndEscReturns(t *testing.T) {
@@ -146,8 +154,9 @@ func TestAreasCompactEvidenceAndEmptyState(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 40
 	m.height = 18
-	m.awarenessPane = 2
 	m.selectedAreaID = "auto:services/auth"
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "enter")
 	out := m.View()
 	if !strings.Contains(out, "Renew sessions") || !strings.Contains(out, "services/auth/session.go") {
 		t.Fatalf("compact evidence hidden:\n%s", out)
@@ -162,6 +171,8 @@ func TestAreasCompactEvidenceAndEmptyState(t *testing.T) {
 	}
 	m.allRecords = nil
 	m.recomputeAuthors()
+	m = pressAwareness(m, "esc")
+	m = pressAwareness(m, "esc")
 	if !strings.Contains(m.View(), "No work-area activity") {
 		t.Fatal("empty area view misreported repository failure")
 	}
@@ -203,6 +214,7 @@ func TestAreaPathInspectorScrollsEveryLiteralPath(t *testing.T) {
 	}
 	m.rebuildAreaDefinitions()
 	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "enter")
 	if !m.showPaths || !strings.Contains(m.View(), "CHANGED PATHS") {
 		t.Fatal("path inspector did not open")
 	}
@@ -232,8 +244,8 @@ func TestAreaViewResizeSweep(t *testing.T) {
 			m := monorepoFixture()
 			m.width = width
 			m.height = height
-			m.awarenessPane = 2
 			m.selectedAreaID = "auto:services/auth"
+			m = pressAwareness(m, "enter")
 			out := m.View()
 			if !strings.Contains(out, "Renew sessions") {
 				t.Fatalf("evidence hidden at %dx%d", width, height)
