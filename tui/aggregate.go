@@ -214,11 +214,11 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		)
 		if l.showAddedRemoved {
 			cells = append(cells,
-				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Added))),
-				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, FormatNumber(a.Removed))),
+				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, formatLineCount(a.Added, a.UnknownLineCommits))),
+				StyleNumeric.Render(fmt.Sprintf("%*s", l.numW, formatLineCount(a.Removed, a.UnknownLineCommits))),
 			)
 		}
-		cells = append(cells, renderNet(a.Net, l.numW))
+		cells = append(cells, renderKnownNet(a.Net, l.numW, a.UnknownLineCommits))
 
 		aiCell := strings.Repeat(" ", l.aiW)
 		if a.AICommits > 0 {

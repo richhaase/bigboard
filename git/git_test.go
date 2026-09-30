@@ -55,12 +55,12 @@ func TestDetectDefaultBranch(t *testing.T) {
 	writeAndCommit(t, dir, "README.md", "hello\n", "initial commit")
 
 	branch := git.DetectDefaultBranch(dir)
-	if branch != "main" && branch != "master" {
-		t.Errorf("expected main or master, got %q", branch)
+	if len(branch) != 40 {
+		t.Errorf("expected resolved commit ID, got %q", branch)
 	}
 }
 
-func TestDetectDefaultBranchPrefersLocalRemoteCounterpart(t *testing.T) {
+func TestDetectDefaultBranchPrefersCachedRemote(t *testing.T) {
 	dir := t.TempDir()
 	makeTestRepo(t, dir)
 	writeAndCommit(t, dir, "README.md", "hello\n", "initial commit")
@@ -78,15 +78,15 @@ func TestDetectDefaultBranchPrefersLocalRemoteCounterpart(t *testing.T) {
 	writeAndCommit(t, dir, "local.go", "package local\n", "unpushed local commit")
 
 	ref := git.DetectDefaultBranch(dir)
-	if ref != "main" {
-		t.Fatalf("DetectDefaultBranch = %q, want main", ref)
+	if len(ref) != 40 {
+		t.Fatalf("DetectDefaultBranch = %q, want resolved commit ID", ref)
 	}
 	records, err := git.CollectCommits(dir, ref)
 	if err != nil {
 		t.Fatalf("CollectCommits(%q): %v", ref, err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("CollectCommits(%q) returned %d commits, want 2", ref, len(records))
+	if len(records) != 1 {
+		t.Fatalf("CollectCommits(%q) returned %d commits, want 1 cached remote commit", ref, len(records))
 	}
 }
 
@@ -109,8 +109,8 @@ func TestDetectDefaultBranchKeepsRemoteRef(t *testing.T) {
 	}
 
 	ref := git.DetectDefaultBranch(dir)
-	if ref != "origin/main" {
-		t.Fatalf("DetectDefaultBranch = %q, want origin/main", ref)
+	if len(ref) != 40 {
+		t.Fatalf("DetectDefaultBranch = %q, want resolved remote commit ID", ref)
 	}
 	if _, err := git.CollectCommits(dir, ref); err != nil {
 		t.Fatalf("CollectCommits(%q): %v", ref, err)

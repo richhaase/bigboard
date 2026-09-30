@@ -53,6 +53,14 @@ func runExportJSON(w, errw io.Writer, repositories []git.Repository, excluded ma
 			continue
 		}
 		all = append(all, results[i].records...)
+		if !excluded[repo.ID] && !excluded[repo.Name] {
+			for _, record := range results[i].records {
+				if record.LinesUnknown {
+					fmt.Fprintf(errw, "warning: %s has shallow history; boundary line counts are unknown\n", diagnosticText(repo.Path))
+					break
+				}
+			}
+		}
 	}
 	if failed > 0 && failed == len(repositories) {
 		return fmt.Errorf("all %d repositories failed to scan", failed)

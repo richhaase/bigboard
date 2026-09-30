@@ -13,11 +13,12 @@ import (
 
 // MonthActivity holds commit stats for a single month.
 type MonthActivity struct {
-	Month   time.Time
-	Commits int
-	Added   int
-	Removed int
-	AI      int
+	Month              time.Time
+	Commits            int
+	Added              int
+	Removed            int
+	AI                 int
+	UnknownLineCommits int
 }
 
 // OperativeView renders a contributor detail screen.
@@ -56,9 +57,12 @@ func (v OperativeView) RenderOperativeDetail(
 
 	if authorStats != nil {
 		sections = append(sections, "")
-		sections = append(sections, RenderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits, width))
+		sections = append(sections, renderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits, width, authorStats.UnknownLineCommits))
 		sections = append(sections, "")
 		sections = append(sections, renderMetricsLine(authorStats))
+		if authorStats.UnknownLineCommits > 0 {
+			sections = append(sections, StyleAmber.Render("  ? Line totals are incomplete (shallow history)."))
+		}
 	}
 
 	if authorStats != nil && len(authorStats.PerRepo) > 0 {
@@ -100,11 +104,17 @@ func heatmapRamp() []struct {
 }
 
 func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now time.Time) string {
+	now = now.In(time.Local)
+	unknown := make(map[string]bool)
 	totals := make(map[string]int)
 	maxV := 0
 	for _, r := range records {
-		k := r.Date.Format("2006-01-02")
-		totals[k] += r.Added + r.Removed
+		k := r.Date.In(time.Local).Format("2006-01-02")
+		if r.LinesUnknown {
+			unknown[k] = true
+		} else {
+			totals[k] += r.Added + r.Removed
+		}
 		if totals[k] > maxV {
 			maxV = totals[k]
 		}
@@ -136,6 +146,10 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 			cellDate := startSunday.AddDate(0, 0, col*7+wd)
 			if cellDate.After(now) {
 				b.WriteString(" ")
+				continue
+			}
+			if unknown[cellDate.Format("2006-01-02")] {
+				b.WriteString(StyleAmber.Render("?"))
 				continue
 			}
 			level := 0
@@ -203,9 +217,9 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 	for i, e := range entries {
 		name := StyleMagenta.Render(padRight(Truncate(e.name, nameW), nameW))
 		commits := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits)))
-		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Added)))
-		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Removed)))
-		net := renderNet(e.rc.Net, numW)
+		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Added, e.rc.UnknownLineCommits)))
+		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Removed, e.rc.UnknownLineCommits)))
+		net := renderKnownNet(e.rc.Net, numW, e.rc.UnknownLineCommits)
 		bar := RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW)
 
 		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
@@ -260,6 +274,9 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		bar := RenderImpactBar(m.Added, m.Removed, maxTotal, barW)
 
 		row := fmt.Sprintf("  %s%s%s", label, count, bar)
+		if m.UnknownLineCommits > 0 {
+			row += StyleAmber.Render(" ?")
+		}
 		if m.AI > 0 {
 			row += " " + StyleAmber.Render(fmt.Sprintf("◆%d", m.AI))
 		}
@@ -299,9 +316,11 @@ func percentLabel(part, whole int) string {
 
 func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, authorName string, fuzzyMatching bool) []git.CommitRecord {
 	var result []git.CommitRecord
-	for _, r := range records {
+	for _, r := range stats.UniqueRecords(records) {
 		match := false
-		if as != nil && len(as.Aliases) > 0 {
+		if as != nil && as.ID != "" {
+			match = stats.IdentityID(r) == as.ID
+		} else if as != nil && len(as.Aliases) > 0 {
 			match = as.Aliases[r.Author]
 		} else {
 			match = stats.NamesMatchWithOptions(r.Author, authorName, stats.AggregateOptions{
@@ -319,18 +338,25 @@ func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
 	byMonth := make(map[string]*MonthActivity)
 
 	for _, r := range records {
-		key := r.Date.Format("2006-01")
+		date := r.Date.In(time.Local)
+		key := date.Format("2006-01")
 		ma, ok := byMonth[key]
 		if !ok {
-			y, m, _ := r.Date.Date()
+			y, m, _ := date.Date()
 			ma = &MonthActivity{
+				// Use UTC as a marker for the local calendar month: local midnight
+				// may fall in a DST gap and normalize into the previous month.
 				Month: time.Date(y, m, 1, 0, 0, 0, 0, time.UTC),
 			}
 			byMonth[key] = ma
 		}
 		ma.Commits++
-		ma.Added += r.Added
-		ma.Removed += r.Removed
+		if r.LinesUnknown {
+			ma.UnknownLineCommits++
+		} else {
+			ma.Added += r.Added
+			ma.Removed += r.Removed
+		}
 		if r.AIAssisted {
 			ma.AI++
 		}

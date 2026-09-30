@@ -359,3 +359,45 @@ func TestRunExportJSONAllReposFail(t *testing.T) {
 		t.Error("expected a warning for the failed repository")
 	}
 }
+
+func TestExportSharedShallowHistoryAndFutureDates(t *testing.T) {
+	root := t.TempDir()
+	source, clone := filepath.Join(root, "source"), filepath.Join(root, "shallow")
+	if err := os.Mkdir(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initRepoWithCommit(t, source)
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "future", "--date=2099-01-01T12:00:00Z")
+	cmd.Dir = source
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("future commit: %v %s", err, out)
+	}
+	cmd = exec.Command("git", "clone", "--depth=1", "file://"+source, clone)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("shallow clone: %v %s", err, out)
+	}
+	for _, paths := range [][]string{{clone}, {source, clone}} {
+		var out, errw bytes.Buffer
+		if err := runExportJSON(&out, &errw, git.NewRepositories(paths), nil, stats.SortByTotal, analysisOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		var authors []stats.AuthorStats
+		if err := json.Unmarshal(out.Bytes(), &authors); err != nil {
+			t.Fatal(err)
+		}
+		if len(authors) != 1 {
+			t.Fatalf("authors: %+v", authors)
+		}
+		a := authors[0]
+		if !strings.Contains(errw.String(), "shallow history") {
+			t.Fatalf("missing warning: %s", errw.String())
+		}
+		if len(paths) == 1 {
+			if a.Commits != 1 || a.Added != 0 || a.UnknownLineCommits != 1 || !strings.Contains(out.String(), `"unknown_line_commits": 1`) {
+				t.Fatalf("shallow export: %s", out.String())
+			}
+		} else if a.Commits != 2 || a.Added != 3 || a.UnknownLineCommits != 0 || len(a.PerRepo) != 2 || strings.Contains(out.String(), `"unknown_line_commits"`) {
+			t.Fatalf("deduplicated full export: %s", out.String())
+		}
+	}
+}

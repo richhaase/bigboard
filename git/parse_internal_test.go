@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// fmtHeader builds a git-log header line in the format CollectCommits requests:
-// fields separated by 0x1e, co-authors within the trailer field by 0x1f.
+// fmtHeader builds NUL-delimited metadata in the collection format.
 func fmtHeader(name, email, date string, coAuthors ...string) string {
-	return strings.Join([]string{name, email, date, strings.Join(coAuthors, "\x1f")}, fieldSep)
+	return "\x00" + strings.Join([]string{strings.Repeat("a", 40), name, email, date, strings.Join(coAuthors, "\x1f")}, "\x00") + "\x00"
 }
 
 func TestParseGitLogBasic(t *testing.T) {
@@ -20,7 +19,7 @@ func TestParseGitLogBasic(t *testing.T) {
 		"",
 		fmtHeader("Bob", "bob@example.com", "2026-01-01T10:00:00Z"),
 		"1\t1\tc.go",
-	}, "\n")
+	}, "\x00") + "\x00"
 
 	records, err := parseGitLog(out, "repo")
 	if err != nil {
@@ -47,7 +46,7 @@ func TestParseGitLogPipeInName(t *testing.T) {
 		"",
 		fmtHeader("Bad|Name", "bad@example.com", "2026-01-01T10:00:00Z"),
 		"50\t0\tb.go",
-	}, "\n")
+	}, "\x00") + "\x00"
 
 	records, err := parseGitLog(out, "repo")
 	if err != nil {
@@ -82,17 +81,14 @@ func TestParseGitLogBinaryAndMalformed(t *testing.T) {
 		"-\t-\timage.png", // binary: skipped
 		"7\t2\tcode.go",
 		"",
-		// Malformed date — whole commit should be dropped, not crash.
-		fmtHeader("Ghost", "ghost@example.com", "not-a-date"),
-		"99\t99\tx.go",
-	}, "\n")
+	}, "\x00") + "\x00"
 
 	records, err := parseGitLog(out, "repo")
 	if err != nil {
 		t.Fatalf("parseGitLog: %v", err)
 	}
 	if len(records) != 1 {
-		t.Fatalf("expected 1 record (binary skipped, malformed dropped), got %d", len(records))
+		t.Fatalf("expected 1 record (binary skipped), got %d", len(records))
 	}
 	if records[0].Added != 7 || records[0].Removed != 2 {
 		t.Errorf("binary line not skipped correctly: %+v", records[0])
@@ -113,7 +109,7 @@ func TestParseGitLogAIDetection(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := tc.header + "\n5\t0\tfile.go"
+			out := tc.header + "\n5\t0\tfile.go\x00"
 			records, err := parseGitLog(out, "repo")
 			if err != nil {
 				t.Fatalf("parseGitLog: %v", err)
@@ -131,11 +127,11 @@ func TestParseGitLogAIDetection(t *testing.T) {
 func TestParseGitLogPathFiltering(t *testing.T) {
 	out := strings.Join([]string{
 		fmtHeader("Dev", "dev@example.com", "2026-01-02T10:00:00Z"),
-		"20\t1\tsrc/app.go",            // counted
-		"5000\t0\tpackage-lock.json",   // ignored (basename glob)
-		"800\t0\tvendor/lib/x.go",      // ignored (dir segment)
-		"3\t0\tsrc/{old.go => new.go}", // counted (rename, resolves to src/new.go)
-	}, "\n")
+		"20\t1\tsrc/app.go",                  // counted
+		"5000\t0\tpackage-lock.json",         // ignored (basename glob)
+		"800\t0\tvendor/lib/x.go",            // ignored (dir segment)
+		"3\t0\t\x00src/old.go\x00src/new.go", // counted (rename, resolves to src/new.go)
+	}, "\x00") + "\x00"
 
 	records, err := parseGitLog(out, "repo")
 	if err != nil {
@@ -146,20 +142,6 @@ func TestParseGitLogPathFiltering(t *testing.T) {
 	}
 	if records[0].Added != 23 { // 20 + 3, excluding the 5800 generated lines
 		t.Errorf("Added = %d, want 23 (generated/vendored excluded)", records[0].Added)
-	}
-}
-
-func TestEffectivePath(t *testing.T) {
-	cases := map[string]string{
-		"src/app.go":               "src/app.go",
-		"old.go => new.go":         "new.go",
-		"{old.go => new.go}":       "new.go",
-		"src/{old => new}/file.go": "src/new/file.go",
-	}
-	for in, want := range cases {
-		if got := effectivePath(in); got != want {
-			t.Errorf("effectivePath(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -174,6 +156,7 @@ func TestShouldCountPath(t *testing.T) {
 		{"vendor/naïve.lock", false},
 		{"go.sum", false},
 		{"a/b/package-lock.json", false},
+		{"vendor/literal => source.go", false},
 		{"src/{old.go => new.go}", true},
 		{"node_modules/pkg/index.js", false},
 	}
@@ -201,5 +184,17 @@ func TestPathFilterUsesExplicitOptions(t *testing.T) {
 	}
 	if !defaultPathFilter(CollectOptions{IncludeGenerated: true}).shouldCount("vendor/lib.go") {
 		t.Error("IncludeGenerated should count vendored paths")
+	}
+}
+
+func TestParseGitLogRejectsMalformedMetadata(t *testing.T) {
+	for _, data := range []string{
+		fmtHeader("Ghost", "ghost@example.com", "not-a-date"),
+		fmtHeader("A", "a@test", "2026-01-01T00:00:00Z") + "1\t0\t\x00old\x00",
+		fmtHeader("A", "a@test", "2026-01-01T00:00:00Z") + "1\t0\tunterminated",
+	} {
+		if _, err := parseGitLog(data, "repo"); err == nil {
+			t.Errorf("accepted malformed log %q", data)
+		}
 	}
 }
