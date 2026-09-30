@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,10 +21,18 @@ const (
 	ViewAggregate ViewMode = iota
 	ViewOperative
 	ViewRepoOverlay
+	ViewAwareness
 )
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	selectedRepoID  string
+	personID        string
+	awarenessPane   int
+	evidenceOffset  int
+	returnView      ViewMode
+	scannedAt       map[string]time.Time
+	staleRepos      map[string]bool
 	allRecords      []git.CommitRecord
 	authors         []stats.AuthorStats
 	repositories    []git.Repository
@@ -99,6 +108,9 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 	}
 	scanContext, cancelScans := context.WithCancel(context.Background())
 	m := Model{
+		viewMode:      ViewAwareness,
+		scannedAt:     make(map[string]time.Time),
+		staleRepos:    make(map[string]bool),
 		repositories:  append([]git.Repository(nil), repositories...),
 		sortField:     initialSort,
 		timeIdx:       initialTimeIdx,
@@ -222,10 +234,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeScans--
 		if msg.Err != nil {
 			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
+			if m.staleRepos == nil {
+				m.staleRepos = make(map[string]bool)
+			}
+			m.staleRepos[msg.Repository.ID] = true
+			for _, repo := range m.loadedRepos {
+				if repo.ID == msg.Repository.ID {
+					m.pendingRepos = append(m.pendingRepos, repo)
+					for _, record := range m.allRecords {
+						if record.RepoID == repo.ID {
+							m.pendingRecords = append(m.pendingRecords, record)
+						}
+					}
+					break
+				}
+			}
 			if m.loading {
 				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
 			}
 		} else {
+			if m.scannedAt == nil {
+				m.scannedAt = make(map[string]time.Time)
+			}
+			m.scannedAt[msg.Repository.ID] = time.Now()
+			delete(m.staleRepos, msg.Repository.ID)
 			m.pendingRecords = append(m.pendingRecords, msg.Records...)
 			m.pendingRepos = append(m.pendingRepos, msg.Repository)
 			if m.loading {
@@ -247,11 +279,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.viewMode == ViewAwareness {
+		return m.handleAwarenessKey(msg)
+	}
 	if m.searching {
 		return m.handleSearchKey(msg)
 	}
 
 	switch msg.String() {
+	case "v":
+		if m.viewMode == ViewAggregate {
+			m.viewMode = ViewAwareness
+			return m, nil
+		}
 	case "ctrl+c":
 		return m.quit()
 
@@ -283,7 +323,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ViewRepoOverlay:
 			m.excludedRepos = m.overlayExcluded
 			m.overlayExcluded = nil
-			m.viewMode = ViewAggregate
+			m.viewMode = m.returnView
 			m.recomputeAuthors()
 		case ViewOperative:
 			m.viewMode = ViewAggregate
@@ -375,6 +415,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.overlayExcluded[k] = v
 			}
 			m.overlayCursor = 0
+			m.returnView = ViewAggregate
 			m.viewMode = ViewRepoOverlay
 		}
 
@@ -393,7 +434,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ViewRepoOverlay:
 			m.excludedRepos = m.overlayExcluded
 			m.overlayExcluded = nil
-			m.viewMode = ViewAggregate
+			m.viewMode = m.returnView
 			m.recomputeAuthors()
 		case ViewAggregate:
 			disp := m.displayedAuthors()
@@ -435,6 +476,7 @@ func (m *Model) recomputeAuthors() {
 		authors = kept
 	}
 	m.authors = authors
+	m.normalizeAwarenessFocus()
 	m.sortAuthors()
 	for i, author := range m.displayedAuthors() {
 		if selectedID != "" && author.ID == selectedID {
@@ -468,7 +510,7 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 	return out
 }
 
-const tableChromeLines = 6
+const tableChromeLines = 7
 
 func (m Model) failedReposLine() string {
 	const maxNames = 3
@@ -601,6 +643,9 @@ func (m Model) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
+	if m.viewMode == ViewAwareness {
+		return m.renderAwareness()
+	}
 	if m.viewMode == ViewRepoOverlay {
 		return m.renderRepoOverlay()
 	}
@@ -667,7 +712,7 @@ func (m Model) renderAggregateView() string {
 	if m.hideBots {
 		botsLabel = "off"
 	}
-	sections = append(sections, RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
+	sections = append(sections, StyleCyan.Render("  v relationships"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
 
 	return strings.Join(sections, "\n")
 }

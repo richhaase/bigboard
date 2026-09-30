@@ -13,6 +13,7 @@ import (
 func TestContributorSelectionSurvivesNameChangesAndSameNamePeople(t *testing.T) {
 	now := time.Now()
 	m := NewModelWithOptions(nil, stats.SortByTotal, nil, "test", 6, Options{})
+	m.viewMode = ViewAggregate
 	m.width, m.height = 120, 60
 	m.allRecords = []git.CommitRecord{
 		{Author: "Alice Smith", Email: "alice@test", Date: now.Add(-60 * 24 * time.Hour), Added: 10, RepoName: "r"},
@@ -133,6 +134,7 @@ func TestMonthTimelineAcrossMidnightDSTTransition(t *testing.T) {
 
 func TestUnknownCountsAreQualifiedAtWideAndNarrowWidths(t *testing.T) {
 	m := NewModelWithOptions(nil, stats.SortByTotal, nil, "test", 6, Options{})
+	m.viewMode = ViewAggregate
 	m.height = 50
 	m.allRecords = []git.CommitRecord{
 		{CommitID: "boundary", Author: "A", Email: "a@test", Date: time.Now(), RepoID: "r", RepoName: "r", LinesUnknown: true},

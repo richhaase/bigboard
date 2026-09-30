@@ -1,6 +1,6 @@
 # Big Board
 
-A cyberpunk-themed TUI for assessing contributor volumes across git repositories. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
+A terminal situational-awareness board for seeing who has worked where across your Git repositories, how that work connects, and the commits behind it. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
 
 ## Install
 
@@ -49,6 +49,30 @@ The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
 all time; per-contributor first/last commit dates are included for reference.
 Those dates alone cannot reconstruct totals for a narrower time window.
 
+## Work relationships
+
+The initial view shows repositories, each with its latest author
+activity and contributors, using Big Board’s gradient banner, selected-row
+colors, section rules, and bordered summary panels. Shared contributors connect repositories; selecting a person
+highlights every included repository associated with their commits. The evidence pane
+shows actual commit subjects, author dates, and short object IDs for the selected
+repository and contributor. These are historical associations, including shared Git
+history across clones or forks, not online presence or proof of collaboration.
+
+Use `Tab` (or `Enter`) to move between repositories, people, and evidence; use `↑/↓` to
+navigate the focused pane. Select `all` in people or press `Esc` to clear person
+focus. The focus can stay pinned while browsing other repositories. `v` switches between
+relationships and the existing contributor statistics. Time ranges, bot hiding,
+repository inclusion, and manual refresh apply to both views.
+
+Scan timestamps describe the local scan, never remote freshness. Big Board does
+not fetch. A failed refresh retains that repository's last successful data with
+a STALE marker; a successful scan, including an empty one, replaces it. The board
+requires at least 40 columns by 18 rows and condenses inactive panes on short
+terminals. The banner compacts on narrow or short screens; summary panels appear
+when space permits. CROSS-REPO counts contributors associated with more than one
+included repository, including shared commits. Statistics retain their existing layout.
+
 ## Accuracy notes
 
 - **Author identity** is resolved by Git's native `.mailmap`, then grouped by canonical email. Shared or similar names do not merge people. Use `.mailmap` to combine aliases with different emails. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
@@ -66,7 +90,9 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 |-----|--------|
 | `↑/↓` `j/k` | Navigate rows |
 | `←/→` `h/l` | Cycle time range (1d / 7d / 14d / 30d / 90d / 1y / all) |
-| `Enter` | Drill into selected contributor |
+| `Tab` / `Shift+Tab` | Focus next / previous relationship pane |
+| `Enter` | Next relationship pane; drill into contributor in statistics |
+| `v` | Switch relationships / statistics |
 | `Esc` | Back / Quit |
 | `s` | Cycle sort column (commits / added / removed / net / ai / total) |
 | `S` | Reverse sort direction |
@@ -111,7 +137,9 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 
 ## Features
 
-- ASCII art banner with vertical color gradient
+- Relationship-first repository view, cross-repository contributor focus, and scrollable commit evidence
+- Local scan freshness and retained last-good data on refresh failures
+- ASCII art banner with vertical color gradient in statistics
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %

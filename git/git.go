@@ -99,7 +99,9 @@ func (f pathFilter) shouldCount(path string) bool {
 
 // CommitRecord holds aggregated stats for a single commit.
 type CommitRecord struct {
-	CommitID   string
+	CommitID string
+	// Subject is Git's unescaped commit subject; escape control characters for display.
+	Subject    string
 	Author     string
 	Email      string
 	Date       time.Time
@@ -269,7 +271,7 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 	args := []string{"log", "--no-merges", "--root", "-M50%", "-C50%", "-l0",
 		"--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--no-show-signature",
 		"--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none",
-		"--format=%x00%H%x00%aN%x00%aE%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00",
+		"--format=%x00%H%x00%aN%x00%aE%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00",
 		"--numstat", "-z", ref, "--"}
 	cmd := gitCommand(ctx, repo.Path, args...)
 	var stderr bytes.Buffer

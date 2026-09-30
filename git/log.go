@@ -111,7 +111,7 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 			if !isCommitID(token) {
 				return nil, fmt.Errorf("invalid commit ID %q", token)
 			}
-			var fields [4]string
+			var fields [5]string
 			for i := range fields {
 				value, err := read()
 				if err != nil {
@@ -123,7 +123,7 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 			if err != nil {
 				return nil, fmt.Errorf("invalid author date: %w", err)
 			}
-			records = append(records, CommitRecord{CommitID: token, Author: strings.TrimSpace(fields[0]), Email: strings.TrimSpace(fields[1]), Date: date,
+			records = append(records, CommitRecord{CommitID: token, Subject: fields[4], Author: strings.TrimSpace(fields[0]), Email: strings.TrimSpace(fields[1]), Date: date,
 				RepoID: repo.ID, RepoName: repo.Name, AIAssisted: ai.isAI(fields[1]) || ai.isAICoAuthor(fields[3])})
 			continue
 		}
