@@ -341,7 +341,13 @@ func nightCanvas(content string, width, height int) string {
 	lines := strings.Split(content, "\n")
 	// A theme may pad a view, never discard its content. View-specific
 	// renderers own viewport sizing and navigation.
-	content = nightPanel(lines, width, max(height, len(lines)))
+	for i, line := range lines {
+		lines[i] = line + strings.Repeat(" ", max(0, width-ansi.StringWidth(line)))
+	}
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", max(0, width)))
+	}
+	content = strings.Join(lines, "\n")
 	prefix, suffix, _ := strings.Cut(nightBase.Render("X"), "X")
 	if prefix == "" {
 		return content
