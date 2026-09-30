@@ -125,10 +125,9 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 ## Publishing releases
 
 Pushing a `v*` tag runs GoReleaser, signs and notarizes the macOS binaries,
-publishes GitHub release assets, and opens a pull request updating `Casks/bigboard.rb` in
+publishes GitHub release assets, and directly updates `Casks/bigboard.rb` in
 [`richhaase/homebrew-tap`](https://github.com/richhaase/homebrew-tap).
-Merge that pull request into `trunk` to make the version available in Homebrew;
-the tap's repository rules require updates through pull requests.
+The tap permits direct release updates, matching plonk and ACR.
 Prereleases publish GitHub assets without updating the stable Homebrew cask.
 
 Configure these **repository Actions secrets** in
@@ -137,7 +136,7 @@ using the same credentials as plonk/acr:
 
 | Secret | Value |
 |--------|-------|
-| `HOMEBREW_TAP_GITHUB_TOKEN` | Token with Contents and Pull requests read/write access to `richhaase/homebrew-tap` |
+| `HOMEBREW_TAP_GITHUB_TOKEN` | Token with Contents read/write access to `richhaase/homebrew-tap` |
 | `QUILL_SIGN_P12` | Base64-encoded Developer ID Application certificate and private key (`.p12`) |
 | `QUILL_SIGN_PASSWORD` | Password for that `.p12` file |
 | `QUILL_NOTARY_KEY` | Base64-encoded App Store Connect API private key (`.p8`) |

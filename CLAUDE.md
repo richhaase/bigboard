@@ -54,7 +54,7 @@ go test ./...
 ## CI
 
 - GitHub Actions: `go test` (+ `-race`), `go vet`, `gofmt -l .` check, golangci-lint v2, `staticcheck`, `govulncheck`, `gosec`.
-- GoReleaser for releases (`.goreleaser.yaml`); tag push (`vX.Y.Z`) publishes binaries and opens a Homebrew tap PR. Merge the tap PR into `trunk` to publish the Homebrew update; the tap requires PRs.
+- GoReleaser for releases (`.goreleaser.yaml`); tag push (`vX.Y.Z`) publishes binaries and directly updates the Homebrew tap, matching plonk and ACR. The tap permits direct release updates; do not add a PR-based publishing step.
 
 > Note: golangci-lint's bundled staticcheck enables the `QF*` quickfix checks that the standalone `staticcheck` binary leaves off by default — the Lint job is stricter than the Staticcheck job. Run `make lint` locally before pushing.
 
