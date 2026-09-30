@@ -153,7 +153,6 @@ func main() {
 		AIIdentities:     cfg.AIIdentities,
 		BotIdentities:    cfg.BotIdentities,
 		WorkAreas:        cfg.WorkAreas,
-		GitHubEnabled:    cfg.GitHub.Enabled,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

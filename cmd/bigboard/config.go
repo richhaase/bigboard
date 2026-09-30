@@ -13,16 +13,9 @@ import (
 	"github.com/richhaase/bigboard/tui"
 )
 
-// GitHubConfig controls automatic read-only pull request context.
-// Missing configuration defaults to enabled; an explicit false opts out.
-type GitHubConfig struct {
-	Enabled bool `json:"enabled"`
-}
-
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
-	GitHub        GitHubConfig                    `json:"github"`
 	Paths         []string                        `json:"paths"`
 	Exclude       []string                        `json:"exclude"`
 	Sort          string                          `json:"sort"`
@@ -48,12 +41,8 @@ func defaultConfigPath() string {
 	return filepath.Join(home, ".config", "bigboard", "config.json")
 }
 
-func defaultConfig() Config {
-	return Config{GitHub: GitHubConfig{Enabled: true}}
-}
-
 func loadConfig(path string, explicit bool) (*Config, error) {
-	cfg := defaultConfig()
+	var cfg Config
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) && !explicit {
@@ -63,7 +52,15 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cfg); err != nil {
+	// Tolerate the obsolete setting from the earlier PR build without
+	// retaining a switch or requiring users to edit their existing config.
+	input := struct {
+		*Config
+		GitHub *struct {
+			Enabled bool `json:"enabled"`
+		} `json:"github"`
+	}{Config: &cfg}
+	if err := decoder.Decode(&input); err != nil {
 		return nil, err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {

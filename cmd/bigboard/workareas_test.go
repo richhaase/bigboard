@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,25 +31,26 @@ func TestLoadWorkAreaConfiguration(t *testing.T) {
 	}
 }
 
-func TestGitHubConfigAutomaticUnlessExplicitlyDisabled(t *testing.T) {
-	for _, tc := range []struct {
-		text    string
-		enabled bool
-	}{{`{}`, true}, {`null`, true}, {`{"paths":["/src"],"theme":"dark"}`, true}, {`{"github":{}}`, true}, {`{"github":null}`, true}, {`{"github":{"enabled":null}}`, true}, {`{"github":{"enabled":false}}`, false}, {`{"github":{"enabled":true}}`, true}} {
+func TestObsoleteGitHubSettingIsIgnored(t *testing.T) {
+	for _, body := range []string{`{}`, `null`, `{"github":{}}`, `{"github":null}`, `{"github":{"enabled":null}}`, `{"github":{"enabled":false}}`, `{"github":{"enabled":true}}`} {
 		path := filepath.Join(t.TempDir(), "config.json")
-		if err := os.WriteFile(path, []byte(tc.text), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
 		cfg, err := loadConfig(path, true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		after, err := os.ReadFile(path)
-		if err != nil || string(after) != tc.text {
-			t.Fatal("loading rewrote existing configuration")
+		encoded, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if cfg.GitHub.Enabled != tc.enabled {
-			t.Fatalf("enabled=%t", cfg.GitHub.Enabled)
+		if strings.Contains(string(encoded), "github") {
+			t.Fatal("obsolete switch retained in Config")
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || string(after) != body {
+			t.Fatal("loading rewrote configuration")
 		}
 	}
 }
@@ -55,7 +58,7 @@ func TestGitHubConfigAutomaticUnlessExplicitlyDisabled(t *testing.T) {
 func TestMissingOptionalConfigEnablesAutomaticPRs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 	cfg, err := loadConfig(path, false)
-	if err != nil || !cfg.GitHub.Enabled {
+	if err != nil || cfg == nil {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

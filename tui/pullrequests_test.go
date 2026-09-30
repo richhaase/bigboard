@@ -38,20 +38,22 @@ func (p *fakePRProvider) Resolve(ctx context.Context, path string) (string, erro
 func (p *fakePRProvider) Fetch(_ context.Context, _ string) gh.Result { p.fetches++; return p.result }
 func prFixture() Model {
 	m := awarenessFixture()
-	m.options.GitHubEnabled = true
 	pr := gh.PullRequest{Repo: "org/repo", Number: 7, URL: "https://github.com/org/repo/pull/7", Title: "Add feature", Author: "robot[bot]", UpdatedAt: time.Now(), ReviewDecision: "UNKNOWN", CheckState: "PENDING", Mergeable: "UNKNOWN", Files: []gh.File{{Path: "feature/new.go"}, {Path: "ui/new.go"}}, FilesComplete: true, ContextComplete: true, PreviousPathsComplete: true}
 	m.prState = prState{repositories: map[string]string{"/api": "org/repo", "/web": "org/repo"}, snapshots: map[string]prSnapshot{"org/repo": {prs: []gh.PullRequest{pr}, checked: time.Now()}}}
 	return m
 }
-func TestPRDisabledMakesNoCalls(t *testing.T) {
+func TestPRRefreshAutomaticallySchedulesWithoutOptions(t *testing.T) {
 	m := awarenessFixture()
-	p := &fakePRProvider{}
+	p := &fakePRProvider{result: gh.Result{Complete: true}}
 	m.prProvider = p
-	if cmd := m.startPRRefresh(); cmd != nil {
-		t.Fatal("disabled provider scheduled")
+	cmd := m.startPRRefresh()
+	if cmd == nil {
+		t.Fatal("automatic provider not scheduled")
 	}
-	if p.resolves+p.fetches != 0 {
-		t.Fatal("disabled provider called")
+	next, _ := m.Update(cmd())
+	m = next.(Model)
+	if p.resolves != len(m.loadedRepos) || p.fetches != 1 || m.prState.loading {
+		t.Fatal("automatic refresh incomplete")
 	}
 }
 func TestPRRefreshDeduplicatesAndRejectsOldGeneration(t *testing.T) {
@@ -175,7 +177,6 @@ func TestPROverlayNavigationResizeAndTerminalSafety(t *testing.T) {
 }
 func TestPRInitialLoadSchedulesOnlyAfterLocalScan(t *testing.T) {
 	m := awarenessFixture()
-	m.options.GitHubEnabled = true
 	m.prProvider = &fakePRProvider{}
 	m.loading = true
 	m.resetPending()
@@ -248,7 +249,6 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 	}{{gh.ErrAuthentication, "gh not signed in"}, {gh.ErrUnavailable, "gh not installed"}} {
 		t.Run(tc.label, func(t *testing.T) {
 			m := awarenessFixture()
-			m.options.GitHubEnabled = true
 			for i := range m.loadedRepos {
 				m.loadedRepos[i].Path = m.loadedRepos[i].ID
 			}
@@ -279,7 +279,6 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 }
 func TestPRUnsupportedOriginNeverCallsGitHub(t *testing.T) {
 	m := awarenessFixture()
-	m.options.GitHubEnabled = true
 	p := &fakePRProvider{resolveErr: gh.ErrUnsupportedOrigin}
 	m.prProvider = p
 	next, _ := m.Update(m.startPRRefresh()())
@@ -288,23 +287,33 @@ func TestPRUnsupportedOriginNeverCallsGitHub(t *testing.T) {
 		t.Fatal("unsupported origin queried or hidden")
 	}
 }
-func TestPRExplicitDisabledRefreshAndOverlayMakeNoCalls(t *testing.T) {
+func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	m := awarenessFixture()
-	m.options.GitHubEnabled = false
 	m.loading = true
 	m.resetPending()
-	p := &fakePRProvider{}
+	p := &fakePRProvider{result: gh.Result{Complete: true}}
 	m.prProvider = p
+	var refresh tea.Cmd
 	for _, repo := range m.repositories {
 		next, cmd := m.Update(RepoLoadedMsg{Repository: repo})
 		m = next.(Model)
-		if !m.loading && cmd != nil {
-			t.Fatal("disabled final scan scheduled GitHub")
+		if !m.loading {
+			refresh = cmd
 		}
 	}
+	if refresh == nil {
+		t.Fatal("final scan did not schedule GitHub")
+	}
+	next, _ := m.Update(refresh())
+	m = next.(Model)
 	m = pressAwareness(m, "P")
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
-	if cmd != nil || p.fetches != 0 || p.resolves != 0 {
-		t.Fatal("disabled overlay refresh called provider")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("overlay refresh not scheduled")
+	}
+	m.Update(cmd())
+	if p.fetches != 2 {
+		t.Fatalf("automatic fetches=%d", p.fetches)
 	}
 }

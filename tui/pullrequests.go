@@ -53,9 +53,6 @@ func (m *Model) cancelPRRefresh() {
 	m.prState.loading = false
 }
 func (m *Model) startPRRefresh() tea.Cmd {
-	if !m.options.GitHubEnabled {
-		return nil
-	}
 	m.cancelPRRefresh()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	m.cancelPRs = cancel
@@ -234,9 +231,6 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	return prs
 }
 func (m Model) prStatus() string {
-	if !m.options.GitHubEnabled {
-		return "Remote status unknown (no fetch) · GitHub PRs off"
-	}
 	if m.prState.loading {
 		return "GitHub PRs refreshing · previous snapshot shown"
 	}
@@ -327,9 +321,6 @@ func (m Model) renderPRs() string {
 	lines = append(lines, RenderSectionHeader(label, width), StyleDimWhite.Render("  "+m.prStatus()), "  All open PRs · independent of local date, person and bot filters")
 	if len(prs) == 0 {
 		lines = append(lines, "  No PRs to display in this snapshot/scope.")
-		if !m.options.GitHubEnabled {
-			lines = append(lines, "  Explicitly disabled by github.enabled=false in config.")
-		}
 	} else if m.prDetail {
 		pr := prs[min(m.prRow, len(prs)-1)]
 		wrapped := m.prDetailLines(pr, width)
@@ -388,9 +379,6 @@ func (m Model) renderPRs() string {
 	return strings.Join(lines, "\n")
 }
 func (m Model) prCountLabel(scope string) string {
-	if !m.options.GitHubEnabled {
-		return ""
-	}
 	id := scope
 	if m.areaRepoID != "" {
 		id = m.areaRepoID

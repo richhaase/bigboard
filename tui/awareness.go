@@ -562,9 +562,7 @@ func (m Model) renderAwareness() string {
 	if width < 80 {
 		help = "Tab pane ↑↓ move Esc back v stats q quit"
 	}
-	if m.options.GitHubEnabled {
-		help = "p/P PRs · " + strings.TrimSpace(help)
-	}
+	help = "p/P PRs · " + strings.TrimSpace(help)
 	lines = append(lines, help)
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, width, "…")

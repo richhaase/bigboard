@@ -100,8 +100,7 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
-	GitHubEnabled bool
-	PRProvider    PRProvider
+	PRProvider PRProvider
 
 	FuzzyMatching    bool
 	IncludeGenerated bool

@@ -222,9 +222,8 @@ MIT
 ### Automatic GitHub PR awareness
 
 Read-only open pull request context loads automatically for supported GitHub
-origins using an already installed and signed-in `gh` CLI. No config change is
-needed, including with existing config files that omit `github.enabled`. Set
-`"github": {"enabled": false}` to opt out; explicit false is always respected.
+origins using an already installed and signed-in `gh` CLI. No config setting is
+needed.
 Missing `gh` or authentication is shown without blocking local history. Bigboard
 never signs in, requests access, creates credentials, fetches Git objects, or
 changes pull requests. Headless `--export` stays local and unchanged.
