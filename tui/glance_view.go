@@ -189,6 +189,9 @@ func (m Model) renderAwareness() string {
 	if m.glance.help {
 		return m.renderGlanceHelp(width, height)
 	}
+	if width >= 100 && height >= 28 && !m.showPaths {
+		return m.renderNightOps(width, height)
+	}
 	if m.glance.detailOpen {
 		return m.renderGlanceDetail(width, height)
 	}
@@ -199,7 +202,7 @@ func (m Model) renderAwareness() string {
 	if height < 30 {
 		bannerWidth = min(width, bannerMinWidth-1)
 	}
-	lines := renderBanner(bannerWidth)
+	lines := nightCompactBanner(bannerWidth)
 	breadcrumb := "  REPOSITORIES"
 	if repo, ok := m.areaRepository(); ok {
 		breadcrumb += " › " + displayText(repo.Name) + " › WORK AREAS"
@@ -320,7 +323,7 @@ func glanceContributorPreview(people []stats.AuthorStats, width, maxLines int) [
 	return lines
 }
 func (m Model) renderGlanceHelp(width, height int) string {
-	lines := renderBanner(min(width, bannerMinWidth-1))
+	lines := nightCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("GLANCE BOARD · HELP", width),
 		"  Enter  repository → areas → detail → full commit",
 		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",

@@ -230,6 +230,13 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "s":
 		m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+	case "tab", "1", "2", "3", "4":
+		if m.areaRepoID != "" && len(rows) > 0 {
+			m.openGlanceArea(rows[selected])
+			if key >= "1" && key <= "4" {
+				m.glance.frame.tab = int(key[0] - '1')
+			}
+		}
 	case "enter":
 		if len(rows) > 0 {
 			if m.areaRepoID == "" {

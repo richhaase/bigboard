@@ -14,6 +14,7 @@ git/git.go              Git ops: recursive discovery (follows symlinks), branch 
 stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
 tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
 tui/styles.go           Color palette and lipgloss style definitions
+tui/nightops.go         Responsive Night Ops inventory/evidence workspace and canvas
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
 tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
@@ -42,7 +43,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **Counting**: deduplicate object IDs globally after repository/time filtering; repository subtotals overlap. Prefer known counts from full copies over unknown shallow boundaries. Shallow counts use `LinesUnknown` / `unknown_line_commits` and visible `?` qualifiers. Scans never lazily fetch missing objects. Cached remote default history precedes local history.
 - **Dates and retained behavior**: use `time.Local` for all calendar grouping and display. Future-dated commits remain counted, with no upper time cutoff. Keep the current churn formula and its zero-additions `0.00` convention. Keep the existing UI, JSON export, and merge-commit exclusion.
 - **Git isolation**: resolve branch OIDs, parse NUL-delimited paths, pin diff settings, clear repository-local environment overrides, and retain specific-agent AI matching with explicit user overrides.
-- **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.
+- **Night Ops awareness**: `tui/nightops.go` renders the wide 100×28+ inventory/evidence workspace with cell-based geometry, violet canvas, lime accents and a compact outlined wordmark. Smaller terminals use the compact glance view. All modes share the dark canvas; statistics retain their existing arrangement.
 
 ## Build & Test
 

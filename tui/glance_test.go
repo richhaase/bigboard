@@ -40,21 +40,21 @@ func TestGlanceOverviewDensityAndNumericContext(t *testing.T) {
 		view := ansi.Strip(m.View())
 		count := 0
 		for _, line := range strings.Split(view, "\n") {
-			if row.MatchString(line) {
+			if row.MatchString(line) || (test.w >= 100 && regexp.MustCompile(`^\s*[› ]\s+(feature|area\d\d)\s+[\d,]+\s+│`).MatchString(line)) {
 				count++
 			}
 		}
 		if count < test.min {
 			t.Fatalf("%dx%d has %d useful rows, want %d:\n%s", test.w, test.h, count, test.min, view)
 		}
-		if !strings.Contains(view, "1,100") || !strings.Contains(view, "120") || !strings.Contains(view, "Latest: Exact subject") {
+		if !strings.Contains(view, "1,100") || !strings.Contains(view, "120") || !strings.Contains(view, "Exact subject") {
 			t.Fatal("busy area counts or selected preview missing")
 		}
-		if !strings.Contains(view, "Contributors: Person 000") || !strings.Contains(view, " more") || strings.Contains(view, "Person 119") {
+		if (!strings.Contains(view, "Contributors: Person 000") && (!strings.Contains(view, "WHO WORKED HERE") || !strings.Contains(view, "Person 000"))) || !strings.Contains(view, " more") || strings.Contains(view, "Person 119") {
 			t.Fatal("overview contributor preview is missing or unbounded")
 		}
-		if test.w == 110 && !strings.Contains(view, bannerLines[0]) {
-			t.Fatal("full gradient banner disappeared")
+		if test.w == 110 && !strings.Contains(view, "NIGHT OPS") {
+			t.Fatal("Night Ops identity disappeared")
 		}
 		if lipgloss.Height(view) > test.h {
 			t.Fatal("overview height overflow")
@@ -190,7 +190,7 @@ func TestGlanceFullInspectorWrapsSubjectsAndAllPaths(t *testing.T) {
 	var seen strings.Builder
 	for i := 0; i < 120; i++ {
 		for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
-			seen.WriteString(strings.TrimPrefix(line, "  "))
+			seen.WriteString(strings.TrimRight(strings.TrimPrefix(line, "  "), " "))
 		}
 		m = pressAwareness(m, "down")
 	}

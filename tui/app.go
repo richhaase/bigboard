@@ -666,6 +666,18 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 
 // View renders the current UI state.
 func (m Model) View() string {
+	content := m.viewContent()
+	width, height := m.width, m.height
+	if width < 1 {
+		width = lipgloss.Width(content)
+	}
+	if height < 1 {
+		height = lipgloss.Height(content)
+	}
+	return nightCanvas(content, max(1, width), max(1, height))
+}
+
+func (m Model) viewContent() string {
 	if m.loading {
 		return m.renderBootSequence()
 	}

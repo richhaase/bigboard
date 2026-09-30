@@ -15,17 +15,17 @@ import (
 func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
 	m := monorepoFixture()
 	m.selectedAreaID = "auto:services/auth"
-	if !strings.Contains(m.View(), "Contributors: Ada") {
+	if !nightPeopleInOrder(m.View(), "Ada") {
 		t.Fatal("selected area does not reveal its contributors")
 	}
 	m = pressAwareness(m, "down")
-	if !strings.Contains(m.View(), "Contributors: Grace") || m.glance.detailOpen {
+	if !nightPeopleInOrder(m.View(), "Grace") || m.glance.detailOpen {
 		t.Fatal("moving selection did not update the inline contributor list")
 	}
 	m = pressAwareness(m, "/")
 	m = pressAwareness(m, "auth")
 	m = pressAwareness(m, "enter")
-	if !strings.Contains(m.View(), "Contributors: Ada") {
+	if !nightPeopleInOrder(m.View(), "Ada") {
 		t.Fatal("searched selection retained another area's contributors")
 	}
 	m = pressAwareness(m, "enter")
@@ -39,11 +39,11 @@ func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
 	}
 
 	m = awarenessFixture()
-	if !strings.Contains(m.View(), "Contributors: Ada, Grace") {
+	if !nightPeopleInOrder(m.View(), "Ada", "Grace") {
 		t.Fatal("repository preview did not reveal its contributors")
 	}
 	m = pressAwareness(m, "down")
-	if !strings.Contains(m.View(), "Contributors: Ada") || strings.Contains(m.View(), "Grace") {
+	if !nightPeopleInOrder(m.View(), "Ada") || strings.Contains(m.View(), "Grace") {
 		t.Fatal("repository selection retained another repository's contributor")
 	}
 }
@@ -67,7 +67,7 @@ func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
 	m.selectedAreaID = "auto:feature"
-	if !strings.Contains(m.View(), "Contributors: Zoe, Ada") {
+	if !nightPeopleInOrder(m.View(), "Zoe", "Ada") {
 		t.Fatal("area preview used alphabetical, global, or out-of-range commit totals")
 	}
 	m = pressAwareness(m, "enter")
@@ -77,7 +77,7 @@ func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	}
 	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "esc")
-	if !strings.Contains(m.View(), "Contributors: Ada, Zoe") {
+	if !nightPeopleInOrder(m.View(), "Ada", "Zoe") {
 		t.Fatal("repository preview used global author totals instead of repository totals")
 	}
 }
@@ -132,13 +132,13 @@ func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 	m = pressAwareness(m, "b")
 	m.timeIdx = 0
 	m.recomputeAuthors()
-	if !strings.Contains(m.View(), "Contributors: Ada") || strings.Contains(m.View(), "Grace") || strings.Contains(m.View(), "robot[bot]") {
+	if !nightPeopleInOrder(m.View(), "Ada") || strings.Contains(m.View(), "Grace") || strings.Contains(m.View(), "robot[bot]") {
 		t.Fatal("date or bot filter did not update the contributor preview")
 	}
 	m = prFixture()
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
-	if !strings.Contains(m.View(), "Contributors: none in this range") || strings.Contains(m.View(), "robot[bot]") {
-		t.Fatal("PR-only area fabricated a local contributor")
+	if !strings.Contains(m.View(), "No contributors in this range") || nightPeopleInOrder(m.View(), "robot[bot]") {
+		t.Fatalf("PR-only area fabricated a local contributor:\n%s", ansi.Strip(m.View()))
 	}
 	for _, size := range [][2]int{{40, 18}, {70, 24}, {110, 40}} {
 		for _, repo := range []bool{false, true} {
@@ -148,7 +148,7 @@ func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 				m.areaRepoID = ""
 			}
 			view := m.View()
-			if lipgloss.Height(view) > m.height || !strings.Contains(view, "Contributors:") || !strings.Contains(view, "author dates") {
+			if lipgloss.Height(view) > m.height || (!strings.Contains(view, "Contributors:") && !strings.Contains(view, "WHO WORKED HERE")) || !strings.Contains(view, "author dates") {
 				t.Fatalf("preview or footer hidden at %dx%d (repository=%t):\n%s", m.width, m.height, repo, view)
 			}
 			for _, line := range strings.Split(view, "\n") {
