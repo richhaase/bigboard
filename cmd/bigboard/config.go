@@ -13,7 +13,8 @@ import (
 	"github.com/richhaase/bigboard/tui"
 )
 
-// GitHubConfig opts into read-only remote pull request context.
+// GitHubConfig controls automatic read-only pull request context.
+// Missing configuration defaults to enabled; an explicit false opts out.
 type GitHubConfig struct {
 	Enabled bool `json:"enabled"`
 }
@@ -47,15 +48,19 @@ func defaultConfigPath() string {
 	return filepath.Join(home, ".config", "bigboard", "config.json")
 }
 
+func defaultConfig() Config {
+	return Config{GitHub: GitHubConfig{Enabled: true}}
+}
+
 func loadConfig(path string, explicit bool) (*Config, error) {
+	cfg := defaultConfig()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) && !explicit {
-			return &Config{}, nil
+			return &cfg, nil
 		}
 		return nil, err
 	}
-	var cfg Config
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {

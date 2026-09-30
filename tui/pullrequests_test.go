@@ -17,11 +17,22 @@ type fakePRProvider struct {
 	resolves, fetches int
 	result            gh.Result
 	ctx               context.Context
+	repoByPath        map[string]string
+	resolveErr        error
 }
 
-func (p *fakePRProvider) Resolve(ctx context.Context, _ string) (string, error) {
+func (p *fakePRProvider) Resolve(ctx context.Context, path string) (string, error) {
 	p.resolves++
 	p.ctx = ctx
+	if p.resolveErr != nil {
+		return "", p.resolveErr
+	}
+	if p.repoByPath != nil {
+		if repo := p.repoByPath[path]; repo != "" {
+			return repo, nil
+		}
+		return "", gh.ErrUnsupportedOrigin
+	}
 	return "org/repo", nil
 }
 func (p *fakePRProvider) Fetch(_ context.Context, _ string) gh.Result { p.fetches++; return p.result }
@@ -227,5 +238,73 @@ func TestPRRefreshPreservesSelectedIdentityAndClosesRemovedDetail(t *testing.T) 
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Complete: true, PRs: []gh.PullRequest{newer}}}})
 	if m.prDetail {
 		t.Fatal("removed PR detail remained open")
+	}
+}
+
+func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		label string
+	}{{gh.ErrAuthentication, "gh not signed in"}, {gh.ErrUnavailable, "gh not installed"}} {
+		t.Run(tc.label, func(t *testing.T) {
+			m := awarenessFixture()
+			m.options.GitHubEnabled = true
+			for i := range m.loadedRepos {
+				m.loadedRepos[i].Path = m.loadedRepos[i].ID
+			}
+			p := &fakePRProvider{repoByPath: map[string]string{"/api": "org/api", "/web": "org/web"}, result: gh.Result{Err: tc.err}}
+			m.prProvider = p
+			before := len(m.allRecords)
+			cmd := m.startPRRefresh()
+			if cmd == nil || m.loading {
+				t.Fatal("automatic fetch missing or blocks local history")
+			}
+			next, _ := m.Update(cmd())
+			m = next.(Model)
+			if p.fetches != 1 {
+				t.Fatalf("retried unavailable GitHub CLI %d times", p.fetches)
+			}
+			if len(m.allRecords) != before || m.loading || m.prState.loading {
+				t.Fatal("local history blocked/changed")
+			}
+			if !strings.Contains(m.prStatus(), tc.label) || !strings.Contains(m.View(), "Fix login") {
+				t.Fatalf("missing useful status/history: %s", m.View())
+			}
+			m = pressAwareness(m, "v")
+			if m.viewMode != ViewAggregate {
+				t.Fatal("cannot navigate local stats")
+			}
+		})
+	}
+}
+func TestPRUnsupportedOriginNeverCallsGitHub(t *testing.T) {
+	m := awarenessFixture()
+	m.options.GitHubEnabled = true
+	p := &fakePRProvider{resolveErr: gh.ErrUnsupportedOrigin}
+	m.prProvider = p
+	next, _ := m.Update(m.startPRRefresh()())
+	m = next.(Model)
+	if p.fetches != 0 || !strings.Contains(m.prStatus(), "unsupported GitHub origin") {
+		t.Fatal("unsupported origin queried or hidden")
+	}
+}
+func TestPRExplicitDisabledRefreshAndOverlayMakeNoCalls(t *testing.T) {
+	m := awarenessFixture()
+	m.options.GitHubEnabled = false
+	m.loading = true
+	m.resetPending()
+	p := &fakePRProvider{}
+	m.prProvider = p
+	for _, repo := range m.repositories {
+		next, cmd := m.Update(RepoLoadedMsg{Repository: repo})
+		m = next.(Model)
+		if !m.loading && cmd != nil {
+			t.Fatal("disabled final scan scheduled GitHub")
+		}
+	}
+	m = pressAwareness(m, "P")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	if cmd != nil || p.fetches != 0 || p.resolves != 0 {
+		t.Fatal("disabled overlay refresh called provider")
 	}
 }

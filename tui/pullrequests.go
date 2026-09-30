@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -66,6 +67,7 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		defer cancel()
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
 		aliases := make(map[string]string)
+		var unavailable error
 		// Serial bounded requests avoid multiplying API budgets across duplicates.
 		for _, repo := range repos {
 			if ctx.Err() != nil {
@@ -81,7 +83,13 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				remote = canonical
 			}
 			if _, exists := msg.results[remote]; !exists {
-				result := provider.Fetch(ctx, remote)
+				result := gh.Result{Repo: remote, Err: unavailable}
+				if unavailable == nil {
+					result = provider.Fetch(ctx, remote)
+					if errors.Is(result.Err, gh.ErrAuthentication) || errors.Is(result.Err, gh.ErrUnavailable) {
+						unavailable = result.Err
+					}
+				}
 				canonical, err := gh.CanonicalRepo(result.Repo)
 				if err != nil {
 					canonical = remote
@@ -233,24 +241,35 @@ func (m Model) prStatus() string {
 		return "GitHub PRs refreshing · previous snapshot shown"
 	}
 	partial, failed := false, false
+	reason := "fetch failed"
 	var checked time.Time
 	for _, repo := range m.loadedRepos {
 		if m.excludedRepos[repo.ID] {
 			continue
 		}
-		if m.prState.errors[repo.ID] != nil {
+		if err := m.prState.errors[repo.ID]; err != nil {
 			failed = true
+			if reason == "fetch failed" || reason == "unsupported GitHub origin" {
+				reason = prFailureReason(err)
+			}
 		}
 		snapshot := m.prState.snapshots[m.prState.repositories[repo.ID]]
 		partial = partial || snapshot.partial
 		failed = failed || snapshot.err != nil
+		if snapshot.err != nil {
+			reason = prFailureReason(snapshot.err)
+		}
 		if snapshot.checked.After(checked) {
 			checked = snapshot.checked
 		}
 	}
-	label := fmt.Sprintf("GitHub · %d known open PRs", len(m.allPRs()))
+	count := len(m.allPRs())
+	if failed && count == 0 {
+		return "GitHub PRs unavailable · " + reason + " · p details"
+	}
+	label := fmt.Sprintf("GitHub · %d known open PRs", count)
 	if failed {
-		label += " · STALE/unavailable"
+		label += " · STALE · " + reason
 	} else if partial {
 		label += " · PARTIAL"
 	}
@@ -309,7 +328,7 @@ func (m Model) renderPRs() string {
 	if len(prs) == 0 {
 		lines = append(lines, "  No PRs to display in this snapshot/scope.")
 		if !m.options.GitHubEnabled {
-			lines = append(lines, "  Set github.enabled to true; uses existing gh authentication.")
+			lines = append(lines, "  Explicitly disabled by github.enabled=false in config.")
 		}
 	} else if m.prDetail {
 		pr := prs[min(m.prRow, len(prs)-1)]
@@ -466,4 +485,21 @@ func githubIdentity(login string) string {
 		return "unavailable"
 	}
 	return "@" + displayText(login)
+}
+
+func prFailureReason(err error) string {
+	switch {
+	case errors.Is(err, gh.ErrAuthentication):
+		return "gh not signed in"
+	case errors.Is(err, gh.ErrUnavailable):
+		return "gh not installed"
+	case errors.Is(err, gh.ErrUnsupportedOrigin):
+		return "unsupported GitHub origin"
+	case errors.Is(err, gh.ErrRateLimited):
+		return "rate limited"
+	case errors.Is(err, gh.ErrRepository):
+		return "repository unavailable"
+	default:
+		return "fetch failed"
+	}
 }

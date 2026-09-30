@@ -29,11 +29,11 @@ func TestLoadWorkAreaConfiguration(t *testing.T) {
 	}
 }
 
-func TestGitHubConfigIsOptIn(t *testing.T) {
+func TestGitHubConfigAutomaticUnlessExplicitlyDisabled(t *testing.T) {
 	for _, tc := range []struct {
 		text    string
 		enabled bool
-	}{{`{}`, false}, {`{"github":{"enabled":false}}`, false}, {`{"github":{"enabled":true}}`, true}} {
+	}{{`{}`, true}, {`null`, true}, {`{"paths":["/src"],"theme":"dark"}`, true}, {`{"github":{}}`, true}, {`{"github":null}`, true}, {`{"github":{"enabled":null}}`, true}, {`{"github":{"enabled":false}}`, false}, {`{"github":{"enabled":true}}`, true}} {
 		path := filepath.Join(t.TempDir(), "config.json")
 		if err := os.WriteFile(path, []byte(tc.text), 0600); err != nil {
 			t.Fatal(err)
@@ -42,8 +42,26 @@ func TestGitHubConfigIsOptIn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		after, err := os.ReadFile(path)
+		if err != nil || string(after) != tc.text {
+			t.Fatal("loading rewrote existing configuration")
+		}
 		if cfg.GitHub.Enabled != tc.enabled {
 			t.Fatalf("enabled=%t", cfg.GitHub.Enabled)
 		}
+	}
+}
+
+func TestMissingOptionalConfigEnablesAutomaticPRs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	cfg, err := loadConfig(path, false)
+	if err != nil || !cfg.GitHub.Enabled {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("loading missing config wrote a config file")
+	}
+	if _, err := loadConfig(path, true); err == nil {
+		t.Fatal("explicit missing config accepted")
 	}
 }
