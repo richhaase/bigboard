@@ -67,3 +67,7 @@ go test ./...
 - Section headers in detail view use `──╸ LABEL ╺──` style
 - Heavy separator (`━`) between major sections
 - No animation: the separator is a static rule, and the loading screen uses plain language (no sci-fi flavor)
+
+## Optional PR context
+
+`github.enabled` is config-only and defaults false. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the p/P overlay. PR handles/data never enter CommitRecord, contributor stats, or export. Local refresh cancels obsolete remote generations; complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.

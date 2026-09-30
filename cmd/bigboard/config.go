@@ -13,9 +13,15 @@ import (
 	"github.com/richhaase/bigboard/tui"
 )
 
+// GitHubConfig opts into read-only remote pull request context.
+type GitHubConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
+	GitHub        GitHubConfig                    `json:"github"`
 	Paths         []string                        `json:"paths"`
 	Exclude       []string                        `json:"exclude"`
 	Sort          string                          `json:"sort"`

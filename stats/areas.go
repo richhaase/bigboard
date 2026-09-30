@@ -91,16 +91,26 @@ func DefineWorkAreas(records []git.CommitRecord, rules []WorkAreaRule) WorkAreaD
 			if change.Generated || change.Path == "" {
 				continue
 			}
-			parts := strings.Split(change.Path, "/")
-			node := root
-			for _, dir := range parts[:len(parts)-1] {
-				if node.children[dir] == nil {
-					node.children[dir] = &areaDirectory{children: make(map[string]*areaDirectory)}
-				}
-				node = node.children[dir]
-			}
+			addAreaPath(root, change.Path)
 		}
 	}
+	d.automatic = automaticAreaPrefixes(root)
+	return d
+}
+
+func addAreaPath(root *areaDirectory, path string) {
+	parts := strings.Split(path, "/")
+	node := root
+	for _, dir := range parts[:len(parts)-1] {
+		if node.children[dir] == nil {
+			node.children[dir] = &areaDirectory{children: make(map[string]*areaDirectory)}
+		}
+		node = node.children[dir]
+	}
+}
+
+func automaticAreaPrefixes(root *areaDirectory) []areaPrefix {
+	var prefixes []areaPrefix
 	var visit func(string, string, *areaDirectory)
 	visit = func(prefix, base string, node *areaDirectory) {
 		// Expand structural containers, retaining direct files in the container's
@@ -110,13 +120,13 @@ func DefineWorkAreas(records []git.CommitRecord, rules []WorkAreaRule) WorkAreaD
 				visit(prefix+"/"+child, child, next)
 			}
 		}
-		d.automatic = append(d.automatic, areaPrefix{prefix, "auto:" + prefix, prefix})
+		prefixes = append(prefixes, areaPrefix{prefix, "auto:" + prefix, prefix})
 	}
 	for name, node := range root.children {
 		visit(name, name, node)
 	}
-	sortAreaPrefixes(d.automatic)
-	return d
+	sortAreaPrefixes(prefixes)
+	return prefixes
 }
 
 type areaDirectory struct {
@@ -159,6 +169,51 @@ func (d WorkAreaDefinition) areaFor(p string) areaPrefix {
 	// remains a literal directory, never an inferred semantic category.
 	first, _, _ := strings.Cut(p, "/")
 	return areaPrefix{id: "auto:" + first, name: first}
+}
+
+// ClassifyPaths maps path evidence to unique work-area identities without
+// creating commit records or changing the definition. Unseen directories use
+// the same automatic grouping as local history, so PR-only areas can appear.
+// Generated paths and PreviousPath metadata are ignored, as in Build. Callers
+// with a confirmed rename may supply its origin as a separate PathChange.
+// Unknown adds an explicit area without discarding any known path evidence;
+// this supports partial file lists. An empty known list means no file changes.
+func (d WorkAreaDefinition) ClassifyPaths(changes []git.PathChange, unknown bool) []WorkArea {
+	root := &areaDirectory{children: make(map[string]*areaDirectory)}
+	for _, change := range changes {
+		if !change.Generated && change.Path != "" {
+			addAreaPath(root, change.Path)
+		}
+	}
+	// Copy the slice before extending or sorting: a definition may be reused
+	// concurrently and its existing mapping must remain unchanged.
+	d.automatic = append(append([]areaPrefix(nil), d.automatic...), automaticAreaPrefixes(root)...)
+	sortAreaPrefixes(d.automatic)
+	areas := make(map[string]WorkArea)
+	for _, change := range changes {
+		if change.Generated || change.Path == "" {
+			continue
+		}
+		area := d.areaFor(change.Path)
+		areas[area.id] = WorkArea{ID: area.id, Name: area.name}
+	}
+	if len(areas) == 0 {
+		switch {
+		case len(changes) > 0:
+			areas["excluded"] = WorkArea{ID: "excluded", Name: "Excluded files"}
+		case !unknown:
+			areas["empty"] = WorkArea{ID: "empty", Name: "No file changes"}
+		}
+	}
+	if unknown {
+		areas["unknown"] = WorkArea{ID: "unknown", Name: "Unknown paths"}
+	}
+	result := make([]WorkArea, 0, len(areas))
+	for _, area := range areas {
+		result = append(result, area)
+	}
+	sortWorkAreas(result)
+	return result
 }
 
 // Build assigns each commit once per touched area and keeps only matching
@@ -207,13 +262,17 @@ func (d WorkAreaDefinition) Build(records []git.CommitRecord) []WorkArea {
 	for _, area := range areas {
 		result = append(result, *area)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Name != result[j].Name {
-			return result[i].Name < result[j].Name
-		}
-		return result[i].ID < result[j].ID
-	})
+	sortWorkAreas(result)
 	return result
+}
+
+func sortWorkAreas(areas []WorkArea) {
+	sort.Slice(areas, func(i, j int) bool {
+		if areas[i].Name != areas[j].Name {
+			return areas[i].Name < areas[j].Name
+		}
+		return areas[i].ID < areas[j].ID
+	})
 }
 
 // BuildWorkAreas is convenient when records already contain the full scan.

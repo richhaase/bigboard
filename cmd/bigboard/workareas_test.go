@@ -28,3 +28,22 @@ func TestLoadWorkAreaConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubConfigIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		text    string
+		enabled bool
+	}{{`{}`, false}, {`{"github":{"enabled":false}}`, false}, {`{"github":{"enabled":true}}`, true}} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(tc.text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := loadConfig(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.GitHub.Enabled != tc.enabled {
+			t.Fatalf("enabled=%t", cfg.GitHub.Enabled)
+		}
+	}
+}

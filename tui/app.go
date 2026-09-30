@@ -26,6 +26,16 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	prState      prState
+	prProvider   PRProvider
+	prGeneration uint64
+	cancelPRs    context.CancelFunc
+	showPRs      bool
+	prDetail     bool
+	prAll        bool
+	prRow        int
+	prOffset     int
+
 	showPaths       bool
 	pathOffset      int
 	areaDefinitions map[string]stats.WorkAreaDefinition
@@ -90,6 +100,9 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
+	GitHubEnabled bool
+	PRProvider    PRProvider
+
 	FuzzyMatching    bool
 	IncludeGenerated bool
 	AIIdentities     []string
@@ -126,6 +139,10 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 		options:       options,
 		scanContext:   scanContext,
 		cancelScans:   cancelScans,
+	}
+	m.prProvider = options.PRProvider
+	if m.prProvider == nil {
+		m.prProvider = defaultPRProvider()
 	}
 	m.resetPending()
 	if len(repositories) == 0 {
@@ -179,6 +196,7 @@ func (m Model) loadCmds() tea.Cmd {
 }
 
 func (m *Model) resetPending() {
+	m.cancelPRRefresh()
 	m.pendingRemaining = len(m.repositories)
 	m.pendingRecords = nil
 	m.pendingRepos = nil
@@ -234,6 +252,11 @@ func (m Model) Init() tea.Cmd {
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case prsLoadedMsg:
+		if msg.generation == m.prGeneration {
+			m.applyPRResult(msg)
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -275,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
+			return m, m.startPRRefresh()
 		} else {
 			return m, m.nextLoadCmd()
 		}
@@ -287,6 +311,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showPRs {
+		return m.handlePRKey(msg)
+	}
 	if m.viewMode == ViewAwareness {
 		return m.handleAwarenessKey(msg)
 	}
@@ -626,6 +653,9 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
+	if m.cancelPRs != nil {
+		m.cancelPRs()
+	}
 	if m.cancelScans != nil {
 		m.cancelScans()
 	}
@@ -651,6 +681,9 @@ func (m Model) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
+	if m.showPRs {
+		return m.renderPRs()
+	}
 	if m.viewMode == ViewAwareness {
 		return m.renderAwareness()
 	}
