@@ -26,6 +26,9 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	// Glance navigation is separate from the aggregate statistics view.
+	glance       glanceState
+	overviewSort int
 	prState      prState
 	prProvider   PRProvider
 	prGeneration uint64

@@ -378,22 +378,6 @@ func (m Model) renderPRs() string {
 	}
 	return strings.Join(lines, "\n")
 }
-func (m Model) prCountLabel(scope string) string {
-	id := scope
-	if m.areaRepoID != "" {
-		id = m.areaRepoID
-	}
-	snapshot, ok := m.prState.snapshots[m.prState.repositories[id]]
-	if !ok {
-		return " [? PRs]"
-	}
-	suffix := ""
-	if snapshot.partial || snapshot.err != nil || m.prState.errors[id] != nil {
-		suffix = "+?"
-	}
-	return fmt.Sprintf(" [%d%s PRs]", len(m.scopePRs(scope)), suffix)
-}
-
 func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	detail := []string{fmt.Sprintf("%s #%d · %s", pr.Repo, pr.Number, pr.Title), pr.URL, "Author " + githubIdentity(pr.Author), fmt.Sprintf("Draft: %t · review: %s · checks: %s · mergeability: %s", pr.Draft, pr.ReviewDecision, pr.CheckState, pr.Mergeable), "Requested reviewers: " + strings.Join(pr.RequestedReviewers, ", "), "Updated " + pr.UpdatedAt.Local().Format("2006-01-02 15:04 MST") + " (any PR activity)"}
 	detail = append(detail, "Mergeability reports conflicts only; check rollup covers reported checks. Branch protection/readiness is not evaluated.")

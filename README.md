@@ -51,21 +51,31 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 
 ## Work relationships
 
-The initial view shows repositories, each with its latest author
-activity and contributors, using Big Board’s gradient banner, selected-row
-colors, section rules, and bordered summary panels. Shared contributors connect repositories; selecting a person
-highlights every included repository associated with their commits. The evidence pane
-shows actual commit subjects, author dates, and short object IDs for the selected
-repository and contributor. These are historical associations, including shared Git
-history across clones or forks, not online presence or proof of collaboration.
+The initial view is a compact repository overview with aligned commit counts,
+contributor counts, latest author activity, and bounded PR context. The default
+Activity sort exposes where commits are concentrated; `s` switches to Recent or
+Name without changing the selected identity. Commit volume is not priority or
+productivity. Only the selected row has a short preview of actual commit subjects
+and busy work areas, keeping Big Board’s gradient banner and neon selection.
 
 Press `Enter` on a repository to open its work areas. A single included repository
-opens directly into work areas after scanning. Use `Tab` to move between
-repositories/areas, people, and evidence, and `↑/↓` to navigate the focused pane.
-`Enter` in evidence opens a scrollable list of changed paths. `Esc` closes path
-details, clears person focus, then returns from areas to repositories. `v`
-switches to contributor statistics. Time ranges, bot hiding, repository inclusion,
-and manual refresh apply to both views.
+opens directly into work areas after scanning. `Enter` on an area opens a dedicated
+detail view. `Tab` / `Shift+Tab` or `1`–`4` switches Activity, People, Related, and
+Subareas; only one detail surface is expanded at a time. Activity shows real
+subjects grouped by author date. `Enter` opens a scrollable inspector with the
+full subject, canonical contributor identity, timestamp, object ID, and all changed
+paths. People is alphabetical; selecting a person filters Activity. Related lists
+exact shared-contributor counts; open one to inspect those identities and their
+evidence. These are historical associations, including shared Git history across
+clones or forks, not online presence or proof of collaboration.
+
+Subareas refines automatic path areas by one literal directory level at a time.
+Direct files are a separate leaf; multi-path commits can appear in several children.
+Configured named areas keep their explicit meaning and are not automatically
+reinterpreted. `Esc` returns through each level, restoring the prior selection.
+`/` searches the current list, `Enter` accepts the query, and `Esc` clears it before
+leaving. `?` shows all controls. `v` switches to contributor statistics. Time ranges,
+bot hiding, repository inclusion, and manual refresh apply to both views.
 
 Work areas are path-based groups, not inferred features or ownership. Automatic
 grouping expands containers such as `src`, `services`, `packages`, `apps`, `cmd`,
@@ -99,12 +109,11 @@ The existing `depth` setting still controls repository discovery only.
 Scan timestamps describe the local scan, never remote freshness. Big Board does
 not fetch. A failed refresh retains that repository's last successful data with
 a STALE marker; a successful scan, including an empty one, replaces it. The board
-requires at least 40 columns by 18 rows and condenses inactive panes on short
-terminals. The banner compacts on narrow or short screens; summary panels appear
-when space permits. CROSS-REPO counts contributors associated with more than one
-included repository, including shared commits. Within a repository the panels
-show work-area-scoped totals and CROSS-AREA contributors. Statistics retain their
-existing layout.
+requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
+surface with a compact banner. Overview rows retain numeric context instead of
+listing every contributor inline; detail and commit inspection preserve the full
+evidence. Shallow, stale, failed, partial, and unknown data remain visibly qualified.
+Statistics retain their existing layout.
 
 ## Accuracy notes
 
@@ -123,13 +132,16 @@ existing layout.
 |-----|--------|
 | `↑/↓` `j/k` | Navigate rows |
 | `←/→` `h/l` | Cycle time range (1d / 7d / 14d / 30d / 90d / 1y / all) |
-| `Tab` / `Shift+Tab` | Focus next / previous relationship pane |
-| `Enter` | Open repository work areas / changed paths; contributor detail in statistics |
+| `Tab` / `Shift+Tab`, `1`–`4` | Switch Activity / People / Related / Subareas in area detail |
+| `Enter` | Open selected scope / contributor filter / commit inspector |
 | `v` | Switch relationships / statistics |
 | `Esc` | Back / Quit |
-| `s` | Cycle sort column (commits / added / removed / net / ai / total) |
+| `s` | Overview: Activity / Recent / Name; statistics: cycle sort column |
 | `S` | Reverse sort direction |
-| `/` | Filter contributors by name (incremental) |
+| `/` | Search the current list; statistics: filter contributors |
+| `g` / `G`, `Home` / `End` | First / last row in awareness views |
+| `PgUp` / `PgDown` | Page through the current list |
+| `?` | Show awareness controls |
 | `b` | Toggle bot contributors in/out |
 | `r` | Open repo inclusion/exclusion overlay |
 | `space` | Toggle a repo in/out (within the repo overlay) |

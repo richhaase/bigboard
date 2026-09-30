@@ -57,13 +57,16 @@ func TestAwarenessDefaultAndStatsRoundTrip(t *testing.T) {
 }
 func TestAwarenessFocusAndEvidence(t *testing.T) {
 	m := awarenessFixture()
+	m = pressAwareness(m, "enter") // repository to areas
+	m = pressAwareness(m, "enter") // area to dedicated detail
 	m = pressAwareness(m, "tab")
 	m = pressAwareness(m, "down")
+	m = pressAwareness(m, "enter")
 	if m.personID != "email:ada@x" {
 		t.Fatalf("focus=%s", m.personID)
 	}
 	out := m.View()
-	for _, text := range []string{"Connected repositories: api ↔ web", "Fix login", "GitHub", "scanned"} {
+	for _, text := range []string{"Fix login", "PRs:", "Local scan"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %q:\n%s", text, out)
 		}
@@ -72,7 +75,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 		t.Fatal("unfocused author's evidence leaked")
 	}
 	m = pressAwareness(m, "esc")
-	if m.personID != "" || m.awarenessPane != 0 {
+	if m.personID != "" || m.glance.frame.tab != glancePeople {
 		t.Fatal("escape must clear focus")
 	}
 	m = pressAwareness(m, "r")
@@ -162,7 +165,8 @@ func TestAwarenessEvidenceScrollAndFiltering(t *testing.T) {
 		m.allRecords = append(m.allRecords, r)
 	}
 	m.recomputeAuthors()
-	m.awarenessPane = 2
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "enter")
 	for i := 0; i < 100; i++ {
 		m = pressAwareness(m, "down")
 	}
@@ -193,6 +197,9 @@ func TestAwarenessDuplicateNamesAndHostileFailure(t *testing.T) {
 	m.allRecords[2].Author = "Ada"
 	m.recomputeAuthors()
 	m.failedRepos = []string{"bad\x1b[2J\x1b]0;hostile\x07"}
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "tab")
 	out := m.View()
 	if !strings.Contains(out, "ada@x") || !strings.Contains(out, "grace@x") {
 		t.Fatalf("duplicate names lack identity: %s", out)
@@ -205,7 +212,8 @@ func TestAwarenessCompactEvidenceStaysVisible(t *testing.T) {
 	m := awarenessFixture()
 	m.height = 18
 	m.width = 40
-	m.awarenessPane = 2
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "enter")
 	m.allRecords[0].Author = "A very long contributor display name"
 	m.failedRepos = []string{"unreadable"}
 	m.allRecords[0].LinesUnknown = true
@@ -248,7 +256,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	m.width = 110
 	m.height = 40
 	out := m.View()
-	for _, text := range []string{bannerLines[0], "━", "──╸", "REPOSITORIES", "CONTRIBUTORS", "CROSS-REPO", "COMMITS"} {
+	for _, text := range []string{bannerLines[0], "━", "REPOSITORIES", "PEOPLE", "COMMITS", "LAST"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing original-style element %q", text)
 		}
