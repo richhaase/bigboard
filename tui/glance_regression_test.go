@@ -49,7 +49,7 @@ func TestReviewInspectorNeverRetargetsRemovedCommit(t *testing.T) {
 	kept := append([]git.CommitRecord(nil), m.allRecords[1:]...)
 	m.loading = true
 	m.resetPending()
-	next, _ := m.Update(RepoLoadedMsg{Repository: m.repositories[0], Records: kept})
+	next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Records: kept})
 	m = next.(Model)
 	if m.showPaths && strings.Contains(m.View(), "review-oid-001") {
 		t.Fatalf("removed inspector silently retargeted next commit:\n%s", m.View())

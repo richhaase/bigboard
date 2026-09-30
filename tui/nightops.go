@@ -99,23 +99,29 @@ func (m Model) renderNightOps(width, height int) string {
 		position += " · counts overlap"
 	}
 	sortNames := []string{"commits ↓", "recent ↓", "name ↑"}
-	sidebar = append(sidebar, nightMuted.Render(position), nightLime.Render(" / find · s "+sortNames[max(0, min(m.overviewSort, len(sortNames)-1))]), nightViolet.Render(strings.Repeat("─", side)), nightLime.Render(" SNAPSHOT"))
+	sidebar = append(sidebar, nightMuted.Render(position), nightLime.Render(" / find · s "+sortNames[max(0, min(m.overviewSort, len(sortNames)-1))]), nightViolet.Render(strings.Repeat("─", side)), nightLime.Render(" Last updated"))
 	scanID := m.selectedScopeID()
 	if m.areaRepoID != "" {
 		scanID = m.areaRepoID
 	}
-	scanLabel := "Local scan"
-	if m.staleRepos[scanID] {
-		scanLabel = "STALE · last good scan"
+	updateStatus := "Updates every minute"
+	if m.refreshing {
+		updateStatus = "Updating…"
 	}
-	scanned := "not recorded"
+	if m.staleRepos[scanID] {
+		updateStatus = "STALE · update failed"
+		if m.refreshing {
+			updateStatus = "STALE · retrying…"
+		}
+	}
+	scanned := "Not updated yet"
 	if at := m.scannedAt[scanID]; !at.IsZero() {
 		scanned = at.Local().Format("Jan 02 15:04 MST")
 	}
-	sidebar = append(sidebar, nightMuted.Render(scanLabel), nightMuted.Render(scanned))
-	sidebar = append(sidebar, nightMuted.Render(" No remote Git fetch"), nightMuted.Render(" "+m.prStatus()))
+	sidebar = append(sidebar, nightMuted.Render(scanned), nightMuted.Render(updateStatus))
+	sidebar = append(sidebar, nightLime.Render(" R refresh now"), nightMuted.Render(" "+m.prStatus()))
 	if len(m.failedRepos) > 0 {
-		sidebar = append(sidebar, nightLime.Render(fmt.Sprintf(" %d scan failures · R retry", len(m.failedRepos))))
+		sidebar = append(sidebar, nightLime.Render(fmt.Sprintf(" Update errors: %d · R retry", len(m.failedRepos))))
 	}
 	var body []string
 	if len(rows) == 0 && !m.glance.detailOpen {
@@ -181,9 +187,9 @@ func (m Model) renderNightOps(width, height int) string {
 	header := []string{
 		nightLime.Render("╱" + strings.Repeat("─", width-2) + "╲"),
 		"  " + nightLime.Render("[ BB ]  READ-ONLY AWARENESS") + nightMuted.Render("  /  NIGHT OPS"),
-		"  " + nightLime.Bold(true).Render("╭─╮╷╭─╮ ╭─╮╭─╮╭─╮╭─╮╭╮ "),
-		"  " + nightViolet.Render("├─┤││ ┐ ├─┤│ │├─┤├┬╯││ ") + nightMuted.Render(" / "+repoName),
-		"  " + nightLime.Render("╰─╯╵╰─╯ ╰─╯╰─╯╵ ╵╵╰╴╰╯ ") + nightMuted.Render(" ["+TimePresets[m.timeIdx].Label+"] · "+bots+" · ←→ range"),
+		"  " + nightLime.Bold(true).Render(nightWordmark[0]),
+		"  " + nightViolet.Render(nightWordmark[1]) + nightMuted.Render(" / "+repoName),
+		"  " + nightLime.Render(nightWordmark[2]) + nightMuted.Render(" ["+TimePresets[m.timeIdx].Label+"] · "+bots+" · ←→ range"),
 		"  " + nightViolet.Render(strings.Repeat("─", inner)),
 	}
 	for _, line := range strings.Split(joined, "\n") {
@@ -317,8 +323,16 @@ func (m Model) nightActivity(width, height int, focused bool, rows []repositoryA
 	return append(out, nightPair(left, right, width, max(0, lower))...)
 }
 
+// One continuous word, with a square, heavy left stem on D to distinguish
+// it from the rounded O even in terminal fonts with narrow box-drawing cells.
+var nightWordmark = [3]string{
+	"┏━╮╻╭─╴┏━╮╭─╮╭─╮┏━╮┏━╮",
+	"┣━┫┃│╺┓┣━┫│ │├─┤┣┳╯┃ ┃",
+	"┗━╯╹╰─╯┗━╯╰─╯╵ ╵╹╰╴┗━╯",
+}
+
 func nightCompactBanner(width int) []string {
-	return []string{nightBand.Render(nightLine("  [ BB ]  BIG BOARD / NIGHT OPS", max(1, width)))}
+	return []string{nightBand.Render(nightLine("  [ BB ]  BIGBOARD / NIGHT OPS", max(1, width)))}
 }
 
 // Restore the canvas after nested Lipgloss spans reset their SGR attributes.

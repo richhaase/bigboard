@@ -100,7 +100,7 @@ func TestNightOpsSmallSnapshotAndPRTitle(t *testing.T) {
 	m.scannedAt["/api"] = at
 	m.failedRepos = []string{"/web"}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"1 scan failures", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "All dates · unfiltered"} {
+	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "All dates · unfiltered"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q at100x28:\n%s", want, view)
 		}
@@ -175,5 +175,32 @@ func TestNightOpsCanvasRespectsNoColor(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	if !strings.Contains(m.View(), "\x1b[") {
 		t.Fatal("color renderer lost styling")
+	}
+}
+
+func TestNightOpsWordmarkAndPlainRefreshStatus(t *testing.T) {
+	m := monorepoFixture()
+	m.width, m.height = 160, 48
+	view := ansi.Strip(m.View())
+	for _, want := range []string{nightWordmark[0], nightWordmark[1], nightWordmark[2], "Last updated", "Updates every minute", "R refresh now"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	for _, old := range []string{"SNAPSHOT", "No remote Git fetch", "Local scan"} {
+		if strings.Contains(view, old) {
+			t.Fatalf("technical status remains: %q", old)
+		}
+	}
+	if !strings.HasSuffix(nightWordmark[0], "┏━╮") || !strings.HasSuffix(nightWordmark[1], "┃ ┃") || !strings.HasSuffix(nightWordmark[2], "┗━╯") {
+		t.Fatal("D must retain its distinct left stem")
+	}
+	m.refreshing = true
+	if !strings.Contains(m.View(), "Updating…") {
+		t.Fatal("background update has no visible status")
+	}
+	m.width = 80
+	if !strings.Contains(m.View(), "BIGBOARD / NIGHT OPS") || !strings.Contains(m.View(), "Last updated") || !strings.Contains(m.View(), "Updating…") {
+		t.Fatal("compact header/status differs")
 	}
 }

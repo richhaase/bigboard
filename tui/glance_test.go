@@ -167,7 +167,7 @@ func TestGlanceDetailAndInspectorKeepStaleWarning(t *testing.T) {
 	m = pressAwareness(m, "enter")
 	m.loading = true
 	m.resetPending()
-	next, _ := m.Update(RepoLoadedMsg{Repository: m.repositories[0], Err: errors.New("unreadable")})
+	next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Err: errors.New("unreadable")})
 	m = next.(Model)
 	if !strings.Contains(m.View(), "STALE") {
 		t.Fatal("detail disguises stale scan")

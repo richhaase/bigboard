@@ -112,8 +112,13 @@ The longest matching prefix wins; unmatched paths keep automatic groups. Names
 must be unique within a repository, and one prefix cannot name two areas.
 The existing `depth` setting still controls repository discovery only.
 
-Scan timestamps describe the local scan, never remote freshness. Big Board does
-not fetch. A failed refresh retains that repository's last successful data with
+The board updates local repository data on launch and every minute while it
+runs. “Last updated” shows the last successful local refresh for the selected
+repository; “Updating…” keeps the existing view usable during a refresh. `R`
+refreshes immediately, including GitHub PR context. Automatic local refreshes
+do not repeatedly request GitHub PR data. Big Board never runs `git fetch`;
+fetch remote history separately when you want to update your local Git cache.
+A failed refresh retains that repository's last successful data with
 a STALE marker; a successful scan, including an empty one, replaces it. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
 surface with a compact Night Ops header and the same controls. Overview rows retain numeric context instead of
@@ -192,8 +197,8 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Local scan freshness and retained last-good data on refresh failures
-- Responsive ASCII art banner with vertical color gradient, shared across relationships and statistics
+- Automatic local updates every minute, clear Last updated status, and retained last-good data on refresh failures
+- Responsive one-word Bigboard wordmark with a violet/lime Night Ops workspace
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %

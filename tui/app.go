@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -75,23 +76,32 @@ type Model struct {
 	width            int
 	height           int
 	loading          bool
+	refreshing       bool
+	quitting         bool
+	scanGeneration   uint64
+	refreshPRs       bool
+	refreshTick      uint64
+	inFlight         map[string]bool
 	err              error
 	options          Options
 	scanContext      context.Context
 	cancelScans      context.CancelFunc
 
-	pendingRecords   []git.CommitRecord
-	pendingRepos     []git.Repository
-	pendingFailed    []string
-	pendingRemaining int
-	activeScans      int
-	nextRepo         int
-	bootLines        []string
+	pendingScannedAt  map[string]time.Time
+	pendingStaleRepos map[string]bool
+	pendingRecords    []git.CommitRecord
+	pendingRepos      []git.Repository
+	pendingFailed     []string
+	pendingRemaining  int
+	activeScans       int
+	nextRepo          int
+	bootLines         []string
 }
 
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
 // can stream a live scan log instead of blocking on the whole set.
 type RepoLoadedMsg struct {
+	Generation uint64
 	Repository git.Repository
 	Records    []git.CommitRecord
 	Err        error
@@ -101,6 +111,25 @@ type RepoLoadedMsg struct {
 const DefaultTimeIndex = 2
 
 const maxConcurrentRepoScans = 8
+
+const localRefreshInterval = 60 * time.Second
+
+type localRefreshMsg struct{ token uint64 }
+
+// A cancellable, tokenized timer keeps one cadence alive without overlapping
+// scans or allowing a duplicate/late tick to create another timer chain.
+func localRefreshCmd(ctx context.Context, token uint64) tea.Cmd {
+	return func() tea.Msg {
+		timer := time.NewTimer(localRefreshInterval)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			return localRefreshMsg{token: token}
+		}
+	}
+}
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
@@ -137,6 +166,7 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 		sortField:     initialSort,
 		timeIdx:       initialTimeIdx,
 		loading:       true,
+		refreshTick:   1,
 		excludedRepos: normalizeExcluded(repositories, excluded),
 		version:       version,
 		options:       options,
@@ -177,13 +207,13 @@ func normalizeExcluded(repositories []git.Repository, excluded map[string]bool) 
 	return normalized
 }
 
-func loadRepoCmd(ctx context.Context, repository git.Repository, options Options) tea.Cmd {
+func loadRepoCmd(ctx context.Context, repository git.Repository, options Options, generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
 			IncludeGenerated: options.IncludeGenerated,
 			AIIdentities:     options.AIIdentities,
 		})
-		return RepoLoadedMsg{Repository: repository, Records: records, Err: err}
+		return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err}
 	}
 }
 
@@ -193,13 +223,28 @@ func (m Model) loadCmds() tea.Cmd {
 	}
 	cmds := make([]tea.Cmd, m.activeScans)
 	for i := range m.activeScans {
-		cmds[i] = loadRepoCmd(m.scanContext, m.repositories[i], m.options)
+		cmds[i] = loadRepoCmd(m.scanContext, m.repositories[i], m.options, m.scanGeneration)
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m *Model) resetPending() {
-	m.cancelPRRefresh()
+	m.resetLocalPending(true)
+}
+
+func (m *Model) resetLocalPending(refreshPRs bool) {
+	if refreshPRs {
+		m.cancelPRRefresh()
+	}
+	m.refreshPRs = refreshPRs
+	m.scanGeneration++
+	m.refreshing = true
+	m.inFlight = make(map[string]bool)
+	for _, repo := range m.repositories[:min(len(m.repositories), maxConcurrentRepoScans)] {
+		m.inFlight[repo.ID] = true
+	}
+	m.pendingScannedAt = make(map[string]time.Time)
+	m.pendingStaleRepos = make(map[string]bool)
 	m.pendingRemaining = len(m.repositories)
 	m.pendingRecords = nil
 	m.pendingRepos = nil
@@ -216,10 +261,12 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 	repository := m.repositories[m.nextRepo]
 	m.nextRepo++
 	m.activeScans++
-	return loadRepoCmd(m.scanContext, repository, m.options)
+	m.inFlight[repository.ID] = true
+	return loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration)
 }
 
 func (m *Model) finalizeLoad() {
+	initial := m.loading
 	sort.Slice(m.pendingRepos, func(i, j int) bool {
 		return m.pendingRepos[i].Name < m.pendingRepos[j].Name
 	})
@@ -227,15 +274,43 @@ func (m *Model) finalizeLoad() {
 	m.allRecords = m.pendingRecords
 	m.loadedRepos = m.pendingRepos
 	m.failedRepos = m.pendingFailed
+	// Commit freshness with the snapshot, never advertise new timestamps while
+	// still displaying old records from an unfinished batch.
+	scannedAt := make(map[string]time.Time)
+	maps.Copy(scannedAt, m.scannedAt)
+	maps.Copy(scannedAt, m.pendingScannedAt)
+	m.scannedAt = scannedAt
+	staleRepos := make(map[string]bool)
+	maps.Copy(staleRepos, m.staleRepos)
+	for id, stale := range m.pendingStaleRepos {
+		if stale {
+			staleRepos[id] = true
+		} else {
+			delete(staleRepos, id)
+		}
+	}
+	m.staleRepos = staleRepos
 	if len(m.loadedRepos) == 0 && len(m.failedRepos) > 0 {
 		m.err = fmt.Errorf("all %d repositories failed to scan", len(m.failedRepos))
 	} else {
 		m.err = nil
 	}
 	m.loading = false
+	m.refreshing = false
 	m.rebuildAreaDefinitions()
+	personID, evidenceOffset := m.personID, m.evidenceOffset
+	showPaths, pathOffset := m.showPaths, m.pathOffset
 	m.recomputeAuthors()
-	m.openSingleRepositoryAreas()
+	if !initial {
+		// A refresh is not a navigation action. Retain vanished-person/commit
+		// intent so the existing detail can explain its empty evidence instead
+		// of silently broadening to everybody or closing an inspector.
+		m.personID, m.evidenceOffset = personID, evidenceOffset
+		m.showPaths, m.pathOffset = showPaths, pathOffset
+	}
+	if initial {
+		m.openSingleRepositoryAreas()
+	}
 }
 
 func bootLine(repo string, ok bool) string {
@@ -249,12 +324,42 @@ func bootLine(repo string, ok bool) string {
 
 // Init kicks off the initial concurrent load.
 func (m Model) Init() tea.Cmd {
+	if len(m.repositories) == 0 {
+		return nil
+	}
+	return tea.Batch(m.loadCmds(), localRefreshCmd(m.scanContext, m.refreshTick))
+}
+
+func (m *Model) startLocalRefresh(manual bool) tea.Cmd {
+	if m.quitting || len(m.repositories) == 0 {
+		return nil
+	}
+	if m.refreshing {
+		// An explicit request during an automatic scan joins that generation.
+		// Keep its GitHub refresh intent without starting overlapping scans.
+		if manual && !m.refreshPRs {
+			m.cancelPRRefresh()
+			m.refreshPRs = true
+		}
+		return nil
+	}
+	m.resetLocalPending(manual)
 	return m.loadCmds()
 }
 
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.quitting {
+		return m, nil
+	}
 	switch msg := msg.(type) {
+	case localRefreshMsg:
+		if msg.token != m.refreshTick {
+			return m, nil
+		}
+		m.refreshTick++
+		cmd := m.startLocalRefresh(false)
+		return m, tea.Batch(cmd, localRefreshCmd(m.scanContext, m.refreshTick))
 	case prsLoadedMsg:
 		if msg.generation == m.prGeneration {
 			m.applyPRResult(msg)
@@ -268,13 +373,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case RepoLoadedMsg:
+		if !m.refreshing || msg.Generation != m.scanGeneration || !m.inFlight[msg.Repository.ID] {
+			return m, nil
+		}
+		m.inFlight = maps.Clone(m.inFlight)
+		m.pendingScannedAt = maps.Clone(m.pendingScannedAt)
+		m.pendingStaleRepos = maps.Clone(m.pendingStaleRepos)
+		delete(m.inFlight, msg.Repository.ID)
 		m.activeScans--
 		if msg.Err != nil {
 			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
-			if m.staleRepos == nil {
-				m.staleRepos = make(map[string]bool)
-			}
-			m.staleRepos[msg.Repository.ID] = true
+			m.pendingStaleRepos[msg.Repository.ID] = true
 			for _, repo := range m.loadedRepos {
 				if repo.ID == msg.Repository.ID {
 					m.pendingRepos = append(m.pendingRepos, repo)
@@ -290,11 +399,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
 			}
 		} else {
-			if m.scannedAt == nil {
-				m.scannedAt = make(map[string]time.Time)
-			}
-			m.scannedAt[msg.Repository.ID] = time.Now()
-			delete(m.staleRepos, msg.Repository.ID)
+			m.pendingScannedAt[msg.Repository.ID] = time.Now()
+			m.pendingStaleRepos[msg.Repository.ID] = false
 			m.pendingRecords = append(m.pendingRecords, msg.Records...)
 			m.pendingRepos = append(m.pendingRepos, msg.Repository)
 			if m.loading {
@@ -304,7 +410,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
-			return m, m.startPRRefresh()
+			if m.refreshPRs {
+				return m, m.startPRRefresh()
+			}
+			return m, nil
 		} else {
 			return m, m.nextLoadCmd()
 		}
@@ -345,10 +454,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 
 	case "R":
-		if m.viewMode == ViewAggregate && !m.loading {
-			m.loading = true
-			m.resetPending()
-			return m, m.loadCmds()
+		if m.viewMode == ViewAggregate {
+			cmd := m.startLocalRefresh(true)
+			return m, cmd
 		}
 
 	case "/":
@@ -679,6 +787,8 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
+	m.quitting = true
+	m.refreshing = false
 	if m.cancelPRs != nil {
 		m.cancelPRs()
 	}

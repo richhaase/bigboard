@@ -181,7 +181,7 @@ func TestPRInitialLoadSchedulesOnlyAfterLocalScan(t *testing.T) {
 	m.loading = true
 	m.resetPending()
 	for i, repo := range m.repositories {
-		next, cmd := m.Update(RepoLoadedMsg{Repository: repo, Records: []git.CommitRecord{}})
+		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Records: []git.CommitRecord{}})
 		m = next.(Model)
 		if i == len(m.repositories)-1 && cmd == nil {
 			t.Fatal("missing initial PR refresh")
@@ -218,8 +218,8 @@ func TestPRRefreshKeyCancelsSupersededFetch(t *testing.T) {
 	}
 	next, _ := m.Update(first())
 	m = next.(Model)
-	if !m.loading {
-		t.Fatal("old PR message interfered with local refresh")
+	if !m.refreshing || m.loading {
+		t.Fatal("old PR message interfered with background local refresh")
 	}
 }
 
@@ -295,7 +295,7 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	m.prProvider = p
 	var refresh tea.Cmd
 	for _, repo := range m.repositories {
-		next, cmd := m.Update(RepoLoadedMsg{Repository: repo})
+		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
 		m = next.(Model)
 		if !m.loading {
 			refresh = cmd
