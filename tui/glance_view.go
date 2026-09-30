@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -206,11 +207,13 @@ func (m Model) renderAwareness() string {
 	lines = append(lines, StyleSubtitle.Render(breadcrumb), m.awarenessSummary(len(all)))
 	selectedID := m.selectedScopeID()
 	lines = append(lines, m.glanceScanLine(selectedID), StyleDimWhite.Render("  "+m.prStatus()), StyleDimCyan.Render("  "+hrule(width-chromeInset)), m.glanceColumnHeader(width))
-	previewRows := 5
+	previewRows := 6
+	peopleRows := 2
 	if height < 30 {
-		previewRows = 4
+		previewRows = 5
+		peopleRows = 1
 	}
-	if m.areaRepoID == "" && height < 30 {
+	if m.areaRepoID == "" {
 		previewRows++
 	}
 	budget := max(1, height-len(lines)-previewRows-3)
@@ -241,31 +244,20 @@ func (m Model) renderAwareness() string {
 	lines = append(lines, StyleDimWhite.Render("  "+position+" · "+sortLabel+qualifier))
 	if len(rows) > 0 {
 		r := rows[selected]
-		lines = append(lines, StyleDimCyan.Render("  "+hrule(width-chromeInset)), StyleCyan.Render(fmt.Sprintf("  %s · %s commits · %d people", displayText(r.repo.Name), FormatNumber(r.commits), len(r.people))))
+		lines = append(lines, StyleDimCyan.Render("  "+hrule(width-chromeInset)), StyleCyan.Render(fmt.Sprintf("  %s · %s commits", displayText(r.repo.Name), FormatNumber(r.commits))))
+		lines = append(lines, glanceContributorPreview(r.people, width, peopleRows)...)
 		evidence := m.evidence(m.scopeEvidenceKey(r), "")
-		count := 2
-		if height < 30 {
-			count = 1
-		}
-		for i := 0; i < count; i++ {
-			subject := ""
-			if i < len(evidence) {
-				subject = evidence[i].Subject
-				if subject == "" {
-					subject = "(no subject)"
-				}
-				subject = "  Latest: " + displayText(subject)
-			} else if i == 0 {
-				subject = "  No local commits in this range"
+		subject := "  No local commits in this range"
+		if len(evidence) > 0 {
+			subject = evidence[0].Subject
+			if subject == "" {
+				subject = "(no subject)"
 			}
-			lines = append(lines, StyleDimWhite.Render(subject))
+			subject = "  Latest: " + displayText(subject)
 		}
+		lines = append(lines, StyleDimWhite.Render(subject))
 		if m.areaRepoID == "" {
-			if height >= 30 {
-				lines[len(lines)-1] = m.glanceBusiestAreas(r.repo.ID, width)
-			} else {
-				lines = append(lines, m.glanceBusiestAreas(r.repo.ID, width))
-			}
+			lines = append(lines, m.glanceBusiestAreas(r.repo.ID, width))
 		}
 		lines = append(lines, StyleDimWhite.Render("  PRs: "+m.prGlanceSignal(r.repo.ID)+" · p opens all-date scope"))
 	}
@@ -275,6 +267,57 @@ func (m Model) renderAwareness() string {
 	}
 	lines = append(lines, footer, m.glanceCoverageLine())
 	return fitGlanceLines(lines, width, height)
+}
+
+// Show the selected scope's most active identities first without expanding its
+// entire inventory or changing the alphabetical People lens.
+// Reserve the remaining-person count before truncating a long final name.
+func glanceContributorPreview(people []stats.AuthorStats, width, maxLines int) []string {
+	if len(people) == 0 {
+		return []string{"  Contributors: none in this range"}
+	}
+	people = append([]stats.AuthorStats(nil), people...)
+	sortPeople(people)
+	sort.SliceStable(people, func(i, j int) bool { return people[i].Commits > people[j].Commits })
+	var lines []string
+	i := 0
+	for row := 0; row < maxLines && i < len(people); row++ {
+		prefix := "  Contributors: "
+		if row > 0 {
+			prefix = "    "
+		}
+		available := max(1, width-2-ansi.StringWidth(prefix))
+		var names []string
+		for i < len(people) {
+			label := glancePersonLabel(people[i], people)
+			if people[i].Bot {
+				label = "[BOT] " + label
+			}
+			suffix := ""
+			if row == maxLines-1 && i+1 < len(people) {
+				suffix = fmt.Sprintf(", +%d more", len(people)-i-1)
+			}
+			candidate := strings.Join(names, ", ")
+			if candidate != "" {
+				candidate += ", "
+			}
+			candidate += label
+			if ansi.StringWidth(candidate+suffix) > available {
+				if len(names) > 0 {
+					break
+				}
+				label = ansi.Truncate(label, max(1, available-ansi.StringWidth(suffix)), "…")
+			}
+			names = append(names, label)
+			i++
+		}
+		line := prefix + strings.Join(names, ", ")
+		if row == maxLines-1 && i < len(people) {
+			line += fmt.Sprintf(", +%d more", len(people)-i)
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 func (m Model) renderGlanceHelp(width, height int) string {
 	lines := renderBanner(min(width, bannerMinWidth-1))

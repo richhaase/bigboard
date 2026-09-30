@@ -50,8 +50,8 @@ func TestGlanceOverviewDensityAndNumericContext(t *testing.T) {
 		if !strings.Contains(view, "1,100") || !strings.Contains(view, "120") || !strings.Contains(view, "Latest: Exact subject") {
 			t.Fatal("busy area counts or selected preview missing")
 		}
-		if strings.Contains(view, "Person 000") {
-			t.Fatal("overview leaked unbounded contributor inventory")
+		if !strings.Contains(view, "Contributors: Person 000") || !strings.Contains(view, " more") || strings.Contains(view, "Person 119") {
+			t.Fatal("overview contributor preview is missing or unbounded")
 		}
 		if test.w == 110 && !strings.Contains(view, bannerLines[0]) {
 			t.Fatal("full gradient banner disappeared")

@@ -55,8 +55,12 @@ The initial view is a compact repository overview with aligned commit counts,
 contributor counts, latest author activity, and bounded PR context. The default
 Activity sort exposes where commits are concentrated; `s` switches to Recent or
 Name without changing the selected identity. Commit volume is not priority or
-productivity. Only the selected row has a short preview of actual commit subjects
-and busy work areas, keeping Big Board’s gradient banner and neon selection.
+productivity. Moving the selection automatically shows that area's or repository's
+contributor names alongside its commit count and latest subject. Names use the
+current time range and bot filter, ordered by most commits in the selected scope
+first; a bounded preview shows `+N more` when needed.
+The full alphabetical list remains in People. Repository previews also show busy
+work areas, keeping Big Board’s gradient banner and neon selection.
 
 Press `Enter` on a repository to open its work areas. A single included repository
 opens directly into work areas after scanning. `Enter` on an area opens a dedicated
