@@ -105,7 +105,12 @@ homebrew_casks:
     repository:
       owner: richhaase
       name: homebrew-tap
+      branch: "codex/bigboard-{{ .Version }}"
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          branch: trunk
     homepage: "https://github.com/richhaase/bigboard"
     description: "Terminal dashboard for contributor activity across Git repositories"
     commit_author:
