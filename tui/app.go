@@ -26,6 +26,11 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	showPaths       bool
+	pathOffset      int
+	areaDefinitions map[string]stats.WorkAreaDefinition
+	areaRepoID      string
+	selectedAreaID  string
 	selectedRepoID  string
 	personID        string
 	awarenessPane   int
@@ -89,6 +94,7 @@ type Options struct {
 	IncludeGenerated bool
 	AIIdentities     []string
 	BotIdentities    []string
+	WorkAreas        map[string][]stats.WorkAreaRule
 }
 
 // NewModel creates an initial Model ready to display the loading state.
@@ -206,7 +212,9 @@ func (m *Model) finalizeLoad() {
 		m.err = nil
 	}
 	m.loading = false
+	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
+	m.openSingleRepositoryAreas()
 }
 
 func bootLine(repo string, ok bool) string {

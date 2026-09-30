@@ -59,11 +59,42 @@ shows actual commit subjects, author dates, and short object IDs for the selecte
 repository and contributor. These are historical associations, including shared Git
 history across clones or forks, not online presence or proof of collaboration.
 
-Use `Tab` (or `Enter`) to move between repositories, people, and evidence; use `↑/↓` to
-navigate the focused pane. Select `all` in people or press `Esc` to clear person
-focus. The focus can stay pinned while browsing other repositories. `v` switches between
-relationships and the existing contributor statistics. Time ranges, bot hiding,
-repository inclusion, and manual refresh apply to both views.
+Press `Enter` on a repository to open its work areas. A single included repository
+opens directly into work areas after scanning. Use `Tab` to move between
+repositories/areas, people, and evidence, and `↑/↓` to navigate the focused pane.
+`Enter` in evidence opens a scrollable list of changed paths. `Esc` closes path
+details, clears person focus, then returns from areas to repositories. `v`
+switches to contributor statistics. Time ranges, bot hiding, repository inclusion,
+and manual refresh apply to both views.
+
+Work areas are path-based groups, not inferred features or ownership. Automatic
+grouping expands containers such as `src`, `services`, `packages`, `apps`, `cmd`,
+and `internal`, so `services/auth` and `services/payments` appear separately.
+Definitions use the full scan and stay stable while changing the time range.
+Root files, excluded-file-only commits, empty commits, and unknown shallow-boundary
+paths have explicit groups. Binary files count as activity even without line counts.
+A commit can appear in several areas; area counts overlap and must not be summed.
+Only destination paths assign rename/copy pairs to areas; the previous path is
+shown as evidence, without treating an unchanged copy source as work.
+
+For meaningful cross-directory groups, optionally configure `work_areas`:
+
+```json
+{
+  "work_areas": {
+    "my-monorepo": [
+      {"name": "Authentication", "paths": ["services/auth", "apps/web/src/auth"]},
+      {"name": "Payments", "paths": ["services/payments"]}
+    ]
+  }
+}
+```
+
+The repository key is its unique display name or absolute path (absolute path
+wins). Prefixes are literal repository-relative files or directories, not globs.
+The longest matching prefix wins; unmatched paths keep automatic groups. Names
+must be unique within a repository, and one prefix cannot name two areas.
+The existing `depth` setting still controls repository discovery only.
 
 Scan timestamps describe the local scan, never remote freshness. Big Board does
 not fetch. A failed refresh retains that repository's last successful data with
@@ -71,7 +102,9 @@ a STALE marker; a successful scan, including an empty one, replaces it. The boar
 requires at least 40 columns by 18 rows and condenses inactive panes on short
 terminals. The banner compacts on narrow or short screens; summary panels appear
 when space permits. CROSS-REPO counts contributors associated with more than one
-included repository, including shared commits. Statistics retain their existing layout.
+included repository, including shared commits. Within a repository the panels
+show work-area-scoped totals and CROSS-AREA contributors. Statistics retain their
+existing layout.
 
 ## Accuracy notes
 
@@ -91,7 +124,7 @@ included repository, including shared commits. Statistics retain their existing 
 | `↑/↓` `j/k` | Navigate rows |
 | `←/→` `h/l` | Cycle time range (1d / 7d / 14d / 30d / 90d / 1y / all) |
 | `Tab` / `Shift+Tab` | Focus next / previous relationship pane |
-| `Enter` | Next relationship pane; drill into contributor in statistics |
+| `Enter` | Open repository work areas / changed paths; contributor detail in statistics |
 | `v` | Switch relationships / statistics |
 | `Esc` | Back / Quit |
 | `s` | Cycle sort column (commits / added / removed / net / ai / total) |
@@ -137,9 +170,9 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 
 ## Features
 
-- Relationship-first repository view, cross-repository contributor focus, and scrollable commit evidence
+- Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
 - Local scan freshness and retained last-good data on refresh failures
-- ASCII art banner with vertical color gradient in statistics
+- Responsive ASCII art banner with vertical color gradient, shared across relationships and statistics
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %

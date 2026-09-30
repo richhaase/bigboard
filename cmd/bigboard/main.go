@@ -152,6 +152,7 @@ func main() {
 		IncludeGenerated: cfg.AllFiles,
 		AIIdentities:     cfg.AIIdentities,
 		BotIdentities:    cfg.BotIdentities,
+		WorkAreas:        cfg.WorkAreas,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

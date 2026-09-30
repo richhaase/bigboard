@@ -97,7 +97,17 @@ func (f pathFilter) shouldCount(path string) bool {
 	return true
 }
 
-// CommitRecord holds aggregated stats for a single commit.
+// PathChange retains literal numstat paths, including binary and generated files.
+// Numstat cannot distinguish a rename from a copy: PreviousPath records the
+// origin only and must not be treated as another touched path or a change status.
+type PathChange struct {
+	Path         string
+	PreviousPath string
+	// Generated is true when the current generated-path filter excludes Path.
+	Generated bool
+}
+
+// CommitRecord holds aggregated stats and changed paths for a single commit.
 type CommitRecord struct {
 	CommitID string
 	// Subject is Git's unescaped commit subject; escape control characters for display.
@@ -112,6 +122,10 @@ type CommitRecord struct {
 	AIAssisted bool
 	// LinesUnknown identifies shallow boundaries whose parents are unavailable.
 	LinesUnknown bool
+	Changes      []PathChange
+	// PathsUnknown marks missing path evidence at shallow boundaries. An empty
+	// Changes slice without this flag is a genuinely empty commit diff.
+	PathsUnknown bool
 }
 
 // Repository identifies a repository independently from its display name.
@@ -317,6 +331,8 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 	for i := range records {
 		if shallow[records[i].CommitID] {
 			records[i].LinesUnknown = true
+			records[i].PathsUnknown = true
+			records[i].Changes = nil
 			records[i].Added, records[i].Removed = 0, 0
 		}
 	}

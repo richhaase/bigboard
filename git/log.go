@@ -89,7 +89,7 @@ func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
 	return parseLog(scanner, Repository{ID: repoName, Name: repoName}, legacyPathFilter(), newAIMatcher(nil))
 }
 
-// Git terminates each metadata field and each numstat path with NUL. Rename
+// Git terminates each metadata field and each numstat path with NUL. Rename/copy
 // records have an empty path followed by the literal old and new paths.
 func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
 	read := func() (string, error) {
@@ -132,16 +132,21 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 			return nil, fmt.Errorf("invalid numstat record %q", token)
 		}
 		path := fields[2]
+		var previousPath string
 		if path == "" {
-			if _, err := read(); err != nil { // old path
+			var err error
+			previousPath, err = read()
+			if err != nil {
 				return nil, err
 			}
-			var err error
 			path, err = read()
 			if err != nil {
 				return nil, err
 			}
 		}
+		countPath := filter.shouldCount(path)
+		record := &records[len(records)-1]
+		record.Changes = append(record.Changes, PathChange{Path: path, PreviousPath: previousPath, Generated: !countPath})
 		if fields[0] == "-" || fields[1] == "-" {
 			continue // Binary files have no line measurement.
 		}
@@ -150,9 +155,9 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 		if errA != nil || errR != nil || added < 0 || removed < 0 {
 			return nil, fmt.Errorf("invalid line counts %q", token)
 		}
-		if filter.shouldCount(path) {
-			records[len(records)-1].Added += added
-			records[len(records)-1].Removed += removed
+		if countPath {
+			record.Added += added
+			record.Removed += removed
 		}
 	}
 	return records, scanner.Err()
