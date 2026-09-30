@@ -7,6 +7,12 @@ A cyberpunk-themed TUI for assessing contributor volumes across git repositories
 Big Board requires Git 2.31 or newer on `PATH`. Partial clones require Git
 2.45.1 or newer so scans can reliably disable automatic object fetching.
 
+### Homebrew
+
+```bash
+brew install --cask richhaase/tap/bigboard
+```
+
 ### From Source
 
 ```bash
@@ -115,6 +121,40 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 - Headless `--export` (JSON, same pipeline and identity policy as the TUI), config file with named `--group`s, glob excludes, and recursive scan depth
 - Accurate-by-default: native `.mailmap`, generated/vendored files excluded, deterministic ordering, rename/copy-aware churn
 - Git worktree detection (linked worktrees are skipped); separate-Git-directory repositories are supported, and symlinked repo directories are followed and deduplicated
+
+## Publishing releases
+
+Pushing a `v*` tag runs GoReleaser, signs and notarizes the macOS binaries,
+publishes GitHub release assets, and updates `Casks/bigboard.rb` in
+[`richhaase/homebrew-tap`](https://github.com/richhaase/homebrew-tap).
+Prereleases publish GitHub assets without updating the stable Homebrew cask.
+
+Configure these **repository Actions secrets** in
+[Bigboard's settings](https://github.com/richhaase/bigboard/settings/secrets/actions),
+using the same credentials as plonk/acr:
+
+| Secret | Value |
+|--------|-------|
+| `HOMEBREW_TAP_GITHUB_TOKEN` | Token with Contents read/write access to `richhaase/homebrew-tap` |
+| `QUILL_SIGN_P12` | Base64-encoded Developer ID Application certificate and private key (`.p12`) |
+| `QUILL_SIGN_PASSWORD` | Password for that `.p12` file |
+| `QUILL_NOTARY_KEY` | Base64-encoded App Store Connect API private key (`.p8`) |
+| `QUILL_NOTARY_KEY_ID` | ID of that API key |
+| `QUILL_NOTARY_ISSUER` | App Store Connect issuer ID |
+
+No Actions variables are required. GitHub supplies `GITHUB_TOKEN` automatically;
+it publishes this repository's release but cannot update the separate tap.
+The release workflow reports missing secret names before building anything.
+
+Validate the configuration and build an unsigned local snapshot without publishing:
+
+```bash
+goreleaser check
+goreleaser release --snapshot --clean --skip=notarize
+```
+
+Homebrew installation becomes available after the first successful release with
+this configuration.
 
 ## License
 

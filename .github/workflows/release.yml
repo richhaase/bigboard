@@ -12,6 +12,23 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      - name: Check release secrets
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
+        run: |
+          missing=0
+          for name in HOMEBREW_TAP_GITHUB_TOKEN QUILL_SIGN_P12 QUILL_SIGN_PASSWORD QUILL_NOTARY_KEY QUILL_NOTARY_KEY_ID QUILL_NOTARY_ISSUER; do
+            if [[ -z "${!name:-}" ]]; then
+              printf '::error::Missing repository secret: %s\n' "$name"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -28,3 +45,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
