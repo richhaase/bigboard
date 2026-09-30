@@ -9,23 +9,25 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
 )
 
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
-	Paths         []string            `json:"paths"`
-	Exclude       []string            `json:"exclude"`
-	Sort          string              `json:"sort"`
-	Since         string              `json:"since"`
-	Theme         string              `json:"theme"`
-	Fuzzy         bool                `json:"fuzzy"`
-	AllFiles      bool                `json:"all_files"`
-	Depth         int                 `json:"depth"`
-	Groups        map[string][]string `json:"groups"`
-	AIIdentities  []string            `json:"ai_identities"`
-	BotIdentities []string            `json:"bot_identities"`
+	Paths         []string                        `json:"paths"`
+	Exclude       []string                        `json:"exclude"`
+	Sort          string                          `json:"sort"`
+	Since         string                          `json:"since"`
+	Theme         string                          `json:"theme"`
+	Fuzzy         bool                            `json:"fuzzy"`
+	AllFiles      bool                            `json:"all_files"`
+	Depth         int                             `json:"depth"`
+	Groups        map[string][]string             `json:"groups"`
+	AIIdentities  []string                        `json:"ai_identities"`
+	BotIdentities []string                        `json:"bot_identities"`
+	WorkAreas     map[string][]stats.WorkAreaRule `json:"work_areas"`
 }
 
 func defaultConfigPath() string {
@@ -58,6 +60,14 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 			return nil, fmt.Errorf("config contains multiple JSON values")
 		}
 		return nil, err
+	}
+	for repository, rules := range cfg.WorkAreas {
+		if strings.TrimSpace(repository) == "" {
+			return nil, fmt.Errorf("work_areas repository cannot be empty")
+		}
+		if err := stats.ValidateWorkAreaRules(rules); err != nil {
+			return nil, fmt.Errorf("work_areas %q: %w", repository, err)
+		}
 	}
 	return &cfg, nil
 }

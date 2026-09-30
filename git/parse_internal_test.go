@@ -8,7 +8,7 @@ import (
 
 // fmtHeader builds NUL-delimited metadata in the collection format.
 func fmtHeader(name, email, date string, coAuthors ...string) string {
-	return "\x00" + strings.Join([]string{strings.Repeat("a", 40), name, email, date, strings.Join(coAuthors, "\x1f")}, "\x00") + "\x00"
+	return "\x00" + strings.Join([]string{strings.Repeat("a", 40), name, email, date, strings.Join(coAuthors, "\x1f"), ""}, "\x00") + "\x00"
 }
 
 func TestParseGitLogBasic(t *testing.T) {
@@ -196,5 +196,26 @@ func TestParseGitLogRejectsMalformedMetadata(t *testing.T) {
 		if _, err := parseGitLog(data, "repo"); err == nil {
 			t.Errorf("accepted malformed log %q", data)
 		}
+	}
+}
+
+func TestParseGitLogSubject(t *testing.T) {
+	for _, subject := range []string{"", "Fix parsing | preserve delimiters", "Fix\tcontrol\x1fbytes\x1b[31m", "Handle naïve subjects 🚀"} {
+		t.Run(fmt.Sprintf("%q", subject), func(t *testing.T) {
+			header := fmtHeader("Alice", "alice@example.com", "2026-01-02T10:00:00Z", "Claude <noreply@anthropic.com>")
+			// Replace the final empty subject, retaining its NUL terminator.
+			header = header[:len(header)-1] + subject + "\x00"
+			out := header + "\n3\t1\ta.go\x00" + fmtHeader("Bob", "bob@example.com", "2026-01-01T10:00:00Z") + "\n7\t2\tb.go\x00"
+			records, err := parseGitLog(out, "repo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 2 || records[0].Subject != subject || records[1].Subject != "" {
+				t.Fatalf("subjects not preserved: %+v", records)
+			}
+			if !records[0].AIAssisted || records[0].Added != 3 || records[0].Removed != 1 || records[1].Added != 7 || records[1].Removed != 2 {
+				t.Fatalf("subject changed metadata or line attribution: %+v", records)
+			}
+		})
 	}
 }

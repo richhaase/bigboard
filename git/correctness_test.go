@@ -178,3 +178,21 @@ func TestAICompanyEmployeesAreHumanUnlessConfigured(t *testing.T) {
 		t.Fatalf("explicit override ignored: %v %+v", err, got)
 	}
 }
+
+func TestCollectCommitSubjects(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	subject := "Fix parsing | preserve\tcontrol\x1fbytes\x1b[31m"
+	writeAndCommit(t, dir, "a.go", "one\n", subject+"\n\nDetails do not belong in the subject.\n\nCo-authored-by: Claude <noreply@anthropic.com>")
+	gitOutput(t, dir, "commit", "--allow-empty", "--allow-empty-message", "-m", "")
+	records := scanFixture(t, dir)
+	if len(records) != 2 {
+		t.Fatalf("expected two commits: %+v", records)
+	}
+	if records[0].Subject != "" || records[1].Subject != subject {
+		t.Fatalf("subjects not preserved: empty=%q, actual=%q", records[0].Subject, records[1].Subject)
+	}
+	if !records[1].AIAssisted || records[1].Added != 1 || records[0].Added != 0 {
+		t.Fatalf("subject changed metadata or line counts: %+v", records)
+	}
+}
