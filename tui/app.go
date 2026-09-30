@@ -39,45 +39,46 @@ type Model struct {
 	prRow        int
 	prOffset     int
 
-	showPaths       bool
-	pathOffset      int
-	areaDefinitions map[string]stats.WorkAreaDefinition
-	areaRepoID      string
-	selectedAreaID  string
-	selectedRepoID  string
-	personID        string
-	awarenessPane   int
-	evidenceOffset  int
-	returnView      ViewMode
-	scannedAt       map[string]time.Time
-	staleRepos      map[string]bool
-	allRecords      []git.CommitRecord
-	authors         []stats.AuthorStats
-	repositories    []git.Repository
-	loadedRepos     []git.Repository
-	failedRepos     []string
-	excludedRepos   map[string]bool
-	overlayExcluded map[string]bool
-	overlayCursor   int
-	viewMode        ViewMode
-	selectedRow     int
-	scrollOffset    int
-	filterQuery     string
-	searching       bool
-	sortAsc         bool
-	hideBots        bool
-	activeOperative string
-	activeAuthorID  string
-	sortField       stats.SortField
-	timeIdx         int
-	version         string
-	width           int
-	height          int
-	loading         bool
-	err             error
-	options         Options
-	scanContext     context.Context
-	cancelScans     context.CancelFunc
+	showPaths        bool
+	pathOffset       int
+	areaDefinitions  map[string]stats.WorkAreaDefinition
+	areaRepoID       string
+	selectedAreaID   string
+	selectedRepoID   string
+	personID         string
+	awarenessPane    int
+	evidenceOffset   int
+	returnView       ViewMode
+	scannedAt        map[string]time.Time
+	staleRepos       map[string]bool
+	allRecords       []git.CommitRecord
+	authors          []stats.AuthorStats
+	repositories     []git.Repository
+	loadedRepos      []git.Repository
+	failedRepos      []string
+	excludedRepos    map[string]bool
+	overlayExcluded  map[string]bool
+	overlayCursor    int
+	viewMode         ViewMode
+	selectedRow      int
+	scrollOffset     int
+	filterQuery      string
+	searching        bool
+	sortAsc          bool
+	hideBots         bool
+	activeOperative  string
+	activeAuthorID   string
+	statDetailOffset int
+	sortField        stats.SortField
+	timeIdx          int
+	version          string
+	width            int
+	height           int
+	loading          bool
+	err              error
+	options          Options
+	scanContext      context.Context
+	cancelScans      context.CancelFunc
 
 	pendingRecords   []git.CommitRecord
 	pendingRepos     []git.Repository
@@ -262,6 +263,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.viewMode == ViewOperative {
+			m.clampStatDetailScroll()
+		}
 
 	case RepoLoadedMsg:
 		m.activeScans--
@@ -405,10 +409,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case "pgup", "pgdown", "home", "end":
+		if m.viewMode == ViewOperative {
+			m.clampStatDetailScroll()
+			switch msg.String() {
+			case "pgup":
+				m.statDetailOffset -= max(1, m.height-3)
+			case "pgdown":
+				m.statDetailOffset += max(1, m.height-3)
+			case "home":
+				m.statDetailOffset = 0
+			case "end":
+				m.statDetailOffset = len(strings.Split(m.operativeDetailContent(), "\n"))
+			}
+			m.clampStatDetailScroll()
+		}
+
 	case "left", "h":
 		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
 			if m.timeIdx > 0 {
 				m.timeIdx--
+				m.statDetailOffset = 0
 				m.recomputeAuthors()
 			}
 		}
@@ -417,6 +438,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
 			if m.timeIdx < len(TimePresets)-1 {
 				m.timeIdx++
+				m.statDetailOffset = 0
 				m.recomputeAuthors()
 			}
 		}
@@ -479,6 +501,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.activeOperative = disp[m.selectedRow].Name
 				m.activeAuthorID = disp[m.selectedRow].ID
 				m.viewMode = ViewOperative
+				m.statDetailOffset = 0
 			}
 		}
 	}
@@ -625,6 +648,7 @@ func (m *Model) stepOperative(delta int) {
 	if idx > len(list)-1 {
 		idx = len(list) - 1
 	}
+	m.statDetailOffset = 0
 	m.activeOperative = list[idx].Name
 	m.activeAuthorID = list[idx].ID
 	m.selectedRow = idx
@@ -772,7 +796,7 @@ func (m Model) renderAggregateView() string {
 	return strings.Join(sections, "\n")
 }
 
-func (m Model) renderOperativeView() string {
+func (m Model) operativeDetailContent() string {
 	var as *stats.AuthorStats
 	for i := range m.authors {
 		if (m.activeAuthorID != "" && m.authors[i].ID == m.activeAuthorID) || (m.activeAuthorID == "" && m.authors[i].Name == m.activeOperative) {
@@ -800,8 +824,38 @@ func (m Model) renderOperativeView() string {
 		len(m.loadedRepos),
 		m.excludedRepoCount(),
 	)
-	helpBar := RenderHelpBar(HelpContext{View: "operative"})
-	return strings.Join([]string{detail, "", helpBar}, "\n")
+	return detail
+}
+
+func (m *Model) clampStatDetailScroll() {
+	lines := strings.Split(m.operativeDetailContent(), "\n")
+	m.statDetailOffset = max(0, min(m.statDetailOffset, len(lines)-max(1, m.height-2)))
+}
+
+func (m Model) renderOperativeView() string {
+	if m.height > 0 && m.height < 3 {
+		return fitGlanceLines([]string{"Resize terminal · Esc back · q quit"}, max(1, m.width), m.height)
+	}
+	detail := m.operativeDetailContent()
+	help := RenderHelpBar(HelpContext{View: "operative"})
+	if m.width > 0 && m.width < 100 {
+		help = StyleHelpKey.Render("  PgUp/PgDn scroll · ↑↓ person · Esc back · ←→ time")
+	}
+	if m.width > 0 && m.width < 60 {
+		help = StyleHelpKey.Render("  PgUp/PgDn scroll · Esc back")
+	}
+	lines := strings.Split(detail, "\n")
+	if m.height <= 0 || len(lines)+2 <= m.height {
+		return strings.Join([]string{detail, "", help}, "\n")
+	}
+	// Keep navigation visible while paging the full detail, including the
+	// timeline and matrix. Arrow keys continue switching contributors.
+	budget := max(1, m.height-2)
+	offset := max(0, min(m.statDetailOffset, len(lines)-budget))
+	end := min(len(lines), offset+budget)
+	visible := append([]string(nil), lines[offset:end]...)
+	visible = append(visible, StyleDimWhite.Render(fmt.Sprintf("  %s · lines %d–%d/%d", displayText(m.activeOperative), offset+1, end, len(lines))), help)
+	return fitGlanceLines(visible, max(1, m.width), m.height)
 }
 
 func (m Model) aggregateTotals() (commits, added, removed, ai int) {

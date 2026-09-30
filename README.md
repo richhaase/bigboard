@@ -119,7 +119,10 @@ requires at least 40 columns by 18 rows. Narrow or short terminals keep one prim
 surface with a compact Night Ops header and the same controls. Overview rows retain numeric context instead of
 listing every contributor inline; detail and commit inspection preserve the full
 evidence. Shallow, stale, failed, partial, and unknown data remain visibly qualified.
-Statistics retain their existing layout.
+Statistics retain their existing layout. On short terminals, contributor detail
+uses `PgUp` / `PgDn` to scroll and `Home` / `End` for the first or last page;
+`↑` / `↓` still switches contributors. Its navigation remains visible while
+scrolling through the timeline and activity matrix.
 
 ## Accuracy notes
 

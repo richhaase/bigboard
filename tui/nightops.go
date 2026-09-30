@@ -324,7 +324,10 @@ func nightCompactBanner(width int) []string {
 // Restore the canvas after nested Lipgloss spans reset their SGR attributes.
 // Derive escapes from the active renderer so NO_COLOR / ASCII stays respected.
 func nightCanvas(content string, width, height int) string {
-	content = nightPanel(strings.Split(content, "\n"), width, height)
+	lines := strings.Split(content, "\n")
+	// A theme may pad a view, never discard its content. View-specific
+	// renderers own viewport sizing and navigation.
+	content = nightPanel(lines, width, max(height, len(lines)))
 	prefix, suffix, _ := strings.Cut(nightBase.Render("X"), "X")
 	if prefix == "" {
 		return content
