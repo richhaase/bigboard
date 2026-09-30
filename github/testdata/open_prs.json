@@ -1,0 +1,230 @@
+{
+  "data": {
+    "repository": {
+      "nameWithOwner": "Acme/Repo",
+      "pullRequests": {
+        "nodes": [
+          {
+            "number": 42,
+            "title": "Add API retry handling",
+            "author": {
+              "login": "alice"
+            },
+            "isDraft": false,
+            "updatedAt": "2026-09-30T12:00:00Z",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "mergeable": "MERGEABLE",
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "alice"
+                  }
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "bob"
+                  },
+                  "state": "COMMENTED"
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "PENDING"
+                    }
+                  }
+                }
+              ]
+            },
+            "files": {
+              "nodes": [
+                {
+                  "path": "api/retry.go",
+                  "changeType": "ADDED"
+                },
+                {
+                  "path": "api/retry_test.go",
+                  "changeType": "ADDED"
+                }
+              ],
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "baseRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "number": 43,
+            "title": "Share client types across API and web",
+            "author": {
+              "login": "bob"
+            },
+            "isDraft": false,
+            "updatedAt": "2026-09-30T12:00:00Z",
+            "reviewDecision": "CHANGES_REQUESTED",
+            "mergeable": "CONFLICTING",
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "alice"
+                  }
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "bob"
+                  },
+                  "state": "COMMENTED"
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "FAILURE"
+                    }
+                  }
+                }
+              ]
+            },
+            "files": {
+              "nodes": [
+                {
+                  "path": "api/types.go",
+                  "changeType": "MODIFIED"
+                },
+                {
+                  "path": "web/src/types.ts",
+                  "changeType": "MODIFIED"
+                }
+              ],
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "baseRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "number": 44,
+            "title": "Rename status panel",
+            "author": {
+              "login": "carol"
+            },
+            "isDraft": true,
+            "updatedAt": "2026-09-30T12:00:00Z",
+            "reviewDecision": null,
+            "mergeable": "UNKNOWN",
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "alice"
+                  }
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "author": {
+                    "login": "bob"
+                  },
+                  "state": "COMMENTED"
+                }
+              ],
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": null
+                  }
+                }
+              ]
+            },
+            "files": {
+              "nodes": [
+                {
+                  "path": "web/src/Status.tsx",
+                  "changeType": "RENAMED"
+                },
+                {
+                  "path": "docs/status.md",
+                  "changeType": "MODIFIED"
+                }
+              ],
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              }
+            },
+            "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "baseRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "totalCount": 3,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    },
+    "rateLimit": {
+      "remaining": 4999
+    }
+  }
+}

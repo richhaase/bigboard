@@ -113,7 +113,20 @@ func (m Model) currentWorkAreas() []stats.WorkArea {
 			kept = append(kept, r)
 		}
 	}
-	return definition.Build(kept)
+	areas := definition.Build(kept)
+	seen := make(map[string]bool)
+	for _, area := range areas {
+		seen[area.ID] = true
+	}
+	for _, pr := range m.prsForRepository(repo.ID) {
+		for _, area := range m.prAreas(repo, pr) {
+			if !seen[area.ID] {
+				areas = append(areas, area)
+				seen[area.ID] = true
+			}
+		}
+	}
+	return areas
 }
 
 func (m *Model) rebuildAreaDefinitions() {

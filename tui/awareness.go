@@ -137,6 +137,12 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
+	case "p", "P":
+		m.showPRs = true
+		m.prAll = msg.String() == "P"
+		m.prDetail = false
+		m.prRow = 0
+		m.prOffset = 0
 	case "v":
 		m.viewMode = ViewAggregate
 	case "R":
@@ -347,7 +353,7 @@ func (m Model) renderAwareness() string {
 	if height >= 30 {
 		lines = strings.Split(RenderHeader(width, len(m.loadedRepos), m.excludedRepoCount(), m.version), "\n")
 	}
-	lines = append(lines, StyleSubtitle.Render(m.awarenessBreadcrumb()), StyleDimWhite.Render("  Remote status unknown (no fetch) · Shared history, not live presence"), timePicker)
+	lines = append(lines, StyleSubtitle.Render(m.awarenessBreadcrumb()), StyleDimWhite.Render("  "+m.prStatus()), timePicker)
 	if height >= 38 && width >= 95 {
 		lines = append(lines, strings.Split(m.awarenessSummary(len(repositories)), "\n")...)
 	}
@@ -403,7 +409,7 @@ func (m Model) renderAwareness() string {
 			if !r.latest.IsZero() {
 				recency = r.latest.Local().Format("2006-01-02 15:04")
 			}
-			line := fmt.Sprintf("  %s%s %s · %s · %s", marker, linked, displayText(r.repo.Name), recency, summary)
+			line := fmt.Sprintf("  %s%s %s · %s · %s", marker, linked, displayText(r.repo.Name)+m.prCountLabel(r.repo.ID), recency, summary)
 			if m.areaRepoID != "" && r.subject != "" {
 				line += " · " + displayText(r.subject)
 			}
@@ -556,6 +562,7 @@ func (m Model) renderAwareness() string {
 	if width < 80 {
 		help = "Tab pane ↑↓ move Esc back v stats q quit"
 	}
+	help = "p/P PRs · " + strings.TrimSpace(help)
 	lines = append(lines, help)
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, width, "…")

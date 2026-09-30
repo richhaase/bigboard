@@ -218,3 +218,39 @@ goreleaser release --snapshot --clean --skip=notarize
 ## License
 
 MIT
+
+### Automatic GitHub PR awareness
+
+Read-only open pull request context loads automatically for supported GitHub
+origins using an already installed and signed-in `gh` CLI. No config setting is
+needed.
+Missing `gh` or authentication is shown without blocking local history. Bigboard
+never signs in, requests access, creates credentials, fetches Git objects, or
+changes pull requests. Headless `--export` stays local and unchanged.
+Only a supported GitHub `origin` is used, with no upstream guessing.
+
+PR counts appear beside Repositories and Work areas. Press `p` for the selected
+scope or `P` for all included repositories, then Enter for a scrollable detail view
+and Esc to return. Details show the canonical link, GitHub author and reviewers,
+aggregate review decision, check rollup, mergeability and update time. GitHub
+handles remain separate from local Git contributor identities. `UNKNOWN` is not
+approval or merge readiness; “updated” includes any PR activity.
+
+Changed file paths map to the same configured prefixes and automatic Work areas
+as local history, including new PR-only areas. Generated files follow `all_files`.
+A PR touching multiple areas appears in each; the overall count deduplicates it,
+including across duplicate local clones. PRs remain independent of local date,
+contributor and bot filters and never enter commit totals or the JSON export.
+
+The initial remote refresh runs after the local scan without blocking navigation.
+`R` refreshes local history and PR context; inside the PR overlay it refreshes PRs
+only. There is no polling or disk cache. Failed or incomplete inventories retain
+last-good evidence with visible stale/partial labels; a complete open inventory
+clears missing PRs even when supporting context is partial. Matching PRs retain
+old path evidence when their new file list is incomplete. Each repository refresh is bounded to 200 open PRs,
+1,000 file paths per PR, 64 requests and 90 seconds, within a two-minute overall
+refresh. Reviewer lists are also bounded and visibly partial when truncated.
+No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
+file list does not expose rename origins, so that limitation is labelled rather
+than guessed. Authentication, rate limits, unavailable repositories and unsupported
+origins are reported in the PR overlay without suppressing local history.

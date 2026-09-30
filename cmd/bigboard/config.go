@@ -42,17 +42,25 @@ func defaultConfigPath() string {
 }
 
 func loadConfig(path string, explicit bool) (*Config, error) {
+	var cfg Config
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) && !explicit {
-			return &Config{}, nil
+			return &cfg, nil
 		}
 		return nil, err
 	}
-	var cfg Config
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cfg); err != nil {
+	// Tolerate the obsolete setting from the earlier PR build without
+	// retaining a switch or requiring users to edit their existing config.
+	input := struct {
+		*Config
+		GitHub *struct {
+			Enabled bool `json:"enabled"`
+		} `json:"github"`
+	}{Config: &cfg}
+	if err := decoder.Decode(&input); err != nil {
 		return nil, err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
