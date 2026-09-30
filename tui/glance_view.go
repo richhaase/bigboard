@@ -108,17 +108,20 @@ func (m Model) glanceScanLine(scope string) string {
 	if m.areaRepoID != "" {
 		id = m.areaRepoID
 	}
-	fresh := "not recorded"
+	fresh := "not yet"
 	if t := m.scannedAt[id]; !t.IsZero() {
 		fresh = t.Local().Format("Jan 02 15:04 MST")
 	}
-	prefix := "Local scan "
+	prefix := "Last updated: "
 	if m.staleRepos[id] {
-		prefix = "STALE · last good scan "
+		prefix = "STALE · last updated: "
 	}
 	line := "  " + prefix + fresh
+	if m.refreshing {
+		line += " · Updating…"
+	}
 	if len(m.failedRepos) > 0 {
-		line += fmt.Sprintf(" · %d scan failures (R retry)", len(m.failedRepos))
+		line += fmt.Sprintf(" · Update errors: %d (R retry)", len(m.failedRepos))
 	}
 	if m.staleRepos[id] || len(m.failedRepos) > 0 {
 		return StyleAmber.Render(line)
@@ -182,12 +185,17 @@ func (m Model) renderAwareness() string {
 		return ansi.Truncate("Resize to 40×18 · v stats · q quit", width, "…")
 	}
 	m.normalizeAreaScope()
-	m.normalizeAwarenessFocus()
+	if !m.glance.detailOpen {
+		m.normalizeAwarenessFocus()
+	}
 	if m.areaRepoID == "" && m.glance.detailOpen {
 		m.closeGlanceDetail()
 	}
 	if m.glance.help {
 		return m.renderGlanceHelp(width, height)
+	}
+	if width >= 100 && height >= 28 && !m.showPaths {
+		return m.renderNightOps(width, height)
 	}
 	if m.glance.detailOpen {
 		return m.renderGlanceDetail(width, height)
@@ -199,7 +207,7 @@ func (m Model) renderAwareness() string {
 	if height < 30 {
 		bannerWidth = min(width, bannerMinWidth-1)
 	}
-	lines := renderBanner(bannerWidth)
+	lines := nightCompactBanner(bannerWidth)
 	breadcrumb := "  REPOSITORIES"
 	if repo, ok := m.areaRepository(); ok {
 		breadcrumb += " › " + displayText(repo.Name) + " › WORK AREAS"
@@ -320,9 +328,10 @@ func glanceContributorPreview(people []stats.AuthorStats, width, maxLines int) [
 	return lines
 }
 func (m Model) renderGlanceHelp(width, height int) string {
-	lines := renderBanner(min(width, bannerMinWidth-1))
+	lines := nightCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("GLANCE BOARD · HELP", width),
 		"  Enter  repository → areas → detail → full commit",
+		"  Local data updates every minute; R refreshes now",
 		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",
 		"  /  search this list  Enter accept  Esc clear",
 		"  s  sort areas/repos: Activity (commits), Recent, Name",
@@ -335,6 +344,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 		"  p  selected parent-area PRs     P  all included PRs",
 		"  PRs use all open dates, independent of local filters",
 		"  r  included repositories     R  refresh local + PR data",
+		"  Local refresh reads cached Git history; never runs git fetch",
 		"  v  contributor statistics     q / Ctrl-C  quit",
 		"  Git associations show neither ownership nor live presence",
 		"  ? / Esc  close help")

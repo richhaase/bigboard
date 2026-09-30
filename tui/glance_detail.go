@@ -210,7 +210,7 @@ func (m Model) renderGlanceDetail(width, height int) string {
 	if m.showPaths {
 		return m.renderCommitInspector(width, height)
 	}
-	lines := renderBanner(min(width, bannerMinWidth-1))
+	lines := nightCompactBanner(width)
 	repo, _ := m.areaRepository()
 	breadcrumb := "  " + displayText(repo.Name) + " › " + displayText(area.Name)
 	if m.glance.frame.relatedFromID != "" {
@@ -248,6 +248,15 @@ func (m Model) renderGlanceDetail(width, height int) string {
 		}
 	}
 	lines = append(lines, StyleCyan.Render("  "+strings.Join(tabs, " ")), StyleDimCyan.Render("  "+hrule(width-chromeInset)))
+	lines = append(lines, m.glanceLensLines(width, height-len(lines))...)
+	return fitGlanceLines(lines, width, height)
+}
+
+// glanceLensLines shares the identity-preserving, scrollable lens between the
+// compact view and the wide workspace without reparsing rendered headings.
+func (m Model) glanceLensLines(width, height int) []string {
+	var lines []string
+	areaPeople := m.glanceAreaPeople()
 	if m.glance.frame.relatedFromID != "" {
 		lines = append(lines, StyleDimWhite.Render("  Shared contributors · associations, not collaboration"))
 	}
@@ -357,7 +366,7 @@ func (m Model) renderGlanceDetail(width, height int) string {
 		footer = "  / " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
 	}
 	lines = append(lines, footer, m.glanceCoverageLine())
-	return fitGlanceLines(lines, width, height)
+	return lines
 }
 
 func (m Model) selectedGlanceCommit() (git.CommitRecord, bool) {
@@ -425,7 +434,7 @@ func (m Model) commitInspectorMaxOffset() int {
 	return max(0, len(m.commitInspectorLines(max(1, m.width)))-max(1, m.height-5))
 }
 func (m Model) renderCommitInspector(width, height int) string {
-	lines := renderBanner(min(width, bannerMinWidth-1))
+	lines := nightCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("COMMIT · CHANGED PATHS", width), m.glanceScanLine(m.areaRepoID))
 	body := m.commitInspectorLines(width)
 	budget := max(1, height-len(lines)-2)

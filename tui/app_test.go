@@ -320,14 +320,14 @@ func TestStreamingLoadFinalizes(t *testing.T) {
 	if !m.loading || m.pendingRemaining != 2 {
 		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
 	}
-	u, _ := m.Update(RepoLoadedMsg{Repository: m.repositories[0], Records: []git.CommitRecord{
+	u, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Records: []git.CommitRecord{
 		{Author: "A", Email: "a@x.com", Date: now, Added: 5, RepoName: "repoA"},
 	}})
 	m = u.(Model)
 	if !m.loading {
 		t.Error("should still be loading after 1 of 2")
 	}
-	u, _ = m.Update(RepoLoadedMsg{Repository: m.repositories[1], Err: errors.New("boom")})
+	u, _ = m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[1], Err: errors.New("boom")})
 	m = u.(Model)
 	if m.loading {
 		t.Error("should finalize after 2 of 2")
@@ -361,11 +361,15 @@ func TestRepositoryLoadingIsBounded(t *testing.T) {
 	if !ok {
 		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
 	}
-	if len(batch) != maxConcurrentRepoScans {
-		t.Fatalf("initial batch has %d scans, want %d", len(batch), maxConcurrentRepoScans)
+	if len(batch) != 2 {
+		t.Fatalf("initial batch should include scans and timer, got %d commands", len(batch))
+	}
+	scans := batch[0]().(tea.BatchMsg)
+	if len(scans) != maxConcurrentRepoScans {
+		t.Fatalf("initial batch has %d scans, want %d", len(scans), maxConcurrentRepoScans)
 	}
 
-	updated, next := m.Update(RepoLoadedMsg{Repository: m.repositories[0]})
+	updated, next := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0]})
 	m = updated.(Model)
 	if next == nil {
 		t.Fatal("completed scan should schedule the next repository")

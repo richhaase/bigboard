@@ -324,6 +324,8 @@ func RenderHelpBar(ctx HelpContext) string {
 	switch ctx.View {
 	case "operative":
 		bindings = []struct{ key, desc string }{
+			{"PgUp/PgDn", "scroll"},
+			{"Home/End", "top/end"},
 			{"↑↓", "prev/next"},
 			{"esc", "back"},
 			{"←→", "time"},

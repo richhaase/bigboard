@@ -42,7 +42,7 @@ func TestMonorepoAreasAndCrossAreaEvidence(t *testing.T) {
 	if !foundBilling {
 		t.Fatal("billing area missing")
 	}
-	for _, want := range []string{"WORK AREAS", "services/auth", "apps/web", "Renew sessions"} {
+	for _, want := range []string{"AREAS / COMMITS", "services/auth", "apps/web", "Renew sessions"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}

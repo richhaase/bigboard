@@ -14,6 +14,7 @@ git/git.go              Git ops: recursive discovery (follows symlinks), branch 
 stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
 tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
 tui/styles.go           Color palette and lipgloss style definitions
+tui/nightops.go         Responsive Night Ops inventory/evidence workspace and canvas
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
 tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
@@ -24,7 +25,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 
 1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
 2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
-3. `Model.Init` streams one scan command per repo; each emits a `RepoLoadedMsg` (driving the live scan log) and accumulates into `Model.allRecords` (in-memory; refetched only on `R`).
+3. `Model.Init` streams bounded scan commands and starts a cancellable 60-second local refresh timer. Generation-tagged `RepoLoadedMsg` results accumulate into a pending snapshot, committed atomically when the batch finishes. Background updates preserve the visible last-good data and navigation; `R` refreshes immediately.
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
 5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 
@@ -42,7 +43,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **Counting**: deduplicate object IDs globally after repository/time filtering; repository subtotals overlap. Prefer known counts from full copies over unknown shallow boundaries. Shallow counts use `LinesUnknown` / `unknown_line_commits` and visible `?` qualifiers. Scans never lazily fetch missing objects. Cached remote default history precedes local history.
 - **Dates and retained behavior**: use `time.Local` for all calendar grouping and display. Future-dated commits remain counted, with no upper time cutoff. Keep the current churn formula and its zero-additions `0.00` convention. Keep the existing UI, JSON export, and merge-commit exclusion.
 - **Git isolation**: resolve branch OIDs, parse NUL-delimited paths, pin diff settings, clear repository-local environment overrides, and retain specific-agent AI matching with explicit user overrides.
-- **Banner rendering**: figlet banner3 font with `#` → `█`, 7-line vertical color gradient, compact fallback for terminals < 82 cols.
+- **Night Ops awareness**: `tui/nightops.go` renders the wide 100×28+ inventory/evidence workspace with cell-based geometry, violet canvas, lime accents and a compact outlined wordmark. Smaller terminals use the compact glance view. All modes share the dark canvas; statistics retain their existing arrangement.
 
 ## Build & Test
 
@@ -70,7 +71,7 @@ go test ./...
 
 ## Automatic PR context
 
-GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the p/P overlay. PR handles/data never enter CommitRecord, contributor stats, or export. Local refresh cancels obsolete remote generations; complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
+GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the p/P overlay. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `R` refresh GitHub context, canceling obsolete remote generations. Automatic local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
 
 ## Progressive disclosure
 

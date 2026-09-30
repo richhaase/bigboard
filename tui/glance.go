@@ -103,7 +103,9 @@ func (m *Model) closeGlanceDetail() {
 
 func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.normalizeAreaScope()
-	m.normalizeAwarenessFocus()
+	if !m.glance.detailOpen {
+		m.normalizeAwarenessFocus()
+	}
 	if m.areaRepoID == "" && m.glance.detailOpen {
 		m.closeGlanceDetail()
 	}
@@ -164,11 +166,8 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewMode = ViewAggregate
 		return m, nil
 	case "R":
-		if !m.loading {
-			m.loading = true
-			m.resetPending()
-			return m, m.loadCmds()
-		}
+		cmd := m.startLocalRefresh(true)
+		return m, cmd
 	case "r":
 		m.overlayExcluded = make(map[string]bool)
 		for k, v := range m.excludedRepos {
@@ -230,6 +229,13 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "s":
 		m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+	case "tab", "1", "2", "3", "4":
+		if m.areaRepoID != "" && len(rows) > 0 {
+			m.openGlanceArea(rows[selected])
+			if key >= "1" && key <= "4" {
+				m.glance.frame.tab = int(key[0] - '1')
+			}
+		}
 	case "enter":
 		if len(rows) > 0 {
 			if m.areaRepoID == "" {

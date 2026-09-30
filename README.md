@@ -51,22 +51,24 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 
 ## Work relationships
 
-The initial view is a compact repository overview with aligned commit counts,
-contributor counts, latest author activity, and bounded PR context. The default
-Activity sort exposes where commits are concentrated; `s` switches to Recent or
-Name without changing the selected identity. Commit volume is not priority or
-productivity. Moving the selection automatically shows that area's or repository's
-contributor names alongside its commit count and latest subject. Names use the
-current time range and bot filter, ordered by most commits in the selected scope
-first; a bounded preview shows `+N more` when needed.
-The full alphabetical list remains in People. Repository previews also show busy
-work areas, keeping Big Board’s gradient banner and neon selection.
+Night Ops is a Go/Bubble Tea workspace with a dark violet canvas, acid-lime
+selection and compact outlined wordmark. At 100 columns × 28 rows and above,
+the repository/area inventory stays on the left while the selected scope shows
+ranked contributors and related areas above recent commits and PR context.
+Moving the selection updates this evidence immediately. The default Activity
+sort exposes where commits are concentrated; `s` switches to Recent or Name
+without changing the selected identity. Commit volume is not priority or productivity.
+Contributor previews use the current time range and bot filter, ranked by commits
+in this scope; a bounded preview shows `+N more` when needed. The full alphabetical
+list remains in People. Repository previews show their busiest work areas.
 
 Press `Enter` on a repository to open its work areas. A single included repository
 opens directly into work areas after scanning. `Enter` on an area opens a dedicated
-detail view. `Tab` / `Shift+Tab` or `1`–`4` switches Activity, People, Related, and
-Subareas; only one detail surface is expanded at a time. Activity shows real
-subjects grouped by author date. `Enter` opens a scrollable inspector with the
+detail view, moving keyboard focus from the sidebar into the selected lens.
+`Tab` or `1`–`4` also opens a lens directly from the area inventory. In detail,
+`Tab` / `Shift+Tab` or `1`–`4` switches Activity, People, Related, and Subareas;
+only one detail surface is expanded at a time. Activity shows real subjects with
+author-date evidence (day headings in the compact view). `Enter` opens a scrollable inspector with the
 full subject, canonical contributor identity, timestamp, object ID, and all changed
 paths. People is alphabetical; selecting a person filters Activity. Related lists
 exact shared-contributor counts; open one to inspect those identities and their
@@ -110,14 +112,23 @@ The longest matching prefix wins; unmatched paths keep automatic groups. Names
 must be unique within a repository, and one prefix cannot name two areas.
 The existing `depth` setting still controls repository discovery only.
 
-Scan timestamps describe the local scan, never remote freshness. Big Board does
-not fetch. A failed refresh retains that repository's last successful data with
+The board updates local repository data on launch and every minute while it
+runs. “Last updated” shows the last successful local refresh for the selected
+repository; “Updating…” keeps the existing view usable during a refresh. `R`
+refreshes immediately, including GitHub PR context. Automatic local refreshes
+do not repeatedly request GitHub PR data. Big Board never runs `git fetch`;
+fetch remote history separately when you want to update your local Git cache.
+A failed refresh retains that repository's last successful data with
 a STALE marker; a successful scan, including an empty one, replaces it. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
-surface with a compact banner. Overview rows retain numeric context instead of
+surface with a compact Night Ops header and the same controls. Overview rows retain numeric context instead of
 listing every contributor inline; detail and commit inspection preserve the full
 evidence. Shallow, stale, failed, partial, and unknown data remain visibly qualified.
-Statistics retain their existing layout.
+Statistics retain their wide layout; narrow contributor detail uses labeled
+repository metrics so every value remains readable. On short terminals, contributor detail
+uses `PgUp` / `PgDn` to scroll and `Home` / `End` for the first or last page;
+`↑` / `↓` still switches contributors. Its navigation remains visible while
+scrolling through the timeline and activity matrix.
 
 ## Accuracy notes
 
@@ -187,8 +198,8 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Local scan freshness and retained last-good data on refresh failures
-- Responsive ASCII art banner with vertical color gradient, shared across relationships and statistics
+- Automatic local updates every minute, clear Last updated status, and retained last-good data on refresh failures
+- Responsive one-word Bigboard wordmark with a violet/lime Night Ops workspace
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
 - AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %

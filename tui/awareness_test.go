@@ -66,7 +66,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 		t.Fatalf("focus=%s", m.personID)
 	}
 	out := m.View()
-	for _, text := range []string{"Fix login", "PRs:", "Local scan"} {
+	for _, text := range []string{"Fix login", "OPEN PRs", "Last updated"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %q:\n%s", text, out)
 		}
@@ -112,7 +112,7 @@ func TestAwarenessFailureRetainsLastGood(t *testing.T) {
 	m.loading = true
 	m.resetPending()
 	for _, repo := range m.repositories {
-		next, _ := m.Update(RepoLoadedMsg{Repository: repo, Err: errors.New("unreadable")})
+		next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Err: errors.New("unreadable")})
 		m = next.(Model)
 	}
 	if len(m.allRecords) != 3 || m.err != nil {
@@ -127,7 +127,7 @@ func TestAwarenessFailureRetainsLastGood(t *testing.T) {
 	m.loading = true
 	m.resetPending()
 	for _, repo := range m.repositories {
-		next, _ := m.Update(RepoLoadedMsg{Repository: repo})
+		next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
 		m = next.(Model)
 	}
 	if len(m.allRecords) != 0 || len(m.failedRepos) != 0 || len(m.staleRepos) != 0 {
@@ -256,7 +256,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	m.width = 110
 	m.height = 40
 	out := m.View()
-	for _, text := range []string{bannerLines[0], "━", "REPOSITORIES", "PEOPLE", "COMMITS", "LAST"} {
+	for _, text := range []string{"NIGHT OPS", "[ BB ]", "REPOSITORIES", "WHO WORKED HERE", "RECENT COMMITS", "Last updated"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing original-style element %q", text)
 		}
@@ -266,7 +266,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	}
 	m.width = 40
 	m.height = 18
-	if !strings.Contains(m.View(), "B I G   B O A R D") {
-		t.Fatal("compact Big Board banner missing")
+	if !strings.Contains(m.View(), "BIGBOARD / NIGHT OPS") {
+		t.Fatalf("compact Big Board banner missing:\n%s", m.View())
 	}
 }

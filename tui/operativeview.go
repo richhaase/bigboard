@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 )
@@ -52,12 +53,12 @@ func (v OperativeView) RenderOperativeDetail(
 	if authorStats == nil && len(authorRecords) == 0 {
 		sections = append(sections, "")
 		sections = append(sections, StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→."))
-		return lipgloss.JoinVertical(lipgloss.Left, sections...)
+		return wrapStatistics(strings.Join(sections, "\n"), width)
 	}
 
 	if authorStats != nil {
 		sections = append(sections, "")
-		sections = append(sections, renderStatBoxes(authorStats.Commits, authorStats.Added, authorStats.Removed, authorStats.AICommits, width, authorStats.UnknownLineCommits))
+		sections = append(sections, renderContributorSummary(authorStats, width))
 		sections = append(sections, "")
 		sections = append(sections, renderMetricsLine(authorStats))
 		if authorStats.UnknownLineCommits > 0 {
@@ -84,7 +85,21 @@ func (v OperativeView) RenderOperativeDetail(
 		sections = append(sections, v.renderHeatmap(authorRecords, width, now))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return wrapStatistics(strings.Join(sections, "\n"), width)
+}
+
+// Detail must expose every total even when the glance summary becomes compact.
+func renderContributorSummary(as *stats.AuthorStats, width int) string {
+	if width <= 0 || width >= midTableWidth {
+		return renderStatBoxes(as.Commits, as.Added, as.Removed, as.AICommits, width, as.UnknownLineCommits)
+	}
+	return wrapStatistics(strings.Join([]string{
+		"  COMMITS " + StyleNumeric.Render(FormatNumber(as.Commits)),
+		"  ADDED   " + StyleNumeric.Render(formatLineCount(as.Added, as.UnknownLineCommits)),
+		"  REMOVED " + StyleNumeric.Render(formatLineCount(as.Removed, as.UnknownLineCommits)),
+		"  NET     " + renderKnownNet(as.Net, 0, as.UnknownLineCommits),
+		"  AI CO-AUTHORED " + StyleAmber.Render(fmt.Sprintf("%s (%d)", percentLabel(as.AICommits, as.Commits), as.AICommits)),
+	}, "\n"), width)
 }
 
 func heatmapRamp() []struct {
@@ -173,9 +188,6 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 }
 
 func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) string {
-	nameW := 30
-	numW := 10
-
 	type repoEntry struct {
 		name string
 		rc   *stats.RepoContribution
@@ -198,45 +210,72 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		}
 	}
 
-	barW := 15
-	rowFmt := fmt.Sprintf("  %%-%ds %%%ds %%%ds %%%ds %%%ds  %%s", nameW, numW, numW, numW, numW)
-
-	var rows []string
-
-	header := fmt.Sprintf(rowFmt,
-		StyleTableHeader.Render(fmt.Sprintf("%-*s", nameW, "REPO")),
-		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "COMMITS")),
-		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "ADDED")),
-		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "REMOVED")),
-		StyleTableHeader.Render(fmt.Sprintf("%*s", numW, "NET")),
-		"",
-	)
-	rows = append(rows, header)
-	rows = append(rows, "  "+StyleDimCyan.Render(hrule(width-chromeInset)))
-
-	for i, e := range entries {
-		name := StyleMagenta.Render(padRight(Truncate(e.name, nameW), nameW))
-		commits := StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits)))
-		added := StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Added, e.rc.UnknownLineCommits)))
-		removed := StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Removed, e.rc.UnknownLineCommits)))
-		net := renderKnownNet(e.rc.Net, numW, e.rc.UnknownLineCommits)
-		bar := RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW)
-
-		row := fmt.Sprintf("  %s %s %s %s %s  %s", name, commits, added, removed, net, bar)
-		if e.rc.AICommits > 0 && e.rc.Commits > 0 {
-			row += "  " + StyleAmber.Render("ai "+percentLabel(e.rc.AICommits, e.rc.Commits))
+	// Retain the table when every cell fits. Use terminal-cell widths rather
+	// than bytes/runes, and include numeric qualifiers and the optional AI share.
+	nameW, numW, aiW := 30, 10, 0
+	for _, e := range entries {
+		nameW = max(nameW, ansi.StringWidth(displayText(e.name)))
+		for _, value := range []string{FormatNumber(e.rc.Commits), formatLineCount(e.rc.Added, e.rc.UnknownLineCommits), formatLineCount(e.rc.Removed, e.rc.UnknownLineCommits), ansi.Strip(renderKnownNet(e.rc.Net, 0, e.rc.UnknownLineCommits))} {
+			numW = max(numW, ansi.StringWidth(value))
 		}
-
-		var rowStyle lipgloss.Style
-		if i%2 == 0 {
-			rowStyle = StyleRowEven
+		if e.rc.AICommits > 0 && e.rc.Commits > 0 {
+			aiW = max(aiW, 2+ansi.StringWidth("ai "+percentLabel(e.rc.AICommits, e.rc.Commits)))
+		}
+	}
+	const barW = 15
+	tableWidth := 2 + nameW + 4*(1+numW) + 2 + barW + aiW
+	narrow := width > 0 && tableWidth > width
+	var rows []string
+	if !narrow {
+		header := "  " + StyleTableHeader.Render(padRight("REPO", nameW))
+		for _, label := range []string{"COMMITS", "ADDED", "REMOVED", "NET"} {
+			header += " " + StyleTableHeader.Render(fmt.Sprintf("%*s", numW, label))
+		}
+		rows = append(rows, header, "  "+StyleDimCyan.Render(hrule(max(0, width-chromeInset))))
+	}
+	for i, e := range entries {
+		var row string
+		if narrow {
+			cells := []string{
+				"  " + StyleMagenta.Render(displayText(e.name)),
+				"  COMMITS " + StyleNumeric.Render(FormatNumber(e.rc.Commits)),
+				"  ADDED   " + StyleNumeric.Render(formatLineCount(e.rc.Added, e.rc.UnknownLineCommits)),
+				"  REMOVED " + StyleNumeric.Render(formatLineCount(e.rc.Removed, e.rc.UnknownLineCommits)),
+				"  NET     " + renderKnownNet(e.rc.Net, 0, e.rc.UnknownLineCommits),
+				"  AI      " + StyleAmber.Render(percentLabel(e.rc.AICommits, e.rc.Commits)),
+			}
+			if i > 0 {
+				rows = append(rows, "")
+			}
+			row = wrapStatistics(strings.Join(cells, "\n"), width)
 		} else {
+			row = fmt.Sprintf("  %s %s %s %s %s  %s",
+				StyleMagenta.Render(padRight(displayText(e.name), nameW)),
+				StyleNumeric.Render(fmt.Sprintf("%*s", numW, FormatNumber(e.rc.Commits))),
+				StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Added, e.rc.UnknownLineCommits))),
+				StyleNumeric.Render(fmt.Sprintf("%*s", numW, formatLineCount(e.rc.Removed, e.rc.UnknownLineCommits))),
+				renderKnownNet(e.rc.Net, numW, e.rc.UnknownLineCommits),
+				RenderImpactBar(e.rc.Added, e.rc.Removed, maxTotal, barW))
+			if e.rc.AICommits > 0 && e.rc.Commits > 0 {
+				row += "  " + StyleAmber.Render("ai "+percentLabel(e.rc.AICommits, e.rc.Commits))
+			}
+		}
+		rowStyle := StyleRowEven
+		if i%2 != 0 {
 			rowStyle = StyleRowOdd
 		}
 		rows = append(rows, rowStyle.Render(row))
 	}
-
 	return strings.Join(rows, "\n")
+}
+
+// Wrap before the viewport slices physical rows: clipping at the canvas cannot
+// recover hidden values, and wrapping after paging would make offsets incorrect.
+func wrapStatistics(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+	return ansi.Hardwrap(content, width, true)
 }
 
 func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) string {
@@ -257,30 +296,27 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 		}
 	}
 
-	labelW := 10
-	numW := 6
-	barW := width - labelW - numW - 6
-	if barW < 10 {
-		barW = 10
-	}
-	if barW > 60 {
-		barW = 60
-	}
-
 	var rows []string
 	for _, m := range months {
 		label := StyleDimWhite.Render(fmt.Sprintf("%-10s", m.Month.Format("Jan 2006")))
 		count := StyleNumeric.Render(fmt.Sprintf("%4d ", m.Commits))
-		bar := RenderImpactBar(m.Added, m.Removed, maxTotal, barW)
-
-		row := fmt.Sprintf("  %s%s%s", label, count, bar)
+		suffix := ""
 		if m.UnknownLineCommits > 0 {
-			row += StyleAmber.Render(" ?")
+			suffix += StyleAmber.Render(" ?")
 		}
 		if m.AI > 0 {
-			row += " " + StyleAmber.Render(fmt.Sprintf("◆%d", m.AI))
+			suffix += " " + StyleAmber.Render(fmt.Sprintf("◆%d", m.AI))
 		}
-		rows = append(rows, row)
+		prefix := "  " + label + count
+		barW := 60
+		if width > 0 {
+			barW = max(0, min(barW, width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix)))
+		}
+		bar := ""
+		if barW > 0 {
+			bar = RenderImpactBar(m.Added, m.Removed, maxTotal, barW)
+		}
+		rows = append(rows, wrapStatistics(prefix+bar+suffix, width))
 	}
 
 	return strings.Join(rows, "\n")
