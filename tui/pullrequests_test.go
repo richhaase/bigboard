@@ -74,6 +74,7 @@ func TestPRRefreshDeduplicatesAndRejectsOldGeneration(t *testing.T) {
 	if p.ctx.Err() == nil {
 		t.Fatal("context not canceled")
 	}
+	m.prState.nextRefresh = time.Time{} // Explicitly advance past minimum refresh age.
 	cmd = m.startPRRefresh()
 	next, _ = m.Update(cmd())
 	m = next.(Model)
@@ -207,19 +208,19 @@ func TestPRCompleteInventoryRemovesClosedEvenWithPartialContext(t *testing.T) {
 		t.Fatal("partial path scope missing")
 	}
 }
-func TestPRRefreshKeyCancelsSupersededFetch(t *testing.T) {
+func TestPRRefreshKeyCoalescesRemoteFetch(t *testing.T) {
 	m := prFixture()
 	m.prProvider = &fakePRProvider{}
 	first := m.startPRRefresh()
 	generation := m.prGeneration
 	m = pressAwareness(m, "R")
-	if m.prGeneration <= generation || m.prState.loading {
-		t.Fatal("local refresh did not cancel PR generation")
+	if m.prGeneration != generation || !m.prState.loading {
+		t.Fatal("local refresh interrupted PR generation")
 	}
 	next, _ := m.Update(first())
 	m = next.(Model)
 	if !m.refreshing || m.loading {
-		t.Fatal("old PR message interfered with background local refresh")
+		t.Fatal("PR message interfered with background local refresh")
 	}
 }
 
@@ -307,6 +308,7 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	next, _ := m.Update(refresh())
 	m = next.(Model)
 	m = pressAwareness(m, "P")
+	m.prState.nextRefresh = time.Time{} // A manual refresh after the minimum age.
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 	m = next.(Model)
 	if cmd == nil {

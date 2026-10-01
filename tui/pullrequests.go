@@ -35,6 +35,7 @@ type prState struct {
 	errors       map[string]error
 	snapshots    map[string]prSnapshot
 	loading      bool
+	nextRefresh  time.Time
 }
 type prsLoadedMsg struct {
 	generation   uint64
@@ -53,16 +54,27 @@ func (m *Model) cancelPRRefresh() {
 	m.prState.loading = false
 }
 func (m *Model) startPRRefresh() tea.Cmd {
+	// Reuse the current snapshot and coalesce repeated refresh keys.
+	if m.prState.loading || time.Now().Before(m.prState.nextRefresh) {
+		return nil
+	}
+	m.prState.nextRefresh = time.Now().Add(time.Minute)
 	m.cancelPRRefresh()
 	parent := m.scanContext
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	ctx = gh.WithRequestBudget(ctx, gh.MaxRefreshRequests)
 	m.cancelPRs = cancel
 	m.prState.loading = true
 	generation := m.prGeneration
-	repos := append([]git.Repository(nil), m.loadedRepos...)
+	var repos []git.Repository
+	for _, repo := range m.loadedRepos {
+		if !m.excludedRepos[repo.ID] {
+			repos = append(repos, repo)
+		}
+	}
 	provider := m.prProvider
 	return m.commands.wrap(func() tea.Msg {
 		defer cancel()
@@ -87,8 +99,11 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				result := gh.Result{Repo: remote, Err: unavailable}
 				if unavailable == nil {
 					result = provider.Fetch(ctx, remote)
-					if errors.Is(result.Err, gh.ErrAuthentication) || errors.Is(result.Err, gh.ErrUnavailable) {
+					if errors.Is(result.Err, gh.ErrAuthentication) || errors.Is(result.Err, gh.ErrUnavailable) || errors.Is(result.Err, gh.ErrRateLimited) {
 						unavailable = result.Err
+					}
+					if result.RetryAt.After(time.Now()) {
+						unavailable = gh.ErrRateLimited
 					}
 				}
 				canonical, err := gh.CanonicalRepo(result.Repo)
@@ -112,6 +127,9 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		selectedKey = oldVisible[m.prRow].Key()
 	}
 	m.prState.loading = false
+	if next := msg.checked.Add(time.Minute); next.After(m.prState.nextRefresh) {
+		m.prState.nextRefresh = next
+	}
 	if m.prState.snapshots == nil {
 		m.prState.snapshots = map[string]prSnapshot{}
 	}
@@ -124,6 +142,9 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	}
 	m.prState.errors = msg.errors
 	for repo, result := range msg.results {
+		if result.RetryAt.After(m.prState.nextRefresh) {
+			m.prState.nextRefresh = result.RetryAt
+		}
 		old := m.prState.snapshots[repo]
 		next := prSnapshot{checked: msg.checked, lastGood: old.lastGood, partial: !result.Complete, err: result.Err}
 		for _, pr := range result.PRs {
@@ -237,6 +258,10 @@ func (m Model) visiblePRs() []gh.PullRequest {
 func (m Model) prStatus() string {
 	partial, failed, hasSnapshot := false, false, false
 	reason := "fetch failed"
+	refreshHint := ""
+	if time.Now().Before(m.prState.nextRefresh) {
+		refreshHint = " · R after " + m.prState.nextRefresh.Local().Format("15:04:05")
+	}
 	var checked time.Time
 	for _, repo := range m.loadedRepos {
 		if m.excludedRepos[repo.ID] {
@@ -261,13 +286,13 @@ func (m Model) prStatus() string {
 	}
 	count := len(m.allPRs())
 	if failed && count == 0 {
-		return "GitHub PRs unavailable · " + reason + " · p details"
+		return "GitHub PRs unavailable · " + reason + refreshHint + " · p details"
 	}
 	if !hasSnapshot {
 		if m.prState.loading {
 			return "GitHub PRs refreshing · no snapshot yet"
 		}
-		return "GitHub PRs unknown · p details"
+		return "GitHub PRs unknown" + refreshHint + " · p details"
 	}
 	// Lead with evidence quality: fixed-width sidebars must never truncate
 	// STALE/PARTIAL after counts. A new request cannot make retained data fresh.
@@ -292,7 +317,7 @@ func (m Model) prStatus() string {
 	if !checked.IsZero() {
 		label += " · checked " + checked.Local().Format("15:04 MST")
 	}
-	return label + " · p scope · P all"
+	return label + refreshHint + " · p scope · P all"
 }
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {

@@ -17,10 +17,13 @@ const (
 )
 
 // Provider is safe for concurrent independent repository fetches. It retains no
-// credentials or cache; the caller owns refresh scheduling and stale snapshots.
+// credentials or response cache; the caller owns refresh scheduling and stale
+// snapshots. Shared quota cooldown survives individual fetch cancellation.
 type Provider struct {
 	runner Runner
 	limits limits
+	quota  quotaState
+	now    func() time.Time
 }
 
 type limits struct {
@@ -32,7 +35,7 @@ func NewProvider(runner Runner) *Provider {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Provider{runner: runner, limits: limits{
+	return &Provider{runner: runner, now: time.Now, limits: limits{
 		pullRequests: MaxPullRequests, files: MaxFilesPerPR, requests: MaxRequests,
 		summaryPages: MaxPullRequests / prPageSize,
 	}}
@@ -101,7 +104,10 @@ type rawRepository struct {
 type apiResponse struct {
 	Data *struct {
 		Repository *rawRepository
-		RateLimit  *struct{ Remaining int }
+		RateLimit  *struct {
+			Remaining int
+			ResetAt   string
+		}
 	}
 	Errors []struct{ Message, Type string }
 }
@@ -135,6 +141,10 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 		return Result{Err: err}
 	}
 	result := Result{Repo: repo, PRs: []PullRequest{}}
+	if until := p.cooldown(); until.After(p.now()) {
+		result.Err, result.RetryAt = ErrRateLimited, until
+		return result
+	}
 	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
 	defer cancel()
 	s := fetchSession{provider: p, ctx: ctx}
@@ -232,6 +242,7 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 			row.pr.RequestedReviewersComplete && row.pr.ReviewsComplete
 		result.PRs = append(result.PRs, row.pr)
 	}
+	result.RetryAt = p.cooldown()
 	return result
 }
 
@@ -429,11 +440,14 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	if s.blocked != nil {
 		return response, s.blocked
 	}
-	if s.requests >= s.provider.limits.requests {
+	if s.provider.cooldown().After(s.provider.now()) {
+		return response, ErrRateLimited
+	}
+	if s.requests >= s.provider.limits.requests || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
 	owner, name, _ := strings.Cut(repo, "/")
-	args := []string{"api", "graphql", "--hostname", "github.com", "--method", "POST",
+	args := []string{"api", "graphql", "--hostname", "github.com", "--method", "POST", "--include",
 		"-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name}
 	if cursor != "" {
 		args = append(args, "-f", "cursor="+cursor)
@@ -449,17 +463,41 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 		err = ctx.Err()
 	}
 	err = safeRequestError(err)
-	if errors.Is(err, ErrAuthentication) || errors.Is(err, ErrUnavailable) || errors.Is(err, ErrRateLimited) {
-		s.blocked = err
-	}
 	if len(data) > MaxOutputBytes {
 		return response, ErrOutputLimit
+	}
+	data, retryAt, limited, throttled := responseBody(data, s.provider.now())
+	if throttled {
+		err = ErrRateLimited
+	}
+	// Inspect all response forms, including errors and successful last pages.
+	defer func() {
+		if response.Data != nil && response.Data.RateLimit != nil {
+			if response.Data.RateLimit.Remaining <= 0 {
+				limited = true
+			}
+			if reset, parseErr := time.Parse(time.RFC3339, response.Data.RateLimit.ResetAt); parseErr == nil && reset.After(retryAt) && limited {
+				retryAt = reset
+			}
+		}
+		if limited || errors.Is(err, ErrRateLimited) {
+			s.provider.limitUntil(retryAt)
+			s.blocked = ErrRateLimited
+		} else if errors.Is(err, ErrAuthentication) || errors.Is(err, ErrUnavailable) {
+			s.blocked = err
+		} else if err == nil {
+			s.provider.quotaSuccess()
+		}
+	}()
+	if limited && len(data) == 0 {
+		err = ErrRateLimited
 	}
 	if len(data) == 0 && err != nil {
 		return response, err
 	}
 	if json.Unmarshal(data, &response) != nil {
-		return apiResponse{}, joinError(err, ErrResponse)
+		err = joinError(err, ErrResponse)
+		return apiResponse{}, err
 	}
 	for _, problem := range response.Errors {
 		kind := classifyFailure(problem.Type + " " + problem.Message)
@@ -467,13 +505,6 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 			kind = ErrIncomplete
 		}
 		err = joinError(err, kind)
-	}
-	if response.Data != nil && response.Data.RateLimit != nil && response.Data.RateLimit.Remaining <= 0 || errors.Is(err, ErrRateLimited) {
-		s.blocked = ErrRateLimited
-	} else if errors.Is(err, ErrAuthentication) {
-		s.blocked = ErrAuthentication
-	} else if errors.Is(err, ErrUnavailable) {
-		s.blocked = ErrUnavailable
 	}
 	return response, err
 }
@@ -545,7 +576,7 @@ const summaryQuery = `query BigBoardOpenPullRequests($owner: String!, $name: Str
       }
     }
   }
-  rateLimit { remaining }
+  rateLimit { remaining resetAt }
 }`
 
 const filesQuery = `query BigBoardPullRequestFiles($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -559,5 +590,5 @@ const filesQuery = `query BigBoardPullRequestFiles($owner: String!, $name: Strin
       }
     }
   }
-  rateLimit { remaining }
+  rateLimit { remaining resetAt }
 }`

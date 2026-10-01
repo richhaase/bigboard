@@ -125,7 +125,8 @@ The existing `depth` setting still controls repository discovery only.
 The board updates local repository data on launch and every minute while it
 runs. “Last updated” shows the last successful local refresh for the selected
 repository; “Updating…” keeps the existing view usable during a refresh. `R`
-refreshes immediately, including GitHub PR context. Automatic local refreshes
+refreshes local history immediately and requests GitHub PR context subject to
+the remote cooldown described below. Automatic local refreshes
 do not repeatedly request GitHub PR data. Big Board never runs `git fetch`;
 fetch remote history separately when you want to update your local Git cache.
 A failed refresh retains that repository's last successful data with
@@ -165,7 +166,14 @@ contributor and bot filters and never enter commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
 `R` refreshes local history and PR context; inside the PR overlay it refreshes PRs
-only. There is no polling or disk cache. Failed or incomplete inventories retain
+only. Repeated refreshes reuse in-memory snapshots for at least one minute and
+join an in-flight remote refresh rather than canceling and restarting it. Excluded
+repositories are not fetched. The entire remote refresh shares a 128-request cap;
+repositories left unfetched retain explicitly stale/partial evidence. Rate limits
+pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
+exponential cooldowns when no retry time is available. The status shows when `R`
+can request data again; no background retry runs. There is no polling or disk cache,
+so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
 clears missing PRs even when supporting context is partial. Matching PRs retain
 old path evidence when their new file list is incomplete. Each repository refresh is bounded to 200 open PRs,

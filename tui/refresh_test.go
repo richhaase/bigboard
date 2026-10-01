@@ -178,14 +178,14 @@ func TestLocalRefreshPreservesNavigationAndDoesNotRefreshGitHub(t *testing.T) {
 	}
 }
 
-func TestManualLocalRefreshBackgroundAndGitHubRestart(t *testing.T) {
+func TestManualLocalRefreshBackgroundAndGitHubSchedule(t *testing.T) {
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
 		m := refreshFixture(t)
 		m.viewMode = view
 		generation := m.prGeneration
 		m, cmd := applyLocal(t, m, key("R"))
-		if cmd == nil || m.loading || !m.refreshing || m.prGeneration <= generation {
-			t.Fatal("manual refresh must update in background and invalidate old PR request")
+		if cmd == nil || m.loading || !m.refreshing || m.prGeneration != generation {
+			t.Fatal("manual refresh must update locally without canceling remote work")
 		}
 		for _, repo := range m.repositories {
 			m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
