@@ -39,7 +39,7 @@ func (m Model) handleScanErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "e":
 		m.showScanErrors = false
 	case "R":
-		return m, m.startLocalRefresh(true)
+		return m, m.startLocalRefresh()
 	case "up", "k":
 		m.scanErrorOffset--
 	case "down", "j":

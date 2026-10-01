@@ -83,9 +83,9 @@ the leaderboard; `v` returns to relationships.
 ## Read freshness and PR status separately
 
 **Last updated** is the last successful local scan for the selected repository.
-The board refreshes local data every minute; **Updating…** keeps the existing view
-usable during a refresh. A failed refresh retains last-good data and marks it
-**STALE**. Bigboard never runs `git fetch`: update the local Git history separately
+The board refreshes local data on launch and when you press `R`; it does not
+auto-refresh. **Updating…** keeps the existing view usable during a refresh.
+A failed refresh retains last-good data and marks it **STALE**. Bigboard never runs `git fetch`: update the local Git history separately
 when needed.
 
 GitHub PR context loads automatically when a supported GitHub origin and an
