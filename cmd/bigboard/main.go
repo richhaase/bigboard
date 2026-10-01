@@ -155,11 +155,19 @@ func main() {
 		WorkAreas:        cfg.WorkAreas,
 	})
 
-	p := tea.NewProgram(model, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	if err := runTUI(model, tea.WithAltScreen()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// Always join background commands, including when Bubble Tea consumes a signal
+// or reports a terminal error without delivering a message to the model.
+func runTUI(model tui.Model, options ...tea.ProgramOption) error {
+	defer model.Close()
+	p := tea.NewProgram(model, options...)
+	_, err := p.Run()
+	return err
 }
 
 func buildExcludeSet(repositories []git.Repository, patterns []string) (map[string]bool, error) {

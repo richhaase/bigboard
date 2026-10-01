@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/mail"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -524,11 +525,17 @@ func isGitRepo(dir string) bool {
 }
 
 func isEmptyRepo(ctx context.Context, dir string) bool {
-	if _, err := runGitContext(ctx, dir, "rev-parse", "--git-dir"); err != nil {
+	// An unborn HEAD names a branch that does not exist yet. Failure to
+	// resolve HEAD alone is insufficient: corrupt refs fail resolution too.
+	_, err := runGitContext(ctx, dir, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
 		return false
 	}
-	_, err := runGitContext(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD")
-	return err != nil
+	// Unlike show-ref --verify --quiet, listing refs distinguishes malformed
+	// refs (an error) from an empty ref inventory (exit status 1).
+	_, err = runGitContext(ctx, dir, "show-ref")
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 func isWorktree(dir string) bool {

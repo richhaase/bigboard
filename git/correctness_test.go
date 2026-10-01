@@ -14,6 +14,8 @@ import (
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	// Clones do not inherit the source repository's hooksPath setting.
+	args = append([]string{"-c", "core.hooksPath=" + t.TempDir()}, args...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
