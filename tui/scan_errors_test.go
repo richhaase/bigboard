@@ -11,7 +11,7 @@ import (
 
 func TestScanErrorsCommitAtomicallyAndClearOnRecovery(t *testing.T) {
 	m := refreshFixture(t)
-	_ = m.startLocalRefresh(false)
+	_ = m.startLocalRefresh()
 	first := m.repositories[0]
 	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: first, Err: errors.New("permission denied\x1b[2J\ncheck permissions")})
 	if len(m.scanErrors) != 0 {
@@ -29,7 +29,7 @@ func TestScanErrorsCommitAtomicallyAndClearOnRecovery(t *testing.T) {
 		t.Fatal("diagnostics unavailable")
 	}
 	before := m.scanErrors
-	_ = m.startLocalRefresh(false)
+	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
 		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
 	}

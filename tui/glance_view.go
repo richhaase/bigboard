@@ -331,7 +331,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 	lines := nightCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("GLANCE BOARD · HELP", width),
 		"  Enter  repository → areas → detail → full commit",
-		"  Local data updates every minute; R refreshes now",
+		"  Local data updates on launch or R; no auto-refresh",
 		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",
 		"  /  search this list  Enter accept  Esc clear",
 		"  s  sort areas/repos: Activity (commits), Recent, Name",

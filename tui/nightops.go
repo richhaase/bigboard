@@ -104,7 +104,7 @@ func (m Model) renderNightOps(width, height int) string {
 	if m.areaRepoID != "" {
 		scanID = m.areaRepoID
 	}
-	updateStatus := "Updates every minute"
+	updateStatus := "Updates on demand"
 	if m.refreshing {
 		updateStatus = "Updating…"
 	}

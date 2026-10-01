@@ -166,7 +166,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewMode = ViewAggregate
 		return m, nil
 	case "R":
-		cmd := m.startLocalRefresh(true)
+		cmd := m.startLocalRefresh()
 		return m, cmd
 	case "r":
 		m.overlayExcluded = make(map[string]bool)

@@ -361,12 +361,8 @@ func TestRepositoryLoadingIsBounded(t *testing.T) {
 	if !ok {
 		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
 	}
-	if len(batch) != 2 {
-		t.Fatalf("initial batch should include scans and timer, got %d commands", len(batch))
-	}
-	scans := batch[0]().(tea.BatchMsg)
-	if len(scans) != maxConcurrentRepoScans {
-		t.Fatalf("initial batch has %d scans, want %d", len(scans), maxConcurrentRepoScans)
+	if len(batch) != maxConcurrentRepoScans {
+		t.Fatalf("initial batch has %d scans, want %d", len(batch), maxConcurrentRepoScans)
 	}
 
 	updated, next := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0]})

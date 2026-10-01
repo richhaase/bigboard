@@ -122,12 +122,11 @@ The longest matching prefix wins; unmatched paths keep automatic groups. Names
 must be unique within a repository, and one prefix cannot name two areas.
 The existing `depth` setting still controls repository discovery only.
 
-The board updates local repository data on launch and every minute while it
-runs. “Last updated” shows the last successful local refresh for the selected
-repository; “Updating…” keeps the existing view usable during a refresh. `R`
+The board updates local repository data only on launch and when you press `R`.
+There is no periodic auto-refresh. “Last updated” shows the last successful local
+refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh. `R`
 refreshes local history immediately and requests GitHub PR context subject to
-the remote cooldown described below. Automatic local refreshes
-do not repeatedly request GitHub PR data. Big Board never runs `git fetch`;
+the remote cooldown described below. Big Board never runs `git fetch`;
 fetch remote history separately when you want to update your local Git cache.
 A failed refresh retains that repository's last successful data with
 a STALE marker; a successful scan, including an empty one, replaces it. The board
@@ -255,7 +254,7 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Automatic local updates every minute, clear Last updated status, and retained last-good data on refresh failures
+- Local updates on launch or `R`, clear Last updated status, and retained last-good data on refresh failures
 - Responsive one-word Bigboard wordmark with a violet/lime Night Ops workspace
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling

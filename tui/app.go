@@ -82,8 +82,6 @@ type Model struct {
 	refreshing       bool
 	quitting         bool
 	scanGeneration   uint64
-	refreshPRs       bool
-	refreshTick      uint64
 	inFlight         map[string]bool
 	err              error
 	options          Options
@@ -116,25 +114,6 @@ type RepoLoadedMsg struct {
 const DefaultTimeIndex = 2
 
 const maxConcurrentRepoScans = 8
-
-const localRefreshInterval = 60 * time.Second
-
-type localRefreshMsg struct{ token uint64 }
-
-// A cancellable, tokenized timer keeps one cadence alive without overlapping
-// scans or allowing a duplicate/late tick to create another timer chain.
-func localRefreshCmd(ctx context.Context, token uint64) tea.Cmd {
-	return func() tea.Msg {
-		timer := time.NewTimer(localRefreshInterval)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			return localRefreshMsg{token: token}
-		}
-	}
-}
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
@@ -171,7 +150,6 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 		sortField:     initialSort,
 		timeIdx:       initialTimeIdx,
 		loading:       true,
-		refreshTick:   1,
 		excludedRepos: normalizeExcluded(repositories, excluded),
 		version:       version,
 		options:       options,
@@ -235,11 +213,6 @@ func (m Model) loadCmds() tea.Cmd {
 }
 
 func (m *Model) resetPending() {
-	m.resetLocalPending(true)
-}
-
-func (m *Model) resetLocalPending(refreshPRs bool) {
-	m.refreshPRs = refreshPRs
 	m.scanGeneration++
 	m.refreshing = true
 	m.inFlight = make(map[string]bool)
@@ -332,22 +305,15 @@ func (m Model) Init() tea.Cmd {
 	if len(m.repositories) == 0 {
 		return nil
 	}
-	return tea.Batch(m.loadCmds(), localRefreshCmd(m.scanContext, m.refreshTick))
+	return m.loadCmds()
 }
 
-func (m *Model) startLocalRefresh(manual bool) tea.Cmd {
-	if m.quitting || len(m.repositories) == 0 {
+func (m *Model) startLocalRefresh() tea.Cmd {
+	if m.quitting || len(m.repositories) == 0 || m.refreshing {
+		// Repeated requests join the initial or manual scan already in flight.
 		return nil
 	}
-	if m.refreshing {
-		// An explicit request during an automatic scan joins that generation.
-		// Keep its GitHub refresh intent without starting overlapping scans.
-		if manual && !m.refreshPRs {
-			m.refreshPRs = true
-		}
-		return nil
-	}
-	m.resetLocalPending(manual)
+	m.resetPending()
 	return m.loadCmds()
 }
 
@@ -357,13 +323,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg := msg.(type) {
-	case localRefreshMsg:
-		if msg.token != m.refreshTick {
-			return m, nil
-		}
-		m.refreshTick++
-		cmd := m.startLocalRefresh(false)
-		return m, tea.Batch(cmd, localRefreshCmd(m.scanContext, m.refreshTick))
 	case prsLoadedMsg:
 		if msg.generation == m.prGeneration {
 			m.applyPRResult(msg)
@@ -416,10 +375,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
-			if m.refreshPRs {
-				return m, m.startPRRefresh()
-			}
-			return m, nil
+			return m, m.startPRRefresh()
 		} else {
 			return m, m.nextLoadCmd()
 		}
@@ -468,7 +424,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "R":
 		if m.viewMode == ViewAggregate {
-			cmd := m.startLocalRefresh(true)
+			cmd := m.startLocalRefresh()
 			return m, cmd
 		}
 

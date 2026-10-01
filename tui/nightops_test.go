@@ -182,12 +182,12 @@ func TestNightOpsWordmarkAndPlainRefreshStatus(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	view := ansi.Strip(m.View())
-	for _, want := range []string{nightWordmark[0], nightWordmark[1], nightWordmark[2], "Last updated", "Updates every minute", "R refresh now"} {
+	for _, want := range []string{nightWordmark[0], nightWordmark[1], nightWordmark[2], "Last updated", "Updates on demand", "R refresh now"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	for _, old := range []string{"SNAPSHOT", "No remote Git fetch", "Local scan"} {
+	for _, old := range []string{"SNAPSHOT", "No remote Git fetch", "Local scan", "Updates every minute"} {
 		if strings.Contains(view, old) {
 			t.Fatalf("technical status remains: %q", old)
 		}
@@ -202,5 +202,13 @@ func TestNightOpsWordmarkAndPlainRefreshStatus(t *testing.T) {
 	m.width = 80
 	if !strings.Contains(m.View(), "BIGBOARD / NIGHT OPS") || !strings.Contains(m.View(), "Last updated") || !strings.Contains(m.View(), "Updating…") {
 		t.Fatal("compact header/status differs")
+	}
+}
+
+func TestGlanceHelpExplainsManualRefresh(t *testing.T) {
+	m := monorepoFixture()
+	view := ansi.Strip(m.renderGlanceHelp(160, 48))
+	if !strings.Contains(view, "Local data updates on launch or R; no auto-refresh") || strings.Contains(view, "every minute") {
+		t.Fatalf("help does not explain manual refresh: %s", view)
 	}
 }
