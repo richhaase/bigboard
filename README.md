@@ -2,6 +2,16 @@
 
 A terminal situational-awareness board for seeing who has worked where across your Git repositories, how that work connects, and the commits behind it. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
 
+![Night Ops Activity view with work areas on the left and selected-area contributors, related areas, commits, and PR status on the right](docs/images/night-ops-activity.png)
+
+*The Night Ops workspace, showing Bigboard's own public Git history at 120 × 36.
+Select a work area to see who worked there and the commits behind it. PR data is
+unavailable in this capture; unknown is not zero.*
+
+[Take the visual tour](docs/visual-guide.md) for the views, navigation, and how to
+read the counts. [Controls](#controls) · [Configuration](#config-file) ·
+[GitHub PR context](#automatic-github-pr-awareness)
+
 ## Install
 
 Big Board requires Git 2.31 or newer on `PATH`. Partial clones require Git
@@ -130,6 +140,42 @@ uses `PgUp` / `PgDn` to scroll and `Home` / `End` for the first or last page;
 `↑` / `↓` still switches contributors. Its navigation remains visible while
 scrolling through the timeline and activity matrix.
 
+## Automatic GitHub PR awareness
+
+Read-only open pull request context loads automatically for supported GitHub
+origins using an already installed and signed-in `gh` CLI. No config setting is
+needed.
+Missing `gh` or authentication is shown without blocking local history. Bigboard
+never signs in, requests access, creates credentials, fetches Git objects, or
+changes pull requests. Headless `--export` stays local and unchanged.
+Only a supported GitHub `origin` is used, with no upstream guessing.
+
+PR counts appear beside Repositories and Work areas. Press `p` for the selected
+scope or `P` for all included repositories, then Enter for a scrollable detail view
+and Esc to return. Details show the canonical link, GitHub author and reviewers,
+aggregate review decision, check rollup, mergeability and update time. GitHub
+handles remain separate from local Git contributor identities. `UNKNOWN` is not
+approval or merge readiness; “updated” includes any PR activity.
+
+Changed file paths map to the same configured prefixes and automatic Work areas
+as local history, including new PR-only areas. Generated files follow `all_files`.
+A PR touching multiple areas appears in each; the overall count deduplicates it,
+including across duplicate local clones. PRs remain independent of local date,
+contributor and bot filters and never enter commit totals or the JSON export.
+
+The initial remote refresh runs after the local scan without blocking navigation.
+`R` refreshes local history and PR context; inside the PR overlay it refreshes PRs
+only. There is no polling or disk cache. Failed or incomplete inventories retain
+last-good evidence with visible stale/partial labels; a complete open inventory
+clears missing PRs even when supporting context is partial. Matching PRs retain
+old path evidence when their new file list is incomplete. Each repository refresh is bounded to 200 open PRs,
+1,000 file paths per PR, 64 requests and 90 seconds, within a two-minute overall
+refresh. Reviewer lists are also bounded and visibly partial when truncated.
+No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
+file list does not expose rename origins, so that limitation is labelled rather
+than guessed. Authentication, rate limits, unavailable repositories and unsupported
+origins are reported in the PR overlay without suppressing local history.
+
 ## Accuracy notes
 
 - **Author identity** is resolved by Git's native `.mailmap`, then grouped by canonical email. Shared or similar names do not merge people. Use `.mailmap` to combine aliases with different emails. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
@@ -160,10 +206,13 @@ scrolling through the timeline and activity matrix.
 | `b` | Toggle bot contributors in/out |
 | `r` | Open repo inclusion/exclusion overlay |
 | `space` | Toggle a repo in/out (within the repo overlay) |
-| `R` | Refresh (re-scan all repos) |
+| `p` / `P` | Open PRs for the selected scope / all included repositories |
+| `R` | Refresh local history and PRs; inside the PR overlay, refresh PRs only |
 | `q` | Quit (clears an active filter first) |
 
 In the contributor detail view, `↑/↓` step to the previous/next contributor.
+`PgUp` / `PgDown` scroll its content; `Home` / `End` jump to the first / last page.
+The help and current line range stay visible while scrolling.
 
 ## Config file
 
@@ -245,39 +294,3 @@ goreleaser release --snapshot --clean --skip=notarize
 ## License
 
 MIT
-
-### Automatic GitHub PR awareness
-
-Read-only open pull request context loads automatically for supported GitHub
-origins using an already installed and signed-in `gh` CLI. No config setting is
-needed.
-Missing `gh` or authentication is shown without blocking local history. Bigboard
-never signs in, requests access, creates credentials, fetches Git objects, or
-changes pull requests. Headless `--export` stays local and unchanged.
-Only a supported GitHub `origin` is used, with no upstream guessing.
-
-PR counts appear beside Repositories and Work areas. Press `p` for the selected
-scope or `P` for all included repositories, then Enter for a scrollable detail view
-and Esc to return. Details show the canonical link, GitHub author and reviewers,
-aggregate review decision, check rollup, mergeability and update time. GitHub
-handles remain separate from local Git contributor identities. `UNKNOWN` is not
-approval or merge readiness; “updated” includes any PR activity.
-
-Changed file paths map to the same configured prefixes and automatic Work areas
-as local history, including new PR-only areas. Generated files follow `all_files`.
-A PR touching multiple areas appears in each; the overall count deduplicates it,
-including across duplicate local clones. PRs remain independent of local date,
-contributor and bot filters and never enter commit totals or the JSON export.
-
-The initial remote refresh runs after the local scan without blocking navigation.
-`R` refreshes local history and PR context; inside the PR overlay it refreshes PRs
-only. There is no polling or disk cache. Failed or incomplete inventories retain
-last-good evidence with visible stale/partial labels; a complete open inventory
-clears missing PRs even when supporting context is partial. Matching PRs retain
-old path evidence when their new file list is incomplete. Each repository refresh is bounded to 200 open PRs,
-1,000 file paths per PR, 64 requests and 90 seconds, within a two-minute overall
-refresh. Reviewer lists are also bounded and visibly partial when truncated.
-No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
-file list does not expose rename origins, so that limitation is labelled rather
-than guessed. Authentication, rate limits, unavailable repositories and unsupported
-origins are reported in the PR overlay without suppressing local history.
