@@ -55,7 +55,10 @@ bigboard --config ./bigboard.json
 bigboard --version
 ```
 
-The time range is chosen interactively (`←/→`) and defaults to 14 days. Set
+The visible `Range: 14 days · t to change` control opens with `t`. Choose a
+preset or enter a custom range of 1–3650 days; `Enter` applies and `Esc` cancels.
+Range changes filter the loaded history in memory, with no scan or fetch.
+The initial range defaults to 14 days. Set
 `since` in the config to choose the initial range. `--export` always covers
 all time; per-contributor first/last commit dates are included for reference.
 Those dates alone cannot reconstruct totals for a narrower time window.
@@ -214,8 +217,9 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `↑/↓` or `j/k` | Select a repository, area, commit, person, or related/subarea row |
 | `PgUp` / `PgDown` | Page through the current list |
 | `g` / `G`, `Home` / `End` | First / last row |
-| `←/→` or `h/l` | Change local range: 1d / 7d / 14d / 30d / 90d / 1y / all |
-| `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
+| `t` | Open local range picker: 1d / 7d / 14d / 30d / 90d / 1y / all / custom days |
+| `←` or `h` | Go back through filters and detail; at the repository root, stay there |
+| `→`, `l`, or `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
 | `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
 | `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses once area detail is open |
 | `s` | Sort overview or Subareas: Recent → Name → Activity (commits); other detail lenses keep their order |
@@ -231,9 +235,17 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |
 
 The full **commit inspector** has its own keys: `↑/↓` or `j/k` scrolls lines;
-`PgUp/PgDown`, `g/G`, or `Home/End` moves farther. `Enter` or `Esc` returns to
+`PgUp/PgDown`, `g/G`, or `Home/End` moves farther. `←`, `h`, `Enter`, or `Esc` returns to
 Activity. `Tab/Shift+Tab` leaves the inspector for the next/previous lens. Return
 to the list or lens before changing range, toggling bots, or refreshing.
+
+The **range picker** owns its keys: `↑/↓` or `j/k` chooses a preset; `c` selects
+Custom days, then `Enter` opens day entry. Type to replace the current value;
+`Backspace` edits and `Ctrl+U` clears it. `Enter` applies a valid choice, while
+`Esc` cancels without changing the range or selection. Custom ranges are
+session-only; `since` in config continues to accept the preset labels. Search
+entry, help, commit inspection, PRs and repository controls keep their own keys;
+return to a list or detail lens to open the picker.
 
 ### PR and repository overlays
 
@@ -248,7 +260,7 @@ file. Excluding a repository also removes it from later PR refresh requests.
 
 ### Contributor statistics
 
-On the **leaderboard**, `↑/↓` or `j/k` selects a contributor and `Enter` opens
+On the **leaderboard**, `↑/↓` or `j/k` selects a contributor and `→` / `l` / `Enter` opens
 their detail. `s` cycles metric columns; `S` reverses the metric sort. `/` filters
 contributors by name, `b` toggles bots, `r` opens repository controls, `R` refreshes,
 and `v` returns to Worklist. With an accepted name filter, `q` or `Esc` clears it
@@ -256,10 +268,11 @@ first; otherwise it quits. The leaderboard scrolls as selection moves; page and
 Home/End keys are not used there.
 
 In **contributor detail**, `↑/↓` or `j/k` switches contributors. `PgUp/PgDown`
-scrolls content and `Home/End` jumps to its first/last page. `Esc` returns to the
+scrolls content and `Home/End` jumps to its first/last page. `←` / `h` / `Esc` returns to the
 leaderboard, where filtering, bot toggles, sorting, repository controls and refresh
-are available. `q` or `Ctrl+C` quits. Both statistics views support `←/→` or `h/l`
-for the local time range. `p/P` and Worklist's `1`–`4` lenses are not statistics keys.
+are available. `q` or `Ctrl+C` quits. Both statistics views support `t` for the local time range. `←` at the
+leaderboard clears an accepted name filter, then stays there without quitting;
+arrows never change the range. `p/P` and Worklist's `1`–`4` lenses are not statistics keys.
 
 ## Config file
 

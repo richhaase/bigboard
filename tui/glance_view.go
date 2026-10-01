@@ -76,7 +76,7 @@ func (m Model) awarenessSummary(scopeCount int) string {
 	if m.hideBots {
 		bots = " · bots hidden"
 	}
-	return StyleDimWhite.Render(fmt.Sprintf("  Range: %s%s · %s commits · %d people · %d %s", TimePresets[m.timeIdx].Label, bots, FormatNumber(len(records)), len(people), scopeCount, scope))
+	return StyleDimWhite.Render(fmt.Sprintf("  Range: %s%s · %s commits · %d people · %d %s", m.rangeLabel()+" · t to change", bots, FormatNumber(len(records)), len(people), scopeCount, scope))
 }
 func (m Model) glanceCoverageLine() string {
 	shallow := false
@@ -249,7 +249,7 @@ func glanceContributorPreview(people []stats.AuthorStats, width, maxLines int) [
 func (m Model) renderGlanceHelp(width, height int) string {
 	lines := nightCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("GLANCE BOARD · HELP", width),
-		"  Enter  repository → areas → detail → full commit",
+		"  → / Enter  repository → areas → detail → commit",
 		"  Local data updates on launch or R; no auto-refresh",
 		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",
 		"  /  search this list  Enter accept  Esc clear",
@@ -258,8 +258,8 @@ func (m Model) renderGlanceHelp(width, height int) string {
 		"  People: alphabetical identities; Enter filters Activity",
 		"  Related: exact shared people; Enter reveals them",
 		"  Subareas: literal child paths; counts may overlap",
-		"  Esc  clear filter, then return with selection preserved",
-		"  ←→ / h l  time range     b  show/hide bots",
+		"  ← / Esc  clear filter, then return; ← stays at root",
+		"  t  range: presets or custom days     b  bots",
 		"  p  selected parent-area PRs     P  all included PRs",
 		"  PRs use all open dates, independent of local filters",
 		"  r  included repositories     R  refresh local + PR data",

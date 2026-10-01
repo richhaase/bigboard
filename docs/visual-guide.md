@@ -10,8 +10,9 @@ opens directly into its work areas.
 
 All screenshots in this guide are **actual terminal captures of Bigboard's own
 public Git history**, not mockups or fixture data. They use the 14-day range with
-bots shown. GitHub returned a rate-limit response during capture; the UI reports
-unavailable PR context and keeps local history usable. See [capture details](#capture-details).
+bots shown; the custom entry shows an unapplied 21-day value. The capture
+environment intentionally omits `gh`; the UI reports unavailable PR context
+and keeps local history usable. See [capture details](#capture-details).
 
 ## Scan work, then inspect its evidence
 
@@ -25,19 +26,33 @@ PR context**. Recent is the default sort. `s` cycles Recent, Name, and Activity
 (commit count). Commit volume is not priority or productivity.
 
 - `↑/↓` or `j/k` selects a row; the evidence underneath follows that selection
-- `Enter` opens repository → work areas → area detail → full commit evidence
+- `→` or `Enter` opens repository → work areas → area detail → full commit evidence
+- `←` goes back with selection preserved; at the repository root it stays there
 - `+N` beside the latest author counts the other distinct contributors in the
   current local time range and bot filter, not the number of extra commits
 - Counts beside names in the lower pane are scoped commit totals. `+N more`
   means the preview is bounded; `2` opens the full alphabetical People list
 - Ages are calculated at each repository's last successful local scan. They
   do not tick or imply a new scan. Future author dates say `future`
-- `←/→` changes the local range, `b` toggles bots, and `/` searches the active list
+- `t` opens the range picker, `b` toggles bots, and `/` searches the active list
 
 One commit can touch several areas, so **area counts overlap and must not be
 summed**. Shared contributors describe historical overlap, not live presence,
 ownership, or proof of collaboration. GitHub handles stay separate from canonical
 Git identities. Historical paths can appear even after removal from the checkout.
+
+## Choose a local range
+
+The visible **Range: 14 days · t to change** control opens with `t`. Use `↑/↓`
+to choose 1 day, 7 days, 14 days, 30 days, 90 days, 1 year, or All time.
+Custom days accepts 1–3650 whole days. `Enter` applies; `Esc` cancels.
+Changing range keeps navigation and filters the loaded records in memory; it
+does not scan Git, fetch objects, or refresh PR data. The startup default remains
+14 days, or the `since` preset in config. Custom choices last for the session.
+
+![Local range picker with 14 days selected and the custom-days choice](images/worklist-range.png)
+
+![Custom range entry with a 21-day value waiting for confirmation](images/worklist-range-custom.png)
 
 ## Compact list → detail
 
@@ -104,7 +119,7 @@ Shared history across clones or forks can also create associations.
 
 *Subareas, 120 × 18. Direct files are a separate leaf beside child directories.
 The historical `docs/contracts` path still appears because selected-range commits
-touched it. The counts overlap, so 16 + 2 + 4 is not a repository total.*
+touched it. The counts overlap, so 17 + 3 + 4 is not a repository total.*
 
 Press `4` to refine an automatic area by one literal directory level. `Enter`
 on a child opens its evidence and allows further refinement where applicable.
@@ -171,7 +186,8 @@ lines 12–39/39, while paging and back controls remain visible.*
 From Worklist, `v` opens the statistics leaderboard and `Enter` opens a contributor.
 In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` switches
 contributors. `Esc` returns to the leaderboard; press `v` **there** to return to
-Worklist. Both statistics views support `←/→` for the local range.
+Worklist. Both statistics views use `t` for the local range. `→` opens the
+selected contributor, `←` returns, and `←` at the leaderboard stays there.
 
 Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`r`),
 and refresh (`R`) live on the statistics leaderboard. Worklist's PR and lens keys
@@ -180,15 +196,17 @@ for search, quit, and overlay behavior.
 
 ## Capture details
 
-The screenshots were captured on October 1, 2026, from a binary built from
-[merged Worklist commit 808d07d](https://github.com/richhaase/bigboard/commit/808d07dbda863e5142e39765f12916475e2c825c),
-scanning the same public repository history in a local checkout named `bigboard`.
-The capture config set `since` to `14d`; bots remained shown. Each image was
-rendered from an actual PTY cell buffer after the PR request reached its terminal
-unavailable/rate-limited state. The displayed timestamps use the capture
-machine's local timezone, **MDT**. Counts and ages are examples from that snapshot,
-not claims about the repository now. The documentation follow-up does not change
-these views' rendering.
+The screenshots were captured on October 1, 2026, from a binary built with
+this change's [navigation](../tui/glance.go) and [range picker](../tui/range.go),
+scanning public Bigboard history at
+[09902f8](https://github.com/richhaase/bigboard/commit/09902f8947964e3bcfa9e2f868c93290136142b9)
+in an isolated local clone named `bigboard`. The capture config sets `since` to
+`14d`; bots remain shown. Each image is rendered from an actual PTY cell buffer.
+The capture PATH contains Git but omits `gh`, so the visible “gh not installed”
+status is real and no GitHub request is made. The displayed timestamps use the
+capture machine's local timezone, **MDT**. Counts and ages are examples from that
+snapshot, not claims about the repository now. All prior tour images were
+recaptured for the new range and navigation controls.
 
 The opt-in `TestWorklistTerminalCapture` harness separately tests synthetic
 Unicode, long-name, 120-contributor and partial-PR states. It is skipped by normal
