@@ -57,6 +57,9 @@ type Model struct {
 	repositories     []git.Repository
 	loadedRepos      []git.Repository
 	failedRepos      []string
+	scanErrors       map[string]string
+	showScanErrors   bool
+	scanErrorOffset  int
 	excludedRepos    map[string]bool
 	overlayExcluded  map[string]bool
 	overlayCursor    int
@@ -86,12 +89,14 @@ type Model struct {
 	options          Options
 	scanContext      context.Context
 	cancelScans      context.CancelFunc
+	commands         *commandGroup
 
 	pendingScannedAt  map[string]time.Time
 	pendingStaleRepos map[string]bool
 	pendingRecords    []git.CommitRecord
 	pendingRepos      []git.Repository
 	pendingFailed     []string
+	pendingScanErrors map[string]string
 	pendingRemaining  int
 	activeScans       int
 	nextRepo          int
@@ -172,6 +177,7 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 		options:       options,
 		scanContext:   scanContext,
 		cancelScans:   cancelScans,
+		commands:      &commandGroup{},
 	}
 	m.prProvider = options.PRProvider
 	if m.prProvider == nil {
@@ -223,7 +229,7 @@ func (m Model) loadCmds() tea.Cmd {
 	}
 	cmds := make([]tea.Cmd, m.activeScans)
 	for i := range m.activeScans {
-		cmds[i] = loadRepoCmd(m.scanContext, m.repositories[i], m.options, m.scanGeneration)
+		cmds[i] = m.commands.wrap(loadRepoCmd(m.scanContext, m.repositories[i], m.options, m.scanGeneration))
 	}
 	return tea.Batch(cmds...)
 }
@@ -246,6 +252,7 @@ func (m *Model) resetLocalPending(refreshPRs bool) {
 	m.pendingRecords = nil
 	m.pendingRepos = nil
 	m.pendingFailed = nil
+	m.pendingScanErrors = make(map[string]string)
 	m.bootLines = nil
 	m.activeScans = min(len(m.repositories), maxConcurrentRepoScans)
 	m.nextRepo = m.activeScans
@@ -259,7 +266,7 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 	m.nextRepo++
 	m.activeScans++
 	m.inFlight[repository.ID] = true
-	return loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration)
+	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration))
 }
 
 func (m *Model) finalizeLoad() {
@@ -271,6 +278,7 @@ func (m *Model) finalizeLoad() {
 	m.allRecords = m.pendingRecords
 	m.loadedRepos = m.pendingRepos
 	m.failedRepos = m.pendingFailed
+	m.scanErrors = m.pendingScanErrors
 	// Commit freshness with the snapshot, never advertise new timestamps while
 	// still displaying old records from an unfinished batch.
 	scannedAt := make(map[string]time.Time)
@@ -375,10 +383,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inFlight = maps.Clone(m.inFlight)
 		m.pendingScannedAt = maps.Clone(m.pendingScannedAt)
 		m.pendingStaleRepos = maps.Clone(m.pendingStaleRepos)
+		m.pendingScanErrors = maps.Clone(m.pendingScanErrors)
 		delete(m.inFlight, msg.Repository.ID)
 		m.activeScans--
 		if msg.Err != nil {
 			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
+			m.pendingScanErrors[msg.Repository.ID] = displayText(msg.Err.Error())
 			m.pendingStaleRepos[msg.Repository.ID] = true
 			for _, repo := range m.loadedRepos {
 				if repo.ID == msg.Repository.ID {
@@ -422,6 +432,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showScanErrors {
+		return m.handleScanErrorKey(msg)
+	}
+	if msg.String() == "e" && !m.searching && !m.glance.searching && len(m.scanErrors) > 0 {
+		m.showScanErrors, m.scanErrorOffset = true, 0
+		return m, nil
+	}
 	if m.showPRs {
 		return m.handlePRKey(msg)
 	}
@@ -685,7 +702,7 @@ func (m Model) failedReposLine() string {
 		names = names[:maxNames]
 	}
 	line := fmt.Sprintf("  ⚠ %d repo(s) unreadable: %s%s", len(m.failedRepos), strings.Join(names, ", "), suffix)
-	return Truncate(line, m.width)
+	return Truncate(displayText(line)+" · e errors", m.width)
 }
 
 func (m Model) tableViewport() int {
@@ -808,6 +825,9 @@ func (m Model) View() string {
 }
 
 func (m Model) viewContent() string {
+	if m.showScanErrors {
+		return m.renderScanErrors()
+	}
 	if m.loading {
 		return m.renderBootSequence()
 	}
@@ -820,8 +840,11 @@ func (m Model) viewContent() string {
 			"",
 			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+displayText(m.err.Error())),
 			"",
-			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit"),
+			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit · R retry · e errors"),
 		)
+		if details := m.scanErrorLines(); len(details) > 0 {
+			lines = append(lines, "", details[0])
+		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 

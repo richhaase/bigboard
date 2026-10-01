@@ -121,7 +121,7 @@ func (m Model) glanceScanLine(scope string) string {
 		line += " · Updating…"
 	}
 	if len(m.failedRepos) > 0 {
-		line += fmt.Sprintf(" · Update errors: %d (R retry)", len(m.failedRepos))
+		line += fmt.Sprintf(" · Update errors: %d (e details)", len(m.failedRepos))
 	}
 	if m.staleRepos[id] || len(m.failedRepos) > 0 {
 		return StyleAmber.Render(line)

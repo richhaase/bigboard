@@ -18,6 +18,8 @@ func TestFullPipeline(t *testing.T) {
 		{"git", "init"},
 		{"git", "config", "user.email", "alice@example.com"},
 		{"git", "config", "user.name", "Alice"},
+		{"git", "config", "commit.gpgSign", "false"},
+		{"git", "config", "core.hooksPath", t.TempDir()},
 	}
 	for _, args := range setupCmds {
 		cmd := exec.Command(args[0], args[1:]...)
