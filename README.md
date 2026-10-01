@@ -127,7 +127,7 @@ must be unique within a repository, and one prefix cannot name two areas.
 The existing `depth` setting still controls repository discovery only.
 
 The board updates local repository data only on launch and when you press `R`.
-There is no periodic auto-refresh. “Last updated” shows the last successful local
+There is no periodic auto-refresh. “Local” shows the last successful local
 refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh. `R`
 refreshes local history immediately and requests GitHub PR context subject to
 the remote cooldown described below. Big Board never runs `git fetch`;
