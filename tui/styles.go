@@ -3,34 +3,34 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	ColorCyan    = lipgloss.AdaptiveColor{Light: "#D7FF3F", Dark: "#D7FF3F"}
-	ColorMagenta = lipgloss.AdaptiveColor{Light: "#BB70F4", Dark: "#BB70F4"}
-	ColorGreen   = lipgloss.AdaptiveColor{Light: "#D7FF3F", Dark: "#D7FF3F"}
-	ColorAmber   = lipgloss.AdaptiveColor{Light: "#FFB000", Dark: "#FFB000"}
-	ColorRed     = lipgloss.AdaptiveColor{Light: "#FF0040", Dark: "#FF0040"}
+	ColorCyan    = lipgloss.AdaptiveColor{Light: "#9FD0FF", Dark: "#9FD0FF"}
+	ColorMagenta = lipgloss.AdaptiveColor{Light: "#B7C9E2", Dark: "#B7C9E2"}
+	ColorGreen   = lipgloss.AdaptiveColor{Light: "#9FD0FF", Dark: "#9FD0FF"}
+	ColorAmber   = lipgloss.AdaptiveColor{Light: "#FFD184", Dark: "#FFD184"}
+	ColorRed     = lipgloss.AdaptiveColor{Light: "#FFA7A0", Dark: "#FFA7A0"}
 
 	ColorBannerGrad = [7]lipgloss.AdaptiveColor{
-		{Light: "#D7FF3F", Dark: "#D7FF3F"},
+		{Light: "#9FD0FF", Dark: "#9FD0FF"},
 		{Light: "#00EEFF", Dark: "#00EEFF"},
 		{Light: "#00CCDD", Dark: "#00CCDD"},
 		{Light: "#00AACC", Dark: "#00AACC"},
 		{Light: "#0088AA", Dark: "#0088AA"},
 		{Light: "#006688", Dark: "#006688"},
-		{Light: "#705182", Dark: "#705182"},
+		{Light: "#627B8E", Dark: "#627B8E"},
 	}
 
-	ColorCyanMid = lipgloss.AdaptiveColor{Light: "#B4D635", Dark: "#B4D635"}
-	ColorCyanDim = lipgloss.AdaptiveColor{Light: "#705182", Dark: "#705182"}
+	ColorCyanMid = lipgloss.AdaptiveColor{Light: "#84B8DA", Dark: "#84B8DA"}
+	ColorCyanDim = lipgloss.AdaptiveColor{Light: "#627B8E", Dark: "#627B8E"}
 
-	ColorMagentaMid = lipgloss.AdaptiveColor{Light: "#A759DD", Dark: "#A759DD"}
-	ColorMagentaDim = lipgloss.AdaptiveColor{Light: "#633E80", Dark: "#633E80"}
+	ColorMagentaMid = lipgloss.AdaptiveColor{Light: "#91ACC4", Dark: "#91ACC4"}
+	ColorMagentaDim = lipgloss.AdaptiveColor{Light: "#58748B", Dark: "#58748B"}
 
-	ColorDimCyan   = lipgloss.AdaptiveColor{Light: "#856898", Dark: "#856898"}
-	ColorDimWhite  = lipgloss.AdaptiveColor{Light: "#ACA0C3", Dark: "#ACA0C3"}
-	ColorBrightWht = lipgloss.AdaptiveColor{Light: "#F0EBFA", Dark: "#F0EBFA"}
-	ColorRowEven   = lipgloss.AdaptiveColor{Light: "#100D1C", Dark: "#100D1C"}
-	ColorRowOdd    = lipgloss.AdaptiveColor{Light: "#141021", Dark: "#141021"}
-	ColorRowSelect = lipgloss.AdaptiveColor{Light: "#312142", Dark: "#312142"}
+	ColorDimCyan   = lipgloss.AdaptiveColor{Light: "#91A7B9", Dark: "#91A7B9"}
+	ColorDimWhite  = lipgloss.AdaptiveColor{Light: "#B3C2D0", Dark: "#B3C2D0"}
+	ColorBrightWht = lipgloss.AdaptiveColor{Light: "#EFF4FA", Dark: "#EFF4FA"}
+	ColorRowEven   = lipgloss.AdaptiveColor{Light: "#0F1922", Dark: "#0F1922"}
+	ColorRowOdd    = lipgloss.AdaptiveColor{Light: "#0F1922", Dark: "#0F1922"}
+	ColorRowSelect = lipgloss.AdaptiveColor{Light: "#24445D", Dark: "#24445D"}
 
 	ColorGold   = lipgloss.AdaptiveColor{Light: "#FFD700", Dark: "#FFD700"}
 	ColorSilver = lipgloss.AdaptiveColor{Light: "#C0C0C0", Dark: "#C0C0C0"}

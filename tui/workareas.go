@@ -145,10 +145,7 @@ func (m Model) activityAreas() []repositoryActivity {
 			return activity.people[i].ID < activity.people[j].ID
 		})
 		for _, r := range area.Records {
-			if r.Date.After(activity.latest) {
-				activity.latest = r.Date
-				activity.subject = r.Subject
-			}
+			activity.observe(r)
 		}
 		result = append(result, activity)
 	}

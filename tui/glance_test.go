@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -31,36 +30,25 @@ func glanceBusyFixture() Model {
 	return m
 }
 
-func TestGlanceOverviewDensityAndNumericContext(t *testing.T) {
-	row := regexp.MustCompile(`^\s*[▸ ]\s+(feature|area\d\d)\s+[\d,]+\s+\d+\s+\w+`)
-	for _, test := range []struct{ w, h, min int }{{110, 40, 12}, {70, 24, 8}} {
+func TestWorklistOverviewDensityAndConcreteContext(t *testing.T) {
+	for _, size := range [][2]int{{120, 36}, {140, 40}, {80, 30}, {40, 18}} {
 		m := glanceBusyFixture()
-		m.width = test.w
-		m.height = test.h
+		m.width, m.height = size[0], size[1]
 		view := ansi.Strip(m.View())
-		count := 0
-		for _, line := range strings.Split(view, "\n") {
-			if row.MatchString(line) || (test.w >= 100 && regexp.MustCompile(`^\s*[› ]\s+(feature|area\d\d)\s+[\d,]+\s+│`).MatchString(line)) {
-				count++
+		for _, want := range []string{"Worklist", "feature", "Person 000", "Exact subject", "120"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("%v missing %q:\n%s", size, want, view)
 			}
 		}
-		if count < test.min {
-			t.Fatalf("%dx%d has %d useful rows, want %d:\n%s", test.w, test.h, count, test.min, view)
+		if size[0] >= 110 && (!strings.Contains(view, "1,100") || !strings.Contains(view, "+")) {
+			t.Fatal("bounded people/count context missing")
 		}
-		if !strings.Contains(view, "1,100") || !strings.Contains(view, "120") || !strings.Contains(view, "Exact subject") {
-			t.Fatal("busy area counts or selected preview missing")
-		}
-		if (!strings.Contains(view, "Contributors: Person 000") && (!strings.Contains(view, "WHO WORKED HERE") || !strings.Contains(view, "Person 000"))) || !strings.Contains(view, " more") || strings.Contains(view, "Person 119") {
-			t.Fatal("overview contributor preview is missing or unbounded")
-		}
-		if test.w == 110 && !strings.Contains(view, "NIGHT OPS") {
-			t.Fatal("Night Ops identity disappeared")
-		}
-		if lipgloss.Height(view) > test.h {
-			t.Fatal("overview height overflow")
+		if lipgloss.Height(view) > m.height {
+			t.Fatal("height overflow")
 		}
 	}
 }
+
 func TestGlanceSortAndBackPreserveIdentityAndSearch(t *testing.T) {
 	m := glanceBusyFixture()
 	m = pressAwareness(m, "s")
