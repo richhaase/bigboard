@@ -28,7 +28,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
 3. `Model.Init` streams bounded scan commands once on launch. Only explicit `R` requests start subsequent refreshes; there is no periodic refresh timer. Generation-tagged `RepoLoadedMsg` results accumulate into a pending snapshot, committed atomically when the batch finishes. Background updates preserve the visible last-good data and navigation; `R` refreshes immediately.
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
-5. View renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
+5. Worklist renders scoped repository/area rows and selected evidence through `worklist*.go`; focused lenses share identity-preserving navigation in `glance*.go`. Statistics renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 
 ## Key Design Decisions
 
@@ -36,7 +36,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state.
 - **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
 - **Identity merging**: canonical emails after Git `.mailmap` establish identity; names never merge contributors. Missing-email identities are repository-scoped. `fuzzy` is accepted for old configs but does not affect aggregation. Contributor selection follows the stable identity, not its current display name.
-- **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; `--all-files` includes them.
+- **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; the `"all_files": true` config setting includes them.
 - **Repository identity**: repositories are keyed by absolute path; duplicate basenames receive shortest-unique display labels such as `org-a/api` and `org-b/api`.
 - **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity, including GitHub-noreply agent accounts (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, …); extensible via `ai_identities` (exact email or `@domain`). Surfaced as a first-class metric (leaderboard `AI%`, per-month/per-repo share).
 - **Bots are counted, not excluded**: bot identities (`[bot]` names/emails, builtin roster, `bot_identities` config) get `AuthorStats.Bot` and a leaderboard `BOT` tag; the `b` key toggles visibility (default shown). Agents that do their own work rank like any contributor.
@@ -56,7 +56,6 @@ go test ./...
 ## CI
 
 - GitHub Actions: `go test` (+ `-race`), `go vet`, `gofmt -l .` check, golangci-lint v2, `staticcheck`, `govulncheck`, `gosec`.
-- GoReleaser for releases (`.goreleaser.yaml`); tag push (`vX.Y.Z`) publishes binaries and directly updates the Homebrew tap, matching plonk and ACR. The tap permits direct release updates; do not add a PR-based publishing step.
 
 > Note: golangci-lint's bundled staticcheck enables the `QF*` quickfix checks that the standalone `staticcheck` binary leaves off by default — the Lint job is stricter than the Staticcheck job. Run `make lint` locally before pushing.
 
@@ -66,8 +65,8 @@ go test ./...
 - Impact bars use gradient trailing glow: `████████▓▒░`
 - Top 3 ranks styled gold/silver/bronze
 - Negative net values rendered in red
-- Section headers in detail view use `──╸ LABEL ╺──` style
-- Heavy separator (`━`) between major sections
+- Worklist uses restrained rules and one selected row; retained statistics and inspector section headers use `──╸ LABEL ╺──` styling
+- Use terminal-cell widths for truncation and alignment; preserve explicit stale/partial/unknown labels before clipping
 - No animation: the separator is a static rule, and the loading screen uses plain language (no sci-fi flavor)
 
 ## Automatic PR context
@@ -77,7 +76,7 @@ GitHub PR context loads automatically with existing gh authentication for suppor
 ## Progressive disclosure
 
 `tui/worklist*.go` owns awareness presentation; `tui/glance*.go` owns focused Activity/People/Related/
-Subareas navigation. `s` cycles volume/recency/name scope sorts, separate from
+Subareas navigation. `s` cycles Recent/Name/Activity (commits) overview or Subareas sorts, separate from
 aggregate contributor statistics. Scope/person/commit identity survives navigation
 and sorting; stale or filtered-out detail must not silently switch to a new area.
 `stats.Subareas` refines automatic areas by literal child directories and direct

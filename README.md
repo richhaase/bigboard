@@ -4,9 +4,10 @@ A terminal situational-awareness board for seeing who has worked where across yo
 
 ![Worklist at 120 columns: work areas, latest authors and commits, with selected-area evidence below](docs/images/worklist-wide.png)
 
-*Worklist, showing Bigboard's own public Git history at 120 × 36. Local history
-and GitHub PR freshness are separate. PR context is unavailable in this capture;
-unknown is not zero. Data refreshes only on launch or `R`.*
+*Worklist at 120 × 36, with `tui` selected in Bigboard's own public Git history.
+The lower pane shows the contributors, commits, and related areas behind that
+selection. GitHub context is rate-limited in this capture, so PRs are shown as
+unavailable rather than zero. Local and PR snapshots refresh on launch or `R`.*
 
 [Take the visual tour](docs/visual-guide.md) for the views, navigation, and how to
 read the counts. [Controls](#controls) · [Configuration](#config-file) ·
@@ -82,7 +83,8 @@ detail view, moving keyboard focus from the list into the selected lens.
 `Tab` or `1`–`4` also opens a lens directly from the area inventory. In detail,
 `Tab` / `Shift+Tab` or `1`–`4` switches Activity, People, Related, and Subareas;
 only one detail surface is expanded at a time. Activity shows real subjects with
-author-date evidence, contributor identity, and short object IDs. `Enter` opens a scrollable inspector with the
+author-date evidence, contributor identity, and short object IDs. `Enter` opens a
+scrollable inspector with the
 full subject, canonical contributor identity, timestamp, object ID, and all changed
 paths. People is alphabetical; selecting a person filters Activity. Related lists
 exact shared-contributor counts; open one to inspect those identities and their
@@ -137,7 +139,8 @@ a STALE marker; a successful scan, including an empty one, replaces it. The boar
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
 surface with the same controls. At 80 columns, two-line rows keep names and
 subjects readable. `Enter` replaces the list with detail; `Esc` restores its
-selection and scroll position. At 40 columns, each row uses three lines. Shallow, stale, failed, partial, and unknown data remain visibly qualified.
+selection and scroll position. At 40 columns, each row uses three lines. Shallow,
+stale, failed, partial, and unknown data remain visibly qualified.
 Statistics retain their wide layout; narrow contributor detail uses labeled
 repository metrics so every value remains readable. On short terminals, contributor detail
 uses `PgUp` / `PgDn` to scroll and `Home` / `End` for the first or last page;
@@ -154,7 +157,8 @@ never signs in, requests access, creates credentials, fetches Git objects, or
 changes pull requests. Headless `--export` stays local and unchanged.
 Only a supported GitHub `origin` is used, with no upstream guessing.
 
-PR counts appear beside Repositories and Work areas. Press `p` for the selected
+PR summaries appear beside repositories and work areas when width permits. From
+Worklist, press `p` for the selected
 scope or `P` for all included repositories, then Enter for a scrollable detail view
 and Esc to return. Details show the canonical link, GitHub author and reviewers,
 aggregate review decision, check rollup, mergeability and update time. GitHub
@@ -174,7 +178,7 @@ join an in-flight remote refresh rather than canceling and restarting it. Exclud
 repositories are not fetched. The entire remote refresh shares a 128-request cap;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
-exponential cooldowns when no retry time is available. The status shows when `R`
+exponential cooldowns when no retry time is available. The PR overlay status shows when `R`
 can request data again; no background retry runs. There is no polling or disk cache,
 so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
@@ -200,34 +204,70 @@ origins are reported in the PR overlay without suppressing local history.
 
 ## Controls
 
+Keys depend on the active view. While typing a search, ordinary characters
+(including `q`) enter text; `Enter` accepts, `Esc` clears, and `Ctrl+C` quits.
+
+### Worklist overview and area detail
+
 | Key | Action |
 |-----|--------|
-| `↑/↓` `j/k` | Navigate rows |
-| `←/→` `h/l` | Cycle time range (1d / 7d / 14d / 30d / 90d / 1y / all) |
-| `Tab` / `Shift+Tab`, `1`–`4` | Switch Activity / People / Related / Subareas in area detail |
-| `Enter` | Open selected scope / contributor filter / commit inspector |
-| `v` | Switch relationships / statistics |
-| `Esc` | Back / Quit |
-| `s` | Overview: Activity / Recent / Name; statistics: cycle sort column |
-| `S` | Reverse sort direction |
-| `/` | Search the current list; statistics: filter contributors |
-| `g` / `G`, `Home` / `End` | First / last row in awareness views |
+| `↑/↓` or `j/k` | Select a repository, area, commit, person, or related/subarea row |
 | `PgUp` / `PgDown` | Page through the current list |
-| `?` | Show awareness controls |
-| `b` | Toggle bot contributors in/out |
-| `r` | Open repo inclusion/exclusion overlay |
-| `space` | Toggle a repo in/out (within the repo overlay) |
-| `p` / `P` | Open PRs for the selected scope / all included repositories |
-| `R` | Refresh local history and PRs; inside the PR overlay, refresh PRs only |
-| `q` | Quit (clears an active filter first) |
+| `g` / `G`, `Home` / `End` | First / last row |
+| `←/→` or `h/l` | Change local range: 1d / 7d / 14d / 30d / 90d / 1y / all |
+| `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
+| `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
+| `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses once area detail is open |
+| `s` | Sort overview or Subareas: Recent → Name → Activity (commits); other detail lenses keep their order |
+| `/` | Search only the current list or lens |
+| `b` | Show/hide bot contributors in local history |
+| `p` / `P` | Selected repository/parent-area PRs / all included repositories |
+| `r` | Open repository inclusion controls |
+| `R` | Refresh local history and request PR context, subject to remote cooldown |
+| `e` | Open scan-error details when errors exist |
+| `v` | Open the contributor-statistics leaderboard |
+| `?` | Show Worklist help |
+| `Esc` | Clear a search/person filter, unwind detail/subareas, then return to repositories; at the unfiltered repository list, quit |
+| `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |
 
-In the contributor detail view, `↑/↓` step to the previous/next contributor.
-`PgUp` / `PgDown` scroll its content; `Home` / `End` jump to the first / last page.
-The help and current line range stay visible while scrolling.
+The full **commit inspector** has its own keys: `↑/↓` or `j/k` scrolls lines;
+`PgUp/PgDown`, `g/G`, or `Home/End` moves farther. `Enter` or `Esc` returns to
+Activity. `Tab/Shift+Tab` leaves the inspector for the next/previous lens. Return
+to the list or lens before changing range, toggling bots, or refreshing.
+
+### PR and repository overlays
+
+In the **PR overlay**, `↑/↓` or `j/k` selects PRs or scrolls the open PR detail.
+`Enter` toggles detail; `Esc` or `p` backs out one level. `R` requests **PR data
+only**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
+
+In **repository controls**, `↑/↓` or `j/k` selects and `Space` toggles inclusion.
+Both `Enter` and `Esc` apply the current choices and close the overlay; `Esc`
+does not cancel toggles. These choices affect the current session, not the config
+file. Excluding a repository also removes it from later PR refresh requests.
+
+### Contributor statistics
+
+On the **leaderboard**, `↑/↓` or `j/k` selects a contributor and `Enter` opens
+their detail. `s` cycles metric columns; `S` reverses the metric sort. `/` filters
+contributors by name, `b` toggles bots, `r` opens repository controls, `R` refreshes,
+and `v` returns to Worklist. With an accepted name filter, `q` or `Esc` clears it
+first; otherwise it quits. The leaderboard scrolls as selection moves; page and
+Home/End keys are not used there.
+
+In **contributor detail**, `↑/↓` or `j/k` switches contributors. `PgUp/PgDown`
+scrolls content and `Home/End` jumps to its first/last page. `Esc` returns to the
+leaderboard, where filtering, bot toggles, sorting, repository controls and refresh
+are available. `q` or `Ctrl+C` quits. Both statistics views support `←/→` or `h/l`
+for the local time range. `p/P` and Worklist's `1`–`4` lenses are not statistics keys.
 
 ## Config file
 
-Optional, at `~/.config/bigboard/config.json` (override with `--config`).
+Optional, at `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CONFIG_HOME` is set,
+otherwise `~/.config/bigboard/config.json`. Override either with `--config`.
+Malformed JSON, unknown fields, and unsupported `sort`, `since`, or `theme` values
+report an error. Settings are read at startup;
+interactive filters and inclusion changes do not rewrite the file.
 
 ```json
 {
@@ -248,7 +288,13 @@ Optional, at `~/.config/bigboard/config.json` (override with `--config`).
 }
 ```
 
-- `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`.
+- `paths` supplies scan roots when no positional paths or `--group` are given; without any of these, Bigboard scans the current directory.
+- `depth` controls recursive repository discovery, with a default of `1`; values below `1` also use `1`. It does not change work-area grouping.
+- `sort` sets the statistics metric: `commits`, `added`, `removed`, `net`, `ai`, or `total` (`impact` is an alias for `total`). The default is `total`. Worklist starts in Recent regardless of this setting.
+- `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Worklist canvas uses its fixed high-contrast palette.
+- `all_files` includes generated/vendored paths in line totals; it defaults to `false`.
+- `work_areas` defines optional cross-directory groups using the [rules above](#work-relationships).
+- `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
 - `fuzzy` is retained for config compatibility; use `.mailmap` for identity aliases.
 - `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
