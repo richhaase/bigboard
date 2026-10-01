@@ -121,7 +121,7 @@ func (m Model) renderNightOps(width, height int) string {
 	sidebar = append(sidebar, nightMuted.Render(scanned), nightMuted.Render(updateStatus))
 	sidebar = append(sidebar, nightLime.Render(" R refresh now"), nightMuted.Render(" "+m.prStatus()))
 	if len(m.failedRepos) > 0 {
-		sidebar = append(sidebar, nightLime.Render(fmt.Sprintf(" Update errors: %d · R retry", len(m.failedRepos))))
+		sidebar = append(sidebar, nightLime.Render(fmt.Sprintf(" Update errors: %d · e details", len(m.failedRepos))))
 	}
 	var body []string
 	if len(rows) == 0 && !m.glance.detailOpen {

@@ -20,6 +20,8 @@ func makeTestRepo(t *testing.T, dir string) {
 		{"git", "init", "-b", "main"},
 		{"git", "config", "user.name", "Test User"},
 		{"git", "config", "user.email", "test@example.com"},
+		{"git", "config", "commit.gpgSign", "false"},
+		{"git", "config", "core.hooksPath", t.TempDir()},
 	}
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)

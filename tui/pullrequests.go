@@ -54,13 +54,17 @@ func (m *Model) cancelPRRefresh() {
 }
 func (m *Model) startPRRefresh() tea.Cmd {
 	m.cancelPRRefresh()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	parent := m.scanContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	m.cancelPRs = cancel
 	m.prState.loading = true
 	generation := m.prGeneration
 	repos := append([]git.Repository(nil), m.loadedRepos...)
 	provider := m.prProvider
-	return func() tea.Msg {
+	return m.commands.wrap(func() tea.Msg {
 		defer cancel()
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
 		aliases := make(map[string]string)
@@ -99,7 +103,7 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		}
 		msg.checked = time.Now()
 		return msg
-	}
+	})
 }
 func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	selectedKey := ""

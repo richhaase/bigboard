@@ -237,6 +237,8 @@ func initRepoWithCommit(t *testing.T, dir string) {
 		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "ada@x.com"},
 		{"git", "config", "user.name", "Ada"},
+		{"git", "config", "commit.gpgSign", "false"},
+		{"git", "config", "core.hooksPath", t.TempDir()},
 	} {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
@@ -372,7 +374,7 @@ func TestExportSharedShallowHistoryAndFutureDates(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("future commit: %v %s", err, out)
 	}
-	cmd = exec.Command("git", "clone", "--depth=1", "file://"+source, clone)
+	cmd = exec.Command("git", "-c", "core.hooksPath="+t.TempDir(), "clone", "--depth=1", "file://"+source, clone)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("shallow clone: %v %s", err, out)
 	}
