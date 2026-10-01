@@ -105,5 +105,7 @@ type Result struct {
 	Repo     string
 	PRs      []PullRequest
 	Complete bool
-	Err      error
+	// RetryAt is shared quota cooldown metadata, including exhausted successful responses.
+	RetryAt time.Time
+	Err     error
 }

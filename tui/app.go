@@ -233,9 +233,6 @@ func (m *Model) resetPending() {
 }
 
 func (m *Model) resetLocalPending(refreshPRs bool) {
-	if refreshPRs {
-		m.cancelPRRefresh()
-	}
 	m.refreshPRs = refreshPRs
 	m.scanGeneration++
 	m.refreshing = true
@@ -338,7 +335,6 @@ func (m *Model) startLocalRefresh(manual bool) tea.Cmd {
 		// An explicit request during an automatic scan joins that generation.
 		// Keep its GitHub refresh intent without starting overlapping scans.
 		if manual && !m.refreshPRs {
-			m.cancelPRRefresh()
 			m.refreshPRs = true
 		}
 		return nil

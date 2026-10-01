@@ -74,7 +74,7 @@ func commandEnv(inherited []string) []string {
 func classifyFailure(diagnostic string) error {
 	message := strings.ToLower(diagnostic)
 	switch {
-	case strings.Contains(message, "rate limit"), strings.Contains(message, "rate_limit"):
+	case strings.Contains(message, "rate limit"), strings.Contains(message, "rate_limit"), strings.Contains(message, "http 429"):
 		return ErrRateLimited
 	case strings.Contains(message, "authentication"), strings.Contains(message, "not logged"),
 		strings.Contains(message, "gh auth login"), strings.Contains(message, "bad credentials"),
