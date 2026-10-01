@@ -10,7 +10,9 @@ repository opens directly into its work areas.
 These screenshots are real terminal captures of Bigboard's public repository,
 not mockups. They use the default **14d** range with bots shown. Historical areas
 such as `src/tui` can remain visible even when those paths no longer exist in the
-current checkout.
+current checkout. The Activity and Related captures predate the manual-refresh
+change: their “Updates every minute” status is historical. Current Bigboard
+refreshes only on launch or `R`.
 
 ## Explore an area
 
@@ -85,8 +87,8 @@ the leaderboard; `v` returns to relationships.
 **Last updated** is the last successful local scan for the selected repository.
 The board refreshes local data on launch and when you press `R`; it does not
 auto-refresh. **Updating…** keeps the existing view usable during a refresh.
-A failed refresh retains last-good data and marks it **STALE**. Bigboard never runs `git fetch`: update the local Git history separately
-when needed.
+A failed refresh retains last-good data and marks it **STALE**. Bigboard never runs
+`git fetch`: update the local Git history separately when needed.
 
 GitHub PR context loads automatically when a supported GitHub origin and an
 already authenticated `gh` CLI are available. These captures were made in a
@@ -98,7 +100,6 @@ PRs cover **all dates**, independently of the local time, person, and bot filter
 they never contribute to commit counts. **STALE**, **PARTIAL**, and **UNKNOWN**
 qualify evidence rather than indicating approval or merge readiness. `R` refreshes
 local history and PR context; inside the PR overlay it refreshes PRs only.
-Automatic minute-by-minute local updates do not poll GitHub.
 
 See [accuracy notes](../README.md#accuracy-notes),
 [PR context and limits](../README.md#automatic-github-pr-awareness), and the
