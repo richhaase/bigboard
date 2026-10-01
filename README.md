@@ -6,7 +6,8 @@ A terminal situational-awareness board for seeing who has worked where across yo
 
 *The Night Ops workspace, showing Bigboard's own public Git history at 120 × 36.
 Select a work area to see who worked there and the commits behind it. PR data is
-unavailable in this capture; unknown is not zero.*
+unavailable in this capture; unknown is not zero. The pictured “Updates every
+minute” label is historical; current Bigboard refreshes only on launch or `R`.*
 
 [Take the visual tour](docs/visual-guide.md) for the views, navigation, and how to
 read the counts. [Controls](#controls) · [Configuration](#config-file) ·
