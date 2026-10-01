@@ -144,7 +144,6 @@ func glanceColumns(width int, withPR bool) (name, commits, people, last, pr int)
 	}
 	return max(4, name), commits, people, last, pr
 }
-func (m Model) glanceColumnHeader(width int) string { return m.glanceColumnHeaderFor(width, true) }
 func (m Model) glanceColumnHeaderFor(width int, withPR bool) string {
 	name, c, p, last, pr := glanceColumns(width, withPR)
 	label := "REPOSITORY"
@@ -194,87 +193,7 @@ func (m Model) renderAwareness() string {
 	if m.glance.help {
 		return m.renderGlanceHelp(width, height)
 	}
-	if width >= 100 && height >= 28 && !m.showPaths {
-		return m.renderNightOps(width, height)
-	}
-	if m.glance.detailOpen {
-		return m.renderGlanceDetail(width, height)
-	}
-	all := m.activityRepositories()
-	rows := m.glanceRepositories()
-	selected := m.selectedRepository(rows)
-	bannerWidth := width
-	if height < 30 {
-		bannerWidth = min(width, bannerMinWidth-1)
-	}
-	lines := nightCompactBanner(bannerWidth)
-	breadcrumb := "  REPOSITORIES"
-	if repo, ok := m.areaRepository(); ok {
-		breadcrumb += " › " + displayText(repo.Name) + " › WORK AREAS"
-	}
-	lines = append(lines, StyleSubtitle.Render(breadcrumb), m.awarenessSummary(len(all)))
-	selectedID := m.selectedScopeID()
-	lines = append(lines, m.glanceScanLine(selectedID), StyleDimWhite.Render("  "+m.prStatus()), StyleDimCyan.Render("  "+hrule(width-chromeInset)), m.glanceColumnHeader(width))
-	previewRows := 6
-	peopleRows := 2
-	if height < 30 {
-		previewRows = 5
-		peopleRows = 1
-	}
-	if m.areaRepoID == "" {
-		previewRows++
-	}
-	budget := max(1, height-len(lines)-previewRows-3)
-	start := max(0, min(selected-budget/2, len(rows)-budget))
-	end := min(len(rows), start+budget)
-	for i := start; i < end; i++ {
-		lines = append(lines, m.glanceActivityRow(rows[i], i == selected, i, width, true))
-	}
-	if len(rows) == 0 {
-		empty := "  No included, readable repositories. r include · R retry."
-		if m.areaRepoID != "" {
-			empty = "  No work-area activity in this range. ←→ range · Esc back."
-		}
-		if m.glanceQuery() != "" {
-			empty = "  No matching names. Esc clears search."
-		}
-		lines = append(lines, empty)
-	}
-	position := "0/0"
-	if len(rows) > 0 {
-		position = fmt.Sprintf("%d–%d/%d", start+1, end, len(rows))
-	}
-	sortLabel := overviewSortLabels[max(0, min(m.overviewSort, len(overviewSortLabels)-1))]
-	qualifier := ""
-	if m.areaRepoID != "" {
-		qualifier = " · counts overlap"
-	}
-	lines = append(lines, StyleDimWhite.Render("  "+position+" · "+sortLabel+qualifier))
-	if len(rows) > 0 {
-		r := rows[selected]
-		lines = append(lines, StyleDimCyan.Render("  "+hrule(width-chromeInset)), StyleCyan.Render(fmt.Sprintf("  %s · %s commits", displayText(r.repo.Name), FormatNumber(r.commits))))
-		lines = append(lines, glanceContributorPreview(r.people, width, peopleRows)...)
-		evidence := m.evidence(m.scopeEvidenceKey(r), "")
-		subject := "  No local commits in this range"
-		if len(evidence) > 0 {
-			subject = evidence[0].Subject
-			if subject == "" {
-				subject = "(no subject)"
-			}
-			subject = "  Latest: " + displayText(subject)
-		}
-		lines = append(lines, StyleDimWhite.Render(subject))
-		if m.areaRepoID == "" {
-			lines = append(lines, m.glanceBusiestAreas(r.repo.ID, width))
-		}
-		lines = append(lines, StyleDimWhite.Render("  PRs: "+m.prGlanceSignal(r.repo.ID)+" · p opens all-date scope"))
-	}
-	footer := "  ↑↓ select · Enter open · / find · s sort · ←→ range · Esc back · ? help"
-	if m.glance.searching || m.glanceQuery() != "" {
-		footer = "  / " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
-	}
-	lines = append(lines, footer, m.glanceCoverageLine())
-	return fitGlanceLines(lines, width, height)
+	return m.renderWorklist(width, height)
 }
 
 // Show the selected scope's most active identities first without expanding its

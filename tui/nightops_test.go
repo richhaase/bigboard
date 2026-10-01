@@ -15,25 +15,12 @@ import (
 // names and related scopes, which may repeat the same people elsewhere.
 func nightPeopleInOrder(view string, names ...string) bool {
 	view = ansi.Strip(view)
-	lines := strings.Split(view, "\n")
-	var panel []string
-	active := false
-	for _, line := range lines {
-		if strings.Contains(line, "WHO WORKED HERE") {
-			active = true
-			continue
-		}
-		if active && strings.Contains(line, "RECENT COMMITS") {
-			break
-		}
-		if active {
-			if i := strings.Index(line, "│"); i >= 0 {
-				line = line[i+len("│"):]
-			}
-			panel = append(panel, line)
-		}
+	_, text, ok := strings.Cut(view, "SELECTED  ")
+	if !ok {
+		return false
 	}
-	text := strings.Join(panel, "\n")
+	_, text, _ = strings.Cut(text, "\n")
+	text, _, _ = strings.Cut(text, "RECENT COMMITS")
 	for _, name := range names {
 		i := strings.Index(text, name)
 		if i < 0 {
@@ -41,7 +28,7 @@ func nightPeopleInOrder(view string, names ...string) bool {
 		}
 		text = text[i+len(name):]
 	}
-	return active
+	return true
 }
 
 func TestNightOpsBoundsAndFocus(t *testing.T) {
@@ -94,13 +81,13 @@ func TestNightOpsUnsetSizePreservesStartupMessages(t *testing.T) {
 
 func TestNightOpsSmallSnapshotAndPRTitle(t *testing.T) {
 	m := prFixture()
-	m.width, m.height = 100, 28
+	m.width, m.height = 120, 36
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
 	at := time.Date(2026, 9, 30, 15, 12, 0, 0, time.Local)
 	m.scannedAt["/api"] = at
 	m.failedRepos = []string{"/web"}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "All dates · unfiltered"} {
+	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "all dates · local filters do not apply"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q at100x28:\n%s", want, view)
 		}
@@ -144,19 +131,12 @@ func TestNightOpsMissingScopeHasNoUnrelatedSidebarFocus(t *testing.T) {
 	m.allRecords = kept
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
-	band, _, _ := strings.Cut(nightBand.Render("X"), "X")
-	for _, line := range strings.Split(m.renderNightOps(160, 48), "\n") {
-		if i := strings.Index(line, "│"); i >= 0 {
-			left := line[:i]
-			plain := ansi.Strip(left)
-			if strings.Contains(plain, "AREAS / COMMITS") {
-				continue
-			}
-			if strings.Contains(plain, "›") || (band != "" && strings.Contains(left, band)) {
-				t.Fatalf("unrelated sidebar row selected: %s", plain)
-			}
+	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "›") {
+			t.Fatalf("missing scope must not select unrelated evidence: %s", line)
 		}
 	}
+
 	if m.glance.frame.areaID != "auto:services/auth" {
 		t.Fatal("missing scope silently switched")
 	}
@@ -178,30 +158,25 @@ func TestNightOpsCanvasRespectsNoColor(t *testing.T) {
 	}
 }
 
-func TestNightOpsWordmarkAndPlainRefreshStatus(t *testing.T) {
+func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	view := ansi.Strip(m.View())
-	for _, want := range []string{nightWordmark[0], nightWordmark[1], nightWordmark[2], "Last updated", "Updates on demand", "R refresh now"} {
+	for _, want := range []string{"BIGBOARD / Worklist", "Local:", "R refresh", "LAST AUTHOR", "LATEST COMMIT"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	for _, old := range []string{"SNAPSHOT", "No remote Git fetch", "Local scan", "Updates every minute"} {
-		if strings.Contains(view, old) {
-			t.Fatalf("technical status remains: %q", old)
-		}
-	}
-	if !strings.HasSuffix(nightWordmark[0], "┏━╮") || !strings.HasSuffix(nightWordmark[1], "┃ ┃") || !strings.HasSuffix(nightWordmark[2], "┗━╯") {
-		t.Fatal("D must retain its distinct left stem")
+	if strings.Contains(view, "NIGHT OPS") || strings.Contains(view, "Updates every minute") {
+		t.Fatal("obsolete theme or timer hint")
 	}
 	m.refreshing = true
 	if !strings.Contains(m.View(), "Updating…") {
-		t.Fatal("background update has no visible status")
+		t.Fatal("refresh status hidden")
 	}
 	m.width = 80
-	if !strings.Contains(m.View(), "BIGBOARD / NIGHT OPS") || !strings.Contains(m.View(), "Last updated") || !strings.Contains(m.View(), "Updating…") {
-		t.Fatal("compact header/status differs")
+	if !strings.Contains(m.View(), "BIGBOARD / Worklist") || !strings.Contains(m.View(), "Updating…") {
+		t.Fatal("compact status differs")
 	}
 }
 

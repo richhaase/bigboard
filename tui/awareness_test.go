@@ -43,6 +43,9 @@ func pressAwareness(m Model, key string) Model {
 func TestAwarenessDefaultAndStatsRoundTrip(t *testing.T) {
 	m := NewModelWithOptions(nil, stats.SortByCommits, nil, "test", DefaultTimeIndex, Options{})
 	defer m.cancelScans()
+	if m.overviewSort != 1 {
+		t.Fatal("Worklist must start with Recent sorting")
+	}
 	if m.viewMode != ViewAwareness {
 		t.Fatal("relationships must be the initial screen")
 	}
@@ -66,7 +69,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 		t.Fatalf("focus=%s", m.personID)
 	}
 	out := m.View()
-	for _, text := range []string{"Fix login", "OPEN PRs", "Last updated"} {
+	for _, text := range []string{"Fix login", "OPEN PRs", "Local:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %q:\n%s", text, out)
 		}
@@ -256,7 +259,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	m.width = 110
 	m.height = 40
 	out := m.View()
-	for _, text := range []string{"NIGHT OPS", "[ BB ]", "REPOSITORIES", "WHO WORKED HERE", "RECENT COMMITS", "Last updated"} {
+	for _, text := range []string{"BIGBOARD / Worklist", "REPOSITORIES", "LAST AUTHOR", "RECENT COMMITS", "Local:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing original-style element %q", text)
 		}
@@ -266,7 +269,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	}
 	m.width = 40
 	m.height = 18
-	if !strings.Contains(m.View(), "BIGBOARD / NIGHT OPS") {
+	if !strings.Contains(m.View(), "BIGBOARD / Worklist") {
 		t.Fatalf("compact Big Board banner missing:\n%s", m.View())
 	}
 }

@@ -144,6 +144,7 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 	scanContext, cancelScans := context.WithCancel(context.Background())
 	m := Model{
 		viewMode:      ViewAwareness,
+		overviewSort:  1,
 		scannedAt:     make(map[string]time.Time),
 		staleRepos:    make(map[string]bool),
 		repositories:  append([]git.Repository(nil), repositories...),

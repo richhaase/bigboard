@@ -205,53 +205,6 @@ func (m Model) glanceDetailIDs() []string {
 	return ids
 }
 
-func (m Model) renderGlanceDetail(width, height int) string {
-	area := m.glanceDetailArea()
-	if m.showPaths {
-		return m.renderCommitInspector(width, height)
-	}
-	lines := nightCompactBanner(width)
-	repo, _ := m.areaRepository()
-	breadcrumb := "  " + displayText(repo.Name) + " › " + displayText(area.Name)
-	if m.glance.frame.relatedFromID != "" {
-		breadcrumb = "  " + displayText(repo.Name) + " › related › " + displayText(area.Name)
-	}
-	lines = append(lines, StyleSubtitle.Render(breadcrumb))
-	bots := ""
-	if m.hideBots {
-		bots = " · bots hidden"
-	}
-	areaPeople := m.glanceAreaPeople()
-	scope := fmt.Sprintf("  Range: %s%s · %s commits · %d people", TimePresets[m.timeIdx].Label, bots, FormatNumber(len(stats.UniqueRecords(m.glanceAreaRecords()))), len(areaPeople))
-	lines = append(lines, StyleDimWhite.Render(scope))
-	if m.personID != "" {
-		label := displayText(strings.TrimPrefix(m.personID, "email:"))
-		for _, p := range areaPeople {
-			if p.ID == m.personID {
-				label = glancePersonLabel(p, areaPeople)
-				break
-			}
-		}
-		label = ansi.Truncate(label, max(1, width-25), "…")
-		lines = append(lines, StyleCyan.Render("  Activity: "+label+" · Esc clears"))
-	}
-
-	lines = append(lines, m.glanceScanLine(m.areaRepoID), StyleDimWhite.Render("  PRs: "+m.prGlanceSignal(m.glance.frame.areaID)+" · all open dates"))
-	tabs := make([]string, len(glanceTabs))
-	for i, label := range glanceTabs {
-		tabs[i] = fmt.Sprintf("%d %s", i+1, label)
-		if width < 70 {
-			tabs[i] = label
-		}
-		if i == m.glance.frame.tab {
-			tabs[i] = "[" + tabs[i] + "]"
-		}
-	}
-	lines = append(lines, StyleCyan.Render("  "+strings.Join(tabs, " ")), StyleDimCyan.Render("  "+hrule(width-chromeInset)))
-	lines = append(lines, m.glanceLensLines(width, height-len(lines))...)
-	return fitGlanceLines(lines, width, height)
-}
-
 // glanceLensLines shares the identity-preserving, scrollable lens between the
 // compact view and the wide workspace without reparsing rendered headings.
 func (m Model) glanceLensLines(width, height int) []string {

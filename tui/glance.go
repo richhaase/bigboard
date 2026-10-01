@@ -247,7 +247,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	default:
-		if next, ok := glanceMove(key, selected, len(rows), max(1, m.height-15)); ok && len(rows) > 0 {
+		if next, ok := glanceMove(key, selected, len(rows), m.worklistPageSize()); ok && len(rows) > 0 {
 			m.setSelectedScopeID(rows[next].repo.ID)
 		}
 	}

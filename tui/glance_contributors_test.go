@@ -14,6 +14,7 @@ import (
 
 func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
 	m := monorepoFixture()
+	m.width = 120
 	m.selectedAreaID = "auto:services/auth"
 	if !nightPeopleInOrder(m.View(), "Ada") {
 		t.Fatal("selected area does not reveal its contributors")
@@ -39,17 +40,19 @@ func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
 	}
 
 	m = awarenessFixture()
+	m.width = 120
 	if !nightPeopleInOrder(m.View(), "Ada", "Grace") {
 		t.Fatal("repository preview did not reveal its contributors")
 	}
 	m = pressAwareness(m, "down")
-	if !nightPeopleInOrder(m.View(), "Ada") || strings.Contains(m.View(), "Grace") {
+	if !nightPeopleInOrder(m.View(), "Ada") || nightPeopleInOrder(m.View(), "Grace") {
 		t.Fatal("repository selection retained another repository's contributor")
 	}
 }
 
 func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	m := monorepoFixture()
+	m.width = 120
 	m.allRecords = nil
 	now := time.Now()
 	add := func(name, email, repo, path string, count int, date time.Time) {
@@ -118,6 +121,7 @@ func TestGlanceContributorPreviewBoundsIdentityAndTies(t *testing.T) {
 
 func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 	m := monorepoFixture()
+	m.width = 120
 	bot := m.allRecords[0]
 	bot.CommitID, bot.Author, bot.Email = "bot", "robot[bot]", "robot[bot]@x"
 	m.allRecords = append(m.allRecords, bot)
@@ -136,6 +140,8 @@ func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 		t.Fatal("date or bot filter did not update the contributor preview")
 	}
 	m = prFixture()
+	m.width = 120
+	m.height = 36
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
 	if !strings.Contains(m.View(), "No contributors in this range") || nightPeopleInOrder(m.View(), "robot[bot]") {
 		t.Fatalf("PR-only area fabricated a local contributor:\n%s", ansi.Strip(m.View()))
@@ -148,7 +154,7 @@ func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 				m.areaRepoID = ""
 			}
 			view := m.View()
-			if lipgloss.Height(view) > m.height || (!strings.Contains(view, "Contributors:") && !strings.Contains(view, "WHO WORKED HERE")) || !strings.Contains(view, "author dates") {
+			if lipgloss.Height(view) > m.height || !strings.Contains(view, "Person 000") || !strings.Contains(view, "author dates") {
 				t.Fatalf("preview or footer hidden at %dx%d (repository=%t):\n%s", m.width, m.height, repo, view)
 			}
 			for _, line := range strings.Split(view, "\n") {

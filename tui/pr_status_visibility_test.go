@@ -56,10 +56,7 @@ func TestPRStatusWarningsVisibleAcrossLenses(t *testing.T) {
 							}
 							raw := m.View()
 							view := ansi.Strip(raw)
-							want := "GitHub · " + state.warning
-							if size[0] < 100 {
-								want = "PRs: " + state.warning
-							}
+							want := "PRs: " + state.warning
 							if !strings.Contains(view, want) {
 								t.Fatalf("complete warning %q missing:\n%s", want, view)
 							}

@@ -11,11 +11,21 @@ import (
 // Repository associations describe Git history, not live presence. Counts and
 // identities use the same canonical records as the statistics pipeline.
 type repositoryActivity struct {
-	repo    git.Repository
-	people  []stats.AuthorStats
-	commits int
-	latest  time.Time
-	subject string
+	repo     git.Repository
+	people   []stats.AuthorStats
+	commits  int
+	latest   time.Time
+	subject  string
+	authorID string
+	latestID string
+}
+
+// Latest author and subject always describe the same canonical commit. Stable
+// object-ID ties keep the row and evidence pane in agreement.
+func (a *repositoryActivity) observe(r git.CommitRecord) {
+	if a.latest.IsZero() || r.Date.After(a.latest) || (r.Date.Equal(a.latest) && r.CommitID < a.latestID) {
+		a.latest, a.subject, a.authorID, a.latestID = r.Date, r.Subject, stats.IdentityID(r), r.CommitID
+	}
 }
 
 func (m Model) activityRepositories() []repositoryActivity {
@@ -40,9 +50,7 @@ func (m Model) activityRepositories() []repositoryActivity {
 			}
 			kept = append(kept, r)
 			activity.commits++
-			if r.Date.After(activity.latest) {
-				activity.latest, activity.subject = r.Date, r.Subject
-			}
+			activity.observe(r)
 		}
 		activity.people = stats.AggregateWithOptions(kept, stats.AggregateOptions{BotIdentities: m.options.BotIdentities})
 		sortPeople(activity.people)

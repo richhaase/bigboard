@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Cyberpunk-themed terminal dashboard for visualizing contributor statistics across multiple git repositories. Built with Go, Bubbletea, and Lipgloss.
+High-contrast terminal dashboard for visualizing contributor statistics across multiple git repositories. Built with Go, Bubbletea, and Lipgloss.
 
 ## Architecture
 
@@ -14,7 +14,8 @@ git/git.go              Git ops: recursive discovery (follows symlinks), branch 
 stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
 tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
 tui/styles.go           Color palette and lipgloss style definitions
-tui/nightops.go         Responsive Night Ops inventory/evidence workspace and canvas
+tui/worklist*.go        Responsive Worklist rows, selected evidence, and compact list→detail
+tui/nightops.go         Shared high-contrast canvas for retained views
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
 tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
@@ -43,7 +44,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **Counting**: deduplicate object IDs globally after repository/time filtering; repository subtotals overlap. Prefer known counts from full copies over unknown shallow boundaries. Shallow counts use `LinesUnknown` / `unknown_line_commits` and visible `?` qualifiers. Scans never lazily fetch missing objects. Cached remote default history precedes local history.
 - **Dates and retained behavior**: use `time.Local` for all calendar grouping and display. Future-dated commits remain counted, with no upper time cutoff. Keep the current churn formula and its zero-additions `0.00` convention. Keep the existing UI, JSON export, and merge-commit exclusion.
 - **Git isolation**: resolve branch OIDs, parse NUL-delimited paths, pin diff settings, clear repository-local environment overrides, and retain specific-agent AI matching with explicit user overrides.
-- **Night Ops awareness**: `tui/nightops.go` renders the wide 100×28+ inventory/evidence workspace with cell-based geometry, violet canvas, lime accents and a compact outlined wordmark. Smaller terminals use the compact glance view. All modes share the dark canvas; statistics retain their existing arrangement.
+- **Worklist awareness**: `tui/worklist*.go` renders a horizontal repo/area → last author + others → concrete commit → age list. At 110×28+ selected evidence fills the pane underneath; narrower terminals use multiline list rows and Enter replaces the list with detail. Recent is the default overview sort, independent of statistics sort. Ages use each row repository's own retained scan timestamp. Latest author, subject, and time come from the same deterministic commit (date, then object ID). All modes share a high-contrast blue-gray canvas; statistics retain their arrangement.
 
 ## Build & Test
 
@@ -75,7 +76,7 @@ GitHub PR context loads automatically with existing gh authentication for suppor
 
 ## Progressive disclosure
 
-`tui/glance*.go` owns the awareness overview and focused Activity/People/Related/
+`tui/worklist*.go` owns awareness presentation; `tui/glance*.go` owns focused Activity/People/Related/
 Subareas navigation. `s` cycles volume/recency/name scope sorts, separate from
 aggregate contributor statistics. Scope/person/commit identity survives navigation
 and sorting; stale or filtered-out detail must not silently switch to a new area.
