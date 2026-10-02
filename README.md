@@ -6,8 +6,8 @@ A terminal situational-awareness board for seeing who has worked where across yo
 
 *Worklist at 120 × 36, with `tui` selected in Bigboard's own public Git history.
 The lower pane shows the contributors, commits, and related areas behind that
-selection. GitHub context is rate-limited in this capture, so PRs are shown as
-unavailable rather than zero. Local and PR snapshots refresh on launch or `R`.*
+selection. The capture omits `gh`, so PR context is
+shown as unavailable rather than zero. Local and PR snapshots refresh on launch or `R`.*
 
 [Take the visual tour](docs/visual-guide.md) for the views, navigation, and how to
 read the counts. [Controls](#controls) · [Configuration](#config-file) ·
@@ -66,10 +66,11 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 ## Work relationships
 
 Worklist puts each repository or area on one reading line: **where → latest
-contributor + other contributors → latest commit → age → open PR context**.
+contributor + other contributors → latest commit → age**.
 At 110 columns × 28 rows and above, a spacious evidence pane below the list shows
-contributors with scoped commit counts, recent commit subjects, PRs, and related
-areas. Moving the selection updates the evidence immediately. Recent is the
+named contributors with scoped commit counts, recent titles, authors, times, hashes,
+and affected areas. Shared PR availability appears once in the header; retained
+area-specific PR evidence stays beside the relevant area. Moving the selection updates the evidence immediately. Recent is the
 default sort; `s` cycles to Name and Activity (commits) without changing the selected
 identity. Commit volume is not priority or productivity.
 
@@ -90,9 +91,13 @@ author-date evidence, contributor identity, and short object IDs. `Enter` opens 
 scrollable inspector with the
 full subject, canonical contributor identity, timestamp, object ID, and all changed
 paths. People is alphabetical; selecting a person filters Activity. Related lists
-exact shared-contributor counts; open one to inspect those identities and their
-evidence. These are historical associations, including shared Git history across
-clones or forks, not online presence or proof of collaboration.
+exact commits touching both areas, their counts, and the latest shared title;
+`Enter` opens those commits and then their full changed paths. Contributor overlap
+is separate: names appearing in both areas may have worked independently. Press
+`o` in Related for its scrollable overlap list, then `Enter` for names and their
+identity-filtered evidence. Direct collaboration has its own status: review
+participation is unavailable and co-authorship is not assessed by these views.
+Neither co-change nor contributor overlap establishes collaboration.
 
 Subareas refines automatic path areas by one literal directory level at a time.
 Direct files are a separate leaf; multi-path commits can appear in several children.
@@ -230,6 +235,7 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `R` | Refresh local history and request PR context, subject to remote cooldown |
 | `e` | Open scan-error details when errors exist |
 | `v` | Open the contributor-statistics leaderboard |
+| `o` | In Related, switch between shared commits and contributor overlap |
 | `?` | Show Worklist help |
 | `Esc` | Clear a search/person filter, unwind detail/subareas, then return to repositories; at the unfiltered repository list, quit |
 | `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |

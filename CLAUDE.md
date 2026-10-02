@@ -83,3 +83,13 @@ and sorting; stale or filtered-out detail must not silently switch to a new area
 files, without changing configured grouping or canonical identities. Area/subarea
 commit counts overlap. `tui/prglance.go` summarizes only explicit PR evidence;
 p/P keeps the parent area/all-open scope, independent of local filters.
+
+## Related evidence
+
+`worklist_related.go` separates exact nonempty shared commit IDs from canonical
+contributor overlap. Related Enter opens shared commits; `o` exposes a scrollable
+name-overlap list whose Enter opens identity-filtered People/Activity. Never infer
+collaboration from either. Review participation is unavailable and co-authorship
+is not assessed in these views. Shared PR unavailability belongs once in the
+header; retained scope-specific PR signals remain available. Commit previews show
+titles first, then author/time/hash and affected areas. No extra scans or requests.

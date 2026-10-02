@@ -157,13 +157,13 @@ func worklistColumnWidths(width int) (area, author, subject, age, pr int) {
 	area = max(18, width/5)
 	author = max(18, width/6)
 	age = 6
-	pr = 25
-	subject = max(1, width-area-author-age-pr-6)
+	pr = 0
+	subject = max(1, width-area-author-age-5)
 	return
 }
 func (m Model) worklistColumns(width int) string {
-	a, p, s, t, r := worklistColumnWidths(width)
-	return StyleDimWhite.Render("  " + padCells("REPO / AREA", a) + " " + padCells("LAST AUTHOR +OTHERS", p) + " " + padCells("LATEST COMMIT", s) + " " + padCells("AGE", t) + " " + padCells("OPEN PRs · all dates", r))
+	a, p, s, t, _ := worklistColumnWidths(width)
+	return StyleDimWhite.Render("  " + padCells("REPO / AREA", a) + " " + padCells("LAST AUTHOR +OTHERS", p) + " " + padCells("LATEST COMMIT", s) + " " + padCells("AGE", t))
 }
 func worklistLastAuthor(r repositoryActivity) string {
 	if len(r.people) == 0 {
@@ -248,12 +248,19 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 	}
 	var lines []string
 	if wide {
-		a, p, s, t, pr := worklistColumnWidths(width)
-		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + padCells(subject, s) + " " + padCells(m.worklistAge(r.latest, id), t) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), pr)}
+		a, p, s, t, _ := worklistColumnWidths(width)
+		if len(m.scopePRs(r.repo.ID)) > 0 {
+			signal := m.worklistSignal(m.worklistPRSignal(r.repo.ID))
+			subject = padCells(subject, max(1, s-27)) + "  " + padCells(signal, min(25, s-3))
+		}
+		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + padCells(subject, s) + " " + padCells(m.worklistAge(r.latest, id), t)}
 	} else if width >= 66 {
 		a := (width - 11) / 2
 		p := width - a - 10
-		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + padCells(subject, width-29) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), 26)}
+		if len(m.scopePRs(r.repo.ID)) > 0 {
+			subject = padCells(subject, width-29) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), 26)
+		}
+		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + padCells(subject, width-2)}
 	} else {
 		lines = []string{cursor + padCells(name, width-9) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + worklistAuthorCell(r, width-2), "  " + padCells(subject, width-2)}
 	}
@@ -281,9 +288,15 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select  →/Enter inspect  / find  s sort  p PRs  r repos  R refresh  ? help"
+	footer := "↑↓ select  →/Enter open  / find  s sort  t range  b bots  v leaderboard  p PRs  R refresh  ? help"
 	if detail {
-		footer = "↑↓ select  →/Enter evidence  Tab / 1–4 lens  p PRs  ←/Esc back  ? help"
+		footer = "↑↓ select  →/Enter evidence  Tab/1–4 lens  ←/Esc back  t range  b bots  v leaderboard  p PRs  R refresh"
+	}
+	if width >= 70 && width < 110 {
+		footer = "↑↓ select →/Enter open ←/Esc back t range b bots v stats p PRs R refresh"
+		if detail {
+			footer = "↑↓ →/Enter evidence ←/Esc back Tab lens t range b bots v stats p PRs R"
+		}
 	}
 	if width < 70 {
 		footer = "↑↓ select → open ← back t range ?"
@@ -314,7 +327,7 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 
 func (m Model) worklistPageSize() int {
 	if m.width >= 110 && m.height >= 28 {
-		return max(3, (m.height-12)/2)
+		return max(3, (m.height-19)/2)
 	}
 	return max(1, (m.height-11)/3)
 }

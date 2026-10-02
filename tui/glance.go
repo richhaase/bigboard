@@ -18,6 +18,7 @@ var glanceTabs = []string{"Activity", "People", "Related", "Subareas"}
 var overviewSortLabels = []string{"Activity (commits)", "Recent", "Name"}
 
 type glanceFrame struct {
+	relatedOverlap, relatedPeople                     bool
 	areaID, name, path, leafID                        string
 	relatedFromID, relatedFromPath, relatedFromLeafID string
 	tab                                               int
@@ -312,6 +313,13 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 	case "1", "2", "3", "4":
 		f.tab = int(key[0] - '1')
 		return m
+	case "o":
+		if f.tab == glanceRelated {
+			f.relatedOverlap = !f.relatedOverlap
+			f.ids[glanceRelated] = ""
+			f.rows[glanceRelated] = 0
+		}
+		return m
 	case "s":
 		if f.tab == glanceSubareas {
 			m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
@@ -342,9 +350,18 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 		f.ids[glanceActivity] = ""
 		m.evidenceOffset = 0
 	case glanceRelated:
-		for _, related := range m.glanceRelatedAreas() {
+		if f.relatedOverlap {
+			for _, related := range m.glanceRelatedAreas() {
+				if related.area.ID == ids[selected] {
+					m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, relatedPeople: true, tab: glancePeople})
+					break
+				}
+			}
+			break
+		}
+		for _, related := range m.glanceCochangedAreas() {
 			if related.area.ID == ids[selected] {
-				m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, tab: glancePeople})
+				m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, tab: glanceActivity})
 				break
 			}
 		}

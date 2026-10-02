@@ -53,7 +53,7 @@ func TestMonorepoAreasAndCrossAreaEvidence(t *testing.T) {
 	}
 	m = pressAwareness(m, "enter")
 	m = pressAwareness(m, "3")
-	if !strings.Contains(m.View(), "apps/web") || !strings.Contains(m.View(), "1 shared people") {
+	if !strings.Contains(m.View(), "apps/web") || !strings.Contains(m.View(), "shared-commit evidence") {
 		t.Fatal("related area evidence unavailable")
 	}
 	m = pressAwareness(m, "1")

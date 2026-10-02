@@ -256,7 +256,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 		"  s  sort areas/repos: Activity (commits), Recent, Name",
 		"  Tab / Shift-Tab or 1–4: Activity, People, Related, Subareas",
 		"  People: alphabetical identities; Enter filters Activity",
-		"  Related: exact shared people; Enter reveals them",
+		"  Related: Enter shared commits; o contributor overlap",
 		"  Subareas: literal child paths; counts may overlap",
 		"  ← / Esc  clear filter, then return; ← stays at root",
 		"  t  range: presets or custom days     b  bots",
@@ -268,26 +268,4 @@ func (m Model) renderGlanceHelp(width, height int) string {
 		"  Git associations show neither ownership nor live presence",
 		"  ? / Esc  close help")
 	return fitGlanceLines(lines, width, height)
-}
-
-// Repository previews reveal concentration without expanding a second list.
-func (m Model) glanceBusiestAreas(repoID string, width int) string {
-	m.areaRepoID = repoID
-	areas := m.activityAreas()
-	sortRepositoryActivities(areas, 0)
-	var parts []string
-	const prefix = "  Busiest areas: "
-	itemWidth := max(10, (width-ansi.StringWidth(prefix)-2)/2)
-	for _, area := range areas {
-		if area.commits == 0 || len(parts) == 2 {
-			break
-		}
-		count := " " + FormatNumber(area.commits)
-		name := ansi.Truncate(displayText(area.repo.Name), max(1, itemWidth-ansi.StringWidth(count)), "…")
-		parts = append(parts, name+count)
-	}
-	if len(parts) == 0 {
-		parts = append(parts, "no local commits in range")
-	}
-	return StyleDimWhite.Render(prefix + strings.Join(parts, ", "))
 }
