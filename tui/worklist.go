@@ -43,9 +43,9 @@ func (m Model) renderWorklist(width, height int) string {
 	if len(rows) == 0 {
 		empty := "No matching names. Esc clears search."
 		if m.glanceQuery() == "" {
-			empty = "No local activity or known PRs. ←→ range · r repos"
+			empty = "No local activity or known PRs. t range · r repos"
 			if m.areaRepoID != "" {
-				empty = "No work-area activity. ←→ range · Esc back"
+				empty = "No work-area activity. t range · Esc back"
 			}
 		}
 		lines = append(lines, "  "+empty)
@@ -86,9 +86,9 @@ func (m Model) worklistHeader(width int) []string {
 	if m.hideBots {
 		bots = "bots hidden"
 	}
-	rangeLine := "Range: " + TimePresets[m.timeIdx].Label + " ←→ · " + bots + " · R refresh"
+	rangeLine := "Range: " + m.rangeLabel() + " · t to change · " + bots + " · R refresh"
 	if width < 70 {
-		rangeLine = "Range: " + TimePresets[m.timeIdx].Label + " ←→ · " + bots + " · R"
+		rangeLine = "Range: " + m.rangeLabel() + " · t to change"
 	}
 	id := m.selectedScopeID()
 	if m.areaRepoID != "" {
@@ -281,17 +281,24 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select  Enter inspect  / find  s sort  p PRs  r repos  R refresh  ? help"
+	footer := "↑↓ select  →/Enter inspect  / find  s sort  p PRs  r repos  R refresh  ? help"
 	if detail {
-		footer = "↑↓ select  Enter evidence  Tab / 1–4 lens  p PRs  Esc back  ? help"
+		footer = "↑↓ select  →/Enter evidence  Tab / 1–4 lens  p PRs  ←/Esc back  ? help"
 	}
 	if width < 70 {
-		footer = "↑↓ select Enter open p PRs Esc back ?"
+		footer = "↑↓ select → open ← back t range ?"
 	}
 	if m.glance.searching || m.glanceQuery() != "" {
 		footer = "/ " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
 	}
 	coverage := strings.TrimSpace(m.glanceCoverageLine())
+	if width < 70 {
+		bots := "bots shown"
+		if m.hideBots {
+			bots = "bots hidden"
+		}
+		coverage = bots + " · " + coverage
+	}
 	if width >= 100 {
 		coverage += " · ages at local scan · no Git fetch"
 	}

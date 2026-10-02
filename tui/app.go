@@ -75,6 +75,8 @@ type Model struct {
 	statDetailOffset int
 	sortField        stats.SortField
 	timeIdx          int
+	customRangeDays  int
+	rangePicker      rangePickerState
 	version          string
 	width            int
 	height           int
@@ -389,6 +391,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.rangePicker.open {
+		return m.handleRangeKey(msg)
+	}
 	if m.showScanErrors {
 		return m.handleScanErrorKey(msg)
 	}
@@ -437,7 +442,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollOffset = 0
 		}
 
-	case "esc":
+	case "t":
+		if !m.loading && m.err == nil && (m.viewMode == ViewAggregate || m.viewMode == ViewOperative) {
+			m.openRangePicker()
+		}
+
+	case "esc", "left", "h":
+		if msg.String() != "esc" && m.viewMode == ViewRepoOverlay {
+			return m, nil
+		}
 		switch m.viewMode {
 		case ViewRepoOverlay:
 			m.excludedRepos = m.overlayExcluded
@@ -452,7 +465,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.filterQuery != "" {
 				m.filterQuery = ""
 				m.clampScroll()
-			} else {
+			} else if msg.String() == "esc" {
 				return m.quit()
 			}
 		}
@@ -503,24 +516,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampStatDetailScroll()
 		}
 
-	case "left", "h":
-		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
-			if m.timeIdx > 0 {
-				m.timeIdx--
-				m.statDetailOffset = 0
-				m.recomputeAuthors()
-			}
-		}
-
-	case "right", "l":
-		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
-			if m.timeIdx < len(TimePresets)-1 {
-				m.timeIdx++
-				m.statDetailOffset = 0
-				m.recomputeAuthors()
-			}
-		}
-
 	case "s":
 		if m.viewMode == ViewAggregate {
 			m.sortField = stats.NextSortField(m.sortField)
@@ -566,7 +561,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "enter":
+	case "enter", "right", "l":
+		if msg.String() != "enter" && m.viewMode != ViewAggregate {
+			return m, nil
+		}
 		switch m.viewMode {
 		case ViewRepoOverlay:
 			m.excludedRepos = m.overlayExcluded
@@ -592,7 +590,11 @@ func (m *Model) filteredRecords() []git.CommitRecord {
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
 	}
-	return stats.FilterByTime(filtered, TimePresets[m.timeIdx].Duration)
+	duration := TimePresets[m.timeIdx].Duration
+	if m.customRangeDays > 0 {
+		duration = time.Duration(m.customRangeDays) * 24 * time.Hour
+	}
+	return stats.FilterByTime(filtered, duration)
 }
 
 func (m *Model) recomputeAuthors() {
@@ -671,7 +673,7 @@ func (m Model) tableViewport() int {
 	if notice := m.historyNotice(); notice != "" {
 		above = append(above, notice)
 	}
-	above = append(above, "", RenderTimePicker(m.timeIdx), "", renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()), "")
+	above = append(above, "", rangeControl(m.rangeLabel()), "", renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()), "")
 	help := RenderHelpBar(HelpContext{View: "aggregate"})
 	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
@@ -805,6 +807,9 @@ func (m Model) viewContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
+	if m.rangePicker.open {
+		return m.renderRangePicker()
+	}
 	if m.showPRs {
 		return m.renderPRs()
 	}
@@ -853,7 +858,7 @@ func (m Model) renderAggregateView() string {
 	if notice := m.historyNotice(); notice != "" {
 		sections = append(sections, StyleAmber.Render(notice))
 	}
-	sections = append(sections, RenderTimePicker(m.timeIdx))
+	sections = append(sections, rangeControl(m.rangeLabel()))
 	sections = append(sections, "")
 
 	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
@@ -901,7 +906,7 @@ func (m Model) operativeDetailContent() string {
 		filtered = nil
 	}
 
-	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
+	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching, RangeLabel: m.rangeLabel()}.RenderOperativeDetail(
 		name,
 		as,
 		filtered,
@@ -925,10 +930,10 @@ func (m Model) renderOperativeView() string {
 	detail := m.operativeDetailContent()
 	help := RenderHelpBar(HelpContext{View: "operative"})
 	if m.width > 0 && m.width < 100 {
-		help = StyleHelpKey.Render("  PgUp/PgDn scroll · ↑↓ person · Esc back · ←→ time")
+		help = StyleHelpKey.Render("  PgUp/PgDn scroll · ↑↓ person · ←/Esc back · t range")
 	}
 	if m.width > 0 && m.width < 60 {
-		help = StyleHelpKey.Render("  PgUp/PgDn scroll · Esc back")
+		help = StyleHelpKey.Render("  PgUp/PgDn · ← back · t range")
 	}
 	lines := strings.Split(detail, "\n")
 	if m.height <= 0 || len(lines)+2 <= m.height {

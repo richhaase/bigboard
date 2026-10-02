@@ -128,7 +128,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.showPaths {
 		switch key {
-		case "esc", "enter":
+		case "esc", "enter", "left", "h":
 			m.showPaths = false
 			m.pathOffset = 0
 		case "tab", "shift+tab":
@@ -181,18 +181,15 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.hideBots = !m.hideBots
 		m.recomputeAuthors()
 		return m, nil
-	case "left", "h", "right", "l":
-		delta := 1
-		if key == "left" || key == "h" {
-			delta = -1
+	case "t":
+		if !m.loading && m.err == nil {
+			m.openRangePicker()
 		}
-		m.timeIdx = max(0, min(len(TimePresets)-1, m.timeIdx+delta))
-		m.recomputeAuthors()
 		return m, nil
 	case "/":
 		m.glance.searching = true
 		return m, nil
-	case "esc":
+	case "esc", "left", "h":
 		if m.glanceQuery() != "" {
 			m.setGlanceQuery("")
 			return m, nil
@@ -219,7 +216,13 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.personID = ""
 			return m, nil
 		}
-		return m.quit()
+		if key == "esc" {
+			return m.quit()
+		}
+		return m, nil
+	}
+	if key == "right" || key == "l" {
+		key = "enter"
 	}
 	if m.glance.detailOpen {
 		return m.handleGlanceDetailKey(key), nil

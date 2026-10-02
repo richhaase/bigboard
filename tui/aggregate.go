@@ -109,7 +109,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		if ts.Searching || ts.Query != "" {
 			return StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", displayText(ts.Query)))
 		}
-		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→.")
+		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range.")
 	}
 
 	l := resolveTableLayout(ts.Width)

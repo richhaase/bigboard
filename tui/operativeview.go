@@ -25,6 +25,7 @@ type MonthActivity struct {
 // OperativeView renders a contributor detail screen.
 type OperativeView struct {
 	FuzzyMatching bool
+	RangeLabel    string
 }
 
 // RenderOperativeDetail renders the full operative detail view.
@@ -44,7 +45,11 @@ func (v OperativeView) RenderOperativeDetail(
 	sections = append(sections, "")
 
 	sections = append(sections, RenderFooter(repoCount, excludedCount, width, ""))
-	sections = append(sections, RenderTimePicker(timeIdx))
+	label := v.RangeLabel
+	if label == "" {
+		label = presetRangeLabel(timeIdx)
+	}
+	sections = append(sections, rangeControl(label))
 	sections = append(sections, "")
 
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
@@ -52,7 +57,7 @@ func (v OperativeView) RenderOperativeDetail(
 	authorRecords := filterRecordsByAuthor(records, authorStats, authorName, v.FuzzyMatching)
 	if authorStats == nil && len(authorRecords) == 0 {
 		sections = append(sections, "")
-		sections = append(sections, StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Widen the time range with ←/→."))
+		sections = append(sections, StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range."))
 		return wrapStatistics(strings.Join(sections, "\n"), width)
 	}
 

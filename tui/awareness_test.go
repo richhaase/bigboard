@@ -249,7 +249,7 @@ func TestAwarenessNarrowRangeAlwaysVisible(t *testing.T) {
 	m := awarenessFixture()
 	m.width = 40
 	m.height = 18
-	if !strings.Contains(m.View(), "Range: ALL") {
+	if !strings.Contains(m.View(), "Range: All time") {
 		t.Fatal("active range hidden on narrow terminal")
 	}
 }

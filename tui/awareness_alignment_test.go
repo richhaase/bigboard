@@ -19,7 +19,7 @@ func TestAwarenessSummaryIsOneScopedLineWithAndWithoutANSI(t *testing.T) {
 		if strings.Contains(text, "\n") {
 			t.Fatal("overview summary consumes multiple rows")
 		}
-		for _, want := range []string{"Range: ALL", "3 commits", "2 people", "3 repositories"} {
+		for _, want := range []string{"Range: All time", "3 commits", "2 people", "3 repositories"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("missing %q: %s", want, text)
 			}

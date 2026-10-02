@@ -215,23 +215,29 @@ func TestGatedKeysInOverlay(t *testing.T) {
 	}
 }
 
-func TestTimeKeysInAggregateAndOperative(t *testing.T) {
+func TestArrowNavigationInStatistics(t *testing.T) {
 	m := modelWithData()
-	m.timeIdx = 2
+	m.timeIdx = DefaultTimeIndex
 	m = send(m, "left")
-	if m.timeIdx != 1 {
-		t.Errorf("left in aggregate should decrement timeIdx, got %d", m.timeIdx)
+	if m.quitting || m.timeIdx != DefaultTimeIndex || m.viewMode != ViewAggregate {
+		t.Fatal("left must stay at statistics root without changing time")
 	}
+	id := m.displayedAuthors()[m.selectedRow].ID
 	m = send(m, "right")
-	if m.timeIdx != 2 {
-		t.Errorf("right in aggregate should increment timeIdx, got %d", m.timeIdx)
+	if m.viewMode != ViewOperative || m.activeAuthorID != id || m.timeIdx != DefaultTimeIndex {
+		t.Fatal("right should open selected contributor")
 	}
-
-	m.viewMode = ViewOperative
-	m.activeOperative = m.authors[0].Name
-	m = send(m, "left")
-	if m.timeIdx != 1 {
-		t.Errorf("left in operative should decrement timeIdx, got %d", m.timeIdx)
+	m = send(m, "right", "left")
+	if m.viewMode != ViewAggregate || m.timeIdx != DefaultTimeIndex {
+		t.Fatal("left should return from contributor without changing time")
+	}
+	m = send(m, "l", "h")
+	if m.viewMode != ViewAggregate || m.timeIdx != DefaultTimeIndex {
+		t.Fatal("vim navigation aliases changed time")
+	}
+	m = send(m, "/", "Ada", "enter", "left")
+	if m.filterQuery != "" || m.quitting || m.viewMode != ViewAggregate {
+		t.Fatal("left should clear an accepted name filter without quitting")
 	}
 }
 

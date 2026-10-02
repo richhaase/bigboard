@@ -184,17 +184,9 @@ func renderKnownNet(value, width, unknown int) string {
 	return StyleAmber.Render(fmt.Sprintf("%*s", width, formatLineCount(value, unknown)))
 }
 
-// RenderTimePicker renders time presets with the active one styled differently.
+// RenderTimePicker renders the current range and its discoverable picker key.
 func RenderTimePicker(activeIdx int) string {
-	parts := make([]string, len(TimePresets))
-	for i, p := range TimePresets {
-		if i == activeIdx {
-			parts[i] = StyleDimCyan.Render("▐") + StyleTimePickerActive.Render(p.Label) + StyleDimCyan.Render("▌")
-		} else {
-			parts[i] = " " + StyleTimePickerInactive.Render(p.Label) + " "
-		}
-	}
-	return "  " + strings.Join(parts, " ")
+	return rangeControl(presetRangeLabel(activeIdx))
 }
 
 // RenderRepoCount renders the repo count indicator.
@@ -327,8 +319,8 @@ func RenderHelpBar(ctx HelpContext) string {
 			{"PgUp/PgDn", "scroll"},
 			{"Home/End", "top/end"},
 			{"↑↓", "prev/next"},
-			{"esc", "back"},
-			{"←→", "time"},
+			{"←/esc", "back"},
+			{"t", "range"},
 			{"q", "quit"},
 		}
 	default:
@@ -342,8 +334,8 @@ func RenderHelpBar(ctx HelpContext) string {
 		}
 		bindings = []struct{ key, desc string }{
 			{"↑↓", "nav"},
-			{"↵", "detail"},
-			{"←→", "time"},
+			{"→/↵", "detail"},
+			{"t", "range"},
 			{"/", "find"},
 			{"s", sortDesc},
 			{"b", botsDesc},
