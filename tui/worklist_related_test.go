@@ -30,7 +30,7 @@ func TestRelatedSeparatesCommitAndContributorEvidence(t *testing.T) {
 	}
 	m.width, m.height = 120, 36
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"WHAT CHANGED TOGETHER", "Renew sessions", "Changed areas: apps/web · services/auth", "CONTRIBUTOR OVERLAP", "services/billing", "Ada", "may have worked independently", "Review participation: unavailable", "Co-authorship: not assessed"} {
+	for _, want := range []string{"WHAT CHANGED TOGETHER", "Renew sessions", "Changed areas: apps/web · services/auth", "CONTRIBUTOR OVERLAP", "services/billing", "Ada"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q:\n%s", want, view)
 		}
@@ -115,7 +115,7 @@ func TestOverlapOnlyDrilldownNeverClaimsSharedCommits(t *testing.T) {
 		t.Fatal("overlap must open canonical People")
 	}
 	view := ansi.Strip(m.View())
-	if strings.Contains(view, "Commits touching both") || strings.Count(view, "Shared contributors · may have worked independently") != 1 {
+	if strings.Contains(view, "Commits touching both") || strings.Count(view, "Contributor identities in both areas") != 1 {
 		t.Fatalf("overlap misrepresented:\n%s", view)
 	}
 	m = pressAwareness(m, "1")
@@ -130,5 +130,22 @@ func TestOverlapOnlyDrilldownNeverClaimsSharedCommits(t *testing.T) {
 	m.width, m.height = 40, 18
 	if !strings.Contains(m.View(), "Ada") {
 		t.Fatal("compact overlap hides contributor names")
+	}
+}
+
+func TestWorklistHasNoCollaborationAssessment(t *testing.T) {
+	m := monorepoFixture()
+	m.width, m.height = 120, 36
+	m.selectedAreaID = "auto:services/auth"
+	for _, key := range []string{"", "enter", "3", "o", "enter"} {
+		if key != "" {
+			m = pressAwareness(m, key)
+		}
+		view := strings.ToLower(ansi.Strip(m.View()))
+		for _, removed := range []string{"collaboration", "review participation", "co-authorship", "worked independently", "incidental"} {
+			if strings.Contains(view, removed) {
+				t.Fatalf("%s retained removed assessment %q", key, removed)
+			}
+		}
 	}
 }

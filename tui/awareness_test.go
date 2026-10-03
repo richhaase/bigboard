@@ -69,7 +69,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 		t.Fatalf("focus=%s", m.personID)
 	}
 	out := m.View()
-	for _, text := range []string{"Fix login", "DIRECT COLLABORATION EVIDENCE", "Local:"} {
+	for _, text := range []string{"Fix login", "RECENT COMMITS", "Local:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %q:\n%s", text, out)
 		}

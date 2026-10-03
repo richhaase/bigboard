@@ -93,11 +93,9 @@ full subject, canonical contributor identity, timestamp, object ID, and all chan
 paths. People is alphabetical; selecting a person filters Activity. Related lists
 exact commits touching both areas, their counts, and the latest shared title;
 `Enter` opens those commits and then their full changed paths. Contributor overlap
-is separate: names appearing in both areas may have worked independently. Press
+is separate: it lists names appearing in both areas in the selected range. Press
 `o` in Related for its scrollable overlap list, then `Enter` for names and their
-identity-filtered evidence. Direct collaboration has its own status: review
-participation is unavailable and co-authorship is not assessed by these views.
-Neither co-change nor contributor overlap establishes collaboration.
+identity-filtered evidence.
 
 Subareas refines automatic path areas by one literal directory level at a time.
 Direct files are a separate leaf; multi-path commits can appear in several children.

@@ -88,8 +88,7 @@ p/P keeps the parent area/all-open scope, independent of local filters.
 
 `worklist_related.go` separates exact nonempty shared commit IDs from canonical
 contributor overlap. Related Enter opens shared commits; `o` exposes a scrollable
-name-overlap list whose Enter opens identity-filtered People/Activity. Never infer
-collaboration from either. Review participation is unavailable and co-authorship
-is not assessed in these views. Shared PR unavailability belongs once in the
+name-overlap list whose Enter opens identity-filtered People/Activity. These views show existing people, area, time,
+and commit evidence. Shared PR unavailability belongs once in the
 header; retained scope-specific PR signals remain available. Commit previews show
 titles first, then author/time/hash and affected areas. No extra scans or requests.

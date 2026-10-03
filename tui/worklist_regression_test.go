@@ -102,7 +102,7 @@ func TestWorklistRelatedAndParentPRProvenance(t *testing.T) {
 	for _, key := range []string{"enter", "3", "enter", "1"} {
 		m = pressAwareness(m, key)
 	}
-	if !strings.Contains(m.View(), "Commits touching both areas · not collaboration") {
+	if !strings.Contains(m.View(), "Commits touching both areas") {
 		t.Fatal("related activity lost provenance")
 	}
 	m = glanceBusyFixture()
