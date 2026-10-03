@@ -102,8 +102,6 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 		pr := prs[0]
 		lines = append(lines, fmt.Sprintf("#%d %s · p full inventory", pr.Number, displayText(pr.Title)))
 	}
-	lines = append(lines, "")
-	lines = append(lines, collaborationEvidenceLines()...)
 	for i := range lines {
 		lines[i] = "  " + ansi.Truncate(lines[i], width, "…")
 	}
@@ -165,9 +163,9 @@ func (m Model) renderWorklistDetail(width, height int) string {
 		lines = append(lines, StyleCyan.Render("  Activity: "+ansi.Truncate(label, max(1, width-25), "…")+" · Esc clears"))
 	}
 	if m.glance.frame.relatedFromID != "" {
-		label := "Commits touching both areas · not collaboration"
+		label := "Commits touching both areas"
 		if m.glance.frame.relatedPeople {
-			label = "Shared contributors · may have worked independently"
+			label = "Contributor identities in both areas"
 		}
 		lines = append(lines, StyleDimWhite.Render("  "+label))
 	}

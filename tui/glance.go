@@ -152,6 +152,16 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "p", "P":
+		if key == "p" && !m.glance.detailOpen {
+			// View resolves the highlighted row on a value copy. Persist the same
+			// filtered/sorted selection before the overlay reads its scope.
+			rows := m.glanceRepositories()
+			if len(rows) == 0 {
+				m.setSelectedScopeID("")
+			} else {
+				m.selectedRepository(rows)
+			}
+		}
 		m.showPRs = true
 		m.prAll = key == "P"
 		m.prDetail = false

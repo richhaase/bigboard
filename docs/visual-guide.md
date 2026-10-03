@@ -36,8 +36,8 @@ Read the top list **area → latest contributor + others → latest commit → a
 - `t` opens the range picker, `b` toggles bots, and `/` searches the active list
 
 One commit can touch several areas, so **area counts overlap and must not be
-summed**. Shared contributors describe historical overlap, not live presence,
-ownership, or proof of collaboration. GitHub handles stay separate from canonical
+summed**. Shared contributors describe historical overlap, not live presence
+or ownership. GitHub handles stay separate from canonical
 Git identities. Historical paths can appear even after removal from the checkout.
 
 ## Choose a local range
@@ -101,11 +101,11 @@ filters GitHub PRs.
 
 ## Related: separate co-change from contributor overlap
 
-![Related at 120 by 36 with exact shared-commit counts, latest title, selected commit evidence, contributor names and a separate collaboration status](images/worklist-related.png)
+![Related at 120 by 36 with exact shared-commit counts, latest title, selected commit evidence and contributor names](images/worklist-related.png)
 
 *Related, 120 × 36. The main list counts actual commit IDs present in both areas.
 The selected preview shows the latest shared title, author, author time, hash,
-and all affected areas. Co-change can be incidental.*
+and all affected areas.*
 
 Press `3`, select an area, then `Enter` to inspect **only commits touching both**.
 `Enter` again opens the canonical full commit and its changed paths. `Esc`
@@ -114,19 +114,14 @@ filter does not change the Related inventory. Missing commit IDs never count as
 shared evidence.
 
 The separate **Contributor overlap** section names canonical identities present
-in both areas. Those contributors may have worked independently. Press `o` for
+in both areas in the selected range. Press `o` for
 the full scrollable overlap list, including on narrow terminals; `Enter` opens
 its shared names and their identity-filtered Activity. Press `o` again to return
 to co-change.
 
-![40-column scrollable contributor overlap showing names and independent-work provenance](images/worklist-overlap.png)
+![40-column scrollable contributor overlap showing names in both areas](images/worklist-overlap.png)
 
 Overlap-only areas do not appear in the shared-commit list.
-
-**Direct collaboration evidence** remains unknown. These views do not collect
-review participation or assess co-authorship, and a PR review decision is not
-proof of who collaborated. No collaboration is inferred from shared commits or
-contributor overlap, and opening these views makes no network requests.
 
 ## Subareas: refine a path group
 
@@ -179,8 +174,10 @@ competes with commit titles. Retained area-specific PR signals remain visible.
 fetch when known and space permits. Unknown inventory is never shown as zero;
 `p` provides detailed status and any remote retry/cooldown time.
 
-From Worklist, `p` opens the selected repository/parent-area inventory and `P`
-opens all included repositories. PRs use **all open dates**, independent of local
+From Worklist, `p` opens the highlighted repository/parent-area inventory,
+including the default first row immediately after entering a repository. An
+accepted name search changes that visible scope; no matching rows means no
+scoped PRs. `P` opens all included repositories regardless of that search. PRs use **all open dates**, independent of local
 range, bot, person, and commit-search filters. In the PR overlay, `Enter` toggles
 detail, `↑/↓` scrolls, and `Esc` or `p` backs out one level. `R` there refreshes
 **PRs only**; it does not start a local Git scan.
@@ -213,8 +210,10 @@ for search, quit, and overlay behavior.
 
 ## Capture details
 
-The screenshots were captured on October 2, 2026, from the current Worklist and
-Related implementation, scanning public Bigboard history at
+Worklist overview, Activity detail, Related, and contributor-overlap images were
+recaptured on October 3, 2026 after removing the assessment section, scanning
+public Bigboard history at [45ca2c7](https://github.com/richhaase/bigboard/commit/45ca2c746813b14b8ceb6d9b3987ddbf02490af5).
+The other screenshots retain their October 2, 2026 capture, scanning history at
 [d510eb2](https://github.com/richhaase/bigboard/commit/d510eb299b849696ee1402a0ef8294f773b0e384)
 in an isolated local clone named `bigboard`. The capture config sets `since` to
 `14d`; bots remain shown. Images are rendered from actual PTY cell buffers, with

@@ -82,14 +82,6 @@ func (m Model) commitAreaNames(r git.CommitRecord) []string {
 	return names
 }
 
-func collaborationEvidenceLines() []string {
-	return []string{
-		StyleTitle.Render("DIRECT COLLABORATION EVIDENCE / unknown"),
-		StyleAmber.Render("Review participation: unavailable · Co-authorship: not assessed"),
-		StyleDimWhite.Render("Co-change and contributor overlap do not establish collaboration."),
-	}
-}
-
 func (m Model) sharedContributorNames(area stats.WorkArea) string {
 	source := make(map[string]bool)
 	for _, p := range m.glanceAreaPeople() {
@@ -116,7 +108,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 	}
 	rows := m.glanceCochangedAreas()
 	selected := m.glanceSelected(m.glanceDetailIDs())
-	lines := []string{StyleTitle.Render("WHAT CHANGED TOGETHER / same commit"), StyleDimWhite.Render("Co-change may be incidental · o contributor overlap")}
+	lines := []string{StyleTitle.Render("WHAT CHANGED TOGETHER / same commit"), StyleDimWhite.Render("o contributor overlap")}
 	compact := height < 20 || width < 76
 	budget := max(1, min(5, height-19))
 	if compact {
@@ -152,7 +144,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 	if !compact {
 		lines = append(lines, worklistRule.Render(strings.Repeat("─", width)), StyleTitle.Render("CONTRIBUTOR OVERLAP / identities appearing in both areas"))
 		overlap := m.glanceRelatedAreas()
-		limit := max(0, height-len(lines)-6)
+		limit := max(0, height-len(lines)-2)
 		for _, r := range overlap[:min(len(overlap), limit)] {
 			lines = append(lines, padCells(displayText(r.area.Name), areaWidth+2)+" "+m.sharedContributorNames(r.area))
 		}
@@ -162,9 +154,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 		if len(overlap) == 0 {
 			lines = append(lines, "No contributor overlap in this range.")
 		}
-		lines = append(lines, StyleDimWhite.Render("Shared contributors may have worked independently."), worklistRule.Render(strings.Repeat("─", width)))
 	}
-	lines = append(lines, collaborationEvidenceLines()...)
 	for i := range lines {
 		lines[i] = "  " + ansi.Truncate(lines[i], width, "…")
 	}
@@ -176,7 +166,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 func (m Model) worklistOverlapLines(width, height int) []string {
 	rows := m.glanceRelatedAreas()
 	selected := m.glanceSelected(m.glanceDetailIDs())
-	lines := []string{StyleTitle.Render("CONTRIBUTOR OVERLAP · o co-change"), StyleDimWhite.Render("May have worked independently.")}
+	lines := []string{StyleTitle.Render("CONTRIBUTOR OVERLAP · o co-change"), StyleDimWhite.Render("Contributor identities in both areas.")}
 	budget := max(1, (height-4)/2)
 	start := max(0, min(selected-budget/2, len(rows)-budget))
 	end := min(len(rows), start+budget)
