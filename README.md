@@ -254,7 +254,9 @@ return to a list or detail lens to open the picker.
 ### PR and repository overlays
 
 In the **PR overlay**, `↑/↓` or `j/k` selects PRs or scrolls the open PR detail.
-`Enter` toggles detail; `Esc` or `p` backs out one level. `R` requests **PR data
+`p` selects the current scope and `P` selects all included repositories; either
+returns to the first PR in the list using cached data. `Enter` toggles detail;
+`Esc` backs out one level. `R` requests **PR data
 only**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
 
 In **repository controls**, `↑/↓` or `j/k` selects and `Space` toggles inclusion.

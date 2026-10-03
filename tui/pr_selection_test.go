@@ -96,3 +96,65 @@ func TestPRScopeRepositoryFallbackAndAllInventory(t *testing.T) {
 		t.Fatal("all-repository inventory was filtered by overview query")
 	}
 }
+
+func TestPROverlayScopeShortcuts(t *testing.T) {
+	for _, detail := range []bool{false, true} {
+		for _, query := range []string{"", "docs", "no-match"} {
+			m := prOnlySelectionFixture()
+			m.areaRepoID = "/api"
+			m.selectedAreaID = ""
+			m.glance.overviewQueries[1] = query
+			provider := &fakePRProvider{}
+			m.prProvider = provider
+			press := func(k string) {
+				t.Helper()
+				next, cmd := m.handleKey(key(k))
+				m = next.(Model)
+				if cmd != nil || provider.fetches != 0 || provider.resolves != 0 {
+					t.Fatalf("%s scheduled work", k)
+				}
+			}
+			press("P") // All-first must still resolve the visible scope on p.
+			for _, k := range []string{"p", "P", "P", "p", "p"} {
+				m.prDetail, m.prRow, m.prOffset = detail, 2, 8
+				press(k)
+				want := 3
+				if k == "p" {
+					want = map[string]int{"": 2, "docs": 1, "no-match": 0}[query]
+				}
+				if !m.showPRs || m.prAll != (k == "P") || m.prDetail || m.prRow != 0 || m.prOffset != 0 || len(m.visiblePRs()) != want {
+					t.Fatalf("detail=%v query=%q key=%s: all=%v detail=%v row=%d offset=%d count=%d want=%d", detail, query, k, m.prAll, m.prDetail, m.prRow, m.prOffset, len(m.visiblePRs()), want)
+				}
+			}
+			m.prDetail = true
+			press("esc")
+			if !m.showPRs || m.prDetail {
+				t.Fatal("Esc did not return to list")
+			}
+			press("esc")
+			if m.showPRs {
+				t.Fatal("Esc did not close list")
+			}
+		}
+	}
+}
+
+func TestPROverlayScopeEmptySnapshotAndParentDetail(t *testing.T) {
+	m := prOnlySelectionFixture()
+	m.areaRepoID, m.selectedAreaID = "/api", "root"
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "P")
+	next, cmd := m.handleKey(key("p"))
+	m = next.(Model)
+	if cmd != nil || len(m.visiblePRs()) != 2 || !m.glance.detailOpen {
+		t.Fatal("switching from all lost parent detail scope")
+	}
+	m.prState.snapshots = nil
+	for _, k := range []string{"P", "p"} {
+		next, cmd = m.handleKey(key(k))
+		m = next.(Model)
+		if cmd != nil || len(m.visiblePRs()) != 0 || !strings.Contains(m.View(), "No PRs to display") {
+			t.Fatal("empty snapshot must remain empty without fetching")
+		}
+	}
+}

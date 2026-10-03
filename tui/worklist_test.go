@@ -182,3 +182,46 @@ func TestWorklistFailureColorSurvivesTruncation(t *testing.T) {
 		t.Fatal("success state has warning color")
 	}
 }
+
+func TestWorklistCommitMetadataHierarchy(t *testing.T) {
+	for _, width := range []int{40, 80, 120} {
+		for _, lens := range []string{"overview", "activity", "related"} {
+			t.Run(fmt.Sprintf("%s/%d", lens, width), func(t *testing.T) {
+				m := monorepoFixture()
+				m.width, m.height = width, 36
+				m.selectedAreaID = "auto:services/auth"
+				if lens == "activity" || (lens == "overview" && width < 110) {
+					m = pressAwareness(m, "enter")
+				} else if lens == "related" {
+					m = pressAwareness(m, "3")
+				}
+				lines := strings.Split(ansi.Strip(m.View()), "\n")
+				found := false
+				for i, line := range lines {
+					if !strings.Contains(line, "Renew sessions") {
+						continue
+					}
+					if i+2 >= len(lines) || !strings.Contains(lines[i+2], "Changed areas:") {
+						continue // A list row may also contain the title.
+					}
+					found = true
+					titleColumn := ansi.StringWidth(line[:strings.Index(line, "Renew sessions")])
+					for _, metadata := range lines[i+1 : i+3] {
+						indent := len(metadata) - len(strings.TrimLeft(metadata, " "))
+						if indent != titleColumn+2 {
+							t.Fatalf("metadata indent %d; title starts at %d: %q", indent, titleColumn, metadata)
+						}
+					}
+				}
+				if !found && (lens != "related" || width != 40) {
+					t.Fatal("commit preview not found")
+				}
+				for _, line := range lines {
+					if ansi.StringWidth(line) > width {
+						t.Fatalf("line exceeds %d columns: %q", width, line)
+					}
+				}
+			})
+		}
+	}
+}

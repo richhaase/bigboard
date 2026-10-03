@@ -21,6 +21,9 @@ and keeps local history usable. See [capture details](#capture-details).
 *Overview, 120 × 36. `tui` is the only selected row. The list shows where recent
 work happened; the lower pane explains that selected area's history.*
 
+Within each commit preview, the author/date/hash and changed areas are indented
+beneath the title.
+
 Read the top list **area → latest contributor + others → latest commit → age**. Recent is the default sort. `s` cycles Recent, Name, and Activity
 (commit count). Commit volume is not priority or productivity.
 
@@ -178,8 +181,9 @@ From Worklist, `p` opens the highlighted repository/parent-area inventory,
 including the default first row immediately after entering a repository. An
 accepted name search changes that visible scope; no matching rows means no
 scoped PRs. `P` opens all included repositories regardless of that search. PRs use **all open dates**, independent of local
-range, bot, person, and commit-search filters. In the PR overlay, `Enter` toggles
-detail, `↑/↓` scrolls, and `Esc` or `p` backs out one level. `R` there refreshes
+range, bot, person, and commit-search filters. Inside the overlay, `p` selects the current scope and `P` selects all included
+repositories, returning to the first list row without fetching. `Enter` toggles
+detail, `↑/↓` scrolls, and `Esc` backs out one level. `R` there refreshes
 **PRs only**; it does not start a local Git scan.
 
 GitHub context uses an already installed and authenticated `gh` CLI. Bigboard
@@ -210,9 +214,10 @@ for search, quit, and overlay behavior.
 
 ## Capture details
 
-Worklist overview, Activity detail, Related, and contributor-overlap images were
-recaptured on October 3, 2026 after removing the assessment section, scanning
-public Bigboard history at [45ca2c7](https://github.com/richhaase/bigboard/commit/45ca2c746813b14b8ceb6d9b3987ddbf02490af5).
+Worklist overview, Activity detail, and Related images were recaptured on
+October 3, 2026 with indented commit metadata, scanning public Bigboard history
+at [3b2f417](https://github.com/richhaase/bigboard/commit/3b2f417bba9864b590e7201eeb006ff8495b4ff4).
+The contributor-overlap image retains its October 3 capture at [45ca2c7](https://github.com/richhaase/bigboard/commit/45ca2c746813b14b8ceb6d9b3987ddbf02490af5).
 The other screenshots retain their October 2, 2026 capture, scanning history at
 [d510eb2](https://github.com/richhaase/bigboard/commit/d510eb299b849696ee1402a0ef8294f773b0e384)
 in an isolated local clone named `bigboard`. The capture config sets `since` to

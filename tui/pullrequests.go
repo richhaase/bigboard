@@ -319,11 +319,34 @@ func (m Model) prStatus() string {
 	}
 	return label + refreshHint + " · p scope · P all"
 }
+
+// selectPRScope uses the visible Worklist selection and only retained PR data.
+func (m Model) selectPRScope(all bool) Model {
+	if !all && !m.glance.detailOpen {
+		// View resolves the highlighted row on a value copy. Persist it before
+		// the overlay reads its scope, including after opening all PRs first.
+		rows := m.glanceRepositories()
+		if len(rows) == 0 {
+			m.setSelectedScopeID("")
+		} else {
+			m.selectedRepository(rows)
+		}
+	}
+	m.showPRs = true
+	m.prAll = all
+	m.prDetail = false
+	m.prRow = 0
+	m.prOffset = 0
+	return m
+}
+
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
-	case "esc", "p":
+	case "p", "P":
+		m = m.selectPRScope(msg.String() == "P")
+	case "esc":
 		if m.prDetail {
 			m.prDetail = false
 			m.prOffset = 0
