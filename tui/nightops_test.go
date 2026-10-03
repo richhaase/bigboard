@@ -101,7 +101,7 @@ func TestNightOpsRelatedAndParentPRProvenance(t *testing.T) {
 	for _, key := range []string{"enter", "3", "enter", "1"} {
 		m = pressAwareness(m, key)
 	}
-	if !strings.Contains(m.View(), "Shared contributors · associations, not collaboration") {
+	if !strings.Contains(m.View(), "Commits touching both areas · not collaboration") {
 		t.Fatal("related activity lost provenance")
 	}
 	m = glanceBusyFixture()
@@ -109,7 +109,7 @@ func TestNightOpsRelatedAndParentPRProvenance(t *testing.T) {
 	for _, key := range []string{"enter", "4", "enter"} {
 		m = pressAwareness(m, key)
 	}
-	if m.glance.frame.path == "" || !strings.Contains(m.View(), "PARENT AREA PRs") {
+	if m.glance.frame.path == "" || !strings.Contains(m.View(), "PRs: unknown") {
 		t.Fatal("subarea hides parent PR scope")
 	}
 }

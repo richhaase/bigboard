@@ -70,12 +70,11 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	if focused {
 		lines = nil
 	}
-	lines = append(lines, worklistPeople(people, width, 2)...)
-	lines = append(lines, "", StyleDimWhite.Bold(true).Render("RECENT COMMITS / author time "+time.Now().Local().Format("MST")))
-	slots := max(1, min(4, height-len(lines)-6))
-	if width < 100 {
-		slots = max(1, min(4, (height-len(lines)-6)/3))
+	for _, line := range worklistPeople(people, width-14, 1) {
+		lines = append(lines, "Contributors: "+line)
 	}
+	lines = append(lines, "", StyleDimWhite.Bold(true).Render("RECENT COMMITS / author time "+time.Now().Local().Format("MST")))
+	slots := max(1, min(3, (height-len(lines)-6)/3))
 	selected := 0
 	if focused {
 		selected = m.glanceSelected(m.glanceDetailIDs())
@@ -88,63 +87,23 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	if len(records) == 0 {
 		lines = append(lines, "No matching commits in this area and range.")
 	}
-	prTitle := "OPEN PRs / selected scope · all dates · local filters do not apply"
-	if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
-		prTitle = "PARENT AREA PRs / all dates · local filters do not apply"
+	if len(records) > end-start {
+		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more commits · →/Enter Activity · 2 People · 3 Related", len(records)-(end-start))))
 	}
-	lines = append(lines, "", StyleDimWhite.Bold(true).Render(prTitle))
+	// The header owns shared availability. Only retained, scoped PR evidence
+	// earns space here; the complete inventory remains available via p.
 	prs := m.scopePRs(r.repo.ID)
-	prRows := 1
-	if width < 110 {
-		prRows = 2
-	}
-	maxPR := max(0, min(3, (height-len(lines)-2)/prRows))
-	for i := 0; i < min(len(prs), maxPR); i++ {
-		pr := prs[i]
-		label := fmt.Sprintf("#%d ", pr.Number)
-		if pr.Draft {
-			label += "DRAFT "
+	if len(prs) > 0 && len(lines)+6 < height {
+		prTitle := "OPEN PRs / all dates · local filters do not apply"
+		if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
+			prTitle = "PARENT AREA PRs / all dates · local filters do not apply"
 		}
-		label += displayText(pr.Title)
-		checks := displayText(pr.CheckState)
-		if checks == "" {
-			checks = "unknown"
-		}
-		review := displayText(pr.ReviewDecision)
-		if review == "" {
-			review = "unknown"
-		}
-		tail := ansi.Truncate(githubIdentity(pr.Author), 20, "…") + " · checks " + checks + " · review " + review
-		if width >= 110 {
-			label = padCells(label, max(20, width-ansi.StringWidth(tail)-2)) + "  " + tail
-		} else {
-			lines = append(lines, label)
-			label = "  " + tail
-		}
-		lines = append(lines, worklistSignalStyle(checks).Render(label))
+		lines = append(lines, StyleDimWhite.Bold(true).Render(prTitle), m.worklistSignal(m.prGlanceSignal(r.repo.ID)))
+		pr := prs[0]
+		lines = append(lines, fmt.Sprintf("#%d %s · p full inventory", pr.Number, displayText(pr.Title)))
 	}
-	if len(prs) == 0 {
-		lines = append(lines, m.worklistSignal(m.prGlanceSignal(r.repo.ID)))
-	} else if len(prs) > maxPR {
-		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more PRs · p full inventory", len(prs)-maxPR)))
-	}
-	if len(lines) < height {
-		if m.areaRepoID != "" {
-			related := m.glanceRelatedAreas()
-			parts := []string{}
-			for _, a := range related[:min(3, len(related))] {
-				parts = append(parts, displayText(a.area.Name)+" "+fmt.Sprint(a.shared))
-			}
-			if len(parts) > 0 {
-				lines = append(lines, "", StyleDimWhite.Render("Shared contributors: "+strings.Join(parts, " · ")))
-			}
-		} else {
-			lines = append(lines, "", strings.TrimSpace(m.glanceBusiestAreas(r.repo.ID, width)))
-		}
-	}
-	if len(lines) < height {
-		lines = append(lines, StyleDimWhite.Render("Historical overlap; area counts overlap. GitHub handles stay separate."))
-	}
+	lines = append(lines, "")
+	lines = append(lines, collaborationEvidenceLines()...)
 	for i := range lines {
 		lines[i] = "  " + ansi.Truncate(lines[i], width, "…")
 	}
@@ -168,15 +127,8 @@ func (m Model) worklistCommit(r git.CommitRecord, people []stats.AuthorStats, wi
 	if selected {
 		cursor = "› "
 	}
-	stamp := r.Date.Local().Format("Jan02 15:04")
-	var lines []string
-	if width >= 100 {
-		a := max(18, width/6)
-		s := max(1, width-a-24)
-		lines = []string{cursor + stamp + " " + padCells(author, a) + " " + padCells(subject, s) + " " + hash}
-	} else {
-		lines = []string{cursor + stamp + " " + padCells(author, max(1, width-23)) + " " + hash, "  " + subject, ""}
-	}
+	stamp := r.Date.Local().Format("Jan 02 15:04")
+	lines := []string{cursor + subject, "  " + author + " · " + stamp + " · " + hash, "  Changed areas: " + strings.Join(m.commitAreaNames(r), " · ")}
 	for i, line := range lines {
 		style := lipgloss.NewStyle()
 		if selected && line != "" {
@@ -213,12 +165,19 @@ func (m Model) renderWorklistDetail(width, height int) string {
 		lines = append(lines, StyleCyan.Render("  Activity: "+ansi.Truncate(label, max(1, width-25), "…")+" · Esc clears"))
 	}
 	if m.glance.frame.relatedFromID != "" {
-		lines = append(lines, StyleDimWhite.Render("  Shared contributors · associations, not collaboration"))
+		label := "Commits touching both areas · not collaboration"
+		if m.glance.frame.relatedPeople {
+			label = "Shared contributors · may have worked independently"
+		}
+		lines = append(lines, StyleDimWhite.Render("  "+label))
 	}
-	if m.glance.frame.tab == glanceActivity {
+	switch m.glance.frame.tab {
+	case glanceActivity:
 		r := repositoryActivity{repo: git.Repository{ID: m.glance.frame.areaID, Name: area.Name}, people: people, commits: len(stats.UniqueRecords(m.glanceAreaRecords()))}
 		lines = append(lines, m.worklistEvidence(r, width-4, height-len(lines)-3, true)...)
-	} else {
+	case glanceRelated:
+		lines = append(lines, m.worklistRelatedLines(width-4, height-len(lines)-3)...)
+	default:
 		lens := m.glanceLensLines(width, height-len(lines))
 		// Shared lens owns its row viewport; Worklist owns the common footer.
 		lines = append(lines, lens[:max(0, len(lens)-2)]...)

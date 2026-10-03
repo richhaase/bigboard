@@ -117,8 +117,8 @@ func TestGlanceRelatedAndSubareaBackNavigation(t *testing.T) {
 		t.Fatal("shared identity counts wrong")
 	}
 	m = pressAwareness(m, "enter")
-	if m.glance.frame.relatedFromID != "auto:services/auth" || m.glance.frame.tab != glancePeople {
-		t.Fatal("related shared-people destination missing")
+	if m.glance.frame.relatedFromID != "auto:services/auth" || m.glance.frame.tab != glanceActivity {
+		t.Fatal("related shared-commit destination missing")
 	}
 	m = pressAwareness(m, "esc")
 	if m.selectedAreaID != "auto:services/auth" || m.glance.frame.tab != glanceRelated {

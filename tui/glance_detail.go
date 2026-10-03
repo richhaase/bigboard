@@ -55,11 +55,15 @@ func (m Model) glanceAreaRecords() []git.CommitRecord {
 		from := glanceFrame{areaID: source, path: m.glance.frame.relatedFromPath, leafID: m.glance.frame.relatedFromLeafID}
 		shared := make(map[string]bool)
 		for _, r := range m.glanceAreaForFrame(from).Records {
-			shared[stats.IdentityID(r)] = true
+			if m.glance.frame.relatedPeople {
+				shared[stats.IdentityID(r)] = true
+			} else if r.CommitID != "" {
+				shared[r.CommitID] = true
+			}
 		}
 		var kept []git.CommitRecord
 		for _, r := range records {
-			if shared[stats.IdentityID(r)] {
+			if (m.glance.frame.relatedPeople && shared[stats.IdentityID(r)]) || (!m.glance.frame.relatedPeople && r.CommitID != "" && shared[r.CommitID]) {
 				kept = append(kept, r)
 			}
 		}
@@ -194,7 +198,13 @@ func (m Model) glanceDetailIDs() []string {
 			ids = append(ids, p.ID)
 		}
 	case glanceRelated:
-		for _, a := range m.glanceRelatedAreas() {
+		if m.glance.frame.relatedOverlap {
+			for _, a := range m.glanceRelatedAreas() {
+				ids = append(ids, a.area.ID)
+			}
+			break
+		}
+		for _, a := range m.glanceCochangedAreas() {
 			ids = append(ids, a.area.ID)
 		}
 	case glanceSubareas:
@@ -211,7 +221,11 @@ func (m Model) glanceLensLines(width, height int) []string {
 	var lines []string
 	areaPeople := m.glanceAreaPeople()
 	if m.glance.frame.relatedFromID != "" {
-		lines = append(lines, StyleDimWhite.Render("  Shared contributors · associations, not collaboration"))
+		label := "Commits touching both areas · not collaboration"
+		if m.glance.frame.relatedPeople {
+			label = "Shared contributors · may have worked independently"
+		}
+		lines = append(lines, StyleDimWhite.Render("  "+label))
 	}
 	if m.glance.frame.tab == glanceSubareas {
 		lines = append(lines, m.glanceColumnHeaderFor(width, false))

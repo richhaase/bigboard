@@ -21,8 +21,7 @@ and keeps local history usable. See [capture details](#capture-details).
 *Overview, 120 × 36. `tui` is the only selected row. The list shows where recent
 work happened; the lower pane explains that selected area's history.*
 
-Read the top list **area → latest contributor + others → latest commit → age →
-PR context**. Recent is the default sort. `s` cycles Recent, Name, and Activity
+Read the top list **area → latest contributor + others → latest commit → age**. Recent is the default sort. `s` cycles Recent, Name, and Activity
 (commit count). Commit volume is not priority or productivity.
 
 - `↑/↓` or `j/k` selects a row; the evidence underneath follows that selection
@@ -56,7 +55,7 @@ does not scan Git, fetch objects, or refresh PR data. The startup default remain
 
 ## Compact list → detail
 
-![80-column area list with tui selected, each area using a name-and-contributor line followed by its latest commit and PR summary](images/worklist-compact.png)
+![80-column area list with tui selected, each area using a name-and-contributor line followed by its latest commit](images/worklist-compact.png)
 
 *Compact overview, 80 × 30. Six areas fit on this page. The second line preserves
 the concrete commit subject rather than compressing several narrow panels.*
@@ -100,18 +99,34 @@ filter and returns to People, unless a search must be cleared first. Choosing
 “All contributors” also removes the person filter. This local filter never
 filters GitHub PRs.
 
-## Related: follow shared history
+## Related: separate co-change from contributor overlap
 
-![Related lens for tui listing areas and one shared contributor per area](images/worklist-related.png)
+![Related at 120 by 36 with exact shared-commit counts, latest title, selected commit evidence, contributor names and a separate collaboration status](images/worklist-related.png)
 
-*Related, 120 × 24. `1 shared people` means one canonical Git identity appears in
-both areas under the current time range and bot filter. It does not mean one
-shared commit, and an Activity person filter does not change this Related count.*
+*Related, 120 × 36. The main list counts actual commit IDs present in both areas.
+The selected preview shows the latest shared title, author, author time, hash,
+and all affected areas. Co-change can be incidental.*
 
-Press `3`, select an area, then `Enter` to inspect the identities shared with the
-starting area. The next People/Activity view remains restricted to those shared
-identities and labels that provenance. `Esc` returns through the prior frames.
-Shared history across clones or forks can also create associations.
+Press `3`, select an area, then `Enter` to inspect **only commits touching both**.
+`Enter` again opens the canonical full commit and its changed paths. `Esc`
+restores the previous selection. Range and bot filters apply; an Activity person
+filter does not change the Related inventory. Missing commit IDs never count as
+shared evidence.
+
+The separate **Contributor overlap** section names canonical identities present
+in both areas. Those contributors may have worked independently. Press `o` for
+the full scrollable overlap list, including on narrow terminals; `Enter` opens
+its shared names and their identity-filtered Activity. Press `o` again to return
+to co-change.
+
+![40-column scrollable contributor overlap showing names and independent-work provenance](images/worklist-overlap.png)
+
+Overlap-only areas do not appear in the shared-commit list.
+
+**Direct collaboration evidence** remains unknown. These views do not collect
+review participation or assess co-authorship, and a PR review decision is not
+proof of who collaborated. No collaboration is inferred from shared commits or
+contributor overlap, and opening these views makes no network requests.
 
 ## Subareas: refine a path group
 
@@ -119,7 +134,7 @@ Shared history across clones or forks can also create associations.
 
 *Subareas, 120 × 18. Direct files are a separate leaf beside child directories.
 The historical `docs/contracts` path still appears because selected-range commits
-touched it. The counts overlap, so 17 + 3 + 4 is not a repository total.*
+touched it. The counts overlap, so 18 + 4 + 4 is not a repository total.*
 
 Press `4` to refine an automatic area by one literal directory level. `Enter`
 on a child opens its evidence and allows further refinement where applicable.
@@ -127,15 +142,15 @@ Direct-file leaves do not expand again. Configured named areas preserve their
 explicit grouping and do not automatically become directory trees. `s` changes
 the Subareas sort, independently of statistics metrics.
 
-PR context beneath a child remains scoped to the **parent area**, labeled
-“PARENT AREA PRs”. `p` uses that same parent scope; it does not claim that every
+When retained PR evidence is available beneath a child, it remains scoped to
+the **parent area**, labeled “PARENT AREA PRs”. `p` uses that same parent scope; it does not claim that every
 listed PR touches the selected child.
 
 ## Inspect a full commit
 
 ![80-column commit inspector showing the complete Worklist commit subject, canonical author identity, timestamp, object ID and changed paths](images/worklist-commit.png)
 
-*Commit inspector, 80 × 30. The selected commit changed 24 paths, including files
+*Commit inspector, 80 × 30. The selected commit changed 29 paths, including files
 outside `tui`. The line range shows that more evidence is available below.*
 
 Activity's `Enter` opens the canonical full commit, not only paths assigned to
@@ -158,6 +173,8 @@ present; that overlay supports scrolling and `R` to retry.
 
 **PRs** describes the selected repository's independent all-open snapshot. A
 failed or incomplete request remains **STALE**, **PARTIAL**, or **unavailable**.
+Shared unavailability appears only in the header; no per-area unknown column
+competes with commit titles. Retained area-specific PR signals remain visible.
 “Checked” is an attempt time. Retained evidence also reports its last complete
 fetch when known and space permits. Unknown inventory is never shown as zero;
 `p` provides detailed status and any remote retry/cooldown time.
@@ -196,17 +213,13 @@ for search, quit, and overlay behavior.
 
 ## Capture details
 
-The screenshots were captured on October 1, 2026, from a binary built with
-this change's [navigation](../tui/glance.go) and [range picker](../tui/range.go),
-scanning public Bigboard history at
-[09902f8](https://github.com/richhaase/bigboard/commit/09902f8947964e3bcfa9e2f868c93290136142b9)
+The screenshots were captured on October 2, 2026, from the current Worklist and
+Related implementation, scanning public Bigboard history at
+[d510eb2](https://github.com/richhaase/bigboard/commit/d510eb299b849696ee1402a0ef8294f773b0e384)
 in an isolated local clone named `bigboard`. The capture config sets `since` to
-`14d`; bots remain shown. Each image is rendered from an actual PTY cell buffer.
-The capture PATH contains Git but omits `gh`, so the visible “gh not installed”
-status is real and no GitHub request is made. The displayed timestamps use the
-capture machine's local timezone, **MDT**. Counts and ages are examples from that
-snapshot, not claims about the repository now. All prior tour images were
-recaptured for the new range and navigation controls.
+`14d`; bots remain shown. Images are rendered from actual PTY cell buffers, with
+Git on PATH and `gh` omitted, so “gh not installed” is real and no GitHub request
+is made. Timestamps use **UTC**. Counts and ages describe that retained snapshot.
 
 The opt-in `TestWorklistTerminalCapture` harness separately tests synthetic
 Unicode, long-name, 120-contributor and partial-PR states. It is skipped by normal
