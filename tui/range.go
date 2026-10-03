@@ -143,11 +143,11 @@ func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyRange() {
 	m.rangePicker = rangePickerState{}
 	m.statDetailOffset = 0
-	personID, evidenceOffset := m.personID, m.evidenceOffset
+	personID := m.personID
 	m.recomputeAuthors()
 	// Filtering is not navigation. Keep a vanished person's intent so detail
 	// shows no matching evidence instead of silently broadening to everybody.
-	m.personID, m.evidenceOffset = personID, evidenceOffset
+	m.personID = personID
 }
 
 func (m Model) renderRangePicker() string {

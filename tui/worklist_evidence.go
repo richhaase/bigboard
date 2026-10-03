@@ -178,9 +178,7 @@ func (m Model) renderWorklistDetail(width, height int) string {
 	case glanceRelated:
 		lines = append(lines, m.worklistRelatedLines(width-4, height-len(lines)-3)...)
 	default:
-		lens := m.glanceLensLines(width, height-len(lines))
-		// Shared lens owns its row viewport; Worklist owns the common footer.
-		lines = append(lines, lens[:max(0, len(lens)-2)]...)
+		lines = append(lines, m.glanceLensLines(width, height-len(lines))...)
 	}
 	return m.worklistFinish(lines, width, height, true)
 }

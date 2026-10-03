@@ -337,13 +337,13 @@ func TestManualRefreshPreservesVanishedPersonAndInspector(t *testing.T) {
 	m.personID = stats.IdentityID(m.allRecords[0])
 	m.glance.frame = glanceFrame{areaID: "removed-area", tab: glanceActivity, ids: [4]string{"aaa11111"}}
 	m.showPaths = true
-	m.pathOffset, m.evidenceOffset = 3, 2
+	m.pathOffset = 3
 	person := m.personID
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
 		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
 	}
-	if m.personID != person || !m.showPaths || m.pathOffset != 3 || m.evidenceOffset != 2 || m.glance.frame.ids[glanceActivity] != "aaa11111" {
+	if m.personID != person || !m.showPaths || m.pathOffset != 3 || m.glance.frame.ids[glanceActivity] != "aaa11111" {
 		t.Fatal("refresh silently broadened vanished person or closed inspector")
 	}
 	if view := m.View(); !strings.Contains(view, "COMMIT") || !strings.Contains(view, "No matching commit") {

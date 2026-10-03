@@ -77,8 +77,6 @@ func (m *Model) openGlanceArea(r repositoryActivity) {
 	m.glance.frame = glanceFrame{areaID: r.repo.ID, name: r.repo.Name}
 	m.glance.stack = nil
 	m.personID = ""
-	m.evidenceOffset = 0
-	m.awarenessPane = 2
 }
 func (m *Model) pushGlanceFrame(next glanceFrame) {
 	current := m.glance.frame
@@ -88,7 +86,6 @@ func (m *Model) pushGlanceFrame(next glanceFrame) {
 	m.glance.frame = next
 	m.selectedAreaID = next.areaID
 	m.personID = ""
-	m.evidenceOffset = 0
 	m.showPaths = false
 	m.pathOffset = 0
 }
@@ -98,8 +95,6 @@ func (m *Model) closeGlanceDetail() {
 	m.glance.frame = glanceFrame{}
 	m.glance.stack = nil
 	m.personID = ""
-	m.awarenessPane = 0
-	m.evidenceOffset = 0
 }
 
 func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -331,9 +326,6 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 	if next, ok := glanceMove(key, selected, len(ids), max(1, m.height-10)); ok && len(ids) > 0 {
 		f.rows[f.tab] = next
 		f.ids[f.tab] = ids[next]
-		if f.tab == glanceActivity {
-			m.evidenceOffset = next
-		}
 		return m
 	}
 	if key != "enter" || len(ids) == 0 {
@@ -348,7 +340,6 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 		f.tab = glanceActivity
 		f.rows[glanceActivity] = 0
 		f.ids[glanceActivity] = ""
-		m.evidenceOffset = 0
 	case glanceRelated:
 		if f.relatedOverlap {
 			for _, related := range m.glanceRelatedAreas() {
@@ -393,9 +384,6 @@ func (m *Model) glanceSelected(ids []string) int {
 	f.rows[f.tab] = i
 	if len(ids) > 0 {
 		f.ids[f.tab] = ids[i]
-	}
-	if f.tab == glanceActivity {
-		m.evidenceOffset = i
 	}
 	return i
 }

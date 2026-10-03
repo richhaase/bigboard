@@ -155,7 +155,6 @@ func (m *Model) normalizeAwarenessFocus() {
 		}
 	}
 	m.personID = ""
-	m.evidenceOffset = 0
 	m.showPaths = false
 	m.pathOffset = 0
 }

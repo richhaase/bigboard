@@ -1,10 +1,22 @@
 package git
 
 import (
+	"bufio"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	scanner.Split(splitNUL)
+	return parseLog(scanner, Repository{ID: repoName, Name: repoName}, legacyPathFilter(), newAIMatcher(nil))
+}
+
+func shouldCountPath(path string) bool {
+	return legacyPathFilter().shouldCount(path)
+}
 
 // fmtHeader builds NUL-delimited metadata in the collection format.
 func fmtHeader(name, email, date string, coAuthors ...string) string {

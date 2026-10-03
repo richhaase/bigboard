@@ -208,7 +208,6 @@ func TestAreaPathInspectorScrollsEveryLiteralPath(t *testing.T) {
 	m.width = 40
 	m.height = 18
 	m.selectedAreaID = "auto:services/auth"
-	m.awarenessPane = 2
 	for i := 0; i < 30; i++ {
 		m.allRecords[0].Changes = append(m.allRecords[0].Changes, git.PathChange{Path: "services/auth/" + strings.Repeat("long", i+1) + ".go"})
 	}
@@ -228,7 +227,7 @@ func TestAreaPathInspectorScrollsEveryLiteralPath(t *testing.T) {
 		t.Fatal("path inspector height overflow")
 	}
 	m = pressAwareness(m, "esc")
-	if m.showPaths || m.awarenessPane != 2 {
+	if m.showPaths || !m.glance.detailOpen || m.glance.frame.tab != glanceActivity || m.glance.frame.areaID != "auto:services/auth" {
 		t.Fatal("Esc did not return to evidence")
 	}
 	m = pressAwareness(m, "enter")

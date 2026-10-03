@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 )
@@ -215,60 +214,20 @@ func (m Model) glanceDetailIDs() []string {
 	return ids
 }
 
-// glanceLensLines shares the identity-preserving, scrollable lens between the
-// compact view and the wide workspace without reparsing rendered headings.
+// glanceLensLines renders the scrollable People and Subareas lists.
+// Worklist owns their common header and footer.
 func (m Model) glanceLensLines(width, height int) []string {
 	var lines []string
 	areaPeople := m.glanceAreaPeople()
-	if m.glance.frame.relatedFromID != "" {
-		label := "Commits touching both areas · not collaboration"
-		if m.glance.frame.relatedPeople {
-			label = "Shared contributors · may have worked independently"
-		}
-		lines = append(lines, StyleDimWhite.Render("  "+label))
-	}
 	if m.glance.frame.tab == glanceSubareas {
-		lines = append(lines, m.glanceColumnHeaderFor(width, false))
+		lines = append(lines, m.glanceColumnHeaderFor(width))
 	}
 	ids := m.glanceDetailIDs()
 	selected := m.glanceSelected(ids)
 	budget := max(1, height-len(lines)-3)
 	start := max(0, min(selected-budget/2, len(ids)-budget))
-	if m.glance.frame.tab == glanceActivity {
-		// At worst each commit adds its own day heading. Keep selection
-		// within the viewport after accounting for those rendered lines.
-		start = max(0, selected-max(0, (budget-2)/4))
-	}
 	end := min(len(ids), start+budget)
 	switch m.glance.frame.tab {
-	case glanceActivity:
-		records := m.glanceEvidence()
-		// Day headings consume real viewport space; each commit remains one subject-first row.
-		lastDay := ""
-		used := 0
-		end = start
-		for i := start; i < len(records) && used < budget; i++ {
-			r := records[i]
-			day := r.Date.Local().Format("Mon Jan 02, 2006")
-			if day != lastDay && used+1 < budget {
-				lines = append(lines, StyleDimWhite.Render("  "+day))
-				used++
-				lastDay = day
-			}
-			if used >= budget {
-				break
-			}
-			subject := displayText(r.Subject)
-			if subject == "" {
-				subject = "(no subject)"
-			}
-			lines = append(lines, awarenessRow("  "+glanceCursor(i == selected)+" "+subject, i == selected, i, width))
-			used++
-			end = i + 1
-		}
-		if len(records) == 0 {
-			lines = append(lines, "  No matching commits in this area and range.")
-		}
 	case glancePeople:
 		people := m.glancePeopleList()
 		labels := make(map[string]string)
@@ -285,17 +244,6 @@ func (m Model) glanceLensLines(width, height int) []string {
 		if len(ids) == 0 {
 			lines = append(lines, "  No matching contributors. Esc clears search.")
 		}
-	case glanceRelated:
-		rows := m.glanceRelatedAreas()
-		for i := start; i < end; i++ {
-			r := rows[i]
-			suffix := fmt.Sprintf("%d shared people", r.shared)
-			line := glanceCursor(i == selected) + " " + padCells(displayText(r.area.Name), max(5, width-7-ansi.StringWidth(suffix))) + " " + suffix
-			lines = append(lines, awarenessRow("  "+line, i == selected, i, width))
-		}
-		if len(rows) == 0 {
-			lines = append(lines, "  No other areas share contributors in this range.")
-		}
 	case glanceSubareas:
 		rows := m.glanceSubareas()
 		for i := start; i < end; i++ {
@@ -306,7 +254,7 @@ func (m Model) glanceLensLines(width, height int) []string {
 					activity.latest = r.Date
 				}
 			}
-			lines = append(lines, m.glanceActivityRow(activity, i == selected, i, width, false))
+			lines = append(lines, m.glanceActivityRow(activity, i == selected, i, width))
 		}
 		if len(rows) == 0 {
 			empty := "  No deeper path groups in this area and range."
@@ -328,11 +276,6 @@ func (m Model) glanceLensLines(width, height int) []string {
 		position = fmt.Sprintf("%d–%d/%d", start+1, end, len(ids))
 	}
 	lines = append(lines, StyleDimWhite.Render("  "+position+" "+label))
-	footer := "  ↑↓ select · →/Enter open · Tab lens · ←/Esc back · t range"
-	if m.glance.searching || m.glanceQuery() != "" {
-		footer = "  / " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
-	}
-	lines = append(lines, footer, m.glanceCoverageLine())
 	return lines
 }
 
@@ -401,7 +344,7 @@ func (m Model) commitInspectorMaxOffset() int {
 	return max(0, len(m.commitInspectorLines(max(1, m.width)))-max(1, m.height-5))
 }
 func (m Model) renderCommitInspector(width, height int) string {
-	lines := nightCompactBanner(width)
+	lines := worklistCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("COMMIT · CHANGED PATHS", width), m.glanceScanLine(m.areaRepoID))
 	body := m.commitInspectorLines(width)
 	budget := max(1, height-len(lines)-2)

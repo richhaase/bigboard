@@ -79,7 +79,7 @@ release:
   header: |
     ## Big Board v{{.Version}}
 
-    Cyberpunk-themed TUI for assessing contributor volumes across git repositories.
+    Terminal dashboard for exploring work areas, contributors, and commit evidence across Git repositories.
   footer: |
     ---
 

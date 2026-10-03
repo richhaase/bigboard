@@ -12,21 +12,21 @@ import (
 	"github.com/richhaase/bigboard/stats"
 )
 
-func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
+func TestWorklistContributorPreviewFollowsSelection(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 120
 	m.selectedAreaID = "auto:services/auth"
-	if !nightPeopleInOrder(m.View(), "Ada") {
+	if !worklistPeopleInOrder(m.View(), "Ada") {
 		t.Fatal("selected area does not reveal its contributors")
 	}
 	m = pressAwareness(m, "down")
-	if !nightPeopleInOrder(m.View(), "Grace") || m.glance.detailOpen {
+	if !worklistPeopleInOrder(m.View(), "Grace") || m.glance.detailOpen {
 		t.Fatal("moving selection did not update the inline contributor list")
 	}
 	m = pressAwareness(m, "/")
 	m = pressAwareness(m, "auth")
 	m = pressAwareness(m, "enter")
-	if !nightPeopleInOrder(m.View(), "Ada") {
+	if !worklistPeopleInOrder(m.View(), "Ada") {
 		t.Fatal("searched selection retained another area's contributors")
 	}
 	m = pressAwareness(m, "enter")
@@ -41,16 +41,16 @@ func TestGlanceContributorPreviewFollowsSelection(t *testing.T) {
 
 	m = awarenessFixture()
 	m.width = 120
-	if !nightPeopleInOrder(m.View(), "Ada", "Grace") {
+	if !worklistPeopleInOrder(m.View(), "Ada", "Grace") {
 		t.Fatal("repository preview did not reveal its contributors")
 	}
 	m = pressAwareness(m, "down")
-	if !nightPeopleInOrder(m.View(), "Ada") || nightPeopleInOrder(m.View(), "Grace") {
+	if !worklistPeopleInOrder(m.View(), "Ada") || worklistPeopleInOrder(m.View(), "Grace") {
 		t.Fatal("repository selection retained another repository's contributor")
 	}
 }
 
-func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
+func TestWorklistContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 120
 	m.allRecords = nil
@@ -70,7 +70,7 @@ func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
 	m.selectedAreaID = "auto:feature"
-	if !nightPeopleInOrder(m.View(), "Zoe", "Ada") {
+	if !worklistPeopleInOrder(m.View(), "Zoe", "Ada") {
 		t.Fatal("area preview used alphabetical, global, or out-of-range commit totals")
 	}
 	m = pressAwareness(m, "enter")
@@ -80,19 +80,19 @@ func TestGlanceContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	}
 	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "esc")
-	if !nightPeopleInOrder(m.View(), "Ada", "Zoe") {
+	if !worklistPeopleInOrder(m.View(), "Ada", "Zoe") {
 		t.Fatal("repository preview used global author totals instead of repository totals")
 	}
 }
 
-func TestGlanceContributorPreviewBoundsIdentityAndTies(t *testing.T) {
+func TestWorklistContributorPreviewBoundsIdentityAndTies(t *testing.T) {
 	people := []stats.AuthorStats{
 		{ID: "email:z@x", Name: "Same name", Commits: 1},
 		{ID: "email:a@x", Name: "Same name", Commits: 1},
 		{ID: "email:b@x", Name: "Bot", Commits: 2, Bot: true},
 	}
-	view := ansi.Strip(strings.Join(glanceContributorPreview(people, 110, 2), "\n"))
-	if !strings.Contains(view, "[BOT] Bot, a@x · Same name, z@x · Same name") {
+	view := ansi.Strip(strings.Join(worklistPeople(people, 110, 2), "\n"))
+	if !strings.Contains(view, "[BOT] Bot 2 · a@x · Same name 1 · z@x · Same name 1") {
 		t.Fatalf("preview lost bot tags, duplicate identities, or deterministic ties:\n%s", view)
 	}
 	if people[0].ID != "email:z@x" {
@@ -103,7 +103,7 @@ func TestGlanceContributorPreviewBoundsIdentityAndTies(t *testing.T) {
 		people = append(people, stats.AuthorStats{ID: fmt.Sprintf("email:%d@x", i), Name: fmt.Sprintf("%03d %s", i, strings.Repeat("長い名前", 15)), Commits: 120 - i})
 	}
 	for _, test := range []struct{ width, rows, remaining int }{{40, 1, 119}, {70, 1, 119}, {110, 2, 118}} {
-		lines := glanceContributorPreview(people, test.width, test.rows)
+		lines := worklistPeople(people, test.width, test.rows)
 		if len(lines) != test.rows {
 			t.Fatalf("want %d bounded preview rows, got %d", test.rows, len(lines))
 		}
@@ -119,7 +119,7 @@ func TestGlanceContributorPreviewBoundsIdentityAndTies(t *testing.T) {
 	}
 }
 
-func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
+func TestWorklistContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 120
 	bot := m.allRecords[0]
@@ -136,14 +136,14 @@ func TestGlanceContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 	m = pressAwareness(m, "b")
 	m.timeIdx = 0
 	m.recomputeAuthors()
-	if !nightPeopleInOrder(m.View(), "Ada") || strings.Contains(m.View(), "Grace") || strings.Contains(m.View(), "robot[bot]") {
+	if !worklistPeopleInOrder(m.View(), "Ada") || strings.Contains(m.View(), "Grace") || strings.Contains(m.View(), "robot[bot]") {
 		t.Fatal("date or bot filter did not update the contributor preview")
 	}
 	m = prFixture()
 	m.width = 120
 	m.height = 36
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
-	if !strings.Contains(m.View(), "No contributors in this range") || nightPeopleInOrder(m.View(), "robot[bot]") {
+	if !strings.Contains(m.View(), "No contributors in this range") || worklistPeopleInOrder(m.View(), "robot[bot]") {
 		t.Fatalf("PR-only area fabricated a local contributor:\n%s", ansi.Strip(m.View()))
 	}
 	for _, size := range [][2]int{{40, 18}, {70, 24}, {110, 40}} {

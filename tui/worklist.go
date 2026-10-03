@@ -153,16 +153,15 @@ func (m Model) worklistPRFreshness(id string) string {
 	return line
 }
 
-func worklistColumnWidths(width int) (area, author, subject, age, pr int) {
+func worklistColumnWidths(width int) (area, author, subject, age int) {
 	area = max(18, width/5)
 	author = max(18, width/6)
 	age = 6
-	pr = 0
 	subject = max(1, width-area-author-age-5)
 	return
 }
 func (m Model) worklistColumns(width int) string {
-	a, p, s, t, _ := worklistColumnWidths(width)
+	a, p, s, t := worklistColumnWidths(width)
 	return StyleDimWhite.Render("  " + padCells("REPO / AREA", a) + " " + padCells("LAST AUTHOR +OTHERS", p) + " " + padCells("LATEST COMMIT", s) + " " + padCells("AGE", t))
 }
 func worklistLastAuthor(r repositoryActivity) string {
@@ -248,7 +247,7 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 	}
 	var lines []string
 	if wide {
-		a, p, s, t, _ := worklistColumnWidths(width)
+		a, p, s, t := worklistColumnWidths(width)
 		if len(m.scopePRs(r.repo.ID)) > 0 {
 			signal := m.worklistSignal(m.worklistPRSignal(r.repo.ID))
 			subject = padCells(subject, max(1, s-27)) + "  " + padCells(signal, min(25, s-3))

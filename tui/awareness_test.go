@@ -173,8 +173,8 @@ func TestAwarenessEvidenceScrollAndFiltering(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		m = pressAwareness(m, "down")
 	}
-	if m.evidenceOffset != 51 {
-		t.Fatalf("offset=%d", m.evidenceOffset)
+	if m.glance.frame.rows[glanceActivity] != 51 {
+		t.Fatalf("selected row=%d", m.glance.frame.rows[glanceActivity])
 	}
 	if !strings.Contains(m.View(), "Add endpoint") {
 		t.Fatal("last evidence is unreachable")

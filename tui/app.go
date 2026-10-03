@@ -47,8 +47,6 @@ type Model struct {
 	selectedAreaID   string
 	selectedRepoID   string
 	personID         string
-	awarenessPane    int
-	evidenceOffset   int
 	returnView       ViewMode
 	scannedAt        map[string]time.Time
 	staleRepos       map[string]bool
@@ -112,7 +110,7 @@ type RepoLoadedMsg struct {
 	Err        error
 }
 
-// DefaultTimeIndex is the TimePresets index used when no --since/since is given.
+// DefaultTimeIndex is the TimePresets index used when no since config value is given.
 const DefaultTimeIndex = 2
 
 const maxConcurrentRepoScans = 8
@@ -279,14 +277,14 @@ func (m *Model) finalizeLoad() {
 	m.loading = false
 	m.refreshing = false
 	m.rebuildAreaDefinitions()
-	personID, evidenceOffset := m.personID, m.evidenceOffset
+	personID := m.personID
 	showPaths, pathOffset := m.showPaths, m.pathOffset
 	m.recomputeAuthors()
 	if !initial {
 		// A refresh is not a navigation action. Retain vanished-person/commit
 		// intent so the existing detail can explain its empty evidence instead
 		// of silently broadening to everybody or closing an inspector.
-		m.personID, m.evidenceOffset = personID, evidenceOffset
+		m.personID = personID
 		m.showPaths, m.pathOffset = showPaths, pathOffset
 	}
 	if initial {
@@ -780,7 +778,7 @@ func (m Model) View() string {
 	if height < 1 {
 		height = lipgloss.Height(content)
 	}
-	return nightCanvas(content, max(1, width), max(1, height))
+	return worklistCanvas(content, max(1, width), max(1, height))
 }
 
 func (m Model) viewContent() string {
