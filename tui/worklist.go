@@ -287,14 +287,14 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select  →/Enter open  / find  s sort  t range  b bots  v leaderboard  p PRs  R refresh  ? help"
+	footer := "↑↓ select  →/Enter open  / find  s sort  t range  b bots  l leaderboard  p PRs  R refresh  ? help"
 	if detail {
-		footer = "↑↓ select  →/Enter evidence  Tab/1–4 lens  ←/Esc back  t range  b bots  v leaderboard  p PRs  R refresh"
+		footer = "↑↓ select  →/Enter evidence  Tab/1–4 lens  ←/Esc back  t range  b bots  l leaderboard  p PRs  R refresh"
 	}
 	if width >= 70 && width < 110 {
-		footer = "↑↓ select →/Enter open ←/Esc back t range b bots v stats p PRs R refresh"
+		footer = "↑↓ select →/Enter open ←/Esc back t range b bots l stats p PRs R refresh"
 		if detail {
-			footer = "↑↓ →/Enter evidence ←/Esc back Tab lens t range b bots v stats p PRs R"
+			footer = "↑↓ →/Enter evidence ←/Esc back Tab lens t range b bots l stats p PRs R"
 		}
 	}
 	if width < 70 {

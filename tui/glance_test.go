@@ -81,7 +81,7 @@ func TestGlanceAllPeopleAndCommitEvidenceRemainReachable(t *testing.T) {
 	if len(m.glanceEvidence()) != 1100 {
 		t.Fatal("commits lost")
 	}
-	m = pressAwareness(m, "G")
+	m = pressAwareness(m, "end")
 	if m.glance.frame.rows[glanceActivity] != 1099 || !strings.Contains(m.View(), "Exact subject 1099") {
 		t.Fatal("last commit unreachable")
 	}
@@ -89,7 +89,7 @@ func TestGlanceAllPeopleAndCommitEvidenceRemainReachable(t *testing.T) {
 	if len(m.glancePeopleList()) != 120 {
 		t.Fatal("identities lost")
 	}
-	m = pressAwareness(m, "G")
+	m = pressAwareness(m, "end")
 	if !strings.Contains(m.View(), "Person 119") {
 		t.Fatal("last person unreachable")
 	}

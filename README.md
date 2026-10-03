@@ -102,8 +102,9 @@ Direct files are a separate leaf; multi-path commits can appear in several child
 Configured named areas keep their explicit meaning and are not automatically
 reinterpreted. `Esc` returns through each level, restoring the prior selection.
 `/` searches the current list, `Enter` accepts the query, and `Esc` clears it before
-leaving. `?` shows all controls. `v` switches to contributor statistics. Time ranges,
-bot hiding, repository inclusion, and manual refresh apply to both views.
+leaving. `?` shows all controls. `l` switches to the contributor-statistics
+leaderboard. Time ranges, bot hiding, repository inclusion, and manual refresh
+apply to both views.
 
 Work areas are path-based groups, not inferred features or ownership. Automatic
 grouping expands containers such as `src`, `services`, `packages`, `apps`, `cmd`,
@@ -217,12 +218,12 @@ Keys depend on the active view. While typing a search, ordinary characters
 
 | Key | Action |
 |-----|--------|
-| `↑/↓` or `j/k` | Select a repository, area, commit, person, or related/subarea row |
+| `↑/↓` | Select a repository, area, commit, person, or related/subarea row |
 | `PgUp` / `PgDown` | Page through the current list |
-| `g` / `G`, `Home` / `End` | First / last row |
+| `Home` / `End` | First / last row |
 | `t` | Open local range picker: 1d / 7d / 14d / 30d / 90d / 1y / all / custom days |
-| `←` or `h` | Go back through filters and detail; at the repository root, stay there |
-| `→`, `l`, or `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
+| `←` | Go back through filters and detail; at the repository root, stay there |
+| `→` or `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
 | `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
 | `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses once area detail is open |
 | `s` | Sort overview or Subareas: Recent → Name → Activity (commits); other detail lenses keep their order |
@@ -232,20 +233,21 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `r` | Open repository inclusion controls |
 | `R` | Refresh local history and request PR context, subject to remote cooldown |
 | `e` | Open scan-error details when errors exist |
-| `v` | Open the contributor-statistics leaderboard |
+| `l` (lowercase) | Open the contributor-statistics leaderboard |
 | `o` | In Related, switch between shared commits and contributor overlap |
 | `?` | Show Worklist help |
 | `Esc` | Clear a search/person filter, unwind detail/subareas, then return to repositories; at the unfiltered repository list, quit |
 | `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |
 
-The full **commit inspector** has its own keys: `↑/↓` or `j/k` scrolls lines;
-`PgUp/PgDown`, `g/G`, or `Home/End` moves farther. `←`, `h`, `Enter`, or `Esc` returns to
+The full **commit inspector** has its own keys: `↑/↓` scrolls lines;
+`PgUp/PgDown` or `Home/End` moves farther. `←`, `Enter`, or `Esc` returns to
 Activity. `Tab/Shift+Tab` leaves the inspector for the next/previous lens. Return
 to the list or lens before changing range, toggling bots, or refreshing.
 
-The **range picker** owns its keys: `↑/↓` or `j/k` chooses a preset; `c` selects
-Custom days, then `Enter` opens day entry. Type to replace the current value;
-`Backspace` edits and `Ctrl+U` clears it. `Enter` applies a valid choice, while
+The **range picker** owns its keys: `↑/↓` chooses a preset; `Home` selects the
+first preset, and `End` or `c` selects Custom days. With Custom days selected,
+`Enter` opens day entry. Type to replace the current value; `Backspace` edits and
+`Ctrl+U` clears it. `Enter` applies a valid choice, while
 `Esc` cancels without changing the range or selection. Custom ranges are
 session-only; `since` in config continues to accept the preset labels. Search
 entry, help, commit inspection, PRs and repository controls keep their own keys;
@@ -253,7 +255,7 @@ return to a list or detail lens to open the picker.
 
 ### PR and repository overlays
 
-In the **PR overlay**, `↑/↓` or `j/k` selects PRs or scrolls the open PR detail.
+In the **PR overlay**, `↑/↓` selects PRs or scrolls the open PR detail.
 `p` selects the current scope and `P` selects all included repositories; either
 returns to the first PR in the list using cached data. `Enter` toggles detail;
 `Esc` backs out one level. `o` opens the selected PR in your default browser
@@ -261,22 +263,22 @@ from either the PR list or detail; it requires a canonical GitHub PR URL.
 Browser-launch errors appear in the overlay. `R` requests **PR data
 only**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
 
-In **repository controls**, `↑/↓` or `j/k` selects and `Space` toggles inclusion.
+In **repository controls**, `↑/↓` selects and `Space` toggles inclusion.
 Both `Enter` and `Esc` apply the current choices and close the overlay; `Esc`
 does not cancel toggles. These choices affect the current session, not the config
 file. Excluding a repository also removes it from later PR refresh requests.
 
 ### Contributor statistics
 
-On the **leaderboard**, `↑/↓` or `j/k` selects a contributor and `→` / `l` / `Enter` opens
+On the **leaderboard**, `↑/↓` selects a contributor and `→` / `Enter` opens
 their detail. `s` cycles metric columns; `S` reverses the metric sort. `/` filters
 contributors by name, `b` toggles bots, `r` opens repository controls, `R` refreshes,
-and `v` returns to Worklist. With an accepted name filter, `q` or `Esc` clears it
-first; otherwise it quits. The leaderboard scrolls as selection moves; page and
+and lowercase `l` returns to Worklist. With an accepted name filter, `q` or `Esc`
+clears it first; otherwise it quits. The leaderboard scrolls as selection moves; page and
 Home/End keys are not used there.
 
-In **contributor detail**, `↑/↓` or `j/k` switches contributors. `PgUp/PgDown`
-scrolls content and `Home/End` jumps to its first/last page. `←` / `h` / `Esc` returns to the
+In **contributor detail**, `↑/↓` switches contributors. `PgUp/PgDown`
+scrolls content and `Home/End` jumps to its first/last page. `←` / `Esc` returns to the
 leaderboard, where filtering, bot toggles, sorting, repository controls and refresh
 are available. `q` or `Ctrl+C` quits. Both statistics views support `t` for the local time range. `←` at the
 leaderboard clears an accepted name filter, then stays there without quitting;

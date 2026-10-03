@@ -359,13 +359,13 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.prDetail = !m.prDetail
 		m.prOffset = 0
-	case "up", "k":
+	case "up":
 		if m.prDetail {
 			m.prOffset = max(0, min(m.prOffset-1, m.prDetailMaxOffset()))
 		} else {
 			m.prRow = max(0, m.prRow-1)
 		}
-	case "down", "j":
+	case "down":
 		if m.prDetail {
 			m.prOffset = min(m.prOffset+1, m.prDetailMaxOffset())
 		} else {

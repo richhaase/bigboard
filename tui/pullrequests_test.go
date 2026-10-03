@@ -271,7 +271,7 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 			if !strings.Contains(m.prStatus(), tc.label) || !strings.Contains(m.View(), "Fix login") {
 				t.Fatalf("missing useful status/history: %s", m.View())
 			}
-			m = pressAwareness(m, "v")
+			m = pressAwareness(m, "l")
 			if m.viewMode != ViewAggregate {
 				t.Fatal("cannot navigate local stats")
 			}

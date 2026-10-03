@@ -107,11 +107,11 @@ func TestWorklistSingleFocusRoundTripResizeAndNoColor(t *testing.T) {
 		m := glanceBusyFixture()
 		for _, size := range [][2]int{{140, 40}, {120, 36}, {80, 30}, {40, 18}} {
 			m.width, m.height = size[0], size[1]
-			m = pressAwareness(m, "G")
+			m = pressAwareness(m, "end")
 			id := m.selectedAreaID
 			before := ansi.Strip(m.View())
 			m = pressAwareness(m, "enter")
-			for _, key := range []string{"G", "2", "G", "3", "4", "1"} {
+			for _, key := range []string{"end", "2", "end", "3", "4", "1"} {
 				m = pressAwareness(m, key)
 			}
 			m = pressAwareness(m, "esc")

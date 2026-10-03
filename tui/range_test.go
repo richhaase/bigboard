@@ -108,7 +108,7 @@ func TestRangePickerOwnsKeysWithoutRefreshOrNavigation(t *testing.T) {
 	m = rangeKey(t, m, "right")
 	before := m.glance
 	m = rangeKey(t, m, "t")
-	for _, k := range []string{"left", "right", "R", "r", "v", "p", "q", "t", "/", "e"} {
+	for _, k := range []string{"left", "right", "R", "r", "l", "v", "p", "q", "t", "/", "e"} {
 		m = rangeKey(t, m, k)
 	}
 	if !m.rangePicker.open || m.quitting || !reflect.DeepEqual(before, m.glance) {
@@ -189,7 +189,7 @@ func TestRangePickerFitsTerminalAndKeepsApplyCancelVisible(t *testing.T) {
 func TestArrowDrillDownBackAndRootDoesNotQuit(t *testing.T) {
 	m := awarenessFixture()
 	initial := m.timeIdx
-	for _, k := range []string{"left", "h"} {
+	for _, k := range []string{"left"} {
 		m = rangeKey(t, m, k)
 		if m.quitting {
 			t.Fatal("left at root quit")

@@ -231,9 +231,9 @@ func TestArrowNavigationInStatistics(t *testing.T) {
 	if m.viewMode != ViewAggregate || m.timeIdx != DefaultTimeIndex {
 		t.Fatal("left should return from contributor without changing time")
 	}
-	m = send(m, "l", "h")
+	m = send(m, "right", "left")
 	if m.viewMode != ViewAggregate || m.timeIdx != DefaultTimeIndex {
-		t.Fatal("vim navigation aliases changed time")
+		t.Fatal("repeated arrow navigation changed time")
 	}
 	m = send(m, "/", "Ada", "enter", "left")
 	if m.filterQuery != "" || m.quitting || m.viewMode != ViewAggregate {
@@ -280,13 +280,13 @@ func TestStepOperative(t *testing.T) {
 	m := modelWithData()
 	m.viewMode = ViewOperative
 	m.activeOperative = "Ada Lovelace"
-	m = send(m, "j")
+	m = send(m, "down")
 	if m.activeOperative != "Grace Hopper" {
-		t.Errorf("j should step to next contributor, got %q", m.activeOperative)
+		t.Errorf("down should step to next contributor, got %q", m.activeOperative)
 	}
-	m = send(m, "k")
+	m = send(m, "up")
 	if m.activeOperative != "Ada Lovelace" {
-		t.Errorf("k should step back, got %q", m.activeOperative)
+		t.Errorf("up should step back, got %q", m.activeOperative)
 	}
 }
 

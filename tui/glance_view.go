@@ -152,7 +152,7 @@ func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, wid
 func (m Model) renderAwareness() string {
 	width, height := max(1, m.width), max(1, m.height)
 	if width < 40 || height < 18 {
-		return ansi.Truncate("Resize to 40×18 · v stats · q quit", width, "…")
+		return ansi.Truncate("Resize to 40×18 · l stats · q quit", width, "…")
 	}
 	m.normalizeAreaScope()
 	if !m.glance.detailOpen {
@@ -172,7 +172,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 	lines = append(lines, RenderSectionHeader("WORKLIST · HELP", width),
 		"  → / Enter  repository → areas → detail → commit",
 		"  Local data updates on launch or R; no auto-refresh",
-		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",
+		"  ↑↓  select     PgUp/PgDn  page     Home/End  first/last",
 		"  /  search this list  Enter accept  Esc clear",
 		"  s  sort areas/repos: Activity (commits), Recent, Name",
 		"  Tab / Shift-Tab or 1–4: Activity, People, Related, Subareas",
@@ -185,7 +185,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 		"  PRs use all open dates, independent of local filters",
 		"  r  included repositories     R  refresh local + PR data",
 		"  Local refresh reads cached Git history; never runs git fetch",
-		"  v  contributor statistics     q / Ctrl-C  quit",
+		"  l  contributor statistics     q / Ctrl-C  quit",
 		"  Git associations show neither ownership nor live presence",
 		"  ? / Esc  close help")
 	return fitGlanceLines(lines, width, height)

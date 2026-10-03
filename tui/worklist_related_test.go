@@ -78,7 +78,7 @@ func TestRelatedSelectionVisibleAcrossSizes(t *testing.T) {
 	m = pressAwareness(m, "3")
 	for _, size := range [][2]int{{120, 36}, {80, 30}, {40, 18}} {
 		m.width, m.height = size[0], size[1]
-		for _, key := range []string{"g", "down", "pgdown", "G"} {
+		for _, key := range []string{"home", "down", "pgdown", "end"} {
 			m = pressAwareness(m, key)
 			rows := m.glanceCochangedAreas()
 			selected := m.glanceSelected(m.glanceDetailIDs())
