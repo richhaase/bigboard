@@ -28,17 +28,19 @@ const (
 // Model is the root Bubble Tea model.
 type Model struct {
 	// Glance navigation is separate from the aggregate statistics view.
-	glance       glanceState
-	overviewSort int
-	prState      prState
-	prProvider   PRProvider
-	prGeneration uint64
-	cancelPRs    context.CancelFunc
-	showPRs      bool
-	prDetail     bool
-	prAll        bool
-	prRow        int
-	prOffset     int
+	glance          glanceState
+	overviewSort    int
+	prState         prState
+	prProvider      PRProvider
+	prGeneration    uint64
+	cancelPRs       context.CancelFunc
+	showPRs         bool
+	prDetail        bool
+	prAll           bool
+	prRow           int
+	prOffset        int
+	prBrowserError  string
+	prBrowserOpener func(string) error
 
 	showPaths        bool
 	pathOffset       int
@@ -380,6 +382,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			return m, m.nextLoadCmd()
 		}
+
+	case prBrowserResult:
+		if msg.err != nil {
+			m.prBrowserError = "Could not open browser: " + displayText(msg.err.Error())
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)

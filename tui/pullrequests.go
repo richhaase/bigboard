@@ -333,6 +333,7 @@ func (m Model) selectPRScope(all bool) Model {
 		}
 	}
 	m.showPRs = true
+	m.prBrowserError = ""
 	m.prAll = all
 	m.prDetail = false
 	m.prRow = 0
@@ -342,6 +343,8 @@ func (m Model) selectPRScope(all bool) Model {
 
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "o":
+		return m.openSelectedPR()
 	case "q", "ctrl+c":
 		return m.quit()
 	case "p", "P":
@@ -394,11 +397,11 @@ func (m Model) renderPRs() string {
 	} else if m.prDetail {
 		pr := prs[min(m.prRow, len(prs)-1)]
 		wrapped := m.prDetailLines(pr, width)
-		budget := max(1, height-len(lines)-2)
+		budget := m.prDetailBudget()
 		offset := max(0, min(m.prOffset, max(0, len(wrapped)-budget)))
 		lines = append(lines, wrapped[offset:min(len(wrapped), offset+budget)]...)
 	} else {
-		budget := max(1, height-len(lines)-3)
+		budget := max(1, height-len(lines)-5)
 		selected := max(0, min(m.prRow, len(prs)-1))
 		start := max(0, min(selected-budget/2, len(prs)-budget))
 		for i := start; i < min(len(prs), start+budget); i++ {
@@ -430,7 +433,7 @@ func (m Model) renderPRs() string {
 			if err == nil {
 				err = m.prState.snapshots[m.prState.repositories[repo.ID]].err
 			}
-			if err != nil && len(lines) < height-2 {
+			if err != nil && len(lines) < height-4 {
 				lines = append(lines, "  "+displayText(repo.Name)+": "+displayText(err.Error()))
 			}
 		}
@@ -438,6 +441,12 @@ func (m Model) renderPRs() string {
 	help := "  ↑↓ scroll · Enter details/back · Esc back · R refresh PRs · q quit"
 	if width < 70 {
 		help = "↑↓ scroll · Enter detail · Esc back · R"
+	}
+	if m.prBrowserError != "" {
+		lines = append(lines, "  "+m.prBrowserError)
+	}
+	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
+		lines = append(lines, "  o open PR in browser")
 	}
 	lines = append(lines, help)
 	if len(lines) > height {
@@ -512,13 +521,19 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 
 	return wrapped
 }
+
+// Reserve the three header rows and four footer/error/hint rows consistently.
+func (m Model) prDetailBudget() int {
+	return max(1, m.height-len(renderBanner(min(max(1, m.width), bannerMinWidth-1)))-7)
+}
+
 func (m Model) prDetailMaxOffset() int {
 	prs := m.visiblePRs()
 	if len(prs) == 0 {
 		return 0
 	}
 	pr := prs[min(m.prRow, len(prs)-1)]
-	budget := max(1, m.height-len(renderBanner(min(max(1, m.width), bannerMinWidth-1)))-5)
+	budget := m.prDetailBudget()
 	return max(0, len(m.prDetailLines(pr, max(1, m.width)))-budget)
 }
 

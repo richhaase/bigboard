@@ -256,7 +256,9 @@ return to a list or detail lens to open the picker.
 In the **PR overlay**, `↑/↓` or `j/k` selects PRs or scrolls the open PR detail.
 `p` selects the current scope and `P` selects all included repositories; either
 returns to the first PR in the list using cached data. `Enter` toggles detail;
-`Esc` backs out one level. `R` requests **PR data
+`Esc` backs out one level. `o` opens the selected PR in your default browser
+from either the PR list or detail; it requires a canonical GitHub PR URL.
+Browser-launch errors appear in the overlay. `R` requests **PR data
 only**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
 
 In **repository controls**, `↑/↓` or `j/k` selects and `Space` toggles inclusion.

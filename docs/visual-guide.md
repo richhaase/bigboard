@@ -184,7 +184,9 @@ scoped PRs. `P` opens all included repositories regardless of that search. PRs u
 range, bot, person, and commit-search filters. Inside the overlay, `p` selects the current scope and `P` selects all included
 repositories, returning to the first list row without fetching. `Enter` toggles
 detail, `↑/↓` scrolls, and `Esc` backs out one level. `R` there refreshes
-**PRs only**; it does not start a local Git scan.
+**PRs only**; it does not start a local Git scan. `o` opens the selected PR in
+your default browser from the PR list or detail. The hint appears only for a
+valid GitHub PR URL; launch errors appear in the overlay.
 
 GitHub context uses an already installed and authenticated `gh` CLI. Bigboard
 never signs in, requests new access, or fetches Git objects. Local history loads
