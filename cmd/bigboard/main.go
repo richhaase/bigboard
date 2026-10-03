@@ -136,7 +136,6 @@ func main() {
 
 	if *exportFlag {
 		if err := runExportJSON(os.Stdout, os.Stderr, repositories, excludedRepos, initialSort, analysisOptions{
-			FuzzyMatching:    cfg.Fuzzy,
 			IncludeGenerated: cfg.AllFiles,
 			AIIdentities:     cfg.AIIdentities,
 			BotIdentities:    cfg.BotIdentities,

@@ -9,19 +9,19 @@ import (
 	"github.com/muesli/termenv"
 )
 
-func TestAwarenessSummaryIsOneScopedLineWithAndWithoutANSI(t *testing.T) {
+func TestWorklistHeaderShowsRangeWithAndWithoutANSI(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(previous)
 	for _, profile := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		lipgloss.SetColorProfile(profile)
 		m := awarenessFixture()
-		text := ansi.Strip(m.awarenessSummary(3))
-		if strings.Contains(text, "\n") {
-			t.Fatal("overview summary consumes multiple rows")
+		header := m.worklistHeader(120)
+		if len(header) != 5 || !strings.Contains(ansi.Strip(header[1]), "Range: All time") {
+			t.Fatalf("range missing from Worklist header: %v", header)
 		}
-		for _, want := range []string{"Range: All time", "3 commits", "2 people", "3 repositories"} {
-			if !strings.Contains(text, want) {
-				t.Fatalf("missing %q: %s", want, text)
+		for _, line := range header {
+			if strings.Contains(line, "\n") || ansi.StringWidth(line) > 120 {
+				t.Fatalf("header exceeds one row: %q", line)
 			}
 		}
 	}

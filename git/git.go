@@ -70,10 +70,6 @@ func legacyPathFilter() pathFilter {
 	}
 }
 
-func shouldCountPath(path string) bool {
-	return legacyPathFilter().shouldCount(path)
-}
-
 func (f pathFilter) shouldCount(path string) bool {
 	if f.includeGenerated {
 		return true

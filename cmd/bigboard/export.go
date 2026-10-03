@@ -13,7 +13,6 @@ import (
 )
 
 type analysisOptions struct {
-	FuzzyMatching    bool
 	IncludeGenerated bool
 	AIIdentities     []string
 	BotIdentities    []string
@@ -73,7 +72,6 @@ func runExportJSON(w, errw io.Writer, repositories []git.Repository, excluded ma
 		return fmt.Errorf("all %d repositories failed to scan", failed)
 	}
 	authors := stats.AggregateWithOptions(all, stats.AggregateOptions{
-		FuzzyMatching: options.FuzzyMatching,
 		BotIdentities: options.BotIdentities,
 	})
 	stats.Sort(authors, sortField)

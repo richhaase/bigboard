@@ -37,7 +37,7 @@ func TestStatisticsCanvasPreservesAllContentLines(t *testing.T) {
 	for i := 0; i < 43; i++ {
 		lines = append(lines, fmt.Sprintf("line %02d", i))
 	}
-	view := ansi.Strip(nightCanvas(strings.Join(lines, "\n"), 100, 28))
+	view := ansi.Strip(worklistCanvas(strings.Join(lines, "\n"), 100, 28))
 	if lipgloss.Height(view) != 43 || !strings.Contains(view, "line 42") {
 		t.Fatalf("canvas discarded overflow: height%d", lipgloss.Height(view))
 	}

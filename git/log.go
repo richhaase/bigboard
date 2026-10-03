@@ -82,13 +82,6 @@ func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
 	return 0, nil, nil
 }
 
-func parseGitLog(output string, repoName string) ([]CommitRecord, error) {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	scanner.Split(splitNUL)
-	return parseLog(scanner, Repository{ID: repoName, Name: repoName}, legacyPathFilter(), newAIMatcher(nil))
-}
-
 // Git terminates each metadata field and each numstat path with NUL. Rename/copy
 // records have an empty path followed by the literal old and new paths.
 func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {

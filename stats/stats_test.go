@@ -530,7 +530,7 @@ func TestMergeAuthorNameDeterministicTieBreak(t *testing.T) {
 	}
 }
 
-func TestAggregateFuzzyDeterministic(t *testing.T) {
+func TestAggregateIdentityDeterministicWithLegacyFuzzyEnabled(t *testing.T) {
 	stats.FuzzyMatching = true
 	t.Cleanup(func() { stats.FuzzyMatching = false })
 	now := time.Now()
@@ -549,7 +549,7 @@ func TestAggregateFuzzyDeterministic(t *testing.T) {
 	want := snapshot(stats.Aggregate(mk()))
 	for i := 0; i < 50; i++ {
 		if got := snapshot(stats.Aggregate(mk())); got != want {
-			t.Fatalf("Aggregate non-deterministic under fuzzy: run %d gave %q, want %q", i, got, want)
+			t.Fatalf("identity aggregation non-deterministic with legacy fuzzy enabled: run %d gave %q, want %q", i, got, want)
 		}
 	}
 }

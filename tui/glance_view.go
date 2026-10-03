@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -62,22 +61,6 @@ func (m Model) glanceScopeRecords() []git.CommitRecord {
 	}
 	return kept
 }
-func (m Model) awarenessSummary(scopeCount int) string {
-	records := m.glanceScopeRecords()
-	people := make(map[string]bool)
-	for _, r := range records {
-		people[stats.IdentityID(r)] = true
-	}
-	scope := "repositories"
-	if m.areaRepoID != "" {
-		scope = "areas"
-	}
-	bots := ""
-	if m.hideBots {
-		bots = " · bots hidden"
-	}
-	return StyleDimWhite.Render(fmt.Sprintf("  Range: %s%s · %s commits · %d people · %d %s", m.rangeLabel()+" · t to change", bots, FormatNumber(len(records)), len(people), scopeCount, scope))
-}
 func (m Model) glanceCoverageLine() string {
 	shallow := false
 	for _, r := range m.allRecords {
@@ -130,22 +113,16 @@ func (m Model) glanceScanLine(scope string) string {
 }
 
 // Column widths reserve numeric context before allocating space to names.
-func glanceColumns(width int, withPR bool) (name, commits, people, last, pr int) {
+func glanceColumns(width int) (name, commits, people, last int) {
 	commits, people, last = 8, 7, 12
 	if width < 70 {
 		commits, people, last = 7, 6, 6
 	}
-	if withPR && width >= 100 {
-		pr = 23
-	}
 	name = width - 4 - 2 - commits - people - last - 3
-	if pr > 0 {
-		name -= pr + 1
-	}
-	return max(4, name), commits, people, last, pr
+	return max(4, name), commits, people, last
 }
-func (m Model) glanceColumnHeaderFor(width int, withPR bool) string {
-	name, c, p, last, pr := glanceColumns(width, withPR)
+func (m Model) glanceColumnHeaderFor(width int) string {
+	name, c, p, last := glanceColumns(width)
 	label := "REPOSITORY"
 	if m.areaRepoID != "" {
 		label = "AREA"
@@ -155,13 +132,10 @@ func (m Model) glanceColumnHeaderFor(width int, withPR bool) string {
 		lastLabel = "LAST (local)"
 	}
 	line := "  " + padCells(label, name) + " " + rightCells("COMMITS", c) + " " + rightCells("PEOPLE", p) + " " + padCells(lastLabel, last)
-	if pr > 0 {
-		line += " " + padCells("OPEN PRs · all dates", pr)
-	}
 	return StyleCyan.Render("  " + line)
 }
-func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, width int, withPR bool) string {
-	name, c, p, last, pr := glanceColumns(width, withPR)
+func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, width int) string {
+	name, c, p, last := glanceColumns(width)
 	recent := "quiet"
 	if !r.latest.IsZero() {
 		recent = r.latest.Local().Format("Jan 02 15:04")
@@ -173,9 +147,6 @@ func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, wid
 		}
 	}
 	line := glanceCursor(selected) + " " + padCells(displayText(r.repo.Name), name) + " " + rightCells(FormatNumber(r.commits), c) + " " + rightCells(FormatNumber(len(r.people)), p) + " " + padCells(recent, last)
-	if pr > 0 {
-		line += " " + padCells(m.prGlanceSignal(r.repo.ID), pr)
-	}
 	return awarenessRow("  "+line, selected, index, width)
 }
 func (m Model) renderAwareness() string {
@@ -196,59 +167,9 @@ func (m Model) renderAwareness() string {
 	return m.renderWorklist(width, height)
 }
 
-// Show the selected scope's most active identities first without expanding its
-// entire inventory or changing the alphabetical People lens.
-// Reserve the remaining-person count before truncating a long final name.
-func glanceContributorPreview(people []stats.AuthorStats, width, maxLines int) []string {
-	if len(people) == 0 {
-		return []string{"  Contributors: none in this range"}
-	}
-	people = append([]stats.AuthorStats(nil), people...)
-	sortPeople(people)
-	sort.SliceStable(people, func(i, j int) bool { return people[i].Commits > people[j].Commits })
-	var lines []string
-	i := 0
-	for row := 0; row < maxLines && i < len(people); row++ {
-		prefix := "  Contributors: "
-		if row > 0 {
-			prefix = "    "
-		}
-		available := max(1, width-2-ansi.StringWidth(prefix))
-		var names []string
-		for i < len(people) {
-			label := glancePersonLabel(people[i], people)
-			if people[i].Bot {
-				label = "[BOT] " + label
-			}
-			suffix := ""
-			if row == maxLines-1 && i+1 < len(people) {
-				suffix = fmt.Sprintf(", +%d more", len(people)-i-1)
-			}
-			candidate := strings.Join(names, ", ")
-			if candidate != "" {
-				candidate += ", "
-			}
-			candidate += label
-			if ansi.StringWidth(candidate+suffix) > available {
-				if len(names) > 0 {
-					break
-				}
-				label = ansi.Truncate(label, max(1, available-ansi.StringWidth(suffix)), "…")
-			}
-			names = append(names, label)
-			i++
-		}
-		line := prefix + strings.Join(names, ", ")
-		if row == maxLines-1 && i < len(people) {
-			line += fmt.Sprintf(", +%d more", len(people)-i)
-		}
-		lines = append(lines, line)
-	}
-	return lines
-}
 func (m Model) renderGlanceHelp(width, height int) string {
-	lines := nightCompactBanner(width)
-	lines = append(lines, RenderSectionHeader("GLANCE BOARD · HELP", width),
+	lines := worklistCompactBanner(width)
+	lines = append(lines, RenderSectionHeader("WORKLIST · HELP", width),
 		"  → / Enter  repository → areas → detail → commit",
 		"  Local data updates on launch or R; no auto-refresh",
 		"  ↑↓ / j k  select     PgUp/PgDn  page     g/G  first/last",

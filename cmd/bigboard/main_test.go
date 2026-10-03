@@ -54,16 +54,25 @@ func TestFullPipeline(t *testing.T) {
 		t.Fatalf("expected 1 repo, got %d", len(repoPaths))
 	}
 
-	branch := git.DetectDefaultBranch(repoPaths[0])
-	records, err := git.CollectCommits(repoPaths[0], branch)
+	repository := git.NewRepositories(repoPaths)[0]
+	records, err := git.ScanRepository(t.Context(), repository, git.CollectOptions{})
 	if err != nil {
-		t.Fatalf("CollectCommits: %v", err)
+		t.Fatalf("ScanRepository: %v", err)
 	}
 	if len(records) != 2 {
 		t.Fatalf("expected 2 records, got %d", len(records))
 	}
 
-	authors := stats.Aggregate(records)
+	for _, record := range records {
+		if record.RepoID != repository.ID || record.RepoName != repository.Name {
+			t.Errorf("record repository identity = %q/%q, want %q/%q", record.RepoID, record.RepoName, repository.ID, repository.Name)
+		}
+		if record.CommitID == "" || record.Subject == "" || len(record.Changes) != 1 || record.Changes[0].Path != "code.go" {
+			t.Errorf("missing retained commit evidence: %+v", record)
+		}
+	}
+
+	authors := stats.AggregateWithOptions(records, stats.AggregateOptions{})
 	if len(authors) != 1 {
 		t.Fatalf("expected 1 author, got %d", len(authors))
 	}
@@ -74,5 +83,11 @@ func TestFullPipeline(t *testing.T) {
 	}
 	if alice.Commits != 2 {
 		t.Errorf("expected 2 commits, got %d", alice.Commits)
+	}
+	if alice.ID != "email:alice@example.com" || alice.Added != 5 || alice.Removed != 0 {
+		t.Errorf("unexpected contributor identity or totals: %+v", alice)
+	}
+	if contribution := alice.PerRepo[repository.Name]; contribution == nil || contribution.Commits != 2 || contribution.Added != 5 {
+		t.Errorf("unexpected repository contribution: %+v", contribution)
 	}
 }

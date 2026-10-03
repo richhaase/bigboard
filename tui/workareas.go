@@ -24,7 +24,6 @@ func (m *Model) normalizeAreaScope() {
 		m.areaRepoID = ""
 		m.selectedAreaID = ""
 		m.personID = ""
-		m.evidenceOffset = 0
 	}
 }
 
@@ -42,7 +41,6 @@ func (m *Model) openSingleRepositoryAreas() {
 	if len(included) == 1 {
 		m.areaRepoID = included[0].ID
 		m.selectedRepoID = included[0].ID
-		m.awarenessPane = 0
 	}
 }
 

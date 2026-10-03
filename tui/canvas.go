@@ -10,19 +10,19 @@ import (
 // The shared dark canvas also styles retained statistics and inspectors.
 // Worklist owns its layout in terminal cells, independently of ANSI styling.
 var (
-	nightBase = lipgloss.NewStyle().Foreground(lipgloss.Color("#EFF4FA")).Background(lipgloss.Color("#0F1922"))
-	nightLime = lipgloss.NewStyle().Foreground(lipgloss.Color("#9FD0FF"))
-	nightBand = nightLime.Background(lipgloss.Color("#24445D"))
+	worklistBase   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EFF4FA")).Background(lipgloss.Color("#0F1922"))
+	worklistAccent = lipgloss.NewStyle().Foreground(lipgloss.Color("#9FD0FF"))
+	worklistBand   = worklistAccent.Background(lipgloss.Color("#24445D"))
 )
 
-func nightLine(s string, width int) string { return padCells(s, width) }
-func nightCompactBanner(width int) []string {
-	return []string{nightBand.Render(nightLine("  BIGBOARD / Worklist", max(1, width)))}
+func worklistLine(s string, width int) string { return padCells(s, width) }
+func worklistCompactBanner(width int) []string {
+	return []string{worklistBand.Render(worklistLine("  BIGBOARD / Worklist", max(1, width)))}
 }
 
 // Restore the canvas after nested Lipgloss spans reset their SGR attributes.
 // Derive escapes from the active renderer so NO_COLOR / ASCII stays respected.
-func nightCanvas(content string, width, height int) string {
+func worklistCanvas(content string, width, height int) string {
 	lines := strings.Split(content, "\n")
 	// A theme may pad a view, never discard its content. View-specific
 	// renderers own viewport sizing and navigation.
@@ -33,7 +33,7 @@ func nightCanvas(content string, width, height int) string {
 		lines = append(lines, strings.Repeat(" ", max(0, width)))
 	}
 	content = strings.Join(lines, "\n")
-	prefix, suffix, _ := strings.Cut(nightBase.Render("X"), "X")
+	prefix, suffix, _ := strings.Cut(worklistBase.Render("X"), "X")
 	if prefix == "" {
 		return content
 	}

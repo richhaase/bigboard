@@ -58,7 +58,7 @@ func TestWorklistSharedUnavailableStatusAndTitleSpace(t *testing.T) {
 	if strings.Count(view, "PRs: unavailable") != 1 || strings.Contains(view, "? unknown") || strings.Contains(view, "OPEN PRs") {
 		t.Fatalf("shared status duplicated:\n%s", view)
 	}
-	_, _, subject, _, _ := worklistColumnWidths(116)
+	_, _, subject, _ := worklistColumnWidths(116)
 	if subject < 45 {
 		t.Fatalf("title cramped to %d cells", subject)
 	}
@@ -115,7 +115,7 @@ func TestOverlapOnlyDrilldownNeverClaimsSharedCommits(t *testing.T) {
 		t.Fatal("overlap must open canonical People")
 	}
 	view := ansi.Strip(m.View())
-	if strings.Contains(view, "Commits touching both") || !strings.Contains(view, "may have worked independently") {
+	if strings.Contains(view, "Commits touching both") || strings.Count(view, "Shared contributors · may have worked independently") != 1 {
 		t.Fatalf("overlap misrepresented:\n%s", view)
 	}
 	m = pressAwareness(m, "1")

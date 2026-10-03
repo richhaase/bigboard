@@ -15,7 +15,7 @@ stats/stats.go          Aggregation, identity merging, bot tagging, time/repo fi
 tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
 tui/styles.go           Color palette and lipgloss style definitions
 tui/worklist*.go        Responsive Worklist rows, selected evidence, and compact list→detail
-tui/nightops.go         Shared high-contrast canvas for retained views
+tui/canvas.go         Shared high-contrast canvas for retained views
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/aggregate.go        Contributor leaderboard table (scrollable, AI% column, BOT tag)
 tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics

@@ -82,7 +82,7 @@ func TestGlanceAllPeopleAndCommitEvidenceRemainReachable(t *testing.T) {
 		t.Fatal("commits lost")
 	}
 	m = pressAwareness(m, "G")
-	if m.evidenceOffset != 1099 || !strings.Contains(m.View(), "Exact subject 1099") {
+	if m.glance.frame.rows[glanceActivity] != 1099 || !strings.Contains(m.View(), "Exact subject 1099") {
 		t.Fatal("last commit unreachable")
 	}
 	m = pressAwareness(m, "2")
