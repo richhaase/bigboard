@@ -28,17 +28,19 @@ const (
 // Model is the root Bubble Tea model.
 type Model struct {
 	// Glance navigation is separate from the aggregate statistics view.
-	glance       glanceState
-	overviewSort int
-	prState      prState
-	prProvider   PRProvider
-	prGeneration uint64
-	cancelPRs    context.CancelFunc
-	showPRs      bool
-	prDetail     bool
-	prAll        bool
-	prRow        int
-	prOffset     int
+	glance          glanceState
+	overviewSort    int
+	prState         prState
+	prProvider      PRProvider
+	prGeneration    uint64
+	cancelPRs       context.CancelFunc
+	showPRs         bool
+	prDetail        bool
+	prAll           bool
+	prRow           int
+	prOffset        int
+	prBrowserError  string
+	prBrowserOpener func(string) error
 
 	showPaths        bool
 	pathOffset       int
@@ -381,6 +383,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.nextLoadCmd()
 		}
 
+	case prBrowserResult:
+		if msg.err != nil {
+			m.prBrowserError = "Could not open browser: " + displayText(msg.err.Error())
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -410,7 +418,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "v":
+	case "l":
 		if m.viewMode == ViewAggregate {
 			m.viewMode = ViewAwareness
 			return m, nil
@@ -445,7 +453,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openRangePicker()
 		}
 
-	case "esc", "left", "h":
+	case "esc", "left":
 		if msg.String() != "esc" && m.viewMode == ViewRepoOverlay {
 			return m, nil
 		}
@@ -468,7 +476,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "up", "k":
+	case "up":
 		switch m.viewMode {
 		case ViewRepoOverlay:
 			if m.overlayCursor > 0 {
@@ -483,7 +491,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "down", "j":
+	case "down":
 		switch m.viewMode {
 		case ViewRepoOverlay:
 			if m.overlayCursor < len(m.loadedRepos)-1 {
@@ -559,7 +567,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "enter", "right", "l":
+	case "enter", "right":
 		if msg.String() != "enter" && m.viewMode != ViewAggregate {
 			return m, nil
 		}
@@ -880,7 +888,7 @@ func (m Model) renderAggregateView() string {
 	if m.hideBots {
 		botsLabel = "off"
 	}
-	sections = append(sections, StyleCyan.Render("  v relationships"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
+	sections = append(sections, StyleCyan.Render("  l worklist"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
 
 	return strings.Join(sections, "\n")
 }

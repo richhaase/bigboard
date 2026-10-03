@@ -131,7 +131,7 @@ func TestPROverlayNavigationDoesNotFetch(t *testing.T) {
 	m := prFixture()
 	p := &fakePRProvider{}
 	m.prProvider = p
-	for _, key := range []string{"p", "enter", "j", "k", "esc", "p"} {
+	for _, key := range []string{"p", "enter", "down", "up", "esc", "p"} {
 		m.handlePRKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 	}
 	if p.fetches != 0 {

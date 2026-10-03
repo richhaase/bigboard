@@ -79,11 +79,11 @@ func TestSingleRepositoryOpensAreasAndEscReturns(t *testing.T) {
 	if m.areaRepoID != "/mono" {
 		t.Fatal("enter does not open selected repo")
 	}
-	m = pressAwareness(m, "v")
+	m = pressAwareness(m, "l")
 	if m.viewMode != ViewAggregate {
 		t.Fatal("stats inaccessible")
 	}
-	m = pressAwareness(m, "v")
+	m = pressAwareness(m, "l")
 	if m.areaRepoID != "/mono" {
 		t.Fatal("stats roundtrip lost area scope")
 	}

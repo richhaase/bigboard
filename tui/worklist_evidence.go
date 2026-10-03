@@ -126,7 +126,7 @@ func (m Model) worklistCommit(r git.CommitRecord, people []stats.AuthorStats, wi
 		cursor = "› "
 	}
 	stamp := r.Date.Local().Format("Jan 02 15:04")
-	lines := []string{cursor + subject, "  " + author + " · " + stamp + " · " + hash, "  Changed areas: " + strings.Join(m.commitAreaNames(r), " · ")}
+	lines := []string{cursor + subject, "    " + author + " · " + stamp + " · " + hash, "    Changed areas: " + strings.Join(m.commitAreaNames(r), " · ")}
 	for i, line := range lines {
 		style := lipgloss.NewStyle()
 		if selected && line != "" {

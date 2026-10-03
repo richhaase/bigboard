@@ -49,11 +49,11 @@ func TestAwarenessDefaultAndStatsRoundTrip(t *testing.T) {
 	if m.viewMode != ViewAwareness {
 		t.Fatal("relationships must be the initial screen")
 	}
-	m = pressAwareness(m, "v")
+	m = pressAwareness(m, "l")
 	if m.viewMode != ViewAggregate {
 		t.Fatal("stats unavailable")
 	}
-	m = pressAwareness(m, "v")
+	m = pressAwareness(m, "l")
 	if m.viewMode != ViewAwareness {
 		t.Fatal("cannot return to relationships")
 	}

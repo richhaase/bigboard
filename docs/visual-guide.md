@@ -21,10 +21,13 @@ and keeps local history usable. See [capture details](#capture-details).
 *Overview, 120 × 36. `tui` is the only selected row. The list shows where recent
 work happened; the lower pane explains that selected area's history.*
 
+Within each commit preview, the author/date/hash and changed areas are indented
+beneath the title.
+
 Read the top list **area → latest contributor + others → latest commit → age**. Recent is the default sort. `s` cycles Recent, Name, and Activity
 (commit count). Commit volume is not priority or productivity.
 
-- `↑/↓` or `j/k` selects a row; the evidence underneath follows that selection
+- `↑/↓` selects a row; the evidence underneath follows that selection
 - `→` or `Enter` opens repository → work areas → area detail → full commit evidence
 - `←` goes back with selection preserved; at the repository root it stays there
 - `+N` beside the latest author counts the other distinct contributors in the
@@ -62,8 +65,8 @@ the concrete commit subject rather than compressing several narrow panels.*
 
 At 80 columns, each item uses two content lines plus spacing. `Enter` replaces
 the list with the selected area's evidence; `Esc` restores its selection and
-scroll position. `PgUp/PgDown` pages through Worklist lists, and `g/G` or
-`Home/End` selects their first/last item.
+scroll position. `PgUp/PgDown` pages through Worklist lists, and `Home/End`
+selects their first/last item.
 
 ![80-column tui Activity detail with one selected commit, author dates, identities, subjects and object IDs](images/worklist-detail.png)
 
@@ -129,7 +132,7 @@ Overlap-only areas do not appear in the shared-commit list.
 
 *Subareas, 120 × 18. Direct files are a separate leaf beside child directories.
 The historical `docs/contracts` path still appears because selected-range commits
-touched it. The counts overlap, so 18 + 4 + 4 is not a repository total.*
+touched it. The counts overlap, so 20 + 6 + 4 is not a repository total.*
 
 Press `4` to refine an automatic area by one literal directory level. `Enter`
 on a child opens its evidence and allows further refinement where applicable.
@@ -152,7 +155,7 @@ Activity's `Enter` opens the canonical full commit, not only paths assigned to
 the selected area. Long subjects, author identities and paths wrap by terminal
 cells. Rename/copy origins and generated-file exclusions are labeled when present.
 
-`↑/↓` or `j/k` scrolls lines. `PgUp/PgDown`, `g/G`, or `Home/End` moves farther.
+`↑/↓` scrolls lines. `PgUp/PgDown` or `Home/End` moves farther.
 `Enter` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
 lens. Return to a list or lens before changing filters or refreshing. The
 inspector's “Last updated” is the same retained local scan time called “Local” in
@@ -178,9 +181,12 @@ From Worklist, `p` opens the highlighted repository/parent-area inventory,
 including the default first row immediately after entering a repository. An
 accepted name search changes that visible scope; no matching rows means no
 scoped PRs. `P` opens all included repositories regardless of that search. PRs use **all open dates**, independent of local
-range, bot, person, and commit-search filters. In the PR overlay, `Enter` toggles
-detail, `↑/↓` scrolls, and `Esc` or `p` backs out one level. `R` there refreshes
-**PRs only**; it does not start a local Git scan.
+range, bot, person, and commit-search filters. Inside the overlay, `p` selects the current scope and `P` selects all included
+repositories, returning to the first list row without fetching. `Enter` toggles
+detail, `↑/↓` scrolls, and `Esc` backs out one level. `R` there refreshes
+**PRs only**; it does not start a local Git scan. `o` opens the selected PR in
+your default browser from the PR list or detail. The hint appears only for a
+valid GitHub PR URL; launch errors appear in the overlay.
 
 GitHub context uses an already installed and authenticated `gh` CLI. Bigboard
 never signs in, requests new access, or fetches Git objects. Local history loads
@@ -191,15 +197,20 @@ when needed; Bigboard only reads the local cache.
 
 ## Contributor statistics
 
+![120-column contributor leaderboard with arrow selection, Enter detail, and lowercase l to return to Worklist](images/worklist-leaderboard.png)
+
+*Leaderboard, 120 × 36. Lowercase `l` switches back to Worklist; arrows select and `Enter` opens contributor detail.*
+
 ![Scrolled 80-column contributor detail showing labeled repository metrics, activity timeline, heatmap and pinned paging controls](images/worklist-statistics.png)
 
 *Contributor detail, 80 × 30, after paging down. Repository values are labeled
 rather than squeezed into columns. The footer identifies Rich Haase and shows
 lines 12–39/39, while paging and back controls remain visible.*
 
-From Worklist, `v` opens the statistics leaderboard and `Enter` opens a contributor.
+From Worklist, lowercase `l` opens the statistics leaderboard and `Enter` opens
+a contributor.
 In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` switches
-contributors. `Esc` returns to the leaderboard; press `v` **there** to return to
+contributors. `Esc` returns to the leaderboard; press `l` **there** to return to
 Worklist. Both statistics views use `t` for the local range. `→` opens the
 selected contributor, `←` returns, and `←` at the leaderboard stays there.
 
@@ -208,13 +219,18 @@ and refresh (`R`) live on the statistics leaderboard. Worklist's PR and lens key
 do not apply to statistics. See the [view-specific controls](../README.md#controls)
 for search, quit, and overlay behavior.
 
+## Keyboard help
+
+![120-column Worklist help with arrow navigation, Home and End, and lowercase l for contributor statistics](images/worklist-help.png)
+
+*Help, 120 × 36. `?` opens these controls from Worklist. Navigation uses arrows,
+`Enter/Esc`, and the page/edge keys shown here; `l` opens the leaderboard.*
+
 ## Capture details
 
-Worklist overview, Activity detail, Related, and contributor-overlap images were
-recaptured on October 3, 2026 after removing the assessment section, scanning
-public Bigboard history at [45ca2c7](https://github.com/richhaase/bigboard/commit/45ca2c746813b14b8ceb6d9b3987ddbf02490af5).
-The other screenshots retain their October 2, 2026 capture, scanning history at
-[d510eb2](https://github.com/richhaase/bigboard/commit/d510eb299b849696ee1402a0ef8294f773b0e384)
+All fourteen images were captured on October 3, 2026 with the current keyboard
+controls and indented commit metadata, scanning public Bigboard history at
+[3b2f417](https://github.com/richhaase/bigboard/commit/3b2f417bba9864b590e7201eeb006ff8495b4ff4)
 in an isolated local clone named `bigboard`. The capture config sets `since` to
 `14d`; bots remain shown. Images are rendered from actual PTY cell buffers, with
 Git on PATH and `gh` omitted, so “gh not installed” is real and no GitHub request

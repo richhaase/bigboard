@@ -113,9 +113,9 @@ func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "up", "k":
+	case "up":
 		picker.cursor = max(0, picker.cursor-1)
-	case "down", "j":
+	case "down":
 		picker.cursor = min(len(TimePresets), picker.cursor+1)
 	case "home":
 		picker.cursor = 0

@@ -124,7 +124,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.showPaths {
 		switch key {
-		case "esc", "enter", "left", "h":
+		case "esc", "enter", "left":
 			m.showPaths = false
 			m.pathOffset = 0
 		case "tab", "shift+tab":
@@ -135,40 +135,26 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				step = 3
 			}
 			m.glance.frame.tab = (m.glance.frame.tab + step) % 4
-		case "up", "k":
+		case "up":
 			m.pathOffset = max(0, m.pathOffset-1)
-		case "down", "j":
+		case "down":
 			m.pathOffset = min(m.commitInspectorMaxOffset(), m.pathOffset+1)
 		case "pgup":
 			m.pathOffset = max(0, m.pathOffset-max(1, m.height-8))
 		case "pgdown":
 			m.pathOffset = min(m.commitInspectorMaxOffset(), m.pathOffset+max(1, m.height-8))
-		case "home", "g":
+		case "home":
 			m.pathOffset = 0
-		case "end", "G":
+		case "end":
 			m.pathOffset = m.commitInspectorMaxOffset()
 		}
 		return m, nil
 	}
 	switch key {
 	case "p", "P":
-		if key == "p" && !m.glance.detailOpen {
-			// View resolves the highlighted row on a value copy. Persist the same
-			// filtered/sorted selection before the overlay reads its scope.
-			rows := m.glanceRepositories()
-			if len(rows) == 0 {
-				m.setSelectedScopeID("")
-			} else {
-				m.selectedRepository(rows)
-			}
-		}
-		m.showPRs = true
-		m.prAll = key == "P"
-		m.prDetail = false
-		m.prRow = 0
-		m.prOffset = 0
+		m = m.selectPRScope(key == "P")
 		return m, nil
-	case "v":
+	case "l":
 		m.viewMode = ViewAggregate
 		return m, nil
 	case "R":
@@ -195,7 +181,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.glance.searching = true
 		return m, nil
-	case "esc", "left", "h":
+	case "esc", "left":
 		if m.glanceQuery() != "" {
 			m.setGlanceQuery("")
 			return m, nil
@@ -227,7 +213,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if key == "right" || key == "l" {
+	if key == "right" {
 		key = "enter"
 	}
 	if m.glance.detailOpen {
@@ -266,17 +252,17 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func glanceMove(key string, current, total, page int) (int, bool) {
 	next := current
 	switch key {
-	case "up", "k":
+	case "up":
 		next--
-	case "down", "j":
+	case "down":
 		next++
 	case "pgup":
 		next -= page
 	case "pgdown":
 		next += page
-	case "home", "g":
+	case "home":
 		next = 0
-	case "end", "G":
+	case "end":
 		next = total - 1
 	default:
 		return current, false

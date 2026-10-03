@@ -55,7 +55,7 @@ func TestWorklistBoundsAndFocus(t *testing.T) {
 		original := m.selectedAreaID
 		m = pressAwareness(m, "enter")
 		check("activity")
-		for _, key := range []string{"2", "G", "3", "G", "4", "G", "1", "G"} {
+		for _, key := range []string{"2", "end", "3", "end", "4", "end", "1", "end"} {
 			m = pressAwareness(m, key)
 			check(key)
 		}
