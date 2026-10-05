@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bigboard Release"
+  short_description: "Publish Bigboard through its release workflow"
+  default_prompt: "Use $bigboard-release to release the latest Bigboard main."
