@@ -18,11 +18,11 @@ func (m Model) scanErrorLines() []string {
 func (m Model) renderScanErrors() string {
 	lines := m.scanErrorLines()
 	if len(lines) == 0 {
-		lines = []string{"All local scan errors have cleared."}
+		lines = []string{"All repository update errors have cleared."}
 	}
 	budget := max(1, m.height-3)
 	offset := max(0, min(m.scanErrorOffset, len(lines)-budget))
-	visible := []string{"LOCAL SCAN ERRORS"}
+	visible := []string{"REPOSITORY UPDATE ERRORS"}
 	visible = append(visible, lines[offset:min(len(lines), offset+budget)]...)
 	help := "↑↓ PgUp/PgDn scroll · R retry · Esc back · q quit"
 	if m.width < 60 {

@@ -138,11 +138,16 @@ The existing `depth` setting still controls repository discovery only.
 The board updates local repository data only on launch and when you press `R`.
 There is no periodic auto-refresh. “Local” shows the last successful local
 refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh. `R`
-refreshes local history immediately and requests GitHub PR context subject to
-the remote cooldown described below. Big Board never runs `git fetch`;
-fetch remote history separately when you want to update your local Git cache.
-A failed refresh retains that repository's last successful data with
-a STALE marker; a successful scan, including an empty one, replaces it. The board
+fetches included repositories from `origin`, then scans local history and requests
+GitHub PR context subject to the PR cooldown described below. Startup and export
+scan cached history without fetching. Fetches update remote-tracking branches only;
+local branches, tags, working trees, and submodules stay untouched. Repositories
+without `origin` remain local-only. Fetches use existing Git credentials, disable
+interactive prompts, and run at most eight repositories at once with a two-minute
+fetch timeout per repository. A failed fetch still allows the local scan, with a
+STALE marker and diagnostics under `e`; a failed scan retains that repository's
+last successful data. A successful fetch and scan, including an empty one, clears
+the stale state. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
 surface with the same controls. At 80 columns, two-line rows keep names and
 subjects readable. `Enter` replaces the list with detail; `Esc` restores its
@@ -160,8 +165,8 @@ Read-only open pull request context loads automatically for supported GitHub
 origins using an already installed and signed-in `gh` CLI. No config setting is
 needed.
 Missing `gh` or authentication is shown without blocking local history. Bigboard
-never signs in, requests access, creates credentials, fetches Git objects, or
-changes pull requests. Headless `--export` stays local and unchanged.
+never signs in, requests access, creates credentials, or changes pull requests.
+Headless `--export` stays local and unchanged.
 Only a supported GitHub `origin` is used, with no upstream guessing.
 
 PR summaries appear beside repositories and work areas when width permits. From
@@ -179,8 +184,8 @@ including across duplicate local clones. PRs remain independent of local date,
 contributor and bot filters and never enter commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
-`R` refreshes local history and PR context; inside the PR overlay it refreshes PRs
-only. Repeated refreshes reuse in-memory snapshots for at least one minute and
+`R` fetches repository history and refreshes PR context, including inside the PR
+overlay. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
 join an in-flight remote refresh rather than canceling and restarting it. Excluded
 repositories are not fetched. The entire remote refresh shares a 128-request cap;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
@@ -204,7 +209,7 @@ origins are reported in the PR overlay without suppressing local history.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on the leaderboard with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. No fetch is performed. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
+- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and export use cached history; `R` fetches included repositories before scanning. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
 - **Calendar dates** use your local timezone for active days, monthly totals, first/last dates, and heatmaps. Future-dated commits remain counted; ALL includes every collected commit and recent windows retain their existing lower-bound filtering. Churn remains removals/additions, with `0.00` when additions are zero.
 - **Incomplete history** is flagged for shallow clones. Boundary line counts are unknown, shown as `?` or a known subtotal followed by `?`. A complete copy of the same commit can supply its missing counts. JSON export keeps numeric known subtotals and includes `unknown_line_commits` on contributor/repository objects when nonzero; stderr reports shallow repositories. Partial clones with missing objects are reported as scan failures instead of downloading data.
@@ -231,7 +236,7 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `b` | Show/hide bot contributors in local history |
 | `p` / `P` | Selected repository/parent-area PRs / all included repositories |
 | `r` | Open repository inclusion controls |
-| `R` | Refresh local history and request PR context, subject to remote cooldown |
+| `R` | Fetch repository history and request PR context, subject to PR cooldown |
 | `e` | Open scan-error details when errors exist |
 | `l` (lowercase) | Open the contributor-statistics leaderboard |
 | `o` | In Related, switch between shared commits and contributor overlap |
@@ -260,13 +265,13 @@ In the **PR overlay**, `↑/↓` selects PRs or scrolls the open PR detail.
 returns to the first PR in the list using cached data. `Enter` toggles detail;
 `Esc` backs out one level. `o` opens the selected PR in your default browser
 from either the PR list or detail; it requires a canonical GitHub PR URL.
-Browser-launch errors appear in the overlay. `R` requests **PR data
-only**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
+Browser-launch errors appear in the overlay. `R` refreshes **repository history
+and PR data**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
 
 In **repository controls**, `↑/↓` selects and `Space` toggles inclusion.
 Both `Enter` and `Esc` apply the current choices and close the overlay; `Esc`
 does not cancel toggles. These choices affect the current session, not the config
-file. Excluding a repository also removes it from later PR refresh requests.
+file. Excluding a repository also removes it from later Git fetches and PR refresh requests.
 
 ### Contributor statistics
 

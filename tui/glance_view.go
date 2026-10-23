@@ -171,7 +171,7 @@ func (m Model) renderGlanceHelp(width, height int) string {
 	lines := worklistCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("WORKLIST · HELP", width),
 		"  → / Enter  repository → areas → detail → commit",
-		"  Local data updates on launch or R; no auto-refresh",
+		"  Startup uses cached history; R fetches repos and PRs",
 		"  ↑↓  select     PgUp/PgDn  page     Home/End  first/last",
 		"  /  search this list  Enter accept  Esc clear",
 		"  s  sort areas/repos: Activity (commits), Recent, Name",

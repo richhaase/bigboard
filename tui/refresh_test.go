@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -313,6 +316,25 @@ func TestManualRefreshCoalescesWithActiveScan(t *testing.T) {
 	}
 }
 
+func TestManualRefreshDuringStartupFetchesAfterOfflineScan(t *testing.T) {
+	m := NewModel([]string{"/repo"}, stats.SortByTotal, nil, "", DefaultTimeIndex)
+	t.Cleanup(m.Close)
+	m.prProvider = &fakePRProvider{}
+	generation := m.scanGeneration
+	m, cmd := applyLocal(t, m, key("R"))
+	if cmd != nil || !m.fetchAfterScan || m.fetchRepos || m.scanGeneration != generation {
+		t.Fatal("R interrupted startup or lost the fetch request")
+	}
+	m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: generation, Repository: m.repositories[0]})
+	if cmd == nil || m.loading || !m.refreshing || !m.fetchRepos || m.fetchAfterScan || m.scanGeneration == generation {
+		t.Fatal("startup completion did not start requested fetch")
+	}
+	m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0]})
+	if cmd == nil || m.refreshing || !m.prState.loading {
+		t.Fatal("requested fetch did not complete with PR refresh")
+	}
+}
+
 func TestManualRefreshRecoversInitialFailure(t *testing.T) {
 	m := NewModel([]string{"/repo"}, stats.SortByTotal, nil, "", DefaultTimeIndex)
 	t.Cleanup(m.cancelScans)
@@ -356,5 +378,81 @@ func TestManualRefreshPreservesVanishedPersonAndInspector(t *testing.T) {
 	m, _ = applyLocal(t, m, key("esc"))
 	if m.personID != person || m.showPaths {
 		t.Fatal("next navigation key discarded preserved person intent")
+	}
+}
+
+func runRefreshCommands(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	queue := []tea.Cmd{cmd}
+	for len(queue) > 0 {
+		cmd, queue = queue[0], queue[1:]
+		if cmd == nil {
+			continue
+		}
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			queue = append(queue, batch...)
+		} else {
+			m, cmd = applyLocal(t, m, msg)
+			queue = append(queue, cmd)
+		}
+	}
+	return m
+}
+
+func TestManualRefreshFetchesIncludedReposAndScansAfterFailure(t *testing.T) {
+	source := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		args = append([]string{"-c", "user.name=Test User", "-c", "user.email=test@example.com", "-c", "commit.gpgSign=false", "-c", "core.hooksPath=" + t.TempDir()}, args...)
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	commit := func(contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(source, "file.go"), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(source, "add", "file.go")
+		runGit(source, "commit", "-m", contents)
+	}
+	runGit(source, "init", "-b", "main")
+	commit("first\n")
+	included := filepath.Join(t.TempDir(), "included")
+	excluded := filepath.Join(t.TempDir(), "excluded")
+	for _, dir := range []string{included, excluded} {
+		runGit(source, "clone", "file://"+source, dir)
+	}
+	commit("second\n")
+	m := NewModel([]string{included, excluded}, stats.SortByTotal, map[string]bool{excluded: true}, "", DefaultTimeIndex)
+	t.Cleanup(m.Close)
+	m.prProvider = &fakePRProvider{}
+	m = runRefreshCommands(t, m, m.Init())
+	if len(m.allRecords) != 2 {
+		t.Fatal("startup fetched instead of using cached history")
+	}
+	m, cmd := applyLocal(t, m, key("R"))
+	m = runRefreshCommands(t, m, cmd)
+	if len(m.allRecords) != 3 || len(m.scanErrors) != 0 {
+		t.Fatalf("manual refresh did not fetch only included repository: %d records, %v", len(m.allRecords), m.scanErrors)
+	}
+	runGit(included, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing"))
+	m, cmd = applyLocal(t, m, key("R"))
+	msg := loadRepoCmd(m.scanContext, m.repositories[0], m.options, m.scanGeneration, true)().(RepoLoadedMsg)
+	if msg.FetchErr == nil || msg.Err != nil || len(msg.Records) != 2 {
+		t.Fatalf("fetch failure blocked cached scan: %+v", msg)
+	}
+	m = runRefreshCommands(t, m, cmd)
+	if !m.staleRepos[included] || len(m.allRecords) != 3 || !strings.Contains(m.scanErrors[included], "fetch failed") || m.err != nil {
+		t.Fatalf("failed fetch lost history or freshness evidence: %v", m.scanErrors)
+	}
+	runGit(included, "remote", "set-url", "origin", "file://"+source)
+	m, cmd = applyLocal(t, m, key("R"))
+	m = runRefreshCommands(t, m, cmd)
+	if m.staleRepos[included] || len(m.scanErrors) != 0 {
+		t.Fatal("successful fetch did not clear stale failure")
 	}
 }

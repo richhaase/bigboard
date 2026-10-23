@@ -372,7 +372,8 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.prRow = min(max(0, len(m.visiblePRs())-1), m.prRow+1)
 		}
 	case "R":
-		return m, m.startPRRefresh()
+		cmd := m.startLocalRefresh()
+		return m, cmd
 	}
 	return m, nil
 }
@@ -438,7 +439,7 @@ func (m Model) renderPRs() string {
 			}
 		}
 	}
-	help := "  ↑↓ scroll · Enter details/back · Esc back · R refresh PRs · q quit"
+	help := "  ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
 	if width < 70 {
 		help = "↑↓ scroll · Enter detail · Esc back · R"
 	}
