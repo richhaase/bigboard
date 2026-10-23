@@ -298,7 +298,7 @@ func (m Model) prStatus() string {
 		eligible++
 		snapshot, exists := m.prState.snapshots[m.prState.repositories[repo.ID]]
 		hasSnapshot = hasSnapshot || exists
-		partial = partial || snapshot.partial
+		partial = partial || snapshot.partial || !exists
 		failed = failed || snapshot.err != nil
 		if snapshot.err != nil {
 			reason = prFailureReason(snapshot.err)
@@ -408,7 +408,7 @@ func (m Model) renderPRs() string {
 	if width < 40 || height < 12 {
 		return ansi.Truncate("Resize to 40×12 · Esc back · q quit", width, "…")
 	}
-	lines := renderBanner(min(width, bannerMinWidth-1))
+	title := "Pull requests"
 	prs := m.visiblePRs()
 	label := "OPEN PULL REQUESTS · selected scope"
 	if m.prAll {
@@ -417,8 +417,10 @@ func (m Model) renderPRs() string {
 	if m.prDetail && len(prs) > 0 {
 		pr := prs[min(m.prRow, len(prs)-1)]
 		label = fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
+		title += fmt.Sprintf(" / #%d", pr.Number)
 	}
-	lines = append(lines, RenderSectionHeader(label, width), StyleDimWhite.Render("  "+m.prStatus()), "  All open PRs · independent of local date, person and bot filters")
+	lines := m.screenHeader(title, width)
+	lines = append(lines, RenderSectionHeader(label, width))
 	if len(prs) == 0 {
 		lines = append(lines, "  No PRs to display in this snapshot/scope.")
 	} else if m.prDetail {
@@ -428,7 +430,7 @@ func (m Model) renderPRs() string {
 		offset := max(0, min(m.prOffset, max(0, len(wrapped)-budget)))
 		lines = append(lines, wrapped[offset:min(len(wrapped), offset+budget)]...)
 	} else {
-		budget := max(1, height-len(lines)-5)
+		budget := max(1, m.prDetailBudget()-2)
 		selected := max(0, min(m.prRow, len(prs)-1))
 		start := max(0, min(selected-budget/2, len(prs)-budget))
 		for i := start; i < min(len(prs), start+budget); i++ {
@@ -460,29 +462,23 @@ func (m Model) renderPRs() string {
 			if err == nil {
 				err = m.prState.snapshots[m.prState.repositories[repo.ID]].err
 			}
-			if err != nil && len(lines) < height-4 {
+			if err != nil && len(lines) < height-screenFooterRows-1 {
 				lines = append(lines, "  "+displayText(repo.Name)+": "+displayText(err.Error()))
 			}
 		}
 	}
-	help := "  ? help · ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
+	help := "? help · ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
 	if width < 70 {
 		help = "? help · ↑↓ · Enter detail · Esc back"
 	}
 	if m.prBrowserError != "" {
 		lines = append(lines, "  "+m.prBrowserError)
 	}
+	coverage := "All dates · p scope · P all"
 	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
-		lines = append(lines, "  o open PR in browser")
+		coverage = "o open PR in browser · " + coverage
 	}
-	lines = append(lines, help)
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, width, "…")
-	}
-	return strings.Join(lines, "\n")
+	return screenFinish(lines, help, coverage, width, height)
 }
 func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	detail := []string{fmt.Sprintf("%s #%d · %s", pr.Repo, pr.Number, pr.Title), pr.URL, "Author " + githubIdentity(pr.Author), fmt.Sprintf("Draft: %t · review: %s · checks: %s · mergeability: %s", pr.Draft, pr.ReviewDecision, pr.CheckState, pr.Mergeable), "Requested reviewers: " + strings.Join(pr.RequestedReviewers, ", "), "Updated " + pr.UpdatedAt.Local().Format("2006-01-02 15:04 MST") + " (any PR activity)"}
@@ -549,9 +545,12 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	return wrapped
 }
 
-// Reserve the three header rows and four footer/error/hint rows consistently.
 func (m Model) prDetailBudget() int {
-	return max(1, m.height-len(renderBanner(min(max(1, m.width), bannerMinWidth-1)))-7)
+	errors := 0
+	if m.prBrowserError != "" {
+		errors = 1
+	}
+	return max(1, m.height-screenHeaderRows-1-screenFooterRows-errors)
 }
 
 func (m Model) prDetailMaxOffset() int {

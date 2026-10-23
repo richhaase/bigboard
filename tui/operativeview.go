@@ -25,7 +25,6 @@ type MonthActivity struct {
 // OperativeView renders a contributor detail screen.
 type OperativeView struct {
 	FuzzyMatching bool
-	RangeLabel    string
 }
 
 // RenderOperativeDetail renders the full operative detail view.
@@ -34,23 +33,9 @@ func (v OperativeView) RenderOperativeDetail(
 	authorStats *stats.AuthorStats,
 	records []git.CommitRecord,
 	width int,
-	timeIdx int,
-	repoCount int,
-	excludedCount int,
 ) string {
 	var sections []string
 	now := time.Now()
-
-	sections = append(sections, renderBanner(width)...)
-	sections = append(sections, "")
-
-	sections = append(sections, RenderFooter(repoCount, excludedCount, width, ""))
-	label := v.RangeLabel
-	if label == "" {
-		label = presetRangeLabel(timeIdx)
-	}
-	sections = append(sections, rangeControl(label))
-	sections = append(sections, "")
 
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 

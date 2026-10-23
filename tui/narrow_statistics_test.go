@@ -52,13 +52,11 @@ func TestNarrowStatisticsPreserveDetailAndPaging(t *testing.T) {
 							t.Fatalf("view line exceeds %d: %q", width, line)
 						}
 					}
-					// Only collect the viewport body; the two pinned footer rows are not
-					// part of a wrapped value and would otherwise interrupt its text.
 					lines := strings.Split(ansi.Strip(view), "\n")
-					end := min(len(lines), m.height-2)
-					start := max(0, collected-m.statDetailOffset)
+					end := min(len(lines)-screenFooterRows, screenHeaderRows+m.statisticsBodyBudget())
+					start := screenHeaderRows + max(0, collected-m.statDetailOffset)
 					pages.WriteString(strings.Join(lines[start:end], "\n"))
-					collected = m.statDetailOffset + end
+					collected = m.statDetailOffset + end - screenHeaderRows
 					old := m.statDetailOffset
 					next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
 					m = next.(Model)

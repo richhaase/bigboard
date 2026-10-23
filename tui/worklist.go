@@ -82,33 +82,7 @@ func (m Model) worklistHeader(width int) []string {
 			title = "BIGBOARD / " + displayText(m.glanceDetailArea().Name)
 		}
 	}
-	bots := "bots shown"
-	if m.hideBots {
-		bots = "bots hidden"
-	}
-	rangeLine := "Range: " + m.rangeLabel() + " · t to change · " + bots + " · R refresh"
-	if width < 70 {
-		rangeLine = "Range: " + m.rangeLabel() + " · t to change"
-	}
-	id := m.selectedScopeID()
-	if m.areaRepoID != "" {
-		id = m.areaRepoID
-	}
-	local := "Local: not scanned yet"
-	if at := m.scannedAt[id]; !at.IsZero() {
-		local = "Local: " + at.Local().Format("Jan 02 15:04 MST")
-	}
-	if m.staleRepos[id] {
-		local = "Local: STALE · " + strings.TrimPrefix(local, "Local: ")
-	}
-	if m.refreshing {
-		local += " · Updating…"
-	}
-	if len(m.failedRepos) > 0 {
-		local += fmt.Sprintf(" · Update errors: %d · e details", len(m.failedRepos))
-	}
-	pr := m.worklistPRFreshness(id)
-	return []string{StyleTitle.Render("  " + title), StyleDimWhite.Render("  " + rangeLine), m.worklistSignal("  " + local), m.worklistSignal("  " + pr), "  " + worklistRule.Render(strings.Repeat("─", max(1, width-4)))}
+	return m.screenHeader(strings.TrimPrefix(title, "BIGBOARD / "), width)
 }
 
 // checked is an attempt time, not freshness of retained evidence. Explicitly
@@ -268,7 +242,11 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 		if selected {
 			style = style.Background(ColorRowSelect)
 		}
-		lines[i] = "  " + style.Render(padCells(line, width))
+		line = style.Render(padCells(line, width))
+		if selected {
+			line = selectedRowBackground(line)
+		}
+		lines[i] = "  " + line
 	}
 	if !wide && width >= 66 {
 		lines = append(lines, "")
@@ -287,18 +265,18 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select  →/Enter open  / find  s sort  t range  b bots  l leaderboard  p PRs  R refresh  ? help"
+	footer := "↑↓ select · →/Enter open · / find · s sort · t range · b bots · l leaderboard · p PRs · R refresh · q quit"
 	if detail {
-		footer = "↑↓ select  →/Enter evidence  Tab/1–4 lens  ←/Esc back  t range  b bots  l leaderboard  p PRs  R refresh"
+		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · l leaderboard · p PRs · R refresh"
 	}
 	if width >= 70 && width < 110 {
-		footer = "↑↓ select →/Enter open ←/Esc back t range b bots l stats p PRs R refresh"
+		footer = "↑↓ select · →/Enter open · l leaderboard · p PRs · R refresh"
 		if detail {
-			footer = "↑↓ →/Enter evidence ←/Esc back Tab lens t range b bots l stats p PRs R"
+			footer = "↑↓ select · → evidence · Tab lens · ←/Esc back · l leaderboard"
 		}
 	}
 	if width < 70 {
-		footer = "↑↓ select → open ← back t range"
+		footer = "↑↓ select · → open · ← back"
 	}
 	if m.glance.searching || m.glanceQuery() != "" {
 		footer = "/ " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
@@ -308,27 +286,9 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 			footer = "? help · " + footer
 		}
 	} else {
-		footer = "? help · " + strings.TrimSuffix(footer, "  ? help")
+		footer = "? help · " + footer
 	}
-	coverage := strings.TrimSpace(m.glanceCoverageLine())
-	if width < 70 {
-		bots := "bots shown"
-		if m.hideBots {
-			bots = "bots hidden"
-		}
-		coverage = bots + " · " + coverage
-	}
-	if width >= 100 {
-		coverage += " · ages at local scan · fetch on launch and R"
-	}
-	for len(lines) < height-3 {
-		lines = append(lines, "")
-	}
-	if len(lines) > height-3 {
-		lines = lines[:height-3]
-	}
-	lines = append(lines, "  "+worklistRule.Render(strings.Repeat("─", max(1, width-4))), StyleCyan.Render("  "+footer), StyleDimWhite.Render("  "+coverage))
-	return fitGlanceLines(lines, width, height)
+	return screenFinish(lines, footer, m.screenCoverage(), width, height)
 }
 
 func (m Model) worklistPageSize() int {

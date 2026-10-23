@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/stats"
 )
 
@@ -13,6 +14,27 @@ func sampleAuthors() []stats.AuthorStats {
 		{Name: "Ada Lovelace", Commits: 120, Added: 4000, Removed: 1200, Net: 2800, TotalChange: 5200, AICommits: 30},
 		{Name: "Grace Hopper", Commits: 80, Added: 2000, Removed: 3000, Net: -1000, TotalChange: 5000},
 		{Name: "Alan Turing", Commits: 40, Added: 900, Removed: 100, Net: 800, TotalChange: 1000, AICommits: 1},
+	}
+}
+
+func TestWideLeaderboardFillsSharedGutters(t *testing.T) {
+	authors := sampleAuthors()
+	for _, width := range []int{100, 120, 220} {
+		out := AggregateView{}.RenderTable(authors, TableState{VisibleRows: len(authors), Width: width})
+		found := false
+		for _, line := range strings.Split(out, "\n") {
+			plain := ansi.Strip(line)
+			if !strings.Contains(plain, "Ada Lovelace") {
+				continue
+			}
+			found = true
+			if !strings.HasPrefix(plain, "  › ") || ansi.StringWidth(line) != width-2 {
+				t.Fatalf("width %d: selected row does not fill the shared gutters: %q", width, plain)
+			}
+		}
+		if !found {
+			t.Fatal("selected contributor missing")
+		}
 	}
 }
 

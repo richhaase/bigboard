@@ -119,7 +119,7 @@ func TestMonthTimelineAcrossMidnightDSTTransition(t *testing.T) {
 				}
 			}
 			author := stats.Aggregate(records)[0]
-			out := OperativeView{}.RenderOperativeDetail(author.Name, &author, records, 120, DefaultTimeIndex, 1, 0)
+			out := OperativeView{}.RenderOperativeDetail(author.Name, &author, records, 120)
 			for _, label := range tt.labels {
 				if strings.Count(out, label) != 1 {
 					t.Errorf("expected exactly one %s label in detail:\n%s", label, out)
