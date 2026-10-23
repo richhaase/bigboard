@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/stats"
 )
 
@@ -47,31 +48,43 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
-func resolveTableLayout(width int) tableLayout {
+func resolveTableLayout(width int, authors ...stats.AuthorStats) tableLayout {
 	const (
 		baseNameW = 22
-		numW      = 10
 		aiW       = 5
 	)
+	numW := 10
+	for _, author := range authors {
+		values := []string{FormatNumber(author.Commits), formatLineCount(author.Net, author.UnknownLineCommits)}
+		if width >= wideTableWidth {
+			values = append(values, formatLineCount(author.Added, author.UnknownLineCommits), formatLineCount(author.Removed, author.UnknownLineCommits))
+		}
+		for _, value := range values {
+			numW = max(numW, len(value))
+		}
+	}
 	avail := width - chromeInset
 	switch {
 	case width >= wideTableWidth:
-		fixed := 2 + 2 + 1 + baseNameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + aiW + 1
+		nameW := max(baseNameW, width/5)
+		numW = max(numW, width/9)
+		fixed := 2 + 2 + 1 + nameW + 1 + numW + 1 + numW + 1 + numW + 1 + numW + 1 + aiW + 1
 		return tableLayout{
-			nameW:            baseNameW,
+			nameW:            nameW,
 			numW:             numW,
 			aiW:              aiW,
-			barW:             clampInt(avail-fixed, 10, 16),
+			barW:             max(10, avail-fixed),
 			showAddedRemoved: true,
 			showBar:          true,
 		}
 	case width >= midTableWidth:
 		fixed := 2 + 2 + 1 + baseNameW + 1 + numW + 1 + numW + 1 + aiW + 1
+		extra := max(0, avail-fixed-8)
 		return tableLayout{
-			nameW:            baseNameW,
+			nameW:            baseNameW + extra/2,
 			numW:             numW,
 			aiW:              aiW,
-			barW:             clampInt(avail-fixed, 8, 16),
+			barW:             8 + extra - extra/2,
 			showAddedRemoved: false,
 			showBar:          true,
 		}
@@ -112,7 +125,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range.")
 	}
 
-	l := resolveTableLayout(ts.Width)
+	l := resolveTableLayout(ts.Width, authors...)
 
 	maxTotal := 0
 	for _, a := range authors {
@@ -160,10 +173,10 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 	if l.showBar {
 		headerCells = append(headerCells, fmt.Sprintf("%-*s", l.barW, colImpact))
 	}
-	header := StyleTableHeader.Render(strings.Join(headerCells, " "))
+	header := "  " + StyleDimWhite.Render(strings.Join(headerCells, " "))
 
-	separator := StyleDimCyan.Render("  " + strings.Repeat("━", l.rowWidth()))
-	sectionHdr := StyleDimCyan.Render("  " + hrule(ts.Width-chromeInset))
+	separator := "  " + worklistRule.Render(strings.Repeat("─", l.rowWidth()))
+	sectionHdr := "  " + worklistRule.Render(strings.Repeat("─", max(1, ts.Width-chromeInset)))
 
 	start := ts.ScrollOffset
 	if start < 0 {
@@ -179,7 +192,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		a := authors[i]
 		cursor := "  "
 		if i == ts.SelectedRow {
-			cursor = StyleCursor.Render("▸ ")
+			cursor = StyleCursor.Render("› ")
 		}
 
 		rank := i + 1
@@ -245,7 +258,11 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		default:
 			rowStyle = StyleRowOdd
 		}
-		rows = append(rows, rowStyle.Render(line))
+		line = rowStyle.Render(padCells(line, max(l.rowWidth(), ansi.StringWidth(line))))
+		if i == ts.SelectedRow {
+			line = selectedRowBackground(line)
+		}
+		rows = append(rows, "  "+line)
 	}
 
 	parts := []string{sectionHdr, "", header, separator}

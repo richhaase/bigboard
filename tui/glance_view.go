@@ -18,7 +18,11 @@ func awarenessRow(line string, selected bool, index, width int) string {
 	if selected {
 		style = StyleRowSelected
 	}
-	return "  " + style.Width(max(1, width-4)).Render(ansi.Truncate(strings.TrimPrefix(line, "  "), max(1, width-4), "…"))
+	line = style.Width(max(1, width-4)).Render(ansi.Truncate(strings.TrimPrefix(line, "  "), max(1, width-4), "…"))
+	if selected {
+		line = selectedRowBackground(line)
+	}
+	return "  " + line
 }
 func glanceCursor(selected bool) string {
 	if selected {

@@ -472,7 +472,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 
 	case "R":
-		if m.viewMode == ViewAggregate {
+		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
 			cmd := m.startLocalRefresh()
 			return m, cmd
 		}
@@ -549,9 +549,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampStatDetailScroll()
 			switch msg.String() {
 			case "pgup":
-				m.statDetailOffset -= max(1, m.height-3)
+				m.statDetailOffset -= m.statisticsBodyBudget()
 			case "pgdown":
-				m.statDetailOffset += max(1, m.height-3)
+				m.statDetailOffset += m.statisticsBodyBudget()
 			case "home":
 				m.statDetailOffset = 0
 			case "end":
@@ -710,36 +710,22 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 	return out
 }
 
-const tableChromeLines = 7
-
-func (m Model) failedReposLine() string {
-	const maxNames = 3
-	names := m.failedRepos
-	suffix := ""
-	if len(names) > maxNames {
-		suffix = fmt.Sprintf(", +%d more", len(names)-maxNames)
-		names = names[:maxNames]
+func (m Model) leaderboardSummary() string {
+	var sections []string
+	if notice := m.historyNotice(); notice != "" {
+		sections = append(sections, StyleAmber.Render(notice))
 	}
-	line := fmt.Sprintf("  ⚠ %d repo(s) update failed · STALE: %s%s", len(m.failedRepos), strings.Join(names, ", "), suffix)
-	return Truncate(displayText(line)+" · e errors", m.width)
+	commits, added, removed, ai := m.aggregateTotals()
+	sections = append(sections, renderStatBoxes(commits, added, removed, ai, m.width, m.unknownLineCommits()))
+	return wrapStatistics(strings.Join(sections, "\n"), m.width)
 }
 
 func (m Model) tableViewport() int {
-	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
-	above := []string{RenderHeader(m.width, len(m.loadedRepos), m.excludedRepoCount(), m.version)}
-	if len(m.failedRepos) > 0 {
-		above = append(above, m.failedReposLine())
-	}
-	if notice := m.historyNotice(); notice != "" {
-		above = append(above, notice)
-	}
-	above = append(above, "", rangeControl(m.rangeLabel()), "", renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()), "")
-	help := RenderHelpBar(HelpContext{View: "aggregate", Searching: m.searching})
-	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
-	if budget < 3 {
-		budget = 3
-	}
-	return budget
+	chrome := AggregateView{}.RenderTable(m.displayedAuthors(), TableState{Width: m.width, Searching: m.searching, Query: m.filterQuery})
+	chromeHeight := lipgloss.Height(wrapStatistics(chrome, m.width))
+	rowHeight := max(1, (resolveTableLayout(m.width, m.displayedAuthors()...).rowWidth()+2+max(1, m.width)-1)/max(1, m.width))
+	budget := m.statisticsBodyBudget() - lipgloss.Height(m.leaderboardSummary()) - chromeHeight
+	return max(1, budget/rowHeight)
 }
 
 func (m *Model) clampScroll() {
@@ -910,45 +896,15 @@ func (m Model) renderBootSequence() string {
 }
 
 func (m Model) renderAggregateView() string {
-	var sections []string
-
-	sections = append(sections, RenderHeader(m.width, len(m.loadedRepos), m.excludedRepoCount(), m.version))
-
-	if len(m.failedRepos) > 0 {
-		sections = append(sections, StyleAmber.Render(m.failedReposLine()))
-	}
-	sections = append(sections, "")
-
-	if notice := m.historyNotice(); notice != "" {
-		sections = append(sections, StyleAmber.Render(notice))
-	}
-	sections = append(sections, rangeControl(m.rangeLabel()))
-	sections = append(sections, "")
-
-	totalCommits, totalAdded, totalRemoved, totalAI := m.aggregateTotals()
-	sections = append(sections, renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()))
-	sections = append(sections, "")
-
-	sections = append(sections, AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
-		SelectedRow:  m.selectedRow,
-		ScrollOffset: m.scrollOffset,
-		VisibleRows:  m.tableViewport(),
-		SortField:    m.sortField,
-		SortAsc:      m.sortAsc,
-		Width:        m.width,
-		Searching:    m.searching,
-		Query:        m.filterQuery,
-	}))
-
-	sections = append(sections, "")
-	sortLabel := strings.ToLower(stats.SortFieldLabel(m.sortField))
-	botsLabel := "on"
-	if m.hideBots {
-		botsLabel = "off"
-	}
-	sections = append(sections, StyleCyan.Render("  l worklist"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel, Searching: m.searching}))
-
-	return strings.Join(sections, "\n")
+	lines := m.screenHeader("Leaderboard", m.width)
+	lines = append(lines, strings.Split(m.leaderboardSummary(), "\n")...)
+	table := AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
+		SelectedRow: m.selectedRow, ScrollOffset: m.scrollOffset,
+		VisibleRows: m.tableViewport(), SortField: m.sortField, SortAsc: m.sortAsc,
+		Width: m.width, Searching: m.searching, Query: m.filterQuery,
+	})
+	lines = append(lines, strings.Split(wrapStatistics(table, m.width), "\n")...)
+	return screenFinish(lines, m.statisticsFooter(), m.screenCoverage(), m.width, m.height)
 }
 
 func (m Model) operativeDetailContent() string {
@@ -970,47 +926,32 @@ func (m Model) operativeDetailContent() string {
 		filtered = nil
 	}
 
-	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching, RangeLabel: m.rangeLabel()}.RenderOperativeDetail(
+	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
 		name,
 		as,
 		filtered,
 		m.width,
-		m.timeIdx,
-		len(m.loadedRepos),
-		m.excludedRepoCount(),
 	)
 	return detail
 }
 
 func (m *Model) clampStatDetailScroll() {
 	lines := strings.Split(m.operativeDetailContent(), "\n")
-	m.statDetailOffset = max(0, min(m.statDetailOffset, len(lines)-max(1, m.height-2)))
+	m.statDetailOffset = max(0, min(m.statDetailOffset, len(lines)-m.statisticsBodyBudget()))
 }
 
 func (m Model) renderOperativeView() string {
-	if m.height > 0 && m.height < 3 {
-		return fitGlanceLines([]string{"Resize terminal · Esc back · q quit"}, max(1, m.width), m.height)
+	lines := m.screenHeader("Leaderboard / "+m.activeOperative, m.width)
+	body := strings.Split(m.operativeDetailContent(), "\n")
+	budget := m.statisticsBodyBudget()
+	offset := max(0, min(m.statDetailOffset, len(body)-budget))
+	end := min(len(body), offset+budget)
+	lines = append(lines, body[offset:end]...)
+	coverage := m.screenCoverage()
+	if len(body) > budget {
+		coverage = fmt.Sprintf("lines %d–%d/%d · %s", offset+1, end, len(body), coverage)
 	}
-	detail := m.operativeDetailContent()
-	help := RenderHelpBar(HelpContext{View: "operative"})
-	if m.width > 0 && m.width < 100 {
-		help = StyleHelpKey.Render("  PgUp/PgDn scroll · ↑↓ person · ←/Esc back · t range")
-	}
-	if m.width > 0 && m.width < 60 {
-		help = StyleHelpKey.Render("  PgUp/PgDn · ← back · t range")
-	}
-	lines := strings.Split(detail, "\n")
-	if m.height <= 0 || len(lines)+2 <= m.height {
-		return strings.Join([]string{detail, "", help}, "\n")
-	}
-	// Keep navigation visible while paging the full detail, including the
-	// timeline and matrix. Arrow keys continue switching contributors.
-	budget := max(1, m.height-2)
-	offset := max(0, min(m.statDetailOffset, len(lines)-budget))
-	end := min(len(lines), offset+budget)
-	visible := append([]string(nil), lines[offset:end]...)
-	visible = append(visible, StyleDimWhite.Render(fmt.Sprintf("  %s · lines %d–%d/%d", displayText(m.activeOperative), offset+1, end, len(lines))), help)
-	return fitGlanceLines(visible, max(1, m.width), m.height)
+	return screenFinish(lines, m.statisticsFooter(), coverage, m.width, m.height)
 }
 
 func (m Model) aggregateTotals() (commits, added, removed, ai int) {
@@ -1021,16 +962,6 @@ func (m Model) aggregateTotals() (commits, added, removed, ai int) {
 		ai += author.AICommits
 	}
 	return commits, added, removed, ai
-}
-
-func (m Model) excludedRepoCount() int {
-	count := 0
-	for _, repo := range m.loadedRepos {
-		if m.excludedRepos[repo.ID] {
-			count++
-		}
-	}
-	return count
 }
 
 func (m Model) unknownLineCommits() int {

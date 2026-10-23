@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 )
@@ -163,7 +162,7 @@ func TestViewStatesRender(t *testing.T) {
 		m := modelWithData()
 		m.failedRepos = []string{"brokenrepo"}
 		out := m.View()
-		if !strings.Contains(out, "update failed") || !strings.Contains(out, "brokenrepo") {
+		if !strings.Contains(out, "Local: STALE") || !strings.Contains(out, "Update errors: 1") || !strings.Contains(out, "e details") {
 			t.Errorf("aggregate view missing failed-repo warning:\n%s", out)
 		}
 	})
@@ -420,15 +419,19 @@ func TestTableViewportAccountsForActualStats(t *testing.T) {
 		width:       78,
 		height:      40,
 	}
-	commits, added, removed, ai := m.aggregateTotals()
-	above := []string{RenderHeader(m.width, len(m.loadedRepos), 0, m.version), "", RenderTimePicker(m.timeIdx), "", RenderStatBoxes(commits, added, removed, ai, m.width), ""}
-	expected := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(RenderHelpBar(HelpContext{View: "aggregate"})) - tableChromeLines
-	if expected < 3 {
-		expected = 3
+	base := m.authors[0]
+	for i := range 20 {
+		author := base
+		author.Name = fmt.Sprintf("Contributor %02d", i)
+		m.authors = append(m.authors, author)
 	}
-	if got := m.tableViewport(); got != expected {
-		t.Fatalf("tableViewport = %d, want %d based on rendered stats", got, expected)
+	m.selectedRow = len(m.authors) - 1
+	m.clampScroll()
+	view := m.View()
+	if !strings.Contains(view, "Contributor 19") || !strings.Contains(view, "COMMITS") {
+		t.Fatal("large totals hid the selected contributor or summary")
 	}
+	checkStatisticsViewportBounds(t, m)
 }
 
 // TestRepoBreakdownStableOrder guards that equal-change repos keep a stable

@@ -88,7 +88,7 @@ func (m Model) currentHelp() screenHelp {
 		return screenHelp{"Contributor details", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Previous / next contributor"}, {"PgUp / PgDn", "Scroll details"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to the leaderboard"},
-		}}, {"Actions", []helpBinding{{"t", "Change the time range"}}}}}
+		}}, {"Actions", []helpBinding{{"t", "Change the time range"}, {"R", "Refresh repos and PRs"}}}}}
 	case ViewAggregate:
 		back, quit := "Quit BigBoard", "Quit BigBoard"
 		if m.filterQuery != "" {

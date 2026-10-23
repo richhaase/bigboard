@@ -10,7 +10,7 @@ import (
 )
 
 func TestRenderOperativeDetailEmptyState(t *testing.T) {
-	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", nil, nil, 100, DefaultTimeIndex, 3, 0)
+	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", nil, nil, 100)
 	if !strings.Contains(out, "NO SIGNAL") {
 		t.Errorf("empty detail should show NO SIGNAL:\n%s", out)
 	}
@@ -33,7 +33,7 @@ func TestRenderOperativeDetailRendersBody(t *testing.T) {
 			"engine": {Commits: 5, Added: 100, Removed: 10, Net: 90, TotalChange: 110},
 		},
 	}
-	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", as, nil, 100, DefaultTimeIndex, 3, 0)
+	out := OperativeView{}.RenderOperativeDetail("Ada Lovelace", as, nil, 100)
 	if !strings.Contains(out, "REPO CONTRIBUTIONS") {
 		t.Errorf("non-empty stats should render the repo breakdown:\n%s", out)
 	}
@@ -54,9 +54,6 @@ func TestRenderOperativeDetailUsesExplicitFuzzyMatching(t *testing.T) {
 		nil,
 		records,
 		100,
-		DefaultTimeIndex,
-		1,
-		0,
 	)
 	if strings.Contains(out, "NO SIGNAL") {
 		t.Errorf("fuzzy-matched records were omitted from detail view:\n%s", out)

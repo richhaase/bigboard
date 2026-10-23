@@ -70,6 +70,11 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	if focused {
 		lines = nil
 	}
+	repoID := r.repo.ID
+	if m.areaRepoID != "" {
+		repoID = m.areaRepoID
+	}
+	lines = append(lines, m.worklistSignal("Repository snapshot: "+strings.TrimPrefix(m.screenLocalFreshness(repoID), "Local: ")))
 	for _, line := range worklistPeople(people, width-14, 1) {
 		lines = append(lines, "Contributors: "+line)
 	}

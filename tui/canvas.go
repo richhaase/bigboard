@@ -16,6 +16,12 @@ var (
 )
 
 func worklistLine(s string, width int) string { return padCells(s, width) }
+
+func selectedRowBackground(line string) string {
+	prefix, suffix, _ := strings.Cut(lipgloss.NewStyle().Background(ColorRowSelect).Render("X"), "X")
+	return prefix + strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+prefix) + suffix
+}
+
 func worklistCompactBanner(width int) []string {
 	return []string{worklistBand.Render(worklistLine("  BIGBOARD / Worklist", max(1, width)))}
 }
