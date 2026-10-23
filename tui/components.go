@@ -409,17 +409,7 @@ func cutToWidth(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	var b strings.Builder
-	cur := 0
-	for _, r := range s {
-		rw := lipgloss.Width(string(r))
-		if cur+rw > w {
-			break
-		}
-		b.WriteRune(r)
-		cur += rw
-	}
-	return b.String()
+	return ansi.Truncate(s, w, "")
 }
 
 func padRight(s string, w int) string {

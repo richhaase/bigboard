@@ -144,6 +144,27 @@ func TestTruncateMultibyte(t *testing.T) {
 	}
 }
 
+func TestTruncatePreservesEmojiGraphemes(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		width int
+		want  string
+	}{
+		{"♥️abcdef", 4, "..."},
+		{"♥️abcdef", 5, "♥️..."},
+		{"👩‍💻abcdef", 5, "👩‍💻..."},
+		{"👩‍💻abcdef", 1, ""},
+		{"👩‍💻abcdef", 2, "👩‍💻"},
+		{"🇺🇸abcdef", 5, "🇺🇸..."},
+		{"👍🏽abcdef", 5, "👍🏽..."},
+	} {
+		got := Truncate(tc.input, tc.width)
+		if got != tc.want || lipgloss.Width(got) > tc.width {
+			t.Errorf("Truncate(%q, %d) = %q, want %q", tc.input, tc.width, got, tc.want)
+		}
+	}
+}
+
 func TestTruncateNonPositiveWidth(t *testing.T) {
 	// Must not panic on zero or negative width (latent slice-bounds bug).
 	if got := Truncate("hello", 0); got != "" {

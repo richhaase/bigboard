@@ -284,7 +284,7 @@ func TestPRUnsupportedOriginNeverCallsGitHub(t *testing.T) {
 	m.prProvider = p
 	next, _ := m.Update(m.startPRRefresh()())
 	m = next.(Model)
-	if p.fetches != 0 || !strings.Contains(m.prStatus(), "unsupported GitHub origin") {
+	if p.fetches != 0 || !strings.Contains(m.prStatus(), "not applicable") {
 		t.Fatal("unsupported origin queried or hidden")
 	}
 }

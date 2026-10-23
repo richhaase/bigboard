@@ -37,6 +37,10 @@ func (ExecRunner) Run(ctx context.Context, command string, args ...string) ([]by
 		return out.Bytes(), ctx.Err()
 	}
 	if err != nil {
+		var exit *exec.ExitError
+		if command == "git" && errors.As(err, &exit) && exit.ExitCode() == 1 && out.Len() == 0 && diagnostic.Len() == 0 {
+			return nil, ErrUnsupportedOrigin
+		}
 		var missing *exec.Error
 		if errors.As(err, &missing) && errors.Is(missing.Err, exec.ErrNotFound) {
 			return nil, ErrUnavailable

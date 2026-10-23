@@ -334,6 +334,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.clampScroll()
 		if m.viewMode == ViewOperative {
 			m.clampStatDetailScroll()
 		}
@@ -397,11 +398,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.rangePicker.open {
-		return m.handleRangeKey(msg)
-	}
 	if m.showScanErrors {
 		return m.handleScanErrorKey(msg)
+	}
+	if m.err != nil && !m.loading {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m.quit()
+		case "R":
+			return m, m.startLocalRefresh()
+		case "e":
+			m.showScanErrors, m.scanErrorOffset = true, 0
+		}
+		return m, nil
+	}
+	if m.rangePicker.open {
+		return m.handleRangeKey(msg)
 	}
 	if msg.String() == "e" && !m.searching && !m.glance.searching && len(m.scanErrors) > 0 {
 		m.showScanErrors, m.scanErrorOffset = true, 0
@@ -428,8 +440,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "q":
 		if m.viewMode == ViewAggregate && m.filterQuery != "" {
+			selectedID := m.selectedContributorID()
 			m.filterQuery = ""
-			m.clampScroll()
+			m.selectContributor(selectedID)
 			return m, nil
 		}
 		return m.quit()
@@ -443,9 +456,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		if m.viewMode == ViewAggregate {
 			m.searching = true
+			selectedID := m.selectedContributorID()
 			m.filterQuery = ""
-			m.selectedRow = 0
-			m.scrollOffset = 0
+			m.selectContributor(selectedID)
 		}
 
 	case "t":
@@ -469,8 +482,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.activeAuthorID = ""
 		default:
 			if m.filterQuery != "" {
+				selectedID := m.selectedContributorID()
 				m.filterQuery = ""
-				m.clampScroll()
+				m.selectContributor(selectedID)
 			} else if msg.String() == "esc" {
 				return m.quit()
 			}
@@ -525,25 +539,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		if m.viewMode == ViewAggregate {
 			m.sortField = stats.NextSortField(m.sortField)
+			selectedID := m.selectedContributorID()
 			m.sortAuthors()
-			m.selectedRow = 0
-			m.scrollOffset = 0
+			m.selectContributor(selectedID)
 		}
 
 	case "S":
 		if m.viewMode == ViewAggregate {
 			m.sortAsc = !m.sortAsc
+			selectedID := m.selectedContributorID()
 			m.sortAuthors()
-			m.selectedRow = 0
-			m.scrollOffset = 0
+			m.selectContributor(selectedID)
 		}
 
 	case "b":
 		if m.viewMode == ViewAggregate {
 			m.hideBots = !m.hideBots
 			m.recomputeAuthors()
-			m.selectedRow = 0
-			m.scrollOffset = 0
 		}
 
 	case "r":
@@ -626,6 +638,24 @@ func (m *Model) recomputeAuthors() {
 	m.sortAuthors()
 	for i, author := range m.displayedAuthors() {
 		if selectedID != "" && author.ID == selectedID {
+			m.selectedRow = i
+			break
+		}
+	}
+	m.clampScroll()
+}
+
+func (m Model) selectedContributorID() string {
+	list := m.displayedAuthors()
+	if m.selectedRow >= 0 && m.selectedRow < len(list) {
+		return list[m.selectedRow].ID
+	}
+	return ""
+}
+
+func (m *Model) selectContributor(id string) {
+	for i, author := range m.displayedAuthors() {
+		if id != "" && author.ID == id {
 			m.selectedRow = i
 			break
 		}
@@ -742,6 +772,7 @@ func (m *Model) stepOperative(delta int) {
 }
 
 func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	selectedID := m.selectedContributorID()
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
@@ -759,8 +790,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filterQuery += string(msg.Runes)
 		}
 	}
-	m.selectedRow = 0
-	m.scrollOffset = 0
+	m.selectContributor(selectedID)
 	return m, nil
 }
 

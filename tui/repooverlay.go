@@ -15,7 +15,20 @@ func (m Model) renderRepoOverlay() string {
 	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
 	sections = append(sections, "")
 
-	for i, repo := range m.loadedRepos {
+	if m.height > 0 && m.height < 5 {
+		return fitGlanceLines([]string{"Resize terminal · Esc back"}, max(1, m.width), m.height)
+	}
+	if m.height > 0 && m.height < len(sections)+7 {
+		sections = []string{RenderSectionHeader("REPOSITORY CONTROL", m.width), ""}
+	}
+	visible := len(m.loadedRepos)
+	if m.height > 0 {
+		visible = max(1, m.height-len(sections)-4)
+	}
+	start := max(0, min(m.overlayCursor-visible+1, len(m.loadedRepos)-visible))
+	end := min(len(m.loadedRepos), start+visible)
+	for i := start; i < end; i++ {
+		repo := m.loadedRepos[i]
 		checkbox := "[x]"
 		if m.overlayExcluded[repo.ID] {
 			checkbox = "[ ]"
@@ -64,5 +77,8 @@ func (m Model) renderRepoOverlay() string {
 		StyleDimCyan.Render("▐") + StyleHelpKey.Render("↑↓") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("navigate")
 	sections = append(sections, help)
 
+	if m.width > 0 && m.height > 0 {
+		return fitGlanceLines(sections, m.width, m.height)
+	}
 	return strings.Join(sections, "\n")
 }

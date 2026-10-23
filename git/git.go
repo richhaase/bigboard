@@ -282,7 +282,7 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 	args := []string{"log", "--no-merges", "--root", "-M50%", "-C50%", "-l0",
 		"--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--no-show-signature",
 		"--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none",
-		"--format=%x00%H%x00%aN%x00%aE%x00%aI%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00",
+		"--format=%x00%H%x00%aN%x00%aE%x00%at%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00",
 		"--numstat", "-z", ref, "--"}
 	cmd := gitCommand(ctx, repo.Path, args...)
 	var stderr bytes.Buffer
@@ -387,7 +387,6 @@ func DiscoverReposDepth(paths []string, maxDepth int) []string {
 				if err != nil || !info.IsDir() {
 					continue
 				}
-				child = resolved
 			}
 			walk(child, depth+1)
 		}
@@ -412,6 +411,7 @@ var aiEmailAddresses = []string{
 	"noreply@openai.com",
 	"hi@cursor.com",
 	"hi@cursor.sh",
+	"cursoragent@cursor.com",
 	"copilot@github.com",
 	"devin@cognition.ai",
 	"noreply@aider.chat",
