@@ -163,7 +163,7 @@ func TestViewStatesRender(t *testing.T) {
 		m := modelWithData()
 		m.failedRepos = []string{"brokenrepo"}
 		out := m.View()
-		if !strings.Contains(out, "unreadable") || !strings.Contains(out, "brokenrepo") {
+		if !strings.Contains(out, "update failed") || !strings.Contains(out, "brokenrepo") {
 			t.Errorf("aggregate view missing failed-repo warning:\n%s", out)
 		}
 	})

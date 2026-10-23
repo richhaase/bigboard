@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -82,6 +83,8 @@ type Model struct {
 	height           int
 	loading          bool
 	refreshing       bool
+	fetchRepos       bool
+	fetchAfterScan   bool
 	quitting         bool
 	scanGeneration   uint64
 	inFlight         map[string]bool
@@ -110,6 +113,7 @@ type RepoLoadedMsg struct {
 	Repository git.Repository
 	Records    []git.CommitRecord
 	Err        error
+	FetchErr   error
 }
 
 // DefaultTimeIndex is the TimePresets index used when no since config value is given.
@@ -194,13 +198,17 @@ func normalizeExcluded(repositories []git.Repository, excluded map[string]bool) 
 	return normalized
 }
 
-func loadRepoCmd(ctx context.Context, repository git.Repository, options Options, generation uint64) tea.Cmd {
+func loadRepoCmd(ctx context.Context, repository git.Repository, options Options, generation uint64, fetch bool) tea.Cmd {
 	return func() tea.Msg {
+		var fetchErr error
+		if fetch {
+			fetchErr = git.FetchRepository(ctx, repository)
+		}
 		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
 			IncludeGenerated: options.IncludeGenerated,
 			AIIdentities:     options.AIIdentities,
 		})
-		return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err}
+		return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err, FetchErr: fetchErr}
 	}
 }
 
@@ -210,7 +218,7 @@ func (m Model) loadCmds() tea.Cmd {
 	}
 	cmds := make([]tea.Cmd, m.activeScans)
 	for i := range m.activeScans {
-		cmds[i] = m.commands.wrap(loadRepoCmd(m.scanContext, m.repositories[i], m.options, m.scanGeneration))
+		cmds[i] = m.repoLoadCmd(m.repositories[i])
 	}
 	return tea.Batch(cmds...)
 }
@@ -242,7 +250,11 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 	m.nextRepo++
 	m.activeScans++
 	m.inFlight[repository.ID] = true
-	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration))
+	return m.repoLoadCmd(repository)
+}
+
+func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
+	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration, m.fetchRepos && !m.excludedRepos[repository.ID]))
 }
 
 func (m *Model) finalizeLoad() {
@@ -312,11 +324,15 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) startLocalRefresh() tea.Cmd {
-	if m.quitting || len(m.repositories) == 0 || m.refreshing {
-		// Repeated requests join the initial or manual scan already in flight.
+	if m.quitting || len(m.repositories) == 0 {
+		return nil
+	}
+	if m.refreshing {
+		m.fetchAfterScan = !m.fetchRepos
 		return nil
 	}
 	m.resetPending()
+	m.fetchRepos = true
 	return m.loadCmds()
 }
 
@@ -348,10 +364,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingScanErrors = maps.Clone(m.pendingScanErrors)
 		delete(m.inFlight, msg.Repository.ID)
 		m.activeScans--
-		if msg.Err != nil {
+		if msg.Err != nil || msg.FetchErr != nil {
 			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
-			m.pendingScanErrors[msg.Repository.ID] = displayText(msg.Err.Error())
+			m.pendingScanErrors[msg.Repository.ID] = displayText(errors.Join(msg.FetchErr, msg.Err).Error())
 			m.pendingStaleRepos[msg.Repository.ID] = true
+		}
+		if msg.Err != nil {
 			for _, repo := range m.loadedRepos {
 				if repo.ID == msg.Repository.ID {
 					m.pendingRepos = append(m.pendingRepos, repo)
@@ -367,8 +385,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
 			}
 		} else {
-			m.pendingScannedAt[msg.Repository.ID] = time.Now()
-			m.pendingStaleRepos[msg.Repository.ID] = false
+			if msg.FetchErr == nil {
+				m.pendingScannedAt[msg.Repository.ID] = time.Now()
+				m.pendingStaleRepos[msg.Repository.ID] = false
+			}
 			m.pendingRecords = append(m.pendingRecords, msg.Records...)
 			m.pendingRepos = append(m.pendingRepos, msg.Repository)
 			if m.loading {
@@ -378,6 +398,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
+			if m.fetchAfterScan {
+				m.fetchAfterScan = false
+				cmd := m.startLocalRefresh()
+				return m, cmd
+			}
 			return m, m.startPRRefresh()
 		} else {
 			return m, m.nextLoadCmd()
@@ -666,7 +691,7 @@ func (m Model) failedReposLine() string {
 		suffix = fmt.Sprintf(", +%d more", len(names)-maxNames)
 		names = names[:maxNames]
 	}
-	line := fmt.Sprintf("  ⚠ %d repo(s) unreadable: %s%s", len(m.failedRepos), strings.Join(names, ", "), suffix)
+	line := fmt.Sprintf("  ⚠ %d repo(s) update failed · STALE: %s%s", len(m.failedRepos), strings.Join(names, ", "), suffix)
 	return Truncate(displayText(line)+" · e errors", m.width)
 }
 

@@ -199,7 +199,7 @@ func TestWorklistHelpExplainsManualRefresh(t *testing.T) {
 	m.width, m.height = 160, 48
 	m = pressAwareness(m, "?")
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "WORKLIST · HELP") || !strings.Contains(view, "Local data updates on launch or R; no auto-refresh") || strings.Contains(view, "every minute") {
+	if !strings.Contains(view, "WORKLIST · HELP") || !strings.Contains(view, "Startup uses cached history; R fetches repos and PRs") || strings.Contains(view, "every minute") {
 		t.Fatalf("help does not explain manual refresh: %s", view)
 	}
 }
