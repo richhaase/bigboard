@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type prSnapshot struct {
 	err      error
 }
 type prState struct {
+	aliases      map[string]string
 	repositories map[string]string
 	errors       map[string]error
 	snapshots    map[string]prSnapshot
@@ -38,6 +40,7 @@ type prState struct {
 	nextRefresh  time.Time
 }
 type prsLoadedMsg struct {
+	aliases      map[string]string
 	generation   uint64
 	repositories map[string]string
 	errors       map[string]error
@@ -58,7 +61,6 @@ func (m *Model) startPRRefresh() tea.Cmd {
 	if m.prState.loading || time.Now().Before(m.prState.nextRefresh) {
 		return nil
 	}
-	m.prState.nextRefresh = time.Now().Add(time.Minute)
 	m.cancelPRRefresh()
 	parent := m.scanContext
 	if parent == nil {
@@ -76,10 +78,14 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		}
 	}
 	provider := m.prProvider
+	aliases := maps.Clone(m.prState.aliases)
+	if aliases == nil {
+		aliases = make(map[string]string)
+	}
 	return m.commands.wrap(func() tea.Msg {
 		defer cancel()
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
-		aliases := make(map[string]string)
+		msg.aliases = aliases
 		var unavailable error
 		// Serial bounded requests avoid multiplying API budgets across duplicates.
 		for _, repo := range repos {
@@ -92,8 +98,9 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				msg.errors[repo.ID] = err
 				continue
 			}
-			if canonical, ok := aliases[remote]; ok {
-				remote = canonical
+			origin := remote
+			for i := 0; i < len(aliases) && aliases[remote] != "" && aliases[remote] != remote; i++ {
+				remote = aliases[remote]
 			}
 			if _, exists := msg.results[remote]; !exists {
 				result := gh.Result{Repo: remote, Err: unavailable}
@@ -111,6 +118,7 @@ func (m *Model) startPRRefresh() tea.Cmd {
 					canonical = remote
 				}
 				aliases[remote] = canonical
+				aliases[origin] = canonical
 				remote = canonical
 				msg.results[remote] = result
 			}
@@ -127,8 +135,13 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		selectedKey = oldVisible[m.prRow].Key()
 	}
 	m.prState.loading = false
-	if next := msg.checked.Add(time.Minute); next.After(m.prState.nextRefresh) {
-		m.prState.nextRefresh = next
+	if len(msg.results) > 0 {
+		if next := msg.checked.Add(time.Minute); next.After(m.prState.nextRefresh) {
+			m.prState.nextRefresh = next
+		}
+	}
+	if msg.aliases != nil {
+		m.prState.aliases = msg.aliases
 	}
 	if m.prState.snapshots == nil {
 		m.prState.snapshots = map[string]prSnapshot{}
@@ -141,6 +154,11 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		m.prState.repositories[id] = repo
 	}
 	m.prState.errors = msg.errors
+	for id, err := range msg.errors {
+		if errors.Is(err, gh.ErrUnsupportedOrigin) {
+			delete(m.prState.repositories, id)
+		}
+	}
 	for repo, result := range msg.results {
 		if result.RetryAt.After(m.prState.nextRefresh) {
 			m.prState.nextRefresh = result.RetryAt
@@ -263,16 +281,21 @@ func (m Model) prStatus() string {
 		refreshHint = " · R after " + m.prState.nextRefresh.Local().Format("15:04:05")
 	}
 	var checked time.Time
+	eligible := 0
 	for _, repo := range m.loadedRepos {
 		if m.excludedRepos[repo.ID] {
 			continue
 		}
 		if err := m.prState.errors[repo.ID]; err != nil {
+			if errors.Is(err, gh.ErrUnsupportedOrigin) {
+				continue
+			}
 			failed = true
 			if reason == "fetch failed" || reason == "unsupported GitHub origin" {
 				reason = prFailureReason(err)
 			}
 		}
+		eligible++
 		snapshot, exists := m.prState.snapshots[m.prState.repositories[repo.ID]]
 		hasSnapshot = hasSnapshot || exists
 		partial = partial || snapshot.partial
@@ -285,6 +308,9 @@ func (m Model) prStatus() string {
 		}
 	}
 	count := len(m.allPRs())
+	if eligible == 0 && !m.prState.loading {
+		return "GitHub PRs not applicable · no supported origins · p details"
+	}
 	if failed && count == 0 {
 		return "GitHub PRs unavailable · " + reason + refreshHint + " · p details"
 	}

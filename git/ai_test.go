@@ -14,6 +14,7 @@ func TestIsAICoAuthor(t *testing.T) {
 		{"Copilot <198982749+Copilot@users.noreply.github.com>", true},
 		{"Cursor <hi@cursor.com>", true},
 		{"Cursor <hi@cursor.sh>", true},
+		{"Cursor Agent <cursoragent@cursor.com>", true},
 		{"Devin <devin@cognition.ai>", true},
 		{"Rich Haase <rich@example.com>", false},
 		{"", false},

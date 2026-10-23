@@ -8,13 +8,13 @@ import (
 )
 
 func TestRetainedChangesLiteralPaths(t *testing.T) {
-	out := fmtHeader("Dev", "dev@example.com", "2026-01-02T10:00:00Z") +
+	out := fmtHeader("Dev", "dev@example.com", "1767348000") +
 		"\n2\t1\t\nleading\tline.go\x00" +
 		"-\t-\timage\twith\nlines.png\x00" +
 		"9\t0\tvendor/generated\tfile.go\x00" +
 		"0\t0\t\x00old\tname.go\x00new\nname.go\x00" +
 		"-\t-\t\x00old\nbinary.png\x00vendor/copied\tbinary.png\x00" +
-		fmtHeader("Empty", "empty@example.com", "2026-01-01T10:00:00Z")
+		fmtHeader("Empty", "empty@example.com", "1767261600")
 	want := []PathChange{
 		{Path: "\nleading\tline.go"},
 		{Path: "image\twith\nlines.png"},

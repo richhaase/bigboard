@@ -112,11 +112,11 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 				}
 				fields[i] = value
 			}
-			date, err := time.Parse(time.RFC3339, fields[2])
+			seconds, err := strconv.ParseInt(fields[2], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid author date: %w", err)
 			}
-			records = append(records, CommitRecord{CommitID: token, Subject: fields[4], Author: strings.TrimSpace(fields[0]), Email: strings.TrimSpace(fields[1]), Date: date,
+			records = append(records, CommitRecord{CommitID: token, Subject: fields[4], Author: strings.TrimSpace(fields[0]), Email: strings.TrimSpace(fields[1]), Date: time.Unix(seconds, 0).UTC(),
 				RepoID: repo.ID, RepoName: repo.Name, AIAssisted: ai.isAI(fields[1]) || ai.isAICoAuthor(fields[3])})
 			continue
 		}

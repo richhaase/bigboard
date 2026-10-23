@@ -25,11 +25,11 @@ func fmtHeader(name, email, date string, coAuthors ...string) string {
 
 func TestParseGitLogBasic(t *testing.T) {
 	out := strings.Join([]string{
-		fmtHeader("Alice", "alice@example.com", "2026-01-02T10:00:00Z"),
+		fmtHeader("Alice", "alice@example.com", "1767348000"),
 		"10\t5\ta.go",
 		"3\t0\tb.go",
 		"",
-		fmtHeader("Bob", "bob@example.com", "2026-01-01T10:00:00Z"),
+		fmtHeader("Bob", "bob@example.com", "1767261600"),
 		"1\t1\tc.go",
 	}, "\x00") + "\x00"
 
@@ -53,10 +53,10 @@ func TestParseGitLogBasic(t *testing.T) {
 // line counts to the previous commit.
 func TestParseGitLogPipeInName(t *testing.T) {
 	out := strings.Join([]string{
-		fmtHeader("Good Dev", "good@example.com", "2026-01-02T10:00:00Z"),
+		fmtHeader("Good Dev", "good@example.com", "1767348000"),
 		"100\t0\ta.go",
 		"",
-		fmtHeader("Bad|Name", "bad@example.com", "2026-01-01T10:00:00Z"),
+		fmtHeader("Bad|Name", "bad@example.com", "1767261600"),
 		"50\t0\tb.go",
 	}, "\x00") + "\x00"
 
@@ -89,7 +89,7 @@ func TestParseGitLogPipeInName(t *testing.T) {
 
 func TestParseGitLogBinaryAndMalformed(t *testing.T) {
 	out := strings.Join([]string{
-		fmtHeader("Alice", "alice@example.com", "2026-01-02T10:00:00Z"),
+		fmtHeader("Alice", "alice@example.com", "1767348000"),
 		"-\t-\timage.png", // binary: skipped
 		"7\t2\tcode.go",
 		"",
@@ -113,11 +113,13 @@ func TestParseGitLogAIDetection(t *testing.T) {
 		header string
 		wantAI bool
 	}{
-		{"human", fmtHeader("Human", "human@example.com", "2026-01-01T10:00:00Z"), false},
-		{"ai-as-author", fmtHeader("Claude", "noreply@anthropic.com", "2026-01-01T10:00:00Z"), true},
-		{"ai-co-author", fmtHeader("Human", "human@example.com", "2026-01-01T10:00:00Z", "Claude <noreply@anthropic.com>"), true},
-		{"multi-co-author-with-ai", fmtHeader("Human", "human@example.com", "2026-01-01T10:00:00Z", "Pat <pat@example.com>", "Claude <noreply@anthropic.com>"), true},
-		{"multi-co-author-no-ai", fmtHeader("Human", "human@example.com", "2026-01-01T10:00:00Z", "Pat <pat@example.com>", "Sam <sam@example.com>"), false},
+		{"human", fmtHeader("Human", "human@example.com", "1767261600"), false},
+		{"cursor-author", fmtHeader("Cursor Agent", "cursoragent@cursor.com", "1767261600"), true},
+		{"cursor-co-author", fmtHeader("Human", "human@example.com", "1767261600", "Cursor Agent <cursoragent@cursor.com>"), true},
+		{"ai-as-author", fmtHeader("Claude", "noreply@anthropic.com", "1767261600"), true},
+		{"ai-co-author", fmtHeader("Human", "human@example.com", "1767261600", "Claude <noreply@anthropic.com>"), true},
+		{"multi-co-author-with-ai", fmtHeader("Human", "human@example.com", "1767261600", "Pat <pat@example.com>", "Claude <noreply@anthropic.com>"), true},
+		{"multi-co-author-no-ai", fmtHeader("Human", "human@example.com", "1767261600", "Pat <pat@example.com>", "Sam <sam@example.com>"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +140,7 @@ func TestParseGitLogAIDetection(t *testing.T) {
 
 func TestParseGitLogPathFiltering(t *testing.T) {
 	out := strings.Join([]string{
-		fmtHeader("Dev", "dev@example.com", "2026-01-02T10:00:00Z"),
+		fmtHeader("Dev", "dev@example.com", "1767348000"),
 		"20\t1\tsrc/app.go",                  // counted
 		"5000\t0\tpackage-lock.json",         // ignored (basename glob)
 		"800\t0\tvendor/lib/x.go",            // ignored (dir segment)
@@ -202,8 +204,8 @@ func TestPathFilterUsesExplicitOptions(t *testing.T) {
 func TestParseGitLogRejectsMalformedMetadata(t *testing.T) {
 	for _, data := range []string{
 		fmtHeader("Ghost", "ghost@example.com", "not-a-date"),
-		fmtHeader("A", "a@test", "2026-01-01T00:00:00Z") + "1\t0\t\x00old\x00",
-		fmtHeader("A", "a@test", "2026-01-01T00:00:00Z") + "1\t0\tunterminated",
+		fmtHeader("A", "a@test", "1767225600") + "1\t0\t\x00old\x00",
+		fmtHeader("A", "a@test", "1767225600") + "1\t0\tunterminated",
 	} {
 		if _, err := parseGitLog(data, "repo"); err == nil {
 			t.Errorf("accepted malformed log %q", data)
@@ -214,10 +216,10 @@ func TestParseGitLogRejectsMalformedMetadata(t *testing.T) {
 func TestParseGitLogSubject(t *testing.T) {
 	for _, subject := range []string{"", "Fix parsing | preserve delimiters", "Fix\tcontrol\x1fbytes\x1b[31m", "Handle naïve subjects 🚀"} {
 		t.Run(fmt.Sprintf("%q", subject), func(t *testing.T) {
-			header := fmtHeader("Alice", "alice@example.com", "2026-01-02T10:00:00Z", "Claude <noreply@anthropic.com>")
+			header := fmtHeader("Alice", "alice@example.com", "1767348000", "Claude <noreply@anthropic.com>")
 			// Replace the final empty subject, retaining its NUL terminator.
 			header = header[:len(header)-1] + subject + "\x00"
-			out := header + "\n3\t1\ta.go\x00" + fmtHeader("Bob", "bob@example.com", "2026-01-01T10:00:00Z") + "\n7\t2\tb.go\x00"
+			out := header + "\n3\t1\ta.go\x00" + fmtHeader("Bob", "bob@example.com", "1767261600") + "\n7\t2\tb.go\x00"
 			records, err := parseGitLog(out, "repo")
 			if err != nil {
 				t.Fatal(err)

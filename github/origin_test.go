@@ -161,6 +161,30 @@ func TestCanceledResolveDoesNotPretendSuccess(t *testing.T) {
 	}
 }
 
+func TestResolvePreservesLookupFailures(t *testing.T) {
+	for _, want := range []error{ErrUnsupportedOrigin, ErrUnavailable, ErrRequest, ErrOutputLimit} {
+		p := NewProvider(&fakeRunner{t: t, steps: []fakeStep{{err: want}}})
+		if _, err := p.Resolve(context.Background(), "."); !errors.Is(err, want) {
+			t.Fatalf("resolve error = %v, want %v", err, want)
+		}
+	}
+}
+
+func TestResolveDistinguishesMissingOriginFromBrokenRepository(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if _, err := (ExecRunner{}).Run(ctx, "git", "init", dir); err != nil {
+		t.Fatal(err)
+	}
+	p := NewProvider(nil)
+	if _, err := p.Resolve(ctx, dir); !errors.Is(err, ErrUnsupportedOrigin) {
+		t.Fatalf("missing origin = %v", err)
+	}
+	if _, err := p.Resolve(ctx, filepath.Join(dir, "missing")); !errors.Is(err, ErrRequest) {
+		t.Fatalf("broken repository = %v", err)
+	}
+}
+
 func assertDeadline(t *testing.T, ctx context.Context) {
 	t.Helper()
 	deadline, ok := ctx.Deadline()

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -115,7 +116,10 @@ func (p *Provider) Resolve(ctx context.Context, localPath string) (string, error
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", ErrUnsupportedOrigin
+		if errors.Is(err, ErrUnsupportedOrigin) {
+			return "", ErrUnsupportedOrigin
+		}
+		return "", safeRequestError(err)
 	}
 	if len(out) > MaxOutputBytes {
 		return "", ErrOutputLimit
