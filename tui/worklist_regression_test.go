@@ -194,12 +194,12 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	}
 }
 
-func TestWorklistHelpExplainsManualRefresh(t *testing.T) {
+func TestWorklistHelpShowsRepositoryControls(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	m = pressAwareness(m, "?")
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "WORKLIST · HELP") || !strings.Contains(view, "Startup uses cached history; R fetches repos and PRs") || strings.Contains(view, "every minute") {
-		t.Fatalf("help does not explain manual refresh: %s", view)
+	if !strings.Contains(view, "Help · Worklist") || !strings.Contains(view, "Refresh repos and PRs") || strings.Contains(view, "never runs git fetch") {
+		t.Fatalf("help does not explain repository controls: %s", view)
 	}
 }

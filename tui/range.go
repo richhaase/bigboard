@@ -178,6 +178,6 @@ func (m Model) renderRangePicker() string {
 		}
 		lines = append(lines, "", "  ↑↓ choose · c custom")
 	}
-	lines = append(lines, "  Enter apply · Esc cancel")
+	lines = append(lines, "  ? help · Enter apply · Esc cancel")
 	return fitGlanceLines(lines, width, height)
 }

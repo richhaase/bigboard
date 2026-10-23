@@ -72,7 +72,7 @@ func (m Model) renderRepoOverlay() string {
 	sections = append(sections, summary)
 
 	sections = append(sections, "")
-	help := StyleDimCyan.Render("  ▐") + StyleHelpKey.Render("space") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("toggle") + "  " +
+	help := StyleHelpKey.Render("  ? help ") + StyleDimCyan.Render("▐") + StyleHelpKey.Render("space") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("toggle") + "  " +
 		StyleDimCyan.Render("▐") + StyleHelpKey.Render("enter/esc") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("done") + "  " +
 		StyleDimCyan.Render("▐") + StyleHelpKey.Render("↑↓") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("navigate")
 	sections = append(sections, help)

@@ -102,7 +102,7 @@ Direct files are a separate leaf; multi-path commits can appear in several child
 Configured named areas keep their explicit meaning and are not automatically
 reinterpreted. `Esc` returns through each level, restoring the prior selection.
 `/` searches the current list, `Enter` accepts the query, and `Esc` clears it before
-leaving. `?` shows all controls. `l` switches to the contributor-statistics
+leaving. `?` opens help for the current screen. `l` switches to the contributor-statistics
 leaderboard. Time ranges, bot hiding, repository inclusion, and manual refresh
 apply to both views.
 
@@ -137,10 +137,10 @@ The existing `depth` setting still controls repository discovery only.
 
 The board updates local repository data only on launch and when you press `R`.
 There is no periodic auto-refresh. “Local” shows the last successful local
-refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh. `R`
-fetches included repositories from `origin`, then scans local history and requests
-GitHub PR context subject to the PR cooldown described below. Startup and export
-scan cached history without fetching. Fetches update remote-tracking branches only;
+refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh.
+Startup and `R` fetch included repositories from `origin`, then scan local history
+and request GitHub PR context subject to the PR cooldown described below. Export
+scans cached history without fetching. Fetches update remote-tracking branches only;
 local branches, tags, working trees, and submodules stay untouched. Repositories
 without `origin` remain local-only. Fetches use existing Git credentials, disable
 interactive prompts, and run at most eight repositories at once with a two-minute
@@ -209,7 +209,7 @@ origins are reported in the PR overlay without suppressing local history.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on the leaderboard with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and export use cached history; `R` fetches included repositories before scanning. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
+- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and `R` fetch included repositories before scanning; export uses cached history. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
 - **Calendar dates** use your local timezone for active days, monthly totals, first/last dates, and heatmaps. Future-dated commits remain counted; ALL includes every collected commit and recent windows retain their existing lower-bound filtering. Churn remains removals/additions, with `0.00` when additions are zero.
 - **Incomplete history** is flagged for shallow clones. Boundary line counts are unknown, shown as `?` or a known subtotal followed by `?`. A complete copy of the same commit can supply its missing counts. JSON export keeps numeric known subtotals and includes `unknown_line_commits` on contributor/repository objects when nonzero; stderr reports shallow repositories. Partial clones with missing objects are reported as scan failures instead of downloading data.
@@ -218,6 +218,10 @@ origins are reported in the PR overlay without suppressing local history.
 
 Keys depend on the active view. While typing a search, ordinary characters
 (including `q`) enter text; `Enter` accepts, `Esc` clears, and `Ctrl+C` quits.
+Press `?` or `F1` on any screen for a centered help modal with that screen's
+shortcuts. While typing a search, `?` stays text and `F1` opens help. `Esc`,
+`Enter`, `?`, or `F1` closes help and returns to the same selection. Long help
+scrolls with arrows, PageUp/PageDown, and Home/End without changing the view beneath it.
 
 ### Worklist overview and area detail
 
@@ -240,7 +244,7 @@ Keys depend on the active view. While typing a search, ordinary characters
 | `e` | Open scan-error details when errors exist |
 | `l` (lowercase) | Open the contributor-statistics leaderboard |
 | `o` | In Related, switch between shared commits and contributor overlap |
-| `?` | Show Worklist help |
+| `?` / `F1` | Open contextual help |
 | `Esc` | Clear a search/person filter, unwind detail/subareas, then return to repositories; at the unfiltered repository list, quit |
 | `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |
 

@@ -34,7 +34,7 @@ type glanceState struct {
 	stack           []glanceFrame
 	overviewAreaID  string
 	overviewQueries [2]string
-	searching, help bool
+	searching       bool
 }
 
 func (m Model) glanceQuery() string {
@@ -111,16 +111,6 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key == "q" || key == "ctrl+c" {
 		return m.quit()
-	}
-	if m.glance.help {
-		if key == "?" || key == "esc" || key == "enter" {
-			m.glance.help = false
-		}
-		return m, nil
-	}
-	if key == "?" {
-		m.glance.help = true
-		return m, nil
 	}
 	if m.showPaths {
 		switch key {

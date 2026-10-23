@@ -465,9 +465,9 @@ func (m Model) renderPRs() string {
 			}
 		}
 	}
-	help := "  ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
+	help := "  ? help · ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
 	if width < 70 {
-		help = "↑↓ scroll · Enter detail · Esc back · R"
+		help = "? help · ↑↓ · Enter detail · Esc back"
 	}
 	if m.prBrowserError != "" {
 		lines = append(lines, "  "+m.prBrowserError)
