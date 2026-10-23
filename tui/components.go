@@ -304,9 +304,10 @@ var StyleGreen = lipgloss.NewStyle().Foreground(ColorGreen)
 
 // HelpContext describes the current UI state for context-aware help.
 type HelpContext struct {
-	View string
-	Sort string
-	Bots string
+	View      string
+	Sort      string
+	Bots      string
+	Searching bool
 }
 
 // RenderHelpBar renders context-aware key binding hints with bracket styling.
@@ -349,7 +350,11 @@ func RenderHelpBar(ctx HelpContext) string {
 	for i, b := range bindings {
 		parts[i] = StyleDimCyan.Render("▐") + StyleHelpKey.Render(b.key) + StyleDimCyan.Render("▌") + StyleHelpDesc.Render(b.desc)
 	}
-	return "  " + strings.Join(parts, "  ")
+	help := "? help"
+	if ctx.Searching {
+		help = "F1 help"
+	}
+	return "  " + StyleHelpKey.Render(help) + "  " + strings.Join(parts, "  ")
 }
 
 // FormatNumber formats an integer with thousand separators.

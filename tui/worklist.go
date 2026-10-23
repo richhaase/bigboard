@@ -298,10 +298,17 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 		}
 	}
 	if width < 70 {
-		footer = "↑↓ select → open ← back t range ?"
+		footer = "↑↓ select → open ← back t range"
 	}
 	if m.glance.searching || m.glanceQuery() != "" {
 		footer = "/ " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
+		if m.glance.searching {
+			footer = "F1 help · " + footer
+		} else {
+			footer = "? help · " + footer
+		}
+	} else {
+		footer = "? help · " + strings.TrimSuffix(footer, "  ? help")
 	}
 	coverage := strings.TrimSpace(m.glanceCoverageLine())
 	if width < 70 {
@@ -312,7 +319,7 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 		coverage = bots + " · " + coverage
 	}
 	if width >= 100 {
-		coverage += " · ages at local scan · no Git fetch"
+		coverage += " · ages at local scan · fetch on launch and R"
 	}
 	for len(lines) < height-3 {
 		lines = append(lines, "")

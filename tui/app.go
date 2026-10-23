@@ -44,6 +44,8 @@ type Model struct {
 	prBrowserOpener func(string) error
 
 	showPaths        bool
+	showHelp         bool
+	helpOffset       int
 	pathOffset       int
 	areaDefinitions  map[string]stats.WorkAreaDefinition
 	areaRepoID       string
@@ -83,8 +85,6 @@ type Model struct {
 	height           int
 	loading          bool
 	refreshing       bool
-	fetchRepos       bool
-	fetchAfterScan   bool
 	quitting         bool
 	scanGeneration   uint64
 	inFlight         map[string]bool
@@ -254,7 +254,7 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 }
 
 func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
-	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration, m.fetchRepos && !m.excludedRepos[repository.ID]))
+	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration, !m.excludedRepos[repository.ID]))
 }
 
 func (m *Model) finalizeLoad() {
@@ -324,15 +324,10 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) startLocalRefresh() tea.Cmd {
-	if m.quitting || len(m.repositories) == 0 {
-		return nil
-	}
-	if m.refreshing {
-		m.fetchAfterScan = !m.fetchRepos
+	if m.quitting || len(m.repositories) == 0 || m.refreshing {
 		return nil
 	}
 	m.resetPending()
-	m.fetchRepos = true
 	return m.loadCmds()
 }
 
@@ -386,8 +381,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
 			}
 		} else {
-			if msg.FetchErr == nil {
+			if msg.FetchErr == nil || m.loading {
 				m.pendingScannedAt[msg.Repository.ID] = time.Now()
+			}
+			if msg.FetchErr == nil {
 				m.pendingStaleRepos[msg.Repository.ID] = false
 			}
 			m.pendingRecords = append(m.pendingRecords, msg.Records...)
@@ -399,11 +396,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRemaining--
 		if m.pendingRemaining <= 0 {
 			m.finalizeLoad()
-			if m.fetchAfterScan {
-				m.fetchAfterScan = false
-				cmd := m.startLocalRefresh()
-				return m, cmd
-			}
 			return m, m.startPRRefresh()
 		} else {
 			return m, m.nextLoadCmd()
@@ -423,6 +415,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp {
+		return m.handleHelpKey(msg)
+	}
+	if msg.String() == "f1" || msg.String() == "?" && !m.helpSearchActive() {
+		m.showHelp, m.helpOffset = true, 0
+		return m, nil
+	}
 	if m.showScanErrors {
 		return m.handleScanErrorKey(msg)
 	}
@@ -735,7 +734,7 @@ func (m Model) tableViewport() int {
 		above = append(above, notice)
 	}
 	above = append(above, "", rangeControl(m.rangeLabel()), "", renderStatBoxes(totalCommits, totalAdded, totalRemoved, totalAI, m.width, m.unknownLineCommits()), "")
-	help := RenderHelpBar(HelpContext{View: "aggregate"})
+	help := RenderHelpBar(HelpContext{View: "aggregate", Searching: m.searching})
 	budget := m.height - lipgloss.Height(strings.Join(above, "\n")) - lipgloss.Height(help) - tableChromeLines
 	if budget < 3 {
 		budget = 3
@@ -841,6 +840,9 @@ func (m Model) View() string {
 	if height < 1 {
 		height = lipgloss.Height(content)
 	}
+	if m.showHelp {
+		content = m.renderHelpModal(content, max(1, width), max(1, height))
+	}
 	return worklistCanvas(content, max(1, width), max(1, height))
 }
 
@@ -860,7 +862,7 @@ func (m Model) viewContent() string {
 			"",
 			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+displayText(m.err.Error())),
 			"",
-			StyleDimCyan.Render("  ▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit · R retry · e errors"),
+			StyleHelpKey.Render("  ? help · ")+StyleDimCyan.Render("▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit · R retry · e errors"),
 		)
 		if details := m.scanErrorLines(); len(details) > 0 {
 			lines = append(lines, "", details[0])
@@ -903,6 +905,7 @@ func (m Model) renderBootSequence() string {
 	}
 	lines = append(lines, shown...)
 	lines = append(lines, "", StyleDimCyan.Render(fmt.Sprintf("  ▐ %d/%d repos ▌", done, total)))
+	lines = append(lines, StyleHelpKey.Render("  ? help · q quit"))
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
@@ -943,7 +946,7 @@ func (m Model) renderAggregateView() string {
 	if m.hideBots {
 		botsLabel = "off"
 	}
-	sections = append(sections, StyleCyan.Render("  l worklist"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel}))
+	sections = append(sections, StyleCyan.Render("  l worklist"), RenderHelpBar(HelpContext{View: "aggregate", Sort: sortLabel, Bots: botsLabel, Searching: m.searching}))
 
 	return strings.Join(sections, "\n")
 }

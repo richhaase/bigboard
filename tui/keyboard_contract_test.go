@@ -20,6 +20,7 @@ func keyboardContractKey(s string) tea.KeyMsg {
 		"home": tea.KeyHome, "end": tea.KeyEnd, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown,
 		"enter": tea.KeyEnter, "esc": tea.KeyEsc, "tab": tea.KeyTab,
 		"backspace": tea.KeyBackspace, "ctrl+u": tea.KeyCtrlU,
+		"f1": tea.KeyF1,
 	}
 	if typ, ok := keys[s]; ok {
 		return tea.KeyMsg{Type: typ}
@@ -141,6 +142,7 @@ func keyboardContractState(m Model) string {
 		m.showPaths, m.pathOffset, m.showPRs, m.prAll, m.prDetail, m.prRow, m.prOffset,
 		m.prBrowserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
 		m.filterQuery, m.searching, m.rangePicker, m.timeIdx, m.customRangeDays, m.overviewSort,
+		m.showHelp, m.helpOffset,
 		m.sortField, m.sortAsc, m.hideBots, m.loading, m.refreshing, m.quitting, m.scanGeneration, m.prGeneration,
 	})
 }

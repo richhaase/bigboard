@@ -161,32 +161,5 @@ func (m Model) renderAwareness() string {
 	if m.areaRepoID == "" && m.glance.detailOpen {
 		m.closeGlanceDetail()
 	}
-	if m.glance.help {
-		return m.renderGlanceHelp(width, height)
-	}
 	return m.renderWorklist(width, height)
-}
-
-func (m Model) renderGlanceHelp(width, height int) string {
-	lines := worklistCompactBanner(width)
-	lines = append(lines, RenderSectionHeader("WORKLIST · HELP", width),
-		"  → / Enter  repository → areas → detail → commit",
-		"  Startup uses cached history; R fetches repos and PRs",
-		"  ↑↓  select     PgUp/PgDn  page     Home/End  first/last",
-		"  /  search this list  Enter accept  Esc clear",
-		"  s  sort areas/repos: Activity (commits), Recent, Name",
-		"  Tab / Shift-Tab or 1–4: Activity, People, Related, Subareas",
-		"  People: alphabetical identities; Enter filters Activity",
-		"  Related: Enter shared commits; o contributor overlap",
-		"  Subareas: literal child paths; counts may overlap",
-		"  ← / Esc  clear filter, then return; ← stays at root",
-		"  t  range: presets or custom days     b  bots",
-		"  p  selected parent-area PRs     P  all included PRs",
-		"  PRs use all open dates, independent of local filters",
-		"  r  included repositories     R  refresh local + PR data",
-		"  Local refresh reads cached Git history; never runs git fetch",
-		"  l  contributor statistics     q / Ctrl-C  quit",
-		"  Git associations show neither ownership nor live presence",
-		"  ? / Esc  close help")
-	return fitGlanceLines(lines, width, height)
 }

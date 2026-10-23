@@ -122,14 +122,14 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 
 func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
-		for _, key := range []string{"?", "/", "r", "p", "t"} {
+		for _, key := range []string{"/", "r", "p", "t"} {
 			t.Run(fmt.Sprintf("%d/%s", view, key), func(t *testing.T) {
 				m := awarenessFixture()
 				m.viewMode = view
 				m.err = errors.New("all repositories failed")
 				m.loadedRepos = nil
 				m = pressAwareness(m, key)
-				if m.glance.help || m.glance.searching || m.searching || m.showPRs || m.rangePicker.open || m.viewMode != view {
+				if m.showHelp || m.glance.searching || m.searching || m.showPRs || m.rangePicker.open || m.viewMode != view {
 					t.Fatal("error screen changed hidden navigation")
 				}
 				next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
@@ -143,7 +143,7 @@ func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	m := awarenessFixture()
 	m.err = errors.New("all repositories failed")
 	m.scanErrors = map[string]string{"/api": "unreadable"}
-	m.glance.help, m.glance.searching, m.searching, m.showPRs = true, true, true, true
+	m.glance.searching, m.searching, m.showPRs = true, true, true
 	m.rangePicker.open = true
 	m = pressAwareness(m, "e")
 	if !m.showScanErrors {

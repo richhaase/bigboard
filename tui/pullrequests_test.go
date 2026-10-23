@@ -314,7 +314,7 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("overlay refresh not scheduled")
 	}
-	if !m.refreshing || !m.fetchRepos || !m.showPRs {
+	if !m.refreshing || !m.showPRs {
 		t.Fatal("overlay refresh did not start repository refresh or lost overlay")
 	}
 	for _, repo := range m.repositories {

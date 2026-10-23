@@ -24,9 +24,9 @@ func (m Model) renderScanErrors() string {
 	offset := max(0, min(m.scanErrorOffset, len(lines)-budget))
 	visible := []string{"REPOSITORY UPDATE ERRORS"}
 	visible = append(visible, lines[offset:min(len(lines), offset+budget)]...)
-	help := "↑↓ PgUp/PgDn scroll · R retry · Esc back · q quit"
+	help := "? help · ↑↓ PgUp/PgDn scroll · R retry · Esc back · q quit"
 	if m.width < 60 {
-		help = "↑↓/PgUp/PgDn · R retry · Esc back"
+		help = "? help · ↑↓ scroll · R retry · Esc back"
 	}
 	visible = append(visible, help)
 	return fitGlanceLines(visible, max(1, m.width), max(1, m.height))

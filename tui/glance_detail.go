@@ -350,7 +350,7 @@ func (m Model) renderCommitInspector(width, height int) string {
 	budget := max(1, height-len(lines)-2)
 	offset := max(0, min(m.pathOffset, max(0, len(body)-budget)))
 	lines = append(lines, body[offset:min(len(body), offset+budget)]...)
-	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  ↑↓ scroll · PgUp/PgDn · ←/Enter/Esc back · q quit")
+	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  ? help · ↑↓ scroll · PgUp/PgDn · ←/Enter/Esc back · q quit")
 	return fitGlanceLines(lines, width, height)
 }
 func wrapGlanceText(s string, width int) []string {

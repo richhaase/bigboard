@@ -136,7 +136,7 @@ func TestRangeKeysRespectSearchAndOtherModals(t *testing.T) {
 		m := glanceBusyFixture()
 		switch mode {
 		case "help":
-			m.glance.help = true
+			m.showHelp = true
 		case "paths":
 			m = rangeKey(t, m, "right")
 			m = rangeKey(t, m, "right")
