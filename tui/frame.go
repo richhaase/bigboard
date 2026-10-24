@@ -127,30 +127,48 @@ func screenFinish(lines []string, footer, coverage string, width, height int) st
 	for len(lines) < budget {
 		lines = append(lines, "")
 	}
-	lines = append(lines, "  "+worklistRule.Render(strings.Repeat("─", max(1, width-4))), StyleCyan.Render("  "+footer), StyleDimWhite.Render("  "+coverage))
+	lines = append(lines, "  "+worklistRule.Render(strings.Repeat("─", max(1, width-4))), StyleCyan.Render("  "+screenFooter(footer, width)), StyleDimWhite.Render("  "+coverage))
 	return fitGlanceLines(lines, max(1, width), height)
+}
+
+func boardShortcuts(width int) string {
+	if width < 70 {
+		return "l/w/p"
+	}
+	if width < 110 {
+		return "l/w/p boards"
+	}
+	return "l leaderboard · w worklist · p PRs"
+}
+
+func screenFooter(footer string, width int) string {
+	if strings.HasPrefix(footer, "F1 help") {
+		return footer
+	}
+	footer = strings.TrimPrefix(footer, "? help · ")
+	return "? help · " + boardShortcuts(width) + " · " + footer
 }
 
 func (m Model) statisticsFooter() string {
 	if m.viewMode == ViewOperative {
 		if m.width < 60 {
-			return "? help · PgUp/PgDn · ←/Esc back"
+			return "? help · ←/Esc back · PgUp/PgDn"
 		}
 		if m.width < 110 {
-			return "? help · ↑↓ person · PgUp/PgDn scroll · ←/Esc back"
+			return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn"
 		}
-		return "? help · ↑↓ person · PgUp/PgDn scroll · ←/Esc back · t range · R refresh · q quit"
+		return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · t range · R refresh · q quit"
 	}
 	if m.searching {
 		return "F1 help · Enter accept · Esc clear"
 	}
 	if m.width < 70 {
-		return "? help · ↑↓ · → open · l worklist"
+		return "? help · ↑↓ · → open"
 	}
 	if m.width < 110 {
-		return "? help · ↑↓ select · →/Enter open · / find · s sort · l worklist"
+		return "? help · ↑↓ select · →/Enter open · / find · s sort"
 	}
-	return "? help · ↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · l worklist · R refresh · q quit"
+	return "? help · ↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · R refresh · q quit"
 }
 
 func (m Model) screenCoverage() string {

@@ -262,14 +262,38 @@ func (m Model) allPRs() []gh.PullRequest {
 }
 func (m Model) visiblePRs() []gh.PullRequest {
 	prs := m.allPRs()
-	if !m.prAll {
-		prs = append([]gh.PullRequest(nil), m.scopePRs(m.selectedScopeID())...)
-	}
-	sort.Slice(prs, func(i, j int) bool {
-		if !prs[i].UpdatedAt.Equal(prs[j].UpdatedAt) {
-			return prs[i].UpdatedAt.After(prs[j].UpdatedAt)
+	kept := prs[:0]
+	query := strings.ToLower(m.prQuery)
+	for _, pr := range prs {
+		if m.prRepoID != "" && (m.excludedRepos[m.prRepoID] || pr.Repo != m.prState.repositories[m.prRepoID]) {
+			continue
 		}
-		return prs[i].Key() < prs[j].Key()
+		if query != "" && !strings.Contains(strings.ToLower(fmt.Sprintf("%s %s %s #%d", pr.Repo, pr.Title, pr.Author, pr.Number)), query) {
+			continue
+		}
+		kept = append(kept, pr)
+	}
+	prs = kept
+	sort.Slice(prs, func(i, j int) bool {
+		a, b := prs[i], prs[j]
+		comparison := 0
+		switch m.prSort {
+		case 0:
+			comparison = b.UpdatedAt.Compare(a.UpdatedAt)
+		case 1:
+			comparison = strings.Compare(strings.ToLower(a.Repo), strings.ToLower(b.Repo))
+		case 2:
+			comparison = strings.Compare(strings.ToLower(a.Author), strings.ToLower(b.Author))
+		case 3:
+			comparison = strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
+		}
+		if comparison == 0 {
+			comparison = strings.Compare(a.Key(), b.Key())
+		}
+		if m.prReverse {
+			return comparison > 0
+		}
+		return comparison < 0
 	})
 	return prs
 }
@@ -343,63 +367,78 @@ func (m Model) prStatus() string {
 	if !checked.IsZero() {
 		label += " · checked " + checked.Local().Format("15:04 MST")
 	}
-	return label + refreshHint + " · p scope · P all"
-}
-
-// selectPRScope uses the visible Worklist selection and only retained PR data.
-func (m Model) selectPRScope(all bool) Model {
-	if !all && !m.glance.detailOpen {
-		// View resolves the highlighted row on a value copy. Persist it before
-		// the overlay reads its scope, including after opening all PRs first.
-		rows := m.glanceRepositories()
-		if len(rows) == 0 {
-			m.setSelectedScopeID("")
-		} else {
-			m.selectedRepository(rows)
-		}
-	}
-	m.showPRs = true
-	m.prBrowserError = ""
-	m.prAll = all
-	m.prDetail = false
-	m.prRow = 0
-	m.prOffset = 0
-	return m
+	return label + refreshHint + " · p PRs"
 }
 
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	if m.prRepoPicker {
+		return m.handlePRScopeKey(msg)
+	}
+	key := msg.String()
+	if !m.prDetail {
+		if row, ok := glanceMove(key, m.prRow, len(m.visiblePRs()), max(1, m.prDetailBudget()-2)); ok {
+			m.prRow = row
+			return m, nil
+		}
+	} else {
+		page := m.prDetailBudget()
+		switch key {
+		case "up":
+			m.prOffset--
+		case "down":
+			m.prOffset++
+		case "pgup":
+			m.prOffset -= page
+		case "pgdown":
+			m.prOffset += page
+		case "home":
+			m.prOffset = 0
+		case "end":
+			m.prOffset = m.prDetailMaxOffset()
+		}
+		m.prOffset = max(0, min(m.prOffset, m.prDetailMaxOffset()))
+	}
+	switch key {
 	case "o":
 		return m.openSelectedPR()
-	case "q", "ctrl+c":
-		return m.quit()
-	case "p", "P":
-		m = m.selectPRScope(msg.String() == "P")
-	case "esc":
-		if m.prDetail {
-			m.prDetail = false
-			m.prOffset = 0
-		} else {
-			m.showPRs = false
+	case "f":
+		m.prRepoPicker, m.prRepoRow = true, 0
+		for i, repo := range m.prScopeRepositories() {
+			if repo.ID == m.prRepoID {
+				m.prRepoRow = i + 1
+				break
+			}
 		}
-	case "enter":
-		m.prDetail = !m.prDetail
-		m.prOffset = 0
-	case "up":
+	case "esc", "left":
 		if m.prDetail {
-			m.prOffset = max(0, min(m.prOffset-1, m.prDetailMaxOffset()))
-		} else {
-			m.prRow = max(0, m.prRow-1)
+			m.prDetail, m.prOffset = false, 0
+		} else if m.prQuery != "" {
+			selected := m.selectedPRKey()
+			m.prQuery = ""
+			m.selectPR(selected)
+		} else if m.prRepoID != "" {
+			selected := m.selectedPRKey()
+			m.prRepoID = ""
+			m.selectPR(selected)
 		}
-	case "down":
-		if m.prDetail {
-			m.prOffset = min(m.prOffset+1, m.prDetailMaxOffset())
-		} else {
-			m.prRow = min(max(0, len(m.visiblePRs())-1), m.prRow+1)
+	case "enter", "right":
+		if len(m.visiblePRs()) > 0 {
+			m.prDetail = true
 		}
-	case "R":
-		cmd := m.startLocalRefresh()
-		return m, cmd
+	case "/":
+		if !m.prDetail {
+			m.prSearching = true
+		}
+	case "s", "S":
+		if !m.prDetail {
+			selected := m.selectedPRKey()
+			if key == "s" {
+				m.prSort = (m.prSort + 1) % len(prSortLabels)
+			} else {
+				m.prReverse = !m.prReverse
+			}
+			m.selectPR(selected)
+		}
 	}
 	return m, nil
 }
@@ -408,12 +447,15 @@ func (m Model) renderPRs() string {
 	if width < 40 || height < 12 {
 		return ansi.Truncate("Resize to 40×12 · Esc back · q quit", width, "…")
 	}
-	title := "Pull requests"
-	prs := m.visiblePRs()
-	label := "OPEN PULL REQUESTS · selected scope"
-	if m.prAll {
-		label = "OPEN PULL REQUESTS · all included repositories"
+	if m.prRepoPicker {
+		return m.renderPRScopePicker(width, height)
 	}
+	title := "Pull requests"
+	if m.prRepoID != "" {
+		title += " / " + m.prScopeLabel()
+	}
+	prs := m.visiblePRs()
+	label := "OPEN PRs · " + m.prSortLabel() + " · " + m.prScopeLabel()
 	if m.prDetail && len(prs) > 0 {
 		pr := prs[min(m.prRow, len(prs)-1)]
 		label = fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
@@ -422,7 +464,7 @@ func (m Model) renderPRs() string {
 	lines := m.screenHeader(title, width)
 	lines = append(lines, RenderSectionHeader(label, width))
 	if len(prs) == 0 {
-		lines = append(lines, "  No PRs to display in this snapshot/scope.")
+		lines = append(lines, "  No PRs to display in this snapshot.")
 	} else if m.prDetail {
 		pr := prs[min(m.prRow, len(prs)-1)]
 		wrapped := m.prDetailLines(pr, width)
@@ -440,22 +482,13 @@ func (m Model) renderPRs() string {
 				draft = " DRAFT"
 			}
 			row := fmt.Sprintf("#%d%s %s · %s · %s · %s", pr.Number, draft, displayText(pr.Title), githubIdentity(pr.Author), displayText(pr.ReviewDecision), displayText(pr.CheckState))
-			if m.prAll {
-				row = displayText(pr.Repo) + " " + row
-			}
-			lines = append(lines, awarenessRow(row, i == selected, i, width))
+			row = displayText(pr.Repo) + " " + row
+			lines = append(lines, awarenessRow(glanceCursor(i == selected)+" "+row, i == selected, i, width))
 		}
 	}
 	if len(prs) == 0 || !m.prDetail {
-		scopeRepoID := m.selectedScopeID()
-		if m.areaRepoID != "" {
-			scopeRepoID = m.areaRepoID
-		}
 		for _, repo := range m.loadedRepos {
-			if !m.prAll && repo.ID != scopeRepoID {
-				continue
-			}
-			if m.excludedRepos[repo.ID] {
+			if m.excludedRepos[repo.ID] || m.prRepoID != "" && repo.ID != m.prRepoID {
 				continue
 			}
 			err := m.prState.errors[repo.ID]
@@ -467,14 +500,26 @@ func (m Model) renderPRs() string {
 			}
 		}
 	}
-	help := "? help · ↑↓ scroll · Enter details/back · Esc back · R refresh · q quit"
+	help := "? help · f repo · / find · s/S sort · ↑↓ select · →/Enter open · ←/Esc back · R refresh · q quit"
 	if width < 70 {
-		help = "? help · ↑↓ · Enter detail · Esc back"
+		help = "? help · f repo · / find · → open"
 	}
 	if m.prBrowserError != "" {
 		lines = append(lines, "  "+m.prBrowserError)
 	}
-	coverage := "All dates · p scope · P all"
+	if m.prDetail {
+		help = "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · R refresh · q quit"
+	}
+	if m.prSearching {
+		help = "F1 help · Enter accept · Esc clear"
+	}
+	coverage := "All dates · " + m.prScopeLabel()
+	if m.prQuery != "" || m.prSearching {
+		coverage = "/ " + displayText(m.prQuery) + " · " + coverage
+	}
+	if len(prs) > 0 && !m.prDetail {
+		coverage += fmt.Sprintf(" · %d/%d", m.prRow+1, len(prs))
+	}
 	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
 		coverage = "o open PR in browser · " + coverage
 	}

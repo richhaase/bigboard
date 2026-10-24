@@ -75,27 +75,24 @@ func TestStatisticsViewportReachesAllSections(t *testing.T) {
 	}
 }
 func TestStatisticsViewportResetsForAuthorTimeAndReopen(t *testing.T) {
-	for _, k := range []tea.KeyType{tea.KeyDown, tea.KeyRunes} {
-		m := statisticsViewportFixture()
-		oldAuthor := m.activeAuthorID
-		oldTime := m.timeIdx
-		m = statisticsViewportKey(m, tea.KeyEnd)
-		if k == tea.KeyRunes {
-			m = send(m, "t", "up", "enter")
-		} else {
-			m = statisticsViewportKey(m, k)
-		}
-		if !strings.Contains(ansi.Strip(m.View()), "CONTRIBUTOR:") {
-			t.Fatalf("%v retained stale detail scroll", k)
-		}
-		if k == tea.KeyDown && m.activeAuthorID == oldAuthor {
-			t.Fatal("arrow no longer switches author")
-		}
-		if k == tea.KeyRunes && m.timeIdx == oldTime {
-			t.Fatal("time range did not change")
-		}
-	}
 	m := statisticsViewportFixture()
+	oldTime := m.timeIdx
+	oldAuthor := m.activeAuthorID
+	m = statisticsViewportKey(m, tea.KeyEnd)
+	m = statisticsViewportKey(m, tea.KeyDown)
+	if m.activeAuthorID != oldAuthor {
+		t.Fatal("scrolling changed contributor")
+	}
+	m = send(m, "t", "up", "enter")
+	if m.timeIdx == oldTime || m.statDetailOffset != 0 {
+		t.Fatal("range change did not reset detail scroll")
+	}
+	m = send(m, "esc", "down", "enter")
+	if m.activeAuthorID == oldAuthor || m.statDetailOffset != 0 {
+		t.Fatal("selecting another contributor did not reset detail")
+	}
+
+	m = statisticsViewportFixture()
 	top := ansi.Strip(m.View())
 	m = statisticsViewportKey(m, tea.KeyEnd)
 	m = send(m, "esc", "enter")

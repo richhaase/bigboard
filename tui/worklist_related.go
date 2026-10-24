@@ -108,7 +108,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 	}
 	rows := m.glanceCochangedAreas()
 	selected := m.glanceSelected(m.glanceDetailIDs())
-	lines := []string{StyleTitle.Render("WHAT CHANGED TOGETHER / same commit"), StyleDimWhite.Render("o contributor overlap")}
+	lines := []string{StyleTitle.Render("WHAT CHANGED TOGETHER / same commit"), StyleDimWhite.Render("c contributor overlap")}
 	compact := height < 20 || width < 76
 	budget := max(1, min(5, height-19))
 	if compact {
@@ -149,7 +149,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 			lines = append(lines, padCells(displayText(r.area.Name), areaWidth+2)+" "+m.sharedContributorNames(r.area))
 		}
 		if len(overlap) > limit {
-			lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more areas with contributor overlap · o all names", len(overlap)-limit)))
+			lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more areas with contributor overlap · c all names", len(overlap)-limit)))
 		}
 		if len(overlap) == 0 {
 			lines = append(lines, "No contributor overlap in this range.")
@@ -166,7 +166,7 @@ func (m Model) worklistRelatedLines(width, height int) []string {
 func (m Model) worklistOverlapLines(width, height int) []string {
 	rows := m.glanceRelatedAreas()
 	selected := m.glanceSelected(m.glanceDetailIDs())
-	lines := []string{StyleTitle.Render("CONTRIBUTOR OVERLAP · o co-change"), StyleDimWhite.Render("Contributor identities in both areas.")}
+	lines := []string{StyleTitle.Render("CONTRIBUTOR OVERLAP · c shared commits"), StyleDimWhite.Render("Contributor identities in both areas.")}
 	budget := max(1, (height-4)/2)
 	start := max(0, min(selected-budget/2, len(rows)-budget))
 	end := min(len(rows), start+budget)

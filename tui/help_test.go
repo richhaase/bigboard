@@ -38,7 +38,7 @@ func TestHelpAvailableAcrossScreensAndRestoresNavigation(t *testing.T) {
 				if !m.showHelp || m.currentHelp().title == "" || !strings.Contains(ansi.Strip(m.View()), "Help ·") {
 					t.Fatalf("%s has no contextual help", opener)
 				}
-				m = keyboardContractPress(t, m, "R", "r", "l", "t", "right", " ")
+				m = keyboardContractPress(t, m, "R", "r", "t", "right", " ")
 				m = keyboardContractPress(t, m, "esc")
 				if m.showHelp || keyboardContractState(m) != before {
 					t.Fatal("help leaked a shortcut or changed the underlying screen")
@@ -64,7 +64,7 @@ func TestHelpContextContainsOnlyRelevantControls(t *testing.T) {
 		{"PR detail", "Scroll PR details", "Select a pull request", func(m Model) Model { m.showPRs, m.prDetail = true, true; return m }},
 		{"repository controls", "Include / exclude the repository", "Refresh repos and PRs", func(m Model) Model { m.viewMode = ViewRepoOverlay; return m }},
 		{"range", "Apply preset / edit custom days", "Show / hide bots", func(m Model) Model { m.openRangePicker(); return m }},
-		{"contributor", "Previous / next contributor", "Change sort / reverse order", func(m Model) Model { m.viewMode = ViewOperative; return m }},
+		{"contributor", "Scroll contributor details", "Change sort / reverse order", func(m Model) Model { m.viewMode = ViewOperative; return m }},
 		{"scan errors", "Retry repository refresh", "Include / exclude the repository", func(m Model) Model { m.showScanErrors = true; return m }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

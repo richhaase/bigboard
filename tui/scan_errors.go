@@ -28,7 +28,7 @@ func (m Model) renderScanErrors() string {
 	if m.width < 60 {
 		help = "? help · ↑↓ scroll · R retry · Esc back"
 	}
-	visible = append(visible, help)
+	visible = append(visible, screenFooter(help, m.width))
 	return fitGlanceLines(visible, max(1, m.width), max(1, m.height))
 }
 
@@ -36,7 +36,7 @@ func (m Model) handleScanErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
-	case "esc", "e":
+	case "esc", "left", "e":
 		m.showScanErrors = false
 	case "R":
 		return m, m.startLocalRefresh()

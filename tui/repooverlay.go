@@ -18,12 +18,12 @@ func (m Model) renderRepoOverlay() string {
 	if m.height > 0 && m.height < 5 {
 		return fitGlanceLines([]string{"Resize terminal · Esc back"}, max(1, m.width), m.height)
 	}
-	if m.height > 0 && m.height < len(sections)+7 {
+	if m.height > 0 && m.height < len(sections)+8 {
 		sections = []string{RenderSectionHeader("REPOSITORY CONTROL", m.width), ""}
 	}
 	visible := len(m.loadedRepos)
 	if m.height > 0 {
-		visible = max(1, m.height-len(sections)-4)
+		visible = max(1, m.height-len(sections)-5)
 	}
 	start := max(0, min(m.overlayCursor-visible+1, len(m.loadedRepos)-visible))
 	end := min(len(m.loadedRepos), start+visible)
@@ -72,10 +72,13 @@ func (m Model) renderRepoOverlay() string {
 	sections = append(sections, summary)
 
 	sections = append(sections, "")
-	help := StyleHelpKey.Render("  ? help ") + StyleDimCyan.Render("▐") + StyleHelpKey.Render("space") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("toggle") + "  " +
-		StyleDimCyan.Render("▐") + StyleHelpKey.Render("enter/esc") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("done") + "  " +
-		StyleDimCyan.Render("▐") + StyleHelpKey.Render("↑↓") + StyleDimCyan.Render("▌") + StyleHelpDesc.Render("navigate")
-	sections = append(sections, help)
+	help := StyleHelpKey.Render("  ? help · Enter apply · Esc cancel · space toggle · ↑↓ select")
+	boards := "  " + boardShortcuts(m.width)
+	if m.width < 70 {
+		help = "  ? help · space toggle · ↑↓ select"
+		boards = "  Enter apply · Esc cancel · " + boardShortcuts(m.width)
+	}
+	sections = append(sections, help, boards)
 
 	if m.width > 0 && m.height > 0 {
 		return fitGlanceLines(sections, m.width, m.height)

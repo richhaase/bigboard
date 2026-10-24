@@ -275,13 +275,13 @@ func TestSortDirectionToggle(t *testing.T) {
 	}
 }
 
-func TestStepOperative(t *testing.T) {
+func TestContributorArrowsKeepIdentity(t *testing.T) {
 	m := modelWithData()
 	m.viewMode = ViewOperative
 	m.activeOperative = "Ada Lovelace"
 	m = send(m, "down")
-	if m.activeOperative != "Grace Hopper" {
-		t.Errorf("down should step to next contributor, got %q", m.activeOperative)
+	if m.activeOperative != "Ada Lovelace" {
+		t.Errorf("down changed contributor identity to %q", m.activeOperative)
 	}
 	m = send(m, "up")
 	if m.activeOperative != "Ada Lovelace" {

@@ -31,7 +31,7 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 							m = pressAwareness(m, "enter")
 						}
 					case "PR list", "PR detail":
-						m.showPRs, m.prAll = true, true
+						m.showPRs = true
 						m.prDetail = screen == "PR detail"
 					}
 					raw := m.View()

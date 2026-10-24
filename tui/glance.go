@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,21 @@ const (
 
 var glanceTabs = []string{"Activity", "People", "Related", "Subareas"}
 var overviewSortLabels = []string{"Activity (commits)", "Recent", "Name"}
+
+func (m Model) overviewSortLabel() string {
+	direction := "↓"
+	if m.overviewSort == 2 {
+		direction = "↑"
+	}
+	if m.overviewReverse {
+		if direction == "↑" {
+			direction = "↓"
+		} else {
+			direction = "↑"
+		}
+	}
+	return overviewSortLabels[max(0, min(m.overviewSort, len(overviewSortLabels)-1))] + " " + direction
+}
 
 type glanceFrame struct {
 	relatedOverlap, relatedPeople                     bool
@@ -60,6 +76,9 @@ func (m *Model) setGlanceQuery(q string) {
 func (m Model) glanceRepositories() []repositoryActivity {
 	rows := m.activityRepositories()
 	q := strings.ToLower(m.glanceQuery())
+	if m.overviewReverse {
+		slices.Reverse(rows)
+	}
 	if q == "" {
 		return rows
 	}
@@ -109,12 +128,25 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleGlanceSearch(msg)
 	}
 	key := msg.String()
+	if key == "v" {
+		id := m.areaRepoID
+		if id == "" {
+			rows := m.glanceRepositories()
+			if len(rows) == 0 {
+				return m, nil
+			}
+			id = rows[m.selectedRepository(rows)].repo.ID
+		}
+		m.showPRs, m.prDetail, m.prRepoPicker = true, false, false
+		m.prRepoID, m.prQuery, m.prOffset, m.prRow = id, "", 0, 0
+		return m, nil
+	}
 	if key == "q" || key == "ctrl+c" {
 		return m.quit()
 	}
 	if m.showPaths {
 		switch key {
-		case "esc", "enter", "left":
+		case "esc", "left":
 			m.showPaths = false
 			m.pathOffset = 0
 		case "tab", "shift+tab":
@@ -141,24 +173,6 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "p", "P":
-		m = m.selectPRScope(key == "P")
-		return m, nil
-	case "l":
-		m.viewMode = ViewAggregate
-		return m, nil
-	case "R":
-		cmd := m.startLocalRefresh()
-		return m, cmd
-	case "r":
-		m.overlayExcluded = make(map[string]bool)
-		for k, v := range m.excludedRepos {
-			m.overlayExcluded[k] = v
-		}
-		m.overlayCursor = 0
-		m.returnView = ViewAwareness
-		m.viewMode = ViewRepoOverlay
-		return m, nil
 	case "b":
 		m.hideBots = !m.hideBots
 		m.recomputeAuthors()
@@ -198,9 +212,6 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.personID = ""
 			return m, nil
 		}
-		if key == "esc" {
-			return m.quit()
-		}
 		return m, nil
 	}
 	if key == "right" {
@@ -214,6 +225,8 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "s":
 		m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+	case "S":
+		m.overviewReverse = !m.overviewReverse
 	case "tab", "1", "2", "3", "4":
 		if m.areaRepoID != "" && len(rows) > 0 {
 			m.openGlanceArea(rows[selected])
@@ -294,16 +307,20 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 	case "1", "2", "3", "4":
 		f.tab = int(key[0] - '1')
 		return m
-	case "o":
+	case "c":
 		if f.tab == glanceRelated {
 			f.relatedOverlap = !f.relatedOverlap
 			f.ids[glanceRelated] = ""
 			f.rows[glanceRelated] = 0
 		}
 		return m
-	case "s":
+	case "s", "S":
 		if f.tab == glanceSubareas {
-			m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+			if key == "s" {
+				m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+			} else {
+				m.overviewReverse = !m.overviewReverse
+			}
 		}
 		return m
 	}

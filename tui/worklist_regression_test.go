@@ -122,8 +122,8 @@ func TestWorklistRelatedAndParentPRProvenance(t *testing.T) {
 	}
 	m = pressAwareness(m, "p")
 	inventory := m.visiblePRs()
-	if len(inventory) != 1 || inventory[0].Number != 7 {
-		t.Fatalf("PR overlay changed parent scope: %+v", inventory)
+	if len(inventory) != 2 || inventory[0].Number != 7 || inventory[1].Number != 8 {
+		t.Fatalf("PR board was limited to its parent scope: %+v", inventory)
 	}
 
 }

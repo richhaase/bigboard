@@ -117,9 +117,9 @@ filter does not change the Related inventory. Missing commit IDs never count as
 shared evidence.
 
 The separate **Contributor overlap** section names canonical identities present
-in both areas in the selected range. Press `o` for
+in both areas in the selected range. Press `c` for
 the full scrollable overlap list, including on narrow terminals; `Enter` opens
-its shared names and their identity-filtered Activity. Press `o` again to return
+its shared names and their identity-filtered Activity. Press `c` again to return
 to co-change.
 
 ![40-column scrollable contributor overlap showing names in both areas](images/worklist-overlap.png)
@@ -156,8 +156,8 @@ the selected area. Long subjects, author identities and paths wrap by terminal
 cells. Rename/copy origins and generated-file exclusions are labeled when present.
 
 `↑/↓` scrolls lines. `PgUp/PgDown` or `Home/End` moves farther.
-`Enter` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
-lens. Return to a list or lens before changing filters or refreshing. The
+`←` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
+lens. `R` refreshes directly from the inspector. Return to a list or lens before changing local filters. The
 inspector's “Last updated” is the same retained local scan time called “Local” in
 Worklist. A refresh that removes the commit cannot silently retarget this
 inspector to a different commit.
@@ -177,29 +177,29 @@ competes with commit titles. Retained area-specific PR signals remain visible.
 fetch when known and space permits. Unknown inventory is never shown as zero;
 `p` provides detailed status and any remote retry/cooldown time.
 
-From Worklist, `p` opens the highlighted repository/parent-area inventory,
-including the default first row immediately after entering a repository. An
-accepted name search changes that visible scope; no matching rows means no
-scoped PRs. `P` opens all included repositories regardless of that search. PRs use **all open dates**, independent of local
-range, bot, person, and commit-search filters. Inside the overlay, `p` selects the current scope and `P` selects all included
-repositories, returning to the first list row without fetching. `Enter` toggles
-detail, `↑/↓` scrolls, and `Esc` backs out one level. `R` there refreshes
-**PRs only**; it does not start a local Git scan. `o` opens the selected PR in
-your default browser from the PR list or detail. The hint appears only for a
-valid GitHub PR URL; launch errors appear in the overlay.
+Lowercase `p` opens PRs across all included repositories. `f` chooses a
+repository scope, and Worklist's `v` opens PRs for its selected repository.
+Both paths use the same PR board. Repository scope is separate from global
+inclusion (`r`); PRs use all open dates, independent of local history filters.
+Plain `p` restores all-repository scope. `/` searches repository, title, author,
+or PR number; `s` selects a sort and `S` reverses it.
 
-GitHub context uses an already installed and authenticated `gh` CLI. Bigboard
-never signs in, requests new access, or fetches Git objects. Local history loads
-on launch and on `R` from Worklist, the statistics leaderboard, or scan errors.
-Remote requests use existing API budgets and cooldowns. **There is no timer
-refresh, polling, or automatic retry.** Update cached remote Git history yourself
-when needed; Bigboard only reads the local cache.
+Enter / right opens details. Arrows, paging, and Home/End navigate lists or
+scroll details. Left / Esc returns one level, clearing search and repository
+scope on the way to the PR root. At a board root, back stays on that board.
+`o` opens a valid canonical PR URL in your browser. `R` refreshes repository
+history and PR context from any board or detail, including the commit inspector.
+
+GitHub context uses an already installed and authenticated `gh` CLI. Startup and
+`R` fetch included repositories' remote-tracking refs before offline scans;
+local branches and working trees remain untouched. Remote requests retain their
+existing API budgets and cooldowns. There is no timer refresh or automatic retry.
 
 ## Contributor statistics
 
-![120-column contributor leaderboard with arrow selection, Enter detail, and lowercase l to return to Worklist](images/worklist-leaderboard.png)
+![120-column contributor leaderboard with arrow selection, Enter detail, and lowercase w to return to Worklist](images/worklist-leaderboard.png)
 
-*Leaderboard, 120 × 36. Lowercase `l` switches back to Worklist; arrows select and `Enter` opens contributor detail.*
+*Leaderboard, 120 × 36. Lowercase `w` switches back to Worklist; arrows select and `Enter` opens contributor detail.*
 
 ![Scrolled 80-column contributor detail showing labeled repository metrics, activity timeline, heatmap and pinned paging controls](images/worklist-statistics.png)
 
@@ -209,14 +209,14 @@ lines 12–39/39, while paging and back controls remain visible.*
 
 From Worklist, lowercase `l` opens the statistics leaderboard and `Enter` opens
 a contributor.
-In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` switches
-contributors. `Esc` returns to the leaderboard; press `l` **there** to return to
-Worklist. Both statistics views use `t` for the local range. `→` opens the
+In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` scrolls the same contributor. `Esc` returns to the leaderboard. Lowercase `l`, `w`, and `p`
+open the leaderboard, Worklist, and all included PRs from either statistics view.
+Both statistics views use `t` for the local range. `→` opens the
 selected contributor, `←` returns, and `←` at the leaderboard stays there.
 
 Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`r`),
-and refresh (`R`) live on the statistics leaderboard. Worklist's PR and lens keys
-do not apply to statistics. See the [view-specific controls](../README.md#controls)
+and refresh (`R`) live on the statistics leaderboard. Worklist's lens keys
+remain specific to Worklist. See the [view-specific controls](../README.md#controls)
 for search, quit, and overlay behavior.
 
 ## Keyboard help

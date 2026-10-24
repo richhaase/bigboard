@@ -172,8 +172,8 @@ func TestPROverlayNavigationResizeAndTerminalSafety(t *testing.T) {
 		t.Fatal("detail escape")
 	}
 	m = pressAwareness(m, "esc")
-	if m.showPRs || m.selectedRepoID != "/api" {
-		t.Fatal("list escape lost scope")
+	if !m.showPRs || m.selectedRepoID != "/api" {
+		t.Fatal("list escape left the board root or changed Worklist scope")
 	}
 }
 func TestPRInitialLoadSchedulesOnlyAfterLocalScan(t *testing.T) {
@@ -227,7 +227,6 @@ func TestPRRefreshKeyCoalescesRemoteFetch(t *testing.T) {
 func TestPRRefreshPreservesSelectedIdentityAndClosesRemovedDetail(t *testing.T) {
 	m := prFixture()
 	m.showPRs = true
-	m.prAll = true
 	m.prDetail = true
 	old := m.allPRs()[0]
 	newer := old
@@ -307,7 +306,7 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	}
 	next, _ := m.Update(refresh())
 	m = next.(Model)
-	m = pressAwareness(m, "P")
+	m = pressAwareness(m, "p")
 	m.prState.nextRefresh = time.Time{} // A manual refresh after the minimum age.
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 	m = next.(Model)

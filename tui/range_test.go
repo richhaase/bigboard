@@ -108,7 +108,7 @@ func TestRangePickerOwnsKeysWithoutRefreshOrNavigation(t *testing.T) {
 	m = rangeKey(t, m, "right")
 	before := m.glance
 	m = rangeKey(t, m, "t")
-	for _, k := range []string{"left", "right", "R", "r", "l", "v", "p", "q", "t", "/", "e"} {
+	for _, k := range []string{"left", "right", "R", "r", "v", "t", "/", "e"} {
 		m = rangeKey(t, m, k)
 	}
 	if !m.rangePicker.open || m.quitting || !reflect.DeepEqual(before, m.glance) {

@@ -31,13 +31,21 @@ type Model struct {
 	// Glance navigation is separate from the aggregate statistics view.
 	glance          glanceState
 	overviewSort    int
+	overviewReverse bool
 	prState         prState
 	prProvider      PRProvider
 	prGeneration    uint64
 	cancelPRs       context.CancelFunc
 	showPRs         bool
 	prDetail        bool
-	prAll           bool
+	prRepoID        string
+	prRepoPicker    bool
+	prRepoRow       int
+	prQuery         string
+	prSearching     bool
+	prSort          int
+	prReverse       bool
+	overlayPRs      bool
 	prRow           int
 	prOffset        int
 	prBrowserError  string
@@ -415,6 +423,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "l", "w", "p":
+		if m.helpSearchActive() && !m.showHelp {
+			break
+		}
+		if m.viewMode == ViewRepoOverlay {
+			m.closeRepositoryControls(false)
+		}
+		m.showHelp, m.helpOffset = false, 0
+		m.showScanErrors, m.scanErrorOffset = false, 0
+		m.showPaths, m.pathOffset = false, 0
+		m.rangePicker = rangePickerState{}
+		m.err = nil
+		m.searching, m.glance.searching, m.prSearching = false, false, false
+		m.prRepoPicker = false
+		selectedPR := m.selectedPRKey()
+		m.showPRs = msg.String() == "p"
+		m.prDetail, m.prOffset = false, 0
+		if m.showPRs {
+			m.prBrowserError = ""
+			m.prRepoID = ""
+			m.selectPR(selectedPR)
+		} else if msg.String() == "l" {
+			m.viewMode = ViewAggregate
+		} else {
+			m.viewMode = ViewAwareness
+		}
+		return m, nil
+	}
 	if m.showHelp {
 		return m.handleHelpKey(msg)
 	}
@@ -439,7 +476,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.rangePicker.open {
 		return m.handleRangeKey(msg)
 	}
-	if msg.String() == "e" && !m.searching && !m.glance.searching && len(m.scanErrors) > 0 {
+	if m.helpSearchActive() {
+		if m.showPRs {
+			return m.handlePRSearch(msg)
+		}
+		if m.viewMode == ViewAwareness {
+			return m.handleGlanceSearch(msg)
+		}
+		return m.handleSearchKey(msg)
+	}
+	if m.viewMode == ViewRepoOverlay {
+		return m.handleRepositoryControls(msg)
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m.quit()
+	case "R":
+		return m, m.startLocalRefresh()
+	case "r":
+		m.openRepositoryControls()
+		return m, nil
+	}
+	if msg.String() == "e" && len(m.scanErrors) > 0 {
 		m.showScanErrors, m.scanErrorOffset = true, 0
 		return m, nil
 	}
@@ -449,39 +507,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.viewMode == ViewAwareness {
 		return m.handleAwarenessKey(msg)
 	}
-	if m.searching {
-		return m.handleSearchKey(msg)
-	}
-
 	switch msg.String() {
-	case "l":
-		if m.viewMode == ViewAggregate {
-			m.viewMode = ViewAwareness
-			return m, nil
-		}
-	case "ctrl+c":
-		return m.quit()
-
-	case "q":
-		if m.viewMode == ViewAggregate && m.filterQuery != "" {
-			selectedID := m.selectedContributorID()
-			m.filterQuery = ""
-			m.selectContributor(selectedID)
-			return m, nil
-		}
-		return m.quit()
-
-	case "R":
-		if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
-			cmd := m.startLocalRefresh()
-			return m, cmd
-		}
-
 	case "/":
 		if m.viewMode == ViewAggregate {
 			m.searching = true
 			selectedID := m.selectedContributorID()
-			m.filterQuery = ""
 			m.selectContributor(selectedID)
 		}
 
@@ -491,15 +521,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "esc", "left":
-		if msg.String() != "esc" && m.viewMode == ViewRepoOverlay {
-			return m, nil
-		}
 		switch m.viewMode {
-		case ViewRepoOverlay:
-			m.excludedRepos = m.overlayExcluded
-			m.overlayExcluded = nil
-			m.viewMode = m.returnView
-			m.recomputeAuthors()
 		case ViewOperative:
 			m.viewMode = ViewAggregate
 			m.activeOperative = ""
@@ -509,19 +531,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				selectedID := m.selectedContributorID()
 				m.filterQuery = ""
 				m.selectContributor(selectedID)
-			} else if msg.String() == "esc" {
-				return m.quit()
 			}
 		}
 
 	case "up":
 		switch m.viewMode {
-		case ViewRepoOverlay:
-			if m.overlayCursor > 0 {
-				m.overlayCursor--
-			}
 		case ViewOperative:
-			m.stepOperative(-1)
+			m.statDetailOffset--
+			m.clampStatDetailScroll()
 		default:
 			if m.selectedRow > 0 {
 				m.selectedRow--
@@ -531,12 +548,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "down":
 		switch m.viewMode {
-		case ViewRepoOverlay:
-			if m.overlayCursor < len(m.loadedRepos)-1 {
-				m.overlayCursor++
-			}
 		case ViewOperative:
-			m.stepOperative(1)
+			m.statDetailOffset++
+			m.clampStatDetailScroll()
 		default:
 			if m.selectedRow < len(m.displayedAuthors())-1 {
 				m.selectedRow++
@@ -545,6 +559,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "pgup", "pgdown", "home", "end":
+		if m.viewMode == ViewAggregate {
+			m.selectedRow, _ = glanceMove(msg.String(), m.selectedRow, len(m.displayedAuthors()), m.tableViewport())
+			m.clampScroll()
+		}
 		if m.viewMode == ViewOperative {
 			m.clampStatDetailScroll()
 			switch msg.String() {
@@ -582,37 +600,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.recomputeAuthors()
 		}
 
-	case "r":
-		if m.viewMode == ViewAggregate {
-			m.overlayExcluded = make(map[string]bool)
-			for k, v := range m.excludedRepos {
-				m.overlayExcluded[k] = v
-			}
-			m.overlayCursor = 0
-			m.returnView = ViewAggregate
-			m.viewMode = ViewRepoOverlay
-		}
-
-	case " ":
-		if m.viewMode == ViewRepoOverlay && m.overlayCursor < len(m.loadedRepos) {
-			id := m.loadedRepos[m.overlayCursor].ID
-			if m.overlayExcluded[id] {
-				delete(m.overlayExcluded, id)
-			} else {
-				m.overlayExcluded[id] = true
-			}
-		}
-
 	case "enter", "right":
 		if msg.String() != "enter" && m.viewMode != ViewAggregate {
 			return m, nil
 		}
 		switch m.viewMode {
-		case ViewRepoOverlay:
-			m.excludedRepos = m.overlayExcluded
-			m.overlayExcluded = nil
-			m.viewMode = m.returnView
-			m.recomputeAuthors()
 		case ViewAggregate:
 			disp := m.displayedAuthors()
 			if m.selectedRow < len(disp) {
@@ -749,36 +741,6 @@ func (m *Model) clampScroll() {
 	if m.scrollOffset < 0 {
 		m.scrollOffset = 0
 	}
-}
-
-func (m *Model) stepOperative(delta int) {
-	list := m.displayedAuthors()
-	if len(list) == 0 {
-		return
-	}
-	idx := -1
-	for i, a := range list {
-		if (m.activeAuthorID != "" && a.ID == m.activeAuthorID) || (m.activeAuthorID == "" && a.Name == m.activeOperative) {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		idx = m.selectedRow
-	} else {
-		idx += delta
-	}
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(list)-1 {
-		idx = len(list) - 1
-	}
-	m.statDetailOffset = 0
-	m.activeOperative = list[idx].Name
-	m.activeAuthorID = list[idx].ID
-	m.selectedRow = idx
-	m.clampScroll()
 }
 
 func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
