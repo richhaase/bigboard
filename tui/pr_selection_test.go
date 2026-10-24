@@ -23,138 +23,67 @@ func prOnlySelectionFixture() Model {
 	return m
 }
 
-func TestPRScopeUsesVisibleOverviewSelection(t *testing.T) {
-	for _, tc := range []struct {
-		name, selected, query string
-		want                  []int
-	}{
-		{"default PR-only root", "", "", []int{260, 261}},
-		{"removed selection", "removed-area", "", []int{260, 261}},
-		{"filtered selection", "root", "docs", []int{262}},
-		{"no matching rows", "root", "does-not-exist", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := prOnlySelectionFixture()
-			m.areaRepoID, m.selectedAreaID = "/api", tc.selected
-			m.glance.overviewQueries[1] = tc.query
-			_ = m.View() // Rendering must not be relied on to mutate model selection.
-			next, cmd := m.handleAwarenessKey(key("p"))
-			m = next.(Model)
-			if cmd != nil {
-				t.Fatal("opening PRs started an external command")
-			}
-			got := m.visiblePRs()
-			if len(got) != len(tc.want) {
-				t.Fatalf("scope %q: got %+v, want %v", m.selectedAreaID, got, tc.want)
-			}
-			for i, n := range tc.want {
-				if got[i].Number != n {
-					t.Fatalf("got %d, want %d", got[i].Number, n)
-				}
-			}
-			if len(tc.want) == 0 && !strings.Contains(m.View(), "No PRs to display") {
-				t.Fatal("empty filter displays unrelated PRs")
-			}
-		})
-	}
-}
-
-func TestPRScopeImmediatelyAfterRepositoryEntry(t *testing.T) {
-	m := prOnlySelectionFixture()
-	m.selectedRepoID = "/api"
-	m = pressAwareness(m, "enter")
-	if m.areaRepoID != "/api" || m.selectedAreaID != "" {
-		t.Fatal("fixture must enter an unresolved area overview")
-	}
-	if !strings.Contains(m.View(), "2 open") {
-		t.Fatal("root preview lacks PR evidence")
-	}
-	m = pressAwareness(m, "p")
-	if len(m.visiblePRs()) != 2 {
-		t.Fatalf("immediate p lost root PRs: %s", m.View())
-	}
-}
-
-func TestPRScopeRepositoryFallbackAndAllInventory(t *testing.T) {
-	m := prOnlySelectionFixture()
-	m.selectedRepoID = "removed-repo"
-	// Repository query determines the visible row, just as the Worklist does.
-	m.glance.overviewQueries[0] = "api"
-	m = pressAwareness(m, "p")
-	if m.selectedRepoID != "/api" || len(m.visiblePRs()) != 3 {
-		t.Fatal("repository p did not match visible selection")
-	}
-	m = pressAwareness(m, "esc")
-	m.glance.overviewQueries[0] = "no match"
-	m = pressAwareness(m, "p")
-	if len(m.visiblePRs()) != 0 {
-		t.Fatal("empty repository filter leaked old selection")
-	}
-	m = pressAwareness(m, "esc")
-	m = pressAwareness(m, "P")
-	if len(m.visiblePRs()) != 3 {
-		t.Fatal("all-repository inventory was filtered by overview query")
-	}
-}
-
-func TestPROverlayScopeShortcuts(t *testing.T) {
-	for _, detail := range []bool{false, true} {
-		for _, query := range []string{"", "docs", "no-match"} {
-			m := prOnlySelectionFixture()
-			m.areaRepoID = "/api"
-			m.selectedAreaID = ""
-			m.glance.overviewQueries[1] = query
-			provider := &fakePRProvider{}
-			m.prProvider = provider
-			press := func(k string) {
-				t.Helper()
-				next, cmd := m.handleKey(key(k))
-				m = next.(Model)
-				if cmd != nil || provider.fetches != 0 || provider.resolves != 0 {
-					t.Fatalf("%s scheduled work", k)
-				}
-			}
-			press("P") // All-first must still resolve the visible scope on p.
-			for _, k := range []string{"p", "P", "P", "p", "p"} {
-				m.prDetail, m.prRow, m.prOffset = detail, 2, 8
-				press(k)
-				want := 3
-				if k == "p" {
-					want = map[string]int{"": 2, "docs": 1, "no-match": 0}[query]
-				}
-				if !m.showPRs || m.prAll != (k == "P") || m.prDetail || m.prRow != 0 || m.prOffset != 0 || len(m.visiblePRs()) != want {
-					t.Fatalf("detail=%v query=%q key=%s: all=%v detail=%v row=%d offset=%d count=%d want=%d", detail, query, k, m.prAll, m.prDetail, m.prRow, m.prOffset, len(m.visiblePRs()), want)
-				}
-			}
-			m.prDetail = true
-			press("esc")
-			if !m.showPRs || m.prDetail {
-				t.Fatal("Esc did not return to list")
-			}
-			press("esc")
-			if m.showPRs {
-				t.Fatal("Esc did not close list")
-			}
+func TestPRBoardIgnoresWorklistFilters(t *testing.T) {
+	for _, query := range []string{"", "docs", "no-match"} {
+		m := prOnlySelectionFixture()
+		m.areaRepoID, m.selectedAreaID = "/api", "root"
+		m.glance.overviewQueries[1] = query
+		m.personID = "email:absent@example.test"
+		m.hideBots, m.timeIdx = true, 0
+		m = keyboardContractPress(t, m, "p")
+		if !m.showPRs || m.prDetail || len(m.visiblePRs()) != 3 {
+			t.Fatalf("query %q limited the PR board: %+v", query, m.visiblePRs())
+		}
+		if !strings.Contains(m.View(), "all included repositories") {
+			t.Fatal("PR board does not identify its scope")
 		}
 	}
 }
 
-func TestPROverlayScopeEmptySnapshotAndParentDetail(t *testing.T) {
+func TestPRBoardRespectsIncludedRepositories(t *testing.T) {
 	m := prOnlySelectionFixture()
-	m.areaRepoID, m.selectedAreaID = "/api", "root"
-	m = pressAwareness(m, "enter")
-	m = pressAwareness(m, "P")
-	next, cmd := m.handleKey(key("p"))
-	m = next.(Model)
-	if cmd != nil || len(m.visiblePRs()) != 2 || !m.glance.detailOpen {
-		t.Fatal("switching from all lost parent detail scope")
+	m.excludedRepos["/api"], m.excludedRepos["/web"] = true, true
+	m = keyboardContractPress(t, m, "p")
+	if len(m.visiblePRs()) != 0 || !strings.Contains(m.View(), "No PRs to display") {
+		t.Fatal("excluded repositories leaked into the PR board")
 	}
+}
+
+func TestPRBoardRetainsSelectionAcrossBoardChanges(t *testing.T) {
+	m := keyboardContractPress(t, prOnlySelectionFixture(), "p", "down")
+	selected := m.visiblePRs()[m.prRow].Key()
+	m = keyboardContractPress(t, m, "l", "p")
+	if m.prDetail || m.visiblePRs()[m.prRow].Key() != selected {
+		t.Fatal("returning to the PR board lost selection")
+	}
+	m = keyboardContractPress(t, m, "enter", "down", "w", "p")
+	if m.prDetail || m.prOffset != 0 || m.visiblePRs()[m.prRow].Key() != selected {
+		t.Fatal("p did not return from detail to the selected PR in the board")
+	}
+}
+
+func TestPRBoardEmptySnapshotDoesNotFetch(t *testing.T) {
+	m := prOnlySelectionFixture()
+	provider := &fakePRProvider{}
+	m.prProvider = provider
 	m.prState.snapshots = nil
-	for _, k := range []string{"P", "p"} {
-		next, cmd = m.handleKey(key(k))
-		m = next.(Model)
-		if cmd != nil || len(m.visiblePRs()) != 0 || !strings.Contains(m.View(), "No PRs to display") {
-			t.Fatal("empty snapshot must remain empty without fetching")
+	m = keyboardContractPress(t, m, "p", "l", "w", "p")
+	if provider.resolves != 0 || provider.fetches != 0 || len(m.visiblePRs()) != 0 || !strings.Contains(m.View(), "No PRs to display") {
+		t.Fatal("opening the PR board fetched or manufactured data")
+	}
+}
+
+func TestPRBoardEscapeStaysAtBoardRoot(t *testing.T) {
+	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
+		m := prOnlySelectionFixture()
+		m.viewMode = view
+		m = keyboardContractPress(t, m, "p", "enter", "esc")
+		if !m.showPRs || m.prDetail {
+			t.Fatal("Esc did not return to PR list")
+		}
+		m = keyboardContractPress(t, m, "esc")
+		if !m.showPRs || m.viewMode != view {
+			t.Fatal("Esc left the PR board root")
 		}
 	}
 }

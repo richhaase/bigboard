@@ -94,7 +94,7 @@ paths. People is alphabetical; selecting a person filters Activity. Related list
 exact commits touching both areas, their counts, and the latest shared title;
 `Enter` opens those commits and then their full changed paths. Contributor overlap
 is separate: it lists names appearing in both areas in the selected range. Press
-`o` in Related for its scrollable overlap list, then `Enter` for names and their
+`c` in Related for its scrollable overlap list, then `Enter` for names and their
 identity-filtered evidence.
 
 Subareas refines automatic path areas by one literal directory level at a time.
@@ -169,10 +169,10 @@ never signs in, requests access, creates credentials, or changes pull requests.
 Headless `--export` stays local and unchanged.
 Only a supported GitHub `origin` is used, with no upstream guessing.
 
-PR summaries appear beside repositories and work areas when width permits. From
-Worklist, press `p` for the selected
-scope or `P` for all included repositories, then Enter for a scrollable detail view
-and Esc to return. Details show the canonical link, GitHub author and reviewers,
+PR summaries appear beside repositories and work areas when width permits.
+Press lowercase `p` for all included repositories, `f` within PRs to choose one
+repository, or `v` from Worklist for its selected repository. Enter opens a
+scrollable detail view; left / Esc returns one level. Details show the canonical link, GitHub author and reviewers,
 aggregate review decision, check rollup, mergeability and update time. GitHub
 handles remain separate from local Git contributor identities. `UNKNOWN` is not
 approval or merge readiness; “updated” includes any PR activity.
@@ -185,12 +185,12 @@ contributor and bot filters and never enter commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
 `R` fetches repository history and refreshes PR context, including inside the PR
-overlay. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
+board. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
 join an in-flight remote refresh rather than canceling and restarting it. Excluded
 repositories are not fetched. The entire remote refresh shares a 128-request cap;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
-exponential cooldowns when no retry time is available. The PR overlay status shows when `R`
+exponential cooldowns when no retry time is available. The PR board status shows when `R`
 can request data again; no background retry runs. There is no polling or disk cache,
 so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
@@ -201,7 +201,7 @@ refresh. Reviewer lists are also bounded and visibly partial when truncated.
 No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
 file list does not expose rename origins, so that limitation is labelled rather
 than guessed. Authentication, rate limits, unavailable repositories and unsupported
-origins are reported in the PR overlay without suppressing local history.
+origins are reported in the PR board without suppressing local history.
 
 ## Accuracy notes
 
@@ -216,82 +216,101 @@ origins are reported in the PR overlay without suppressing local history.
 
 ## Controls
 
-Keys depend on the active view. While typing a search, ordinary characters
-(including `q`) enter text; `Enter` accepts, `Esc` clears, and `Ctrl+C` quits.
-Press `?` or `F1` on any screen for a centered help modal with that screen's
-shortcuts. While typing a search, `?` stays text and `F1` opens help. `Esc`,
-`Enter`, `?`, or `F1` closes help and returns to the same selection. Long help
-scrolls with arrows, PageUp/PageDown, and Home/End without changing the view beneath it.
+BigBoard has three peer boards. Lowercase `l` opens the contributor leaderboard,
+`w` opens Worklist, and `p` opens PRs across all included repositories. Switching
+uses cached data and keeps selections, searches, and sorts. Plain `p` clears PR
+repository scope. Worklist retains its repository, area, lens, and person context.
+Pending dialog choices cancel when switching boards.
 
-### Worklist overview and area detail
-
-| Key | Action |
-|-----|--------|
-| `↑/↓` | Select a repository, area, commit, person, or related/subarea row |
-| `PgUp` / `PgDown` | Page through the current list |
-| `Home` / `End` | First / last row |
-| `t` | Open local range picker: 1d / 7d / 14d / 30d / 90d / 1y / all / custom days |
-| `←` | Go back through filters and detail; at the repository root, stay there |
-| `→` or `Enter` | Repository → areas → detail → full commit; in People, filter Activity; in Related/Subareas, open that row |
-| `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
-| `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses once area detail is open |
-| `s` | Sort overview or Subareas: Recent → Name → Activity (commits); other detail lenses keep their order |
-| `/` | Search only the current list or lens |
-| `b` | Show/hide bot contributors in local history |
-| `p` / `P` | Selected repository/parent-area PRs / all included repositories |
-| `r` | Open repository inclusion controls |
-| `R` | Fetch repository history and request PR context, subject to PR cooldown |
-| `e` | Open scan-error details when errors exist |
-| `l` (lowercase) | Open the contributor-statistics leaderboard |
-| `o` | In Related, switch between shared commits and contributor overlap |
+| Key | Shared behavior |
+|-----|-----------------|
+| `l` / `w` / `p` | Open Leaderboard / Worklist / all-repository PRs |
+| `↑` / `↓` | Select rows in lists; scroll lines in details |
+| `PgUp` / `PgDown` | Move a page in lists and details |
+| `Home` / `End` | First / last row or detail page |
+| `→` / `Enter` | Open the selected item or drill down; does not toggle detail closed |
+| `←` / `Esc` | Clear a current filter or return one level; stay at board roots |
+| `/` | Search the current board list or Worklist lens; reopen the existing query for editing |
+| `s` / `S` | Change sort / reverse order in sortable lists |
+| `r` | Open global repository inclusion controls from any board or detail |
+| `R` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
+| `e` | Open repository update errors when present |
 | `?` / `F1` | Open contextual help |
-| `Esc` | Clear a search/person filter, unwind detail/subareas, then return to repositories; at the unfiltered repository list, quit |
-| `q` / `Ctrl+C` | Quit, except ordinary `q` is text during search entry |
+| `q` / `Ctrl+C` | Quit outside text entry; `Ctrl+C` always quits |
 
-The full **commit inspector** has its own keys: `↑/↓` scrolls lines;
-`PgUp/PgDown` or `Home/End` moves farther. `←`, `Enter`, or `Esc` returns to
-Activity. `Tab/Shift+Tab` leaves the inspector for the next/previous lens. Return
-to the list or lens before changing range, toggling bots, or refreshing.
+During search entry, ordinary characters, including shortcut letters and `?`,
+enter text. `Enter` accepts the filter, `Esc` clears it, and `Backspace` edits.
+`F1` opens help while typing. Help is a centered, scrollable modal: arrows,
+paging, and Home/End scroll; `Esc`, `Enter`, `?`, or `F1` dismiss it. Board keys
+can leave help directly. Dialogs own their other keys while open.
 
-The **range picker** owns its keys: `↑/↓` chooses a preset; `Home` selects the
-first preset, and `End` or `c` selects Custom days. With Custom days selected,
-`Enter` opens day entry. Type to replace the current value; `Backspace` edits and
-`Ctrl+U` clears it. `Enter` applies a valid choice, while
-`Esc` cancels without changing the range or selection. Custom ranges are
-session-only; `since` in config continues to accept the preset labels. Search
-entry, help, commit inspection, PRs and repository controls keep their own keys;
-return to a list or detail lens to open the picker.
+### Worklist
 
-### PR and repository overlays
+Worklist shows included repositories and their default-branch history in the
+selected local time range. `→` / `Enter` drills through repositories, areas,
+lenses, and commit details. `←` / `Esc` clears a current search/person filter or
+returns to the parent. At the repository root it stays there; use `q` to quit.
 
-In the **PR overlay**, `↑/↓` selects PRs or scrolls the open PR detail.
-`p` selects the current scope and `P` selects all included repositories; either
-returns to the first PR in the list using cached data. `Enter` toggles detail;
-`Esc` backs out one level. `o` opens the selected PR in your default browser
-from either the PR list or detail; it requires a canonical GitHub PR URL.
-Browser-launch errors appear in the overlay. `R` refreshes **repository history
-and PR data**. `q` or `Ctrl+C` quits. Page and Home/End keys are not used here.
+| Key | Worklist behavior |
+|-----|-------------------|
+| `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
+| `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses in area detail |
+| `s` / `S` | Change Recent / Name / Activity sort, or reverse it, in overview and Subareas |
+| `t` | Change the local history range |
+| `b` | Show / hide bot contributors in local history |
+| `v` | Open the PR board scoped to the selected repository, including from area or commit detail |
+| `c` | In Related, switch between shared commits and contributor overlap |
 
-In **repository controls**, `↑/↓` selects and `Space` toggles inclusion.
-Both `Enter` and `Esc` apply the current choices and close the overlay; `Esc`
-does not cancel toggles. These choices affect the current session, not the config
-file. Excluding a repository also removes it from later Git fetches and PR refresh requests.
+People, Activity, and Related keep their meaningful fixed ordering. In People,
+Enter opens that contributor's Activity. Related and Subareas open the selected
+evidence. The full commit inspector uses arrows and paging to scroll; `←` / `Esc`
+returns to Activity. `Tab` / `Shift+Tab` leaves it for the next / previous lens.
+`R` refreshes directly from the inspector without changing the selected commit.
 
-### Contributor statistics
+### PRs
 
-On the **leaderboard**, `↑/↓` selects a contributor and `→` / `Enter` opens
-their detail. `s` cycles metric columns; `S` reverses the metric sort. `/` filters
-contributors by name, `b` toggles bots, `r` opens repository controls, `R` refreshes,
-and lowercase `l` returns to Worklist. With an accepted name filter, `q` or `Esc`
-clears it first; otherwise it quits. The leaderboard scrolls as selection moves; page and
-Home/End keys are not used there.
+The PR board defaults to all open PRs across included repositories, independent
+of local time, person, and bot filters. `f` opens a repository scope picker:
+choose All included repositories or one repository, then Enter to apply or Esc
+to cancel. Scope is a view filter; it never changes inclusion or fetch coverage.
+Worklist's `v` enters this same board with explicit repository scope. Plain `p`
+returns to all included repositories while preserving the selected PR if visible.
 
-In **contributor detail**, `↑/↓` switches contributors. `PgUp/PgDown`
-scrolls content and `Home/End` jumps to its first/last page. `←` / `Esc` returns to the
-leaderboard, where filtering, bot toggles, sorting, repository controls and refresh
-are available. `q` or `Ctrl+C` quits. Both statistics views support `t` for the local time range. `←` at the
-leaderboard clears an accepted name filter, then stays there without quitting;
-arrows never change the range. `p/P` and Worklist's `1`–`4` lenses are not statistics keys.
+`/` searches repository, title, author, or `#number`. `s` cycles Updated,
+Repository, Author, and Title; `S` reverses the order. Updated defaults newest
+first. The heading shows the active scope and sort; accepted search text stays
+visible. Enter / right opens PR details; left / Esc returns to the list, clears
+an active search, then clears repository scope. Back at the all-repository root
+stays on PRs. All lists and details support arrows, paging, and Home/End.
+
+`o` opens the selected PR in your default browser from the list or detail when
+its canonical GitHub URL is valid. Launch errors appear on the board. `R`
+refreshes repository history and PR context from list or detail. `r` changes
+global inclusion and returns to the same PR view.
+
+### Leaderboard
+
+The leaderboard aggregates included repositories in the selected local history
+range. `/` filters contributor names; `s` selects the metric and `S` reverses it.
+`b` toggles bots and `t` changes the range. Enter / right opens contributor detail.
+In detail, arrows and paging scroll the same contributor; left / Esc returns to
+the list. Select another contributor there to open their detail. `r` and `R`
+remain available in detail. At the list root, Esc clears a search if present,
+otherwise stays there; `q` quits immediately.
+
+### Dialogs
+
+Repository inclusion is session-wide and separate from PR repository scope.
+Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
+Enter applies choices; Esc / left cancels. Exclusion removes a repository from
+all boards and subsequent fetch/PR requests. It does not write the config file.
+
+`t` opens the local range picker on Worklist and statistics list/detail views.
+Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
+preset; End or `c` selects Custom. Enter applies a preset or opens day entry.
+Custom entry accepts 1–3650 days; Backspace edits and Ctrl+U clears it. Enter
+applies a valid range; Esc cancels. Custom ranges are session-only. Time and bot
+filters affect Worklist and statistics; PRs remain independent.
 
 ## Config file
 

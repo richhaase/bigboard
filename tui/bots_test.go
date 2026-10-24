@@ -89,24 +89,14 @@ func TestModelBotToggle(t *testing.T) {
 	}
 }
 
-func TestStepOperativeKeepsPositionWhenActiveDropsOut(t *testing.T) {
+func TestContributorScrollKeepsMissingIdentity(t *testing.T) {
 	m := NewModelWithOptions(nil, stats.SortByTotal, nil, "v", DefaultTimeIndex, Options{})
-	m.authors = []stats.AuthorStats{
-		{Name: "First", TotalChange: 30},
-		{Name: "Second", TotalChange: 20},
-		{Name: "Third", TotalChange: 10},
-	}
-	m.activeOperative = "Vanished"
-	m.selectedRow = 1
-	m.stepOperative(1)
-	if m.activeOperative != "Second" {
-		t.Errorf("expected position retained at Second, got %q", m.activeOperative)
-	}
-
-	m.activeOperative = "Second"
-	m.stepOperative(1)
-	if m.activeOperative != "Third" {
-		t.Errorf("expected step to Third, got %q", m.activeOperative)
+	m.viewMode = ViewOperative
+	m.authors = []stats.AuthorStats{{ID: "email:first@example.test", Name: "First", TotalChange: 30}}
+	m.activeOperative, m.activeAuthorID = "Vanished", "email:vanished@example.test"
+	m = keyboardContractPress(t, m, "down", "pgdown", "up")
+	if m.activeOperative != "Vanished" || m.activeAuthorID != "email:vanished@example.test" {
+		t.Fatal("scrolling silently selected a different contributor")
 	}
 }
 

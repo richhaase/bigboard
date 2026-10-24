@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -86,7 +87,7 @@ func keyboardContractOrdinaryContexts() []keyboardContractContext {
 			return keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "enter", "down")
 		}},
 		{"contributor overlap", func(t *testing.T) Model {
-			return keyboardContractPress(t, keyboardContractFixture(), "right", "3", "o", "down")
+			return keyboardContractPress(t, keyboardContractFixture(), "right", "3", "c", "down")
 		}},
 	}
 	for tab, name := range glanceTabs {
@@ -105,7 +106,7 @@ func keyboardContractOwnedContexts() []keyboardContractContext {
 			return keyboardContractPress(t, m, "right", "enter", "down")
 		}},
 		{"PR list", func(t *testing.T) Model {
-			return keyboardContractPress(t, prOnlySelectionFixture(), "P", "down")
+			return keyboardContractPress(t, prOnlySelectionFixture(), "p", "down")
 		}},
 		{"PR detail", func(t *testing.T) Model {
 			m := prFixture()
@@ -115,7 +116,7 @@ func keyboardContractOwnedContexts() []keyboardContractContext {
 				snapshot.prs[0].Files = append(snapshot.prs[0].Files, gh.File{Path: fmt.Sprintf("feature/file%02d.go", i)})
 			}
 			m.prState.snapshots["org/repo"] = snapshot
-			return keyboardContractPress(t, m, "P", "enter", "down")
+			return keyboardContractPress(t, m, "p", "enter", "down")
 		}},
 		{"repository overlay", func(t *testing.T) Model {
 			return keyboardContractPress(t, awarenessFixture(), "r", "down")
@@ -139,7 +140,7 @@ func keyboardContractState(m Model) string {
 	return fmt.Sprintf("%#v", []any{
 		m.viewMode, m.returnView, m.glance, m.selectedRepoID, m.areaRepoID, m.selectedAreaID, m.personID,
 		m.selectedRow, m.scrollOffset, m.activeAuthorID, m.activeOperative, m.statDetailOffset,
-		m.showPaths, m.pathOffset, m.showPRs, m.prAll, m.prDetail, m.prRow, m.prOffset,
+		m.showPaths, m.pathOffset, m.showPRs, m.prDetail, m.prRow, m.prOffset,
 		m.prBrowserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
 		m.filterQuery, m.searching, m.rangePicker, m.timeIdx, m.customRangeDays, m.overviewSort,
 		m.showHelp, m.helpOffset,
@@ -154,7 +155,7 @@ func TestKeyboardContractRemovedAliasesAreInert(t *testing.T) {
 			base := tc.setup(t)
 			// Resolve lazy selection before asserting that a key is a no-op.
 			base = keyboardContractPress(t, base, "")
-			for _, k := range []string{"h", "j", "k", "g", "G", "v", "L"} {
+			for _, k := range []string{"h", "j", "k", "g", "G", "L", "W", "P"} {
 				t.Run(k, func(t *testing.T) {
 					before := keyboardContractState(base)
 					after := keyboardContractPress(t, base, k)
@@ -167,45 +168,67 @@ func TestKeyboardContractRemovedAliasesAreInert(t *testing.T) {
 	}
 }
 
-func TestKeyboardContractLowercaseLRoundTripPreservesWorklist(t *testing.T) {
+func TestKeyboardContractBoardRoundTripPreservesWorklist(t *testing.T) {
 	for _, tc := range keyboardContractOrdinaryContexts() {
 		t.Run(tc.name, func(t *testing.T) {
-			m := tc.setup(t)
+			m := keyboardContractPress(t, tc.setup(t), "")
 			before := m
-			if m.viewMode == ViewOperative {
-				m = keyboardContractPress(t, m, "l")
-				if keyboardContractState(m) != keyboardContractState(before) {
-					t.Fatal("l escaped contributor detail or drilled in")
-				}
-				return
+			m = keyboardContractPress(t, m, "l", "p", "w")
+			if m.viewMode != ViewAwareness || m.showPRs || m.showPaths {
+				t.Fatal("w did not return to Worklist")
 			}
-			m = keyboardContractPress(t, m, "l")
-			want := ViewAggregate
-			if before.viewMode == ViewAggregate {
-				want = ViewAwareness
-			}
-			if m.viewMode != want || m.showPaths || m.showPRs {
-				t.Fatalf("l should toggle leaderboard without drilling in: view=%v, inspector=%v, PRs=%v", m.viewMode, m.showPaths, m.showPRs)
-			}
-			m = keyboardContractPress(t, m, "l")
 			if !reflect.DeepEqual(before.glance, m.glance) || before.selectedRepoID != m.selectedRepoID ||
 				before.areaRepoID != m.areaRepoID || before.selectedAreaID != m.selectedAreaID || before.personID != m.personID {
-				t.Fatal("leaderboard round trip lost Worklist scope, lens, search, stack, or selected identity")
+				t.Fatal("board round trip lost Worklist navigation or identity")
 			}
 		})
 	}
 }
 
-func TestKeyboardContractOwnedViewsIsolateLeaderboardShortcut(t *testing.T) {
-	for _, tc := range keyboardContractOwnedContexts() {
-		t.Run(tc.name, func(t *testing.T) {
-			m := keyboardContractPress(t, tc.setup(t), "")
-			before := keyboardContractState(m)
-			m = keyboardContractPress(t, m, "l")
-			if keyboardContractState(m) != before {
-				t.Fatal("l escaped the active overlay or acted as drill-in")
-			}
-		})
+func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
+	contexts := append(keyboardContractOrdinaryContexts(), keyboardContractOwnedContexts()...)
+	contexts = append(contexts, keyboardContractContext{"custom range", func(t *testing.T) Model {
+		return keyboardContractPress(t, awarenessFixture(), "t", "c", "enter")
+	}}, keyboardContractContext{"load error", func(t *testing.T) Model {
+		m := awarenessFixture()
+		m.err = errors.New("all repositories failed")
+		m.scanErrors = map[string]string{"/api": "unavailable"}
+		m.failedRepos = []string{"api"}
+		return m
+	}})
+	for _, tc := range contexts {
+		for _, shortcut := range []string{"l", "w", "p"} {
+			t.Run(tc.name+"/"+shortcut, func(t *testing.T) {
+				m := keyboardContractPress(t, tc.setup(t), shortcut)
+				if m.showHelp || m.showScanErrors || m.showPaths || m.rangePicker.open || m.viewMode == ViewRepoOverlay {
+					t.Fatal("board shortcut left a dialog or inspector open")
+				}
+				if m.err != nil {
+					t.Fatal("load error still covers the destination board")
+				}
+				if tc.name == "load error" && (len(m.scanErrors) == 0 || len(m.failedRepos) == 0) {
+					t.Fatal("board navigation discarded repository diagnostics")
+				}
+				if shortcut == "p" {
+					if !m.showPRs || m.prDetail || len(m.visiblePRs()) != len(m.allPRs()) {
+						t.Fatal("p did not open the complete PR board")
+					}
+				} else {
+					want := ViewAggregate
+					if shortcut == "w" {
+						want = ViewAwareness
+					}
+					if m.showPRs || m.viewMode != want {
+						t.Fatal("board shortcut went to the wrong board")
+					}
+				}
+				before := keyboardContractState(m)
+				m = keyboardContractPress(t, m, shortcut)
+				if keyboardContractState(m) != before {
+					t.Fatal("repeated board shortcut toggled or reset the board")
+				}
+			})
+		}
 	}
 }
 
@@ -217,7 +240,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := keyboardContractPress(t, tc.setup(t), "/")
 			view, scan, prs := m.viewMode, m.scanGeneration, m.prGeneration
-			const typed = "hjklgGvLpPoRré"
+			const typed = "hjklwgGvLpPoRré"
 			for _, r := range typed {
 				m = keyboardContractPress(t, m, string(r))
 			}
@@ -245,10 +268,36 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 	}
 }
 
+func TestBoardKeysCancelRepositoryChoicesAndPendingRanges(t *testing.T) {
+	for _, shortcut := range []string{"l", "w", "p"} {
+		m := keyboardContractPress(t, awarenessFixture(), "r", "down", " ", shortcut)
+		if m.excludedRepos["/web"] || m.overlayExcluded != nil {
+			t.Fatal("leaving repository controls applied unconfirmed choices")
+		}
+		m = awarenessFixture()
+		timeIndex, customDays := m.timeIdx, m.customRangeDays
+		m = keyboardContractPress(t, m, "t", "c", "enter", "21", shortcut)
+		if m.timeIdx != timeIndex || m.customRangeDays != customDays || m.rangePicker.open {
+			t.Fatal("leaving the range picker applied an unconfirmed range")
+		}
+	}
+}
+
+func TestBoardKeyFromSearchHelpKeepsAcceptedFilter(t *testing.T) {
+	m := keyboardContractPress(t, awarenessFixture(), "/", "l", "w", "p")
+	if m.glanceQuery() != "lwp" || m.viewMode != ViewAwareness || m.showPRs {
+		t.Fatal("search intercepted letters as board shortcuts")
+	}
+	m = keyboardContractPress(t, m, "f1", "l", "w")
+	if m.showHelp || m.glance.searching || m.glanceQuery() != "lwp" {
+		t.Fatal("switching from search help lost the filter or kept input active")
+	}
+}
+
 func TestKeyboardContractCustomRangeRejectsLettersWithoutNavigation(t *testing.T) {
 	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "c", "enter", "ctrl+u", "21")
 	before := m.glance
-	for _, k := range []string{"h", "j", "k", "l", "g", "G", "v", "p", "P", "o", "R", "r"} {
+	for _, k := range []string{"h", "j", "k", "g", "G", "v", "P", "o", "R", "r"} {
 		m = keyboardContractPress(t, m, k)
 		if !m.rangePicker.open || !m.rangePicker.custom || m.rangePicker.input != "21" || m.rangePicker.error == "" ||
 			m.viewMode != ViewAwareness || !reflect.DeepEqual(before, m.glance) {
@@ -333,45 +382,6 @@ func TestKeyboardContractInspectorAndErrorsRetainScrolling(t *testing.T) {
 	}
 }
 
-func TestKeyboardContractPRScopeAndBrowserActionsStayLocal(t *testing.T) {
-	m := prOnlySelectionFixture()
-	m.areaRepoID, m.selectedAreaID = "/api", "root"
-	provider := &fakePRProvider{}
-	m.prProvider = provider
-	m = keyboardContractPress(t, m, "p")
-	if m.prAll || len(m.visiblePRs()) != 2 {
-		t.Fatal("p did not open the selected area scope")
-	}
-	m = keyboardContractPress(t, m, "down", "enter", "P")
-	if !m.prAll || m.prDetail || m.prRow != 0 || len(m.visiblePRs()) != 3 {
-		t.Fatal("P inside PR detail did not select all open PRs")
-	}
-	m = keyboardContractPress(t, m, "down", "up", "enter", "p")
-	if m.prAll || m.prDetail || m.prRow != 0 || len(m.visiblePRs()) != 2 {
-		t.Fatal("p inside PR detail did not restore parent area scope")
-	}
-	if provider.resolves != 0 || provider.fetches != 0 {
-		t.Fatal("PR scope/navigation spent the remote request budget")
-	}
-	m = keyboardContractPress(t, m, "esc")
-	if m.showPRs || m.selectedAreaID != "root" {
-		t.Fatal("Esc lost the selected Worklist scope")
-	}
-	// Outside PR overlays, o continues to mean contributor overlap evidence.
-	m = keyboardContractPress(t, keyboardContractFixture(), "right", "3", "o")
-	if !m.glance.frame.relatedOverlap || m.showPRs {
-		t.Fatal("o no longer opens related contributor evidence")
-	}
-	for _, tc := range keyboardContractOrdinaryContexts() {
-		m = tc.setup(t)
-		m.prBrowserOpener = func(string) error { t.Fatal("o opened a browser outside PR context"); return nil }
-		m = keyboardContractPress(t, m, "o")
-		if m.showPRs {
-			t.Fatalf("o in %s opened PR context", tc.name)
-		}
-	}
-}
-
 func TestKeyboardContractOverviewRetainsArrowsAndPaging(t *testing.T) {
 	for _, tc := range []keyboardContractContext{
 		{"repositories", func(*testing.T) Model { return awarenessFixture() }},
@@ -427,8 +437,8 @@ func TestKeyboardContractLeaderboardAndContributorRetainNavigation(t *testing.T)
 		t.Fatal("right did not open selected contributor")
 	}
 	m = keyboardContractPress(t, m, "down")
-	if m.activeAuthorID != m.displayedAuthors()[1].ID {
-		t.Fatal("contributor down did not select next identity")
+	if m.activeAuthorID != m.displayedAuthors()[0].ID || m.statDetailOffset != 1 {
+		t.Fatal("contributor down changed identity or did not scroll")
 	}
 	m = keyboardContractPress(t, m, "up", "pgdown")
 	if m.activeAuthorID != m.displayedAuthors()[0].ID || m.statDetailOffset == 0 {
@@ -446,9 +456,9 @@ func TestKeyboardContractLeaderboardAndContributorRetainNavigation(t *testing.T)
 	if m.viewMode != ViewAggregate || m.activeAuthorID != "" || m.statDetailOffset != 0 {
 		t.Fatal("Home/left failed to return to leaderboard")
 	}
-	m = keyboardContractPress(t, m, "enter", "esc", "l", "left")
+	m = keyboardContractPress(t, m, "enter", "esc", "w", "left")
 	if m.viewMode != ViewAwareness || m.quitting {
-		t.Fatal("Enter/Esc and l did not restore Worklist")
+		t.Fatal("Enter/Esc and w did not restore Worklist")
 	}
 }
 
@@ -459,8 +469,8 @@ func TestKeyboardContractRepositoryAndRangePickersRetainNavigation(t *testing.T)
 			t.Fatal("repository arrows/space no longer select and toggle the target row")
 		}
 		m = keyboardContractPress(t, m, closeKey)
-		if m.viewMode != ViewAwareness || !m.excludedRepos[m.loadedRepos[1].ID] {
-			t.Fatalf("repository %s did not apply selection and return", closeKey)
+		if m.viewMode != ViewAwareness || m.excludedRepos[m.loadedRepos[1].ID] != (closeKey == "enter") {
+			t.Fatalf("repository %s did not apply/cancel choices and return", closeKey)
 		}
 	}
 	m := keyboardContractPress(t, awarenessFixture(), "t", "home", "down", "up", "down", "enter")

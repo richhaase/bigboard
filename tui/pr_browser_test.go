@@ -12,7 +12,7 @@ func TestPRBrowserListDetailAndErrors(t *testing.T) {
 		for _, fail := range []bool{false, true} {
 			m := prFixture()
 			m.width, m.height = 80, 30
-			m.showPRs, m.prAll, m.prDetail = true, true, detail
+			m.showPRs, m.prDetail = true, detail
 			calls := 0
 			m.prBrowserOpener = func(url string) error {
 				calls++
@@ -63,7 +63,7 @@ func TestPRBrowserRejectsInvalidAndEmpty(t *testing.T) {
 	}
 	m := prFixture()
 	m.width, m.height = 80, 30
-	m.showPRs, m.prAll = true, true
+	m.showPRs = true
 	m.prState.snapshots = nil
 	m.prBrowserOpener = func(string) error { t.Fatal("empty opened browser"); return nil }
 	_, cmd := m.handleKey(key("o"))
@@ -72,7 +72,7 @@ func TestPRBrowserRejectsInvalidAndEmpty(t *testing.T) {
 	}
 	m = prFixture()
 	m.width, m.height = 80, 30
-	m.showPRs, m.prAll = true, true
+	m.showPRs = true
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.prs[0].URL = "file:///tmp/pr"
 	m.prState.snapshots["org/repo"] = snapshot
@@ -112,7 +112,7 @@ func TestPRBrowserDetailCanScrollToFinalPath(t *testing.T) {
 	for _, width := range []int{40, 80, 120} {
 		m := prFixture()
 		m.width, m.height = width, 18
-		m.showPRs, m.prAll, m.prDetail = true, true, true
+		m.showPRs, m.prDetail = true, true
 		snapshot := m.prState.snapshots["org/repo"]
 		for range 40 {
 			snapshot.prs[0].Files = append(snapshot.prs[0].Files, gh.File{Path: "extra/path.go"})
@@ -135,7 +135,7 @@ func TestPRBrowserDetailCanScrollToFinalPath(t *testing.T) {
 
 func TestPRBrowserOpensSelectedRow(t *testing.T) {
 	m := prOnlySelectionFixture()
-	m.showPRs, m.prAll = true, true
+	m.showPRs = true
 	m.prRow = 2
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.prs[2].URL = "https://github.com/org/repo/pull/262"

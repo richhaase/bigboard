@@ -83,7 +83,7 @@ func TestSingleRepositoryOpensAreasAndEscReturns(t *testing.T) {
 	if m.viewMode != ViewAggregate {
 		t.Fatal("stats inaccessible")
 	}
-	m = pressAwareness(m, "l")
+	m = pressAwareness(m, "w")
 	if m.areaRepoID != "/mono" {
 		t.Fatal("stats roundtrip lost area scope")
 	}

@@ -29,7 +29,7 @@ func (m Model) renderWorklist(width, height int) string {
 	if repo, ok := m.areaRepository(); ok {
 		scope = displayText(repo.Name) + " / WORK AREAS"
 	}
-	heading := scope + " · " + overviewSortLabels[max(0, min(m.overviewSort, 2))]
+	heading := scope + " · " + m.overviewSortLabel()
 	lines = append(lines, StyleTitle.Render("  "+heading))
 	listBudget := m.worklistPageSize()
 	if wide {
@@ -265,25 +265,28 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select · →/Enter open · / find · s sort · t range · b bots · l leaderboard · p PRs · R refresh · q quit"
+	footer := "↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · v repo PRs · R refresh · q quit"
 	if detail {
-		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · l leaderboard · p PRs · R refresh"
+		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · v repo PRs · R refresh"
 	}
 	if width >= 70 && width < 110 {
-		footer = "↑↓ select · →/Enter open · l leaderboard · p PRs · R refresh"
+		footer = "v repo PRs · / find · ↑↓ select · → open · R refresh"
 		if detail {
-			footer = "↑↓ select · → evidence · Tab lens · ←/Esc back · l leaderboard"
+			footer = "←/Esc back · v repo PRs · Tab lens · → evidence"
 		}
 	}
 	if width < 70 {
-		footer = "↑↓ select · → open · ← back"
+		footer = "↑↓ select · → open"
+		if detail || m.areaRepoID != "" {
+			footer = "←/Esc back · ↑↓ select"
+		}
 	}
 	if m.glance.searching || m.glanceQuery() != "" {
-		footer = "/ " + displayText(m.glanceQuery()) + " · Enter accept · Esc clear"
+		footer = "/ " + displayText(m.glanceQuery())
 		if m.glance.searching {
-			footer = "F1 help · " + footer
+			footer = "F1 help · " + footer + " · Enter accept · Esc clear"
 		} else {
-			footer = "? help · " + footer
+			footer = "? help · " + footer + " · Esc clear"
 		}
 	} else {
 		footer = "? help · " + footer

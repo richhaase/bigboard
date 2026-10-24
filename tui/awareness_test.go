@@ -53,7 +53,7 @@ func TestAwarenessDefaultAndStatsRoundTrip(t *testing.T) {
 	if m.viewMode != ViewAggregate {
 		t.Fatal("stats unavailable")
 	}
-	m = pressAwareness(m, "l")
+	m = pressAwareness(m, "w")
 	if m.viewMode != ViewAwareness {
 		t.Fatal("cannot return to relationships")
 	}

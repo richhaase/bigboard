@@ -60,7 +60,7 @@ func (m *Model) openRangePicker() {
 func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	picker := &m.rangePicker
 	key := msg.String()
-	if key == "ctrl+c" {
+	if key == "ctrl+c" || key == "q" && !picker.custom {
 		return m.quit()
 	}
 	if key == "esc" {
@@ -178,6 +178,6 @@ func (m Model) renderRangePicker() string {
 		}
 		lines = append(lines, "", "  ↑↓ choose · c custom")
 	}
-	lines = append(lines, "  ? help · Enter apply · Esc cancel")
+	lines = append(lines, "  ? help · Enter apply · Esc cancel", "  "+boardShortcuts(width))
 	return fitGlanceLines(lines, width, height)
 }

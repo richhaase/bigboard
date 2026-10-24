@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -176,6 +177,9 @@ func (m Model) glanceSubareas() []stats.WorkArea {
 		activities = append(activities, activity)
 	}
 	sortRepositoryActivities(activities, m.overviewSort)
+	if m.overviewReverse {
+		slices.Reverse(activities)
+	}
 	var result []stats.WorkArea
 	for _, a := range activities {
 		result = append(result, byID[a.repo.ID])
@@ -266,7 +270,7 @@ func (m Model) glanceLensLines(width, height int) []string {
 	}
 	label := strings.ToLower(glanceTabs[m.glance.frame.tab])
 	if m.glance.frame.tab == glanceSubareas {
-		label += " · " + overviewSortLabels[max(0, min(m.overviewSort, len(overviewSortLabels)-1))] + " · counts overlap"
+		label += " · " + m.overviewSortLabel() + " · counts overlap"
 	}
 	if m.glance.frame.tab == glancePeople {
 		label = fmt.Sprintf("rows · %d contributors (alphabetical)", len(m.glancePeopleList()))
@@ -350,7 +354,7 @@ func (m Model) renderCommitInspector(width, height int) string {
 	budget := max(1, height-len(lines)-2)
 	offset := max(0, min(m.pathOffset, max(0, len(body)-budget)))
 	lines = append(lines, body[offset:min(len(body), offset+budget)]...)
-	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  ? help · ↑↓ scroll · PgUp/PgDn · ←/Enter/Esc back · q quit")
+	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  "+screenFooter("? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · q quit", width))
 	return fitGlanceLines(lines, width, height)
 }
 func wrapGlanceText(s string, width int) []string {

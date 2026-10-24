@@ -122,7 +122,7 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 
 func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
-		for _, key := range []string{"/", "r", "p", "t"} {
+		for _, key := range []string{"/", "r", "t"} {
 			t.Run(fmt.Sprintf("%d/%s", view, key), func(t *testing.T) {
 				m := awarenessFixture()
 				m.viewMode = view
