@@ -34,6 +34,7 @@ type Model struct {
 	overviewReverse    bool
 	repositorySort     int
 	directory          directoryState
+	contributorPane    activityContributorPane
 	filters            sharedFilterState
 	sharedRepos        filterValues
 	activityPeople     filterValues
@@ -354,6 +355,13 @@ func (m *Model) startLocalRefresh() tea.Cmd {
 
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	updated := next.(Model)
+	updated.normalizeActivityContributors()
+	return updated, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		return m, nil
 	}

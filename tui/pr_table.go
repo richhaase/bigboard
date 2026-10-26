@@ -12,11 +12,11 @@ import (
 
 var prSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9DDBA2"))
 
-type prTableLayout struct{ repo, number, state, title, review, checks, updated int }
+type prTableLayout struct{ repo, number, state, author, title, review, checks, updated int }
 
 func resolvePRTable(width int) prTableLayout {
-	l := prTableLayout{repo: max(18, width/6), number: 7, state: 5, review: 13, checks: 9, updated: 7}
-	l.title = max(1, width-4-2-6-l.repo-l.number-l.state-l.review-l.checks-l.updated)
+	l := prTableLayout{repo: max(18, width/6), number: 7, state: 5, author: min(24, max(14, width/10)), review: 13, checks: 9, updated: 7}
+	l.title = max(1, width-4-2-7-l.repo-l.number-l.state-l.author-l.review-l.checks-l.updated)
 	return l
 }
 
@@ -111,7 +111,13 @@ func prTableColumns(width int) string {
 		return boardColumns("  STATE / PR # / TITLE · REPO / AUTHOR / STATUS / AGE", width)
 	}
 	l := resolvePRTable(width)
-	return boardColumns("  "+padCells("REPOSITORY", l.repo)+" "+padCells("PR #", l.number)+" "+padCells("STATE", l.state)+" "+padCells("TITLE", l.title)+" "+padCells("REVIEW", l.review)+" "+padCells("CHECKS", l.checks)+" "+rightCells("UPDATED", l.updated), width)
+	return boardColumns("  "+padCells("REPOSITORY", l.repo)+" "+padCells("PR #", l.number)+" "+padCells("STATE", l.state)+" "+padCells("AUTHOR", l.author)+" "+padCells("TITLE", l.title)+" "+padCells("REVIEW", l.review)+" "+padCells("CHECKS", l.checks)+" "+rightCells("UPDATED", l.updated), width)
+}
+
+func prRepositoryAuthor(repo, author string, width int) string {
+	authorWidth := min(ansi.StringWidth(author), max(12, width/3))
+	repoWidth := min(ansi.StringWidth(repo), max(1, width-3-authorWidth))
+	return padCells(repo, repoWidth) + " · " + padCells(author, max(1, width-3-repoWidth))
 }
 
 func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, index, width int) []string {
@@ -131,14 +137,14 @@ func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, in
 	var lines []string
 	if width >= 110 {
 		l := resolvePRTable(width)
-		lines = []string{cursor + StyleDimWhite.Render(padCells(repo, l.repo)) + " " + padCells(number, l.number) + " " + StyleDimWhite.Render(padCells(state, l.state)) + " " + titleStyle.Render(padCells(title, l.title)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, l.review)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, l.checks)) + " " + rightCells(age, l.updated)}
+		lines = []string{cursor + StyleDimWhite.Render(padCells(repo, l.repo)) + " " + padCells(number, l.number) + " " + StyleDimWhite.Render(padCells(state, l.state)) + " " + StyleDimWhite.Render(padCells(author, l.author)) + " " + titleStyle.Render(padCells(title, l.title)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, l.review)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, l.checks)) + " " + rightCells(age, l.updated)}
 	} else if width >= 70 {
 		inner := width - 4
 		metaWidth := max(1, inner-2-13-9-7-3)
-		metadata := "  " + StyleDimWhite.Render(padCells(repo+" · "+author, metaWidth)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
+		metadata := "  " + StyleDimWhite.Render(prRepositoryAuthor(repo, author, metaWidth)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
 		lines = []string{cursor + state + " " + padCells(number, 7) + " " + titleStyle.Render(title), metadata}
 	} else {
-		metadata := "  " + repo + " · " + author
+		metadata := "  " + prRepositoryAuthor(repo, author, width-6)
 		status := "  " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
 		lines = []string{cursor + state + " " + padCells(number, 7) + " " + titleStyle.Render(title), metadata, status}
 	}

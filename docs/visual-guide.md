@@ -26,11 +26,16 @@ work happened; the lower pane explains that selected area's history.*
 Within each commit preview, the author/date/hash and changed areas are indented
 beneath the title.
 
-At the repository level, compare **where change occurred** using a full-height
+At the repository level, compare **where change occurred** using a
 ranking with bars. Added + removed lines is the default sort; commit counts stay
 visible and sortable. Bars always show added and removed lines. Counts follow the
 current range and bot filter; quiet repositories remain visible, and unknown line
-totals keep their `?` qualifiers. There is no selected repository text pane.
+totals keep their `?` qualifiers. A compact contributor breakdown follows the
+highlighted repo or directory, ranking people by their scoped added + removed
+lines. It shows up to five people and reduces or hides itself in small windows
+to preserve the main ranking. Tab focuses the contributor pane so arrows,
+paging, and Home/End can browse all contributors. Tab or Esc returns focus to
+the ranking; Enter does not open another view from the scrolling pane.
 Enter opens a literal directory/file ranking with the same columns and bars.
 Directory totals count only the changes to files inside that directory. Enter
 a directory to go deeper, or a file to see its commits. Configured named work
@@ -216,13 +221,15 @@ existing API budgets and cooldowns. There is no timer refresh or automatic retry
 The main boards align their list heading, column labels, and first data row.
 The heading shows sort and visible range; scope and accepted search text stay
 in the shared row above the freshness indicators. Contributors totals are a
-compact heading summary. Activity uses the full height for repository and
-directory comparisons, with details available through Enter.
+compact heading summary. Activity reserves a bounded panel beneath repository
+and directory comparisons for the selected scope’s contributors. Enter continues
+through the directory hierarchy; the contributor panel follows the selection.
 
 PR rows separate PR number, state, and title, and reserve review, checks, and
 updated-age fields. `◇` and a subdued title identify drafts; `●` identifies
-open non-drafts. Approved reviews and passing checks are green. Wide lists put the author
-in a selected-PR preview below the table, leaving more room for titles. The preview
+open non-drafts. Approved reviews and passing checks are green. Wide lists include
+an Author column before Title; narrower metadata rows reserve room for the
+author even when repository names are long. The selected-PR preview
 appears at 70×24 and above, keeps at least three list entries visible, and shows
 the full repository identity, wrapped title, author, draft state, and separate
 review/check states. Long titles continue in Enter detail. Repository labels

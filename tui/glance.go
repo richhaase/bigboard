@@ -190,6 +190,9 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.handleActivityContributorKey(key) {
+		return m, nil
+	}
 	switch key {
 	case "b":
 		m.activityHideBots = !m.activityHideBots
@@ -200,6 +203,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "/":
+		m.contributorPane.focused = false
 		m.glanceSearchBefore = m.glanceQuery()
 		m.glance.searching = true
 		return m, nil

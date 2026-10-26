@@ -159,8 +159,14 @@ func TestDirectoryPagingAndFrameFit(t *testing.T) {
 		}
 		m = keyboardContractPress(t, m, "end")
 		view := ansi.Strip(m.View())
-		if !strings.Contains(view, "dir44/") || strings.Contains(view, "SELECTED") || len(strings.Split(view, "\n")) != m.height {
-			t.Fatal("directory ranking lost selected row, height, or full-height layout")
+		frame := strings.Split(view, "\n")
+		panel := activityContributorsHeight(m.width, m.height)
+		listEnd := m.height - screenFooterRows - panel
+		if !strings.Contains(strings.Join(frame[screenHeaderRows+2:listEnd], "\n"), "dir44/") || strings.Contains(view, "SELECTED") || len(frame) != m.height {
+			t.Fatal("directory ranking lost selected row or frame height")
+		}
+		if panel > 0 && !strings.Contains(strings.Join(frame[listEnd:], "\n"), "CONTRIBUTORS · mono / dir44/") {
+			t.Fatal("contributor breakdown did not follow the selected directory")
 		}
 		for _, line := range strings.Split(view, "\n") {
 			if ansi.StringWidth(line) > m.width {

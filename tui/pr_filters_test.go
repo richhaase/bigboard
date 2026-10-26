@@ -99,7 +99,7 @@ func TestPRNumberDraftAndSuccessPresentation(t *testing.T) {
 		plain := ansi.Strip(row)
 		l := resolvePRTable(m.width)
 		numberStart := 4 + l.repo + 1
-		titleStart := numberStart + l.number + 1 + l.state + 1
+		titleStart := numberStart + l.number + 1 + l.state + 1 + l.author + 1
 		if ansi.Cut(plain, numberStart, numberStart+l.number) != "#123   " || !strings.HasPrefix(ansi.Cut(plain, titleStart, titleStart+l.title), pr.Title) {
 			t.Fatal("number and title do not occupy separate columns")
 		}

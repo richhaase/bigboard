@@ -67,7 +67,7 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 ## Work relationships
 
 Activity ranks repositories by **lines changed (added + removed)** in the selected
-period, using the full list height for comparison. Bars always show the balance
+period, with a contributor breakdown for the highlighted scope. Bars show the balance
 of added and removed lines. Commit counts remain visible; `s` can sort by commits
 without changing what the bars measure.
 Quiet repositories stay visible, and unknown line totals remain marked with `?`.
@@ -227,7 +227,7 @@ sort and visible row range in the same place, followed by column labels and rows
 Search text stays in the scope row while typing and after acceptance.
 
 Contributors totals use a compact summary in its list heading. PRs use columns
-for repository, PR number, state, title, review, checks, and updated age at wide widths;
+for repository, PR number, state, author, title, review, checks, and updated age at wide widths;
 80-column rows stack title and metadata, and 40-column rows put review/check/age
 on their own line. Titles shorten before status fields. PR ages use their
 snapshot's check time. At 70×24 and above, a selected-PR preview above the footer
@@ -238,10 +238,18 @@ omit the owner only when the name is unique across included PR repositories.
 Drafts use a `◇` state marker and subdued titles; `●` identifies open non-draft
 PRs. Approved reviews and passing checks are green, independently of draft state.
 Neither signals that branch protection or merge readiness has been evaluated.
-Activity's repository and directory inventories fill the available height with
-ranked bars, commit and contributor counts, and changed-line totals. Bars always
-show added and removed lines; `s` changes sorting among lines changed, commits,
-recent activity, and name. There is no selected text preview in these inventories.
+Activity's repository and directory inventories show ranked bars, commit and
+contributor counts, and changed-line totals. A compact contributor breakdown
+beneath the ranking follows the highlighted repository, directory, or file. It
+ranks contributors by added + removed lines and shows commits and split bars
+using only that scope's files. The panel shows up to five contributors, scales
+down in shorter windows, and yields to the ranking in very small terminals.
+Tab moves focus into the contributor pane; arrows, paging, and Home/End browse
+every contributor. Tab or Esc returns to the ranking. A highlighted heading and
+thick side marker identify the active pane; the other pane keeps a quiet border.
+Bars always show added and removed lines; `s` changes sorting among lines changed, commits,
+recent activity, and name. Contributors detail provides the inverse view: the
+selected person’s repositories, ranked by the same line-change measure.
 Enter opens a deeper directory or a file's commit history. Commit evidence uses
 the available height and pages by visible commits.
 
@@ -317,7 +325,8 @@ files, and commit details. `←` / `Esc` returns to the parent, preserving board
 
 | Key | Activity behavior |
 |-----|-------------------|
-| `Tab`, `1`–`3` | Open Commits / People / Related for the current directory scope |
+| `Tab` / `Shift+Tab` | Move focus between the ranking and contributor pane |
+| `1`–`3` | Open Commits / People / Related for the current directory scope |
 | `Tab` / `Shift+Tab`, `1`–`3` | Switch detail lenses |
 | `4` | Return to the directory ranking |
 | `s` / `S` | Change sort / reverse order; directories support Lines +/- / Commits / Recent / Name |

@@ -136,13 +136,8 @@ func (m Model) handleDirectoryKey(key string) Model {
 			}
 			m.openDirectoryDetails(row.repo.ID, name, glanceActivity)
 		}
-	case "tab", "shift+tab", "1", "2", "3":
-		tab := glanceActivity
-		if key == "shift+tab" {
-			tab = glanceRelated
-		} else if key >= "1" && key <= "3" {
-			tab = int(key[0] - '1')
-		}
+	case "1", "2", "3":
+		tab := int(key[0] - '1')
 		name := m.directory.frame.path
 		if name == "" {
 			name = "."
@@ -180,8 +175,16 @@ func (m Model) renderDirectoryBoard(width, height int) string {
 			message = "No matching paths. x clears board filters."
 		}
 		lines = append(lines, "  "+message)
+	} else {
+		lines = m.appendActivityContributors(lines, rows[selected], width, height)
 	}
-	footer := "? help · ←/Esc back · →/Enter open · / find · s/S sort · t range · Tab details · r refresh"
+	footer := "? help · ←/Esc back · →/Enter open · / find · s/S sort · t range · 2 people · r refresh"
+	if activityContributorsHeight(width, height) > 0 {
+		footer += " · Tab contributors"
+	}
+	if m.contributorPane.focused {
+		footer = "? help · Tab ranking · ↑↓ scroll · ←/Esc back · r refresh"
+	}
 	if m.glance.searching {
 		footer = "F1 help · Enter accept · Esc cancel"
 	}

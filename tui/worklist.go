@@ -12,6 +12,7 @@ import (
 var worklistRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#415665"))
 
 func (m Model) renderWorklist(width, height int) string {
+	m.normalizeActivityContributors()
 	if m.showPaths {
 		return m.renderCommitInspector(width, height)
 	}
@@ -78,6 +79,8 @@ func (m Model) renderWorklist(width, height int) string {
 		r := rows[selected]
 		label := fmt.Sprintf("Selected: %s commits · %d contributors", FormatNumber(r.commits), len(r.people))
 		lines = append(lines, StyleDimWhite.Render("  "+label))
+	} else if len(rows) > 0 {
+		lines = m.appendActivityContributors(lines, rows[selected], width, height)
 	}
 	return m.worklistFinish(lines, width, height, false)
 }
@@ -305,6 +308,12 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 			footer = "←/Esc back · ↑↓ select"
 		}
 	}
+	if !detail && m.areaRepoID == "" && activityContributorsHeight(width, height) > 0 {
+		footer += " · Tab contributors"
+		if m.contributorPane.focused {
+			footer = "Tab ranking · ↑↓ scroll · ←/Esc back · r refresh"
+		}
+	}
 	if m.glance.searching {
 		footer = "F1 help · Enter accept · Esc cancel"
 	} else {
@@ -316,13 +325,7 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 
 func (m Model) worklistPageSize() int {
 	if m.areaRepoID == "" || m.directory.active {
-		rowHeight := 3
-		if m.width-4 >= 96 {
-			rowHeight = 1
-		} else if m.width-4 >= 66 {
-			rowHeight = 2
-		}
-		return max(1, (m.height-screenHeaderRows-screenFooterRows-2)/rowHeight)
+		return max(1, (m.height-screenHeaderRows-screenFooterRows-2-activityContributorsHeight(m.width, m.height))/activityRankingRowHeight(m.width))
 	}
 	if m.width >= 110 && m.height >= 28 {
 		return max(3, (m.height-19)/2)
@@ -332,4 +335,43 @@ func (m Model) worklistPageSize() int {
 		rowHeight = 2
 	}
 	return max(1, (m.height-screenHeaderRows-screenFooterRows-3)/rowHeight)
+}
+
+func activityRankingRowHeight(width int) int {
+	if width-4 >= 96 {
+		return 1
+	}
+	if width-4 >= 66 {
+		return 2
+	}
+	return 3
+}
+
+func activityContributorsHeight(width, height int) int {
+	available := height - screenHeaderRows - screenFooterRows - 2
+	panel := min(9, available/2, available-3*activityRankingRowHeight(width))
+	if panel < 4 {
+		return 0
+	}
+	return panel
+}
+
+func (m Model) appendActivityContributors(lines []string, row repositoryActivity, width, height int) []string {
+	budget := activityContributorsHeight(width, height)
+	if budget == 0 {
+		return lines
+	}
+	start := height - screenFooterRows - budget
+	for len(lines) < start {
+		lines = append(lines, "")
+	}
+	focused := !m.contributorPane.focused
+	for i := screenHeaderRows; i < len(lines); i++ {
+		text := ansi.Cut(lines[i], 2, width-2)
+		if i == screenHeaderRows {
+			text = activityPaneHeading(text, width-4, focused)
+		}
+		lines[i] = activityPaneRail(focused) + text
+	}
+	return append(lines, m.activityContributors(row, width, budget)...)
 }

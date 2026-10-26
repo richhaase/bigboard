@@ -221,6 +221,7 @@ func (v OperativeView) renderRepoBreakdown(as *stats.AuthorStats, width int) str
 		for _, label := range []string{"COMMITS", "ADDED", "REMOVED", "NET"} {
 			header += " " + StyleTableHeader.Render(fmt.Sprintf("%*s", numW, label))
 		}
+		header += "  " + StyleTableHeader.Render("LINES +/-")
 		rows = append(rows, header, "  "+StyleDimCyan.Render(hrule(max(0, width-chromeInset))))
 	}
 	for i, e := range entries {

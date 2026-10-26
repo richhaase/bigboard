@@ -95,7 +95,7 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 				t.Fatal("modal replaced the underlying board")
 			}
 			m = keyboardContractPress(t, m, "d", "end")
-			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(ansi.Strip(m.View())), "END-OF-DIAGNOSTIC") {
+			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "", "┃", "").Replace(ansi.Strip(m.View())), "END-OF-DIAGNOSTIC") {
 				t.Fatalf("%s/%v technical details are not fully accessible (%d):\n%s", board, size, m.scanErrorOffset, ansi.Strip(m.View()))
 			}
 			m = keyboardContractPress(t, m, "?", "esc")

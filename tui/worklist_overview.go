@@ -123,7 +123,7 @@ func (m Model) worklistRepositoryRow(r repositoryActivity, selected bool, width,
 	}
 	for i, line := range lines {
 		line = padCells(line, width)
-		if selected {
+		if selected && !m.contributorPane.focused {
 			line = selectedRowBackground(lipgloss.NewStyle().Background(ColorRowSelect).Render(line))
 		}
 		lines[i] = "  " + line

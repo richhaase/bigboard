@@ -163,8 +163,20 @@ func (m Model) screenHelp() screenHelp {
 		if m.glance.frame.tab == glanceSubareas {
 			actions = append(actions, helpBinding{"s / S", "Change sort / reverse order"})
 		}
-	} else if m.directory.active {
-		navigation = append(navigation, helpBinding{"Tab / 1–3", "Read scope commits / people / related evidence"})
+	} else if m.directory.active || m.areaRepoID == "" {
+		if activityContributorsHeight(m.width, m.height) > 0 {
+			navigation = append(navigation, helpBinding{"Tab / Shift+Tab", "Move focus between ranking and contributors"})
+		}
+		if m.directory.active {
+			navigation = append(navigation, helpBinding{"1–3", "Read scope commits / people / related evidence"})
+		} else {
+			navigation = append(navigation, helpBinding{"Enter, then 2", "Read all contributors for the repository"})
+		}
+		if m.contributorPane.focused {
+			title = "Activity · Contributors pane"
+			navigation = []helpBinding{{"↑ / ↓", "Scroll contributors"}, {"PgUp / PgDn", "Scroll a visible page"}, {"Home / End", "First / last contributor page"}, {"Tab / Shift+Tab", "Return focus to ranking"}, {"← / Esc", "Return focus to ranking"}}
+			actions = nil
+		}
 	} else if m.areaRepoID != "" {
 		navigation = append(navigation, helpBinding{"Tab / 1–4", "Open an area lens"})
 	}
