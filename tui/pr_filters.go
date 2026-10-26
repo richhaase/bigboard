@@ -158,18 +158,19 @@ func (m Model) prFilterContext(scope string, width int) string {
 		parts = append(parts, "State: "+m.prFilters.state)
 	}
 	if len(parts) == 1 {
-		return "All open PRs · Scope: " + scope + " · all dates"
+		return "All open PRs · Range: " + m.rangeLabel() + " · Scope: " + scope
 	}
 	if width < 70 {
 		count := len(parts) - 1
 		if m.prRepoID != "" {
 			count++
 		}
-		return fmt.Sprintf("%d filters · f/a/v/c/d edit", count)
+		return fmt.Sprintf("Range: %s · %d PR filters", m.rangeLabel(), count)
 	}
-	partWidth := max(1, (width-4-3*(len(parts)-1))/len(parts))
+	rangePrefix := "Range: " + m.rangeLabel() + " · "
+	partWidth := max(1, (width-ansi.StringWidth(rangePrefix)-4-3*(len(parts)-1))/len(parts))
 	for i, part := range parts {
 		parts[i] = ansi.Truncate(part, partWidth, "…")
 	}
-	return strings.Join(parts, " · ")
+	return rangePrefix + strings.Join(parts, " · ")
 }

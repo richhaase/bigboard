@@ -101,6 +101,7 @@ func (m Model) screenHelp() screenHelp {
 		}
 		navigation := []helpBinding{{"↑ / ↓", move}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last row or page"}, {"← / Esc", "Clear filter / return to parent; stay at board root"}}
 		actions := []helpBinding{{"f", "Filter by repository; inclusion stays unchanged"}, {"a", "Filter by PR author (owner)"}, {"v", "Filter by review status"}, {"c", "Filter by check status"}, {"d", "Show all, open non-draft, or draft PRs"}, {"x", "Clear PR filters and search"}, {"i", "Choose included repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh repos and PRs"}}
+		actions = append([]helpBinding{{"t", "Change global range (PR last-updated time)"}}, actions...)
 		if !m.prDetail {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
 			actions = append([]helpBinding{{"/", "Search repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)

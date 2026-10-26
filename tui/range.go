@@ -16,6 +16,7 @@ type rangePickerState struct {
 	open, custom, replace, overflow bool
 	cursor                          int
 	input, error                    string
+	prSelection                     string
 }
 
 func presetRangeLabel(index int) string {
@@ -45,6 +46,17 @@ func (m Model) rangeLabel() string {
 	return presetRangeLabel(m.timeIdx)
 }
 
+func (m Model) rangeDuration() time.Duration {
+	if m.customRangeDays > 0 {
+		return time.Duration(m.customRangeDays) * 24 * time.Hour
+	}
+	index := m.timeIdx
+	if index < 0 || index >= len(TimePresets) {
+		index = DefaultTimeIndex
+	}
+	return TimePresets[index].Duration
+}
+
 func rangeControl(label string) string {
 	return StyleDimWhite.Render("  Range: " + label + " · t to change")
 }
@@ -54,7 +66,7 @@ func (m *Model) openRangePicker() {
 	if m.customRangeDays > 0 {
 		cursor = len(TimePresets)
 	}
-	m.rangePicker = rangePickerState{open: true, cursor: cursor}
+	m.rangePicker = rangePickerState{open: true, cursor: cursor, prSelection: m.selectedPRKey()}
 }
 
 func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -141,7 +153,12 @@ func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyRange() {
+	selectedPR := m.rangePicker.prSelection
 	m.rangePicker = rangePickerState{}
+	m.selectPR(selectedPR)
+	if m.prDetail && (selectedPR == "" || m.selectedPRKey() != selectedPR) {
+		m.prDetail, m.prOffset = false, 0
+	}
 	m.statDetailOffset = 0
 	personID := m.personID
 	m.recomputeAuthors()
@@ -155,7 +172,7 @@ func (m Model) renderRangePicker() string {
 	if width < 40 || height < 18 {
 		return fitGlanceLines([]string{"Resize to 40×18 · Esc cancel"}, width, height)
 	}
-	lines := []string{StyleTitle.Render("  LOCAL TIME RANGE"), "  Current: " + m.rangeLabel(), "  In-memory filter · no scan or fetch", ""}
+	lines := []string{StyleTitle.Render("  GLOBAL TIME RANGE"), "  Current: " + m.rangeLabel(), "  In-memory filter · no scan or fetch", ""}
 	if m.rangePicker.custom {
 		input, hint := m.rangePicker.input, "  Type days · Backspace edit"
 		if m.rangePicker.overflow {

@@ -63,8 +63,8 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 					if m.width >= 90 && !strings.Contains(lines[0], "v-test") {
 						t.Fatal("version missing from wide title band")
 					}
-					if m.showPRs && (!strings.Contains(lines[1], "All open PRs") || !strings.Contains(lines[m.height-1], "All dates")) {
-						t.Fatal("PR screen lost its independent date scope")
+					if m.showPRs && (!strings.Contains(lines[1], "Range:") || !strings.Contains(lines[m.height-1], "PR updated time")) {
+						t.Fatal("PR screen lost its date scope")
 					}
 					if profile == termenv.Ascii && strings.Contains(raw, "\x1b[") {
 						t.Fatal("plain output contains ANSI styling")
