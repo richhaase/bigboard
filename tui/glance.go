@@ -326,7 +326,11 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 	}
 	ids := m.glanceDetailIDs()
 	selected := m.glanceSelected(ids)
-	if next, ok := glanceMove(key, selected, len(ids), max(1, m.height-10)); ok && len(ids) > 0 {
+	page := max(1, m.height-10)
+	if f.tab == glanceActivity {
+		page = m.worklistActivityPageSize()
+	}
+	if next, ok := glanceMove(key, selected, len(ids), page); ok && len(ids) > 0 {
 		f.rows[f.tab] = next
 		f.ids[f.tab] = ids[next]
 		return m

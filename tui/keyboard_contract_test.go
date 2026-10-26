@@ -319,10 +319,14 @@ func TestKeyboardContractFocusedNavigationRetainsArrowsAndPaging(t *testing.T) {
 			if count < 3 {
 				t.Fatal("fixture must expose at least three rows")
 			}
+			page := m.height - 10
+			if tab == glanceActivity {
+				page = strings.Count(m.View(), "Changed areas:")
+			}
 			for _, tc := range []struct {
 				key string
 				row int
-			}{{"down", 1}, {"up", 0}, {"end", count - 1}, {"home", 0}, {"pgdown", min(count-1, m.height-10)}, {"pgup", 0}} {
+			}{{"down", 1}, {"up", 0}, {"end", count - 1}, {"home", 0}, {"pgdown", min(count-1, page)}, {"pgup", 0}} {
 				m = keyboardContractPress(t, m, tc.key)
 				if m.glance.frame.rows[tab] != tc.row {
 					t.Fatalf("%s selected row %d, want %d", tc.key, m.glance.frame.rows[tab], tc.row)

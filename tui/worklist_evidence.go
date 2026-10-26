@@ -74,14 +74,22 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	if m.areaRepoID != "" {
 		repoID = m.areaRepoID
 	}
-	lines = append(lines, m.worklistSignal("Repository snapshot: "+strings.TrimPrefix(m.screenLocalFreshness(repoID), "Local: ")))
-	for _, line := range worklistPeople(people, width-14, 1) {
-		lines = append(lines, "Contributors: "+line)
+	if !focused || height >= 6 {
+		lines = append(lines, m.worklistSignal("Repository snapshot: "+strings.TrimPrefix(m.screenLocalFreshness(repoID), "Local: ")))
 	}
-	lines = append(lines, "", StyleDimWhite.Bold(true).Render("RECENT COMMITS / author time "+time.Now().Local().Format("MST")))
+	if !focused || height >= 7 {
+		for _, line := range worklistPeople(people, width-14, 1) {
+			lines = append(lines, "Contributors: "+line)
+		}
+	}
+	if !focused || height >= 8 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, StyleDimWhite.Bold(true).Render("RECENT COMMITS / author time "+time.Now().Local().Format("MST")))
 	slots := max(1, min(3, (height-len(lines)-6)/3))
 	selected := 0
 	if focused {
+		slots = m.worklistActivitySlots(height)
 		selected = m.glanceSelected(m.glanceDetailIDs())
 	}
 	start := max(0, min(selected-slots/2, len(records)-slots))
@@ -92,13 +100,24 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	if len(records) == 0 {
 		lines = append(lines, "No matching commits in this area and range.")
 	}
-	if len(records) > end-start {
+	if focused {
+		position := "0 commits"
+		if len(records) > 0 {
+			position = fmt.Sprintf("%d–%d of %d", start+1, end, len(records))
+			action := "Enter commit details"
+			if width < 70 {
+				action = "Enter details"
+			}
+			position = ansi.Truncate(position, max(1, width-ansi.StringWidth(action)-3), "…") + " · " + action
+		}
+		lines = append(lines, StyleDimWhite.Render(position))
+	} else if len(records) > end-start {
 		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more commits · →/Enter Activity · 2 People · 3 Related", len(records)-(end-start))))
 	}
 	// The header owns shared availability. Only retained, scoped PR evidence
 	// earns space here; the complete inventory remains available via p.
 	prs := m.scopePRs(r.repo.ID)
-	if len(prs) > 0 && len(lines)+6 < height {
+	if len(prs) > 0 && (focused && len(lines)+3 <= height || !focused && len(lines)+6 < height) {
 		prTitle := "OPEN PRs / all dates · local filters do not apply"
 		if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
 			prTitle = "PARENT AREA PRs / all dates · local filters do not apply"
@@ -142,7 +161,20 @@ func (m Model) worklistCommit(r git.CommitRecord, people []stats.AuthorStats, wi
 	return lines
 }
 
-func (m Model) renderWorklistDetail(width, height int) string {
+func (m Model) worklistActivitySlots(height int) int {
+	prefix := min(4, max(1, height-4))
+	prRows := 0
+	if height >= 11 && len(m.scopePRs(m.glance.frame.areaID)) > 0 {
+		prRows = 3
+	}
+	return max(1, (height-prefix-1-prRows)/3)
+}
+
+func (m Model) worklistActivityPageSize() int {
+	return m.worklistActivitySlots(m.height - len(m.worklistDetailHeader(m.width)) - screenFooterRows)
+}
+
+func (m Model) worklistDetailHeader(width int) []string {
 	lines := m.worklistHeader(width)
 	tabs := make([]string, len(glanceTabs))
 	for i, label := range glanceTabs {
@@ -155,7 +187,6 @@ func (m Model) renderWorklistDetail(width, height int) string {
 		}
 	}
 	lines = append(lines, StyleCyan.Render("  "+strings.Join(tabs, "  ")))
-	area := m.glanceDetailArea()
 	people := m.glanceAreaPeople()
 	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  %s commits · %d contributors", FormatNumber(len(stats.UniqueRecords(m.glanceAreaRecords()))), len(people))))
 	if m.personID != "" {
@@ -174,8 +205,15 @@ func (m Model) renderWorklistDetail(width, height int) string {
 		}
 		lines = append(lines, StyleDimWhite.Render("  "+label))
 	}
+	return lines
+}
+
+func (m Model) renderWorklistDetail(width, height int) string {
+	lines := m.worklistDetailHeader(width)
 	switch m.glance.frame.tab {
 	case glanceActivity:
+		area := m.glanceDetailArea()
+		people := m.glanceAreaPeople()
 		r := repositoryActivity{repo: git.Repository{ID: m.glance.frame.areaID, Name: area.Name}, people: people, commits: len(stats.UniqueRecords(m.glanceAreaRecords()))}
 		lines = append(lines, m.worklistEvidence(r, width-4, height-len(lines)-3, true)...)
 	case glanceRelated:
