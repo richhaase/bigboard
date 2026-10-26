@@ -148,7 +148,7 @@ func TestWorklistPRScopeIndependentOfPersonFilter(t *testing.T) {
 	m = pressAwareness(m, "enter")
 	m.personID = "email:nonexistent@x"
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "#7 Add feature") || !strings.Contains(view, "all dates") || !strings.Contains(view, "No matching commits") {
+	if !strings.Contains(view, "#7 Add feature") || !strings.Contains(view, "shared range · Git person/bot filters do not apply") || !strings.Contains(view, "No matching commits") {
 		t.Fatalf("PR-only evidence lost or filtered:\n%s", view)
 	}
 }

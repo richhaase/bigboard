@@ -65,7 +65,7 @@ func TestHelpContextContainsOnlyRelevantControls(t *testing.T) {
 		{"repository controls", "Include / exclude the repository", "Refresh repos and PRs", func(m Model) Model { m.viewMode = ViewRepoOverlay; return m }},
 		{"range", "Apply all pending changes", "Show / hide bots", func(m Model) Model { m.openRangePicker(); return m }},
 		{"contributor", "Scroll contributor details", "Change sort / reverse order", func(m Model) Model { m.viewMode = ViewOperative; return m }},
-		{"scan errors", "Retry repository refresh", "Include / exclude the repository", func(m Model) Model { m.showScanErrors = true; return m }},
+		{"data status", "Refresh Git and PRs", "Include / exclude the repository", func(m Model) Model { m.showScanErrors = true; return m }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.setup(awarenessFixture())

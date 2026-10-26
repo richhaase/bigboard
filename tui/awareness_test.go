@@ -69,7 +69,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 		t.Fatalf("focus=%s", m.personID)
 	}
 	out := m.View()
-	for _, text := range []string{"Fix login", "RECENT COMMITS", "Local:"} {
+	for _, text := range []string{"Fix login", "RECENT COMMITS", "Git:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %q:\n%s", text, out)
 		}
@@ -264,7 +264,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	m.width = 110
 	m.height = 40
 	out := m.View()
-	for _, text := range []string{"BIGBOARD / Activity", "REPOSITORIES", "COMMITS", "PEOPLE", "LINES +/-", "Local:"} {
+	for _, text := range []string{"BIGBOARD / Activity", "REPOSITORIES", "COMMITS", "PEOPLE", "LINES +/-", "Git:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing original-style element %q", text)
 		}

@@ -56,9 +56,8 @@ func TestPRStatusWarningsVisibleAcrossLenses(t *testing.T) {
 							}
 							raw := m.View()
 							view := ansi.Strip(raw)
-							want := "PR cache: " + state.warning
-							if !strings.Contains(view, want) {
-								t.Fatalf("complete warning %q missing:\n%s", want, view)
+							if !strings.Contains(view, "PRs: "+state.warning) && !strings.Contains(view, "PR "+state.warning) {
+								t.Fatalf("complete PR warning %q missing:\n%s", state.warning, view)
 							}
 							if strings.Contains(view, "0 known open") {
 								t.Fatalf("retained PR inventory became zero:\n%s", view)

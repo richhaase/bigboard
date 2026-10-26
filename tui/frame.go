@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const screenHeaderRows = 6
+const screenHeaderRows = 5
 const screenFooterRows = 3
 
 func (m Model) screenHeader(title string, width int) []string {
@@ -41,16 +41,7 @@ func (m Model) screenHeader(title string, width int) []string {
 		left += strings.Repeat(" ", max(2, width-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 	}
 	left = worklistBand.Render(worklistLine(ansi.Truncate(left, max(1, width), "…"), width))
-	pr := strings.TrimPrefix(m.prStatus(), "GitHub")
-	pr = strings.TrimPrefix(pr, " PRs")
-	pr = strings.TrimSpace(strings.TrimPrefix(pr, " · "))
-	pr, _, _ = strings.Cut(pr, " · p ")
-	state, rest, _ := strings.Cut(pr, " · ")
-	pr = "PR cache: " + state + " · all dates"
-	if rest != "" {
-		pr += " · " + rest
-	}
-	return []string{left, StyleDimWhite.Render("  " + m.sharedScopeLabel(width)), StyleCyan.Render("  " + m.boardFiltersLabel(width)), m.worklistSignal("  " + m.screenLocalFreshness("")), m.worklistSignal("  " + pr), "  " + worklistRule.Render(strings.Repeat("─", max(1, width-4)))}
+	return []string{left, StyleDimWhite.Render("  " + m.sharedScopeLabel(width)), StyleCyan.Render("  " + m.boardFiltersLabel(width)), "  " + m.compactDataStatus(width), "  " + worklistRule.Render(strings.Repeat("─", max(1, width-4)))}
 }
 
 func (m Model) screenLocalFreshness(repoID string) string {

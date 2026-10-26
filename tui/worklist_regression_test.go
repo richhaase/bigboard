@@ -86,11 +86,17 @@ func TestWorklistSmallSnapshotAndPRTitle(t *testing.T) {
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
 	at := time.Date(2026, 9, 30, 15, 12, 0, 0, time.Local)
 	m.scannedAt["/api"] = at
-	m.failedRepos = []string{"/web"}
+	m.failedRepos = []string{"web"}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "shared range · Git person/bot filters do not apply"} {
+	for _, want := range []string{"Git: STALE", "#7 Add feature", "shared range · Git person/bot filters do not apply"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q at120x36:\n%s", want, view)
+		}
+	}
+	details := ansi.Strip(strings.Join(m.dataStatusLines(m.width), "\n"))
+	for _, want := range []string{"1 repository updates failed", at.Format("Jan 02 15:04:05 MST")} {
+		if !strings.Contains(details, want) {
+			t.Fatalf("status details lost %q:\n%s", want, details)
 		}
 	}
 }
@@ -177,7 +183,7 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"BIGBOARD / Activity", "Local:", "r refresh", "LAST AUTHOR", "LATEST COMMIT"} {
+	for _, want := range []string{"BIGBOARD / Activity", "Git:", "r refresh", "LAST AUTHOR", "LATEST COMMIT"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}
@@ -186,11 +192,11 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 		t.Fatal("obsolete theme or timer hint")
 	}
 	m.refreshing = true
-	if !strings.Contains(m.View(), "Updating…") {
+	if !strings.Contains(m.View(), "refreshing") {
 		t.Fatal("refresh status hidden")
 	}
 	m.width = 80
-	if !strings.Contains(m.View(), "BIGBOARD / Activity") || !strings.Contains(m.View(), "Updating…") {
+	if !strings.Contains(m.View(), "BIGBOARD / Activity") || !strings.Contains(m.View(), "refreshing") {
 		t.Fatal("compact status differs")
 	}
 }
