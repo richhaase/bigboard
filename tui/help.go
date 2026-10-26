@@ -39,14 +39,20 @@ func (m Model) helpSearchActive() bool {
 func (m Model) currentHelp() screenHelp {
 	help := m.screenHelp()
 	if !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
-		help.sections = append(help.sections, helpSection{"Filtering", []helpBinding{{"f", "Edit shared scope and board filters"}, {"t", "Open shared date range"}, {"x", "Clear this board filters/search; keep scope and location"}}})
+		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: shared scope and this board's filters"}, {"t", "Date range: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
 	}
-	help.sections = append([]helpSection{{"Boards", []helpBinding{
-		{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume pull requests"},
-	}}}, help.sections...)
-	if !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
-		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Read Git/PR freshness, coverage and diagnostics"}}})
+	if !m.filters.open && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
+		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Data status: Git/PR freshness, coverage and diagnostics"}}})
 	}
+	boards := "Boards"
+	if m.filters.open || m.viewMode == ViewRepoOverlay {
+		boards = "Boards · cancel pending choices"
+	} else if m.helpSearchActive() {
+		boards = "Boards · from help"
+	}
+	help.sections = append(help.sections, helpSection{boards, []helpBinding{
+		{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume PRs"},
+	}})
 	return help
 }
 
@@ -54,36 +60,36 @@ func (m Model) screenHelp() screenHelp {
 	if m.filters.open {
 		if m.filtersTextEditing() {
 			return screenHelp{"Filter text", []helpSection{{"Edit", []helpBinding{
-				{"Type / Backspace", "Edit the text"}, {"Ctrl+U", "Clear the text"}, {"Enter", "Keep this edit in the pending choices"}, {"Esc", "Cancel this edit"}, {"F1", "Show help while typing"},
+				{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear the text"}, {"Enter", "Keep this edit; return to pending choices"}, {"Esc", "Cancel this edit; return to pending choices"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 			}}}}
 		}
 		return screenHelp{"Filters", []helpSection{{"Choose", []helpBinding{
-			{"← / → / Tab", "Change category"}, {"↑ / ↓", "Select an option"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last option"},
-			{"Space", "Change pending selection"}, {"/", "Find options"}, {"Enter", "Apply all pending changes"}, {"Esc", "Cancel pending changes"},
+			{"← / → / Tab", "Change category; Shift+Tab moves backward"}, {"↑ / ↓", "Select an option"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last option"},
+			{"Space", "Change pending selection"}, {"/", "Find options"}, {"Enter", "Apply all pending changes"}, {"Esc", "Cancel pending changes; return to the board"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}, {"Scope", []helpBinding{
-			{"Shared", "Date range and viewed repositories affect every board"}, {"This board", "Other filters stay on this board"}, {"Selections", "Any selected value; all categories must match"},
+			{"Shared", "Date range and viewed repositories affect every board; tracking is unchanged"}, {"This board", "Other filters stay on this board"}, {"Selections", "Any selected value; all categories must match"},
 			{"Reset shared", "All time and all tracked repositories"}, {"Reset this board", "Clear board filters and search; keep your location"},
 		}}}}
 	}
 	if m.showScanErrors {
 		return screenHelp{"Data status", []helpSection{{"Actions", []helpBinding{
 			{"↑ / ↓", "Scroll freshness and coverage"}, {"d", "Show / hide repository diagnostics"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
-			{"e / ← / Esc", "Return to the previous screen"}, {"r", "Refresh Git and PRs"},
+			{"e / ← / Esc", "Close Data status; return to the previous view"}, {"r", "Refresh Git and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.loading {
 		return screenHelp{"Loading repositories", []helpSection{{"Actions", []helpBinding{
-			{"r", "Join the current refresh"},
+			{"r", "Join the current refresh"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.err != nil {
 		return screenHelp{"Repositories unavailable", []helpSection{{"Recovery", []helpBinding{
-			{"r", "Retry repository refresh"}, {"e", "Read error details"},
+			{"r", "Retry repository refresh"}, {"e", "Data status: read error details"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.helpSearchActive() {
 		return screenHelp{"Search", []helpSection{{"Edit the search", []helpBinding{
-			{"Type", "Filter the current list"}, {"Backspace", "Remove the last character"},
+			{"Type", "Find in the current list; shortcut letters stay literal"}, {"Backspace", "Remove the last character"}, {"Ctrl+U", "Clear the text"},
 			{"Enter", "Keep the search and return to the list"}, {"Esc", "Restore the previous search and return"},
 			{"?", "Type a question mark"}, {"F1", "Open this help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 		}}}}
@@ -93,47 +99,48 @@ func (m Model) screenHelp() screenHelp {
 		if m.prDetail {
 			title, move = "Pull request details", "Scroll PR details"
 		}
-		back := "Close details; stay at board root; keep filters"
-		if m.prContext.active {
-			back = "Close details / return to Activity; keep saved PR filters"
+		back := "Stay at the PRs root; keep filters"
+		if m.prDetail {
+			back = "Close details; return to the PR list; keep filters"
+		} else if m.prContext.active {
+			back = "Return to Activity; restore saved PR filters"
 		}
 		navigation := []helpBinding{{"↑ / ↓", move}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last row or page"}, {"← / Esc", back}}
-		actions := []helpBinding{{"f", "Edit shared scope and PR filters"}, {"u", "Edit PR authors"}, {"v", "Edit review states"}, {"k", "Edit check states"}, {"d", "Edit draft/open states"}, {"x", "Clear PR filters and search; keep shared scope"}, {"i", "Manage tracked repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh repos and PRs"}}
-		actions = append([]helpBinding{{"t", "Change global range (PR last-updated time)"}}, actions...)
+		actions := []helpBinding{{"u", "Filters: PR authors"}, {"v", "Filters: review states"}, {"k", "Filters: check states"}, {"d", "Filters: draft/open states"}, {"i", "Repository controls: choose tracked repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}
 		if !m.prDetail {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
-			actions = append([]helpBinding{{"/", "Search repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
+			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
 		}
-		return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}, {"Legend", []helpBinding{{"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}}}}}
+		return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}, {"Legend", []helpBinding{{"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
 	}
 
 	switch m.viewMode {
 	case ViewRepoOverlay:
 		return screenHelp{"Repository controls", []helpSection{{"Choose repositories", []helpBinding{
-			{"↑ / ↓", "Select a repository"}, {"Space", "Include / exclude the repository"},
+			{"↑ / ↓", "Select a repository"}, {"Space", "Stage include / exclude for this repository"},
 			{"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last repository"},
-			{"Enter", "Apply choices and return"}, {"Esc / ←", "Cancel choices and return"}, {"q / Ctrl+C", "Quit BigBoard"},
-		}}}}
+			{"Enter", "Apply tracking choices and return"}, {"Esc / ←", "Cancel pending choices and return"}, {"q / Ctrl+C", "Quit BigBoard"},
+		}}, {"Tracking", []helpBinding{{"Included", "Used for data and refreshes in this session"}, {"Filters", "Narrow the view without changing repository tracking"}}}}}
 	case ViewOperative:
 		return screenHelp{"Contributor details", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll contributor details"}, {"PgUp / PgDn", "Scroll details"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to Contributors"},
-		}}, {"Actions", []helpBinding{{"t", "Edit the shared time range"}, {"i", "Choose included repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh repos and PRs"}}}}}
+		}}, {"Actions", []helpBinding{{"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
 	case ViewAggregate:
 		back := "Stay at the Contributors root"
 		return screenHelp{"Contributors", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Select a contributor"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last contributor"}, {"Enter / →", "Read contributor details"}, {"← / Esc", back},
 		}}, {"Actions", []helpBinding{
-			{"/", "Search contributors"}, {"s / S", "Change sort / reverse order"}, {"t", "Edit the shared time range"},
-			{"b", "Show / hide bots"}, {"i", "Include repositories"},
-			{"r", "Refresh repos and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
+			{"/", "Find contributors"}, {"s / S", "Change sort / reverse order"},
+			{"b", "Show / hide bots"}, {"i", "Repository controls: choose tracked repositories"},
+			{"r", "Refresh Git and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.showPaths {
 		return screenHelp{"Commit details", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll commit evidence"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to the current lens"}, {"Tab / Shift+Tab", "Next / previous lens"},
-		}}, {"Actions", []helpBinding{{"v", "Open PRs for this repository"}, {"i", "Choose included repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh repos and PRs"}}}}}
+		}}, {"Actions", []helpBinding{{"v", "Open PRs for this repository"}, {"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
 	}
 	title, open, back := "Activity · Repositories", "Open repository directories", "Stay at the Activity root"
 	if m.areaRepoID != "" {
@@ -144,7 +151,7 @@ func (m Model) screenHelp() screenHelp {
 	}
 	navigation := []helpBinding{{"↑ / ↓", "Select a row"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last row"}, {"Enter / →", open}}
 	navigation = append(navigation, helpBinding{"← / Esc", back})
-	actions := []helpBinding{{"/", "Search this list"}, {"s / S", "Change sort / reverse order"}}
+	actions := []helpBinding{{"/", "Find in this list"}, {"s / S", "Change sort / reverse order"}}
 	if m.glance.detailOpen {
 		title = "Activity · " + glanceTabs[m.glance.frame.tab]
 		navigation[3].action = []string{"Read commit details", "Show this contributor's activity", "Open related evidence", "Open the selected subarea"}[m.glance.frame.tab]
@@ -156,7 +163,7 @@ func (m Model) screenHelp() screenHelp {
 			}
 			navigation[len(navigation)-1] = helpBinding{"1–3 / 4", "Commits / People / Related; return to directories"}
 		}
-		actions = []helpBinding{{"/", "Search this lens"}}
+		actions = []helpBinding{{"/", "Find in this lens"}}
 		if m.glance.frame.tab == glanceRelated {
 			actions = append(actions, helpBinding{"m", "Shared commits / contributor overlap"})
 		}
@@ -180,9 +187,9 @@ func (m Model) screenHelp() screenHelp {
 	} else if m.areaRepoID != "" {
 		navigation = append(navigation, helpBinding{"Tab / 1–4", "Open an area lens"})
 	}
-	actions = append(actions, helpBinding{"t", "Edit the shared time range"}, helpBinding{"b", "Show / hide bots"},
-		helpBinding{"i", "Choose included repositories"}, helpBinding{"v", "Open PRs for this repository"},
-		helpBinding{"q / Ctrl+C", "Quit BigBoard"}, helpBinding{"r", "Refresh repos and PRs"})
+	actions = append(actions, helpBinding{"b", "Show / hide bots"},
+		helpBinding{"i", "Repository controls: choose tracked repositories"}, helpBinding{"v", "Open PRs for this repository"},
+		helpBinding{"q / Ctrl+C", "Quit BigBoard"}, helpBinding{"r", "Refresh Git and PRs"})
 	return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}}}
 }
 

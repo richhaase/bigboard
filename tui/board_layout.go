@@ -54,11 +54,15 @@ func fitFooter(footer string, width int) string {
 			}
 		}
 	} else {
-		if has("←/Esc back") || has("Esc back") {
-			local = append(local, "Esc back")
-		}
 		if has("Tab ranking") {
 			local = append(local, "Tab ranking", "↑↓ scroll")
+		} else {
+			if has("←/Esc back") || has("Esc back") {
+				local = append(local, "Esc back")
+			}
+			if has("↑↓ scroll") {
+				local = append(local, "↑↓ scroll")
+			}
 		}
 		local = append(local, "f filters")
 		if has("Tab contributors") {
@@ -76,20 +80,17 @@ func fitFooter(footer string, width int) string {
 		if has("/ ") {
 			local = append(local, "/ find")
 		}
-		if has("t range") {
-			local = append(local, "t range")
-		}
-		if has("s/S sort") || has("s sort") {
-			local = append(local, "s sort")
-		}
 		if has("→") {
 			local = append(local, "Enter open")
 		}
 		if has("o ") {
 			local = append(local, "o browser")
 		}
-		if len(local) < 4 && has("↑↓ scroll") && !has("Tab ranking") {
-			local = append(local, "↑↓ scroll")
+		if has("t range") {
+			local = append(local, "t date range")
+		}
+		if has("s/S sort") || has("s sort") {
+			local = append(local, "s sort")
 		}
 		if len(local) < 4 && has("v repo PRs") {
 			local = append(local, "v PRs")
@@ -118,7 +119,17 @@ func fitFooter(footer string, width int) string {
 		return out
 	}
 	fits := func() bool { return ansi.StringWidth(strings.Join(groups(), " │ ")) <= max(1, width-4) }
+	if len(local) >= 2 {
+		chosen = local[:2]
+		if !fits() {
+			boards = nil
+		}
+		chosen = nil
+	}
 	for _, hint := range local {
+		if len(chosen) == 5 {
+			break
+		}
 		chosen = append(chosen, hint)
 		if !fits() {
 			chosen = chosen[:len(chosen)-1]
