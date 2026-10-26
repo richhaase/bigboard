@@ -109,8 +109,8 @@ func (m Model) handlePRScopeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "left":
 		m.prRepoPicker, m.prFilterSearch = false, false
-	case "f", "a", "v", "c", "d":
-		kinds := map[string]string{"f": "repo", "a": "author", "v": "review", "c": "checks", "d": "state"}
+	case "f", "u", "v", "k", "d":
+		kinds := map[string]string{"f": "repo", "u": "author", "v": "review", "k": "checks", "d": "state"}
 		m.openPRFilter(kinds[msg.String()])
 	case "tab", "shift+tab":
 		index := 0
@@ -154,7 +154,7 @@ func (m Model) handlePRScopeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) prFilterTabLines(width int) []string {
-	keys := []string{"f", "a", "v", "c", "d"}
+	keys := []string{"f", "u", "v", "k", "d"}
 	labels := []string{"Repo", "Author", "Review", "Checks", "State"}
 	kind := m.prFilterKind
 	if kind == "" {

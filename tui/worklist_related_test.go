@@ -102,7 +102,7 @@ func TestOverlapOnlyDrilldownNeverClaimsSharedCommits(t *testing.T) {
 	m := monorepoFixture()
 	m.selectedAreaID = "auto:services/auth"
 	m = pressAwareness(m, "3")
-	m = pressAwareness(m, "c")
+	m = pressAwareness(m, "m")
 	m.glance.frame.ids[glanceRelated] = "auto:root"
 	// Select the independent README area by its returned identity.
 	for _, r := range m.glanceRelatedAreas() {
@@ -137,7 +137,7 @@ func TestWorklistHasNoCollaborationAssessment(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 120, 36
 	m.selectedAreaID = "auto:services/auth"
-	for _, key := range []string{"", "enter", "3", "c", "enter"} {
+	for _, key := range []string{"", "enter", "3", "m", "enter"} {
 		if key != "" {
 			m = pressAwareness(m, key)
 		}

@@ -112,12 +112,16 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 		}
 		lines = append(lines, StyleDimWhite.Render(position))
 	} else if len(records) > end-start {
-		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more commits · →/Enter Activity · 2 People · 3 Related", len(records)-(end-start))))
+		action := "Enter areas"
+		if m.areaRepoID != "" {
+			action = "Enter Activity · 2 People · 3 Related"
+		}
+		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("+%d more commits · %s", len(records)-(end-start), action)))
 	}
 	// The header owns shared availability. Only retained, scoped PR evidence
 	// earns space here; the complete inventory remains available via p.
 	prs := m.scopePRs(r.repo.ID)
-	if len(prs) > 0 && (focused && len(lines)+3 <= height || !focused && len(lines)+6 < height) {
+	if len(prs) > 0 && len(lines)+3 <= height {
 		prTitle := "OPEN PRs / all dates · local filters do not apply"
 		if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
 			prTitle = "PARENT AREA PRs / all dates · local filters do not apply"
@@ -176,8 +180,12 @@ func (m Model) worklistActivityPageSize() int {
 
 func (m Model) worklistDetailHeader(width int) []string {
 	lines := m.worklistHeader(width)
-	tabs := make([]string, len(glanceTabs))
-	for i, label := range glanceTabs {
+	labels := glanceTabs
+	if m.glance.frame.literal {
+		labels = []string{"Commits", "People", "Related", "Directories"}
+	}
+	tabs := make([]string, len(labels))
+	for i, label := range labels {
 		tabs[i] = fmt.Sprintf("%d %s", i+1, label)
 		if width < 70 {
 			tabs[i] = label

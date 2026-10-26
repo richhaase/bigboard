@@ -23,7 +23,7 @@ func selectedRowBackground(line string) string {
 }
 
 func worklistCompactBanner(width int) []string {
-	return []string{worklistBand.Render(worklistLine("  BIGBOARD / Worklist", max(1, width)))}
+	return []string{worklistBand.Render(worklistLine("  BIGBOARD / Activity", max(1, width)))}
 }
 
 // Restore the canvas after nested Lipgloss spans reset their SGR attributes.

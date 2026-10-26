@@ -259,7 +259,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	m.width = 110
 	m.height = 40
 	out := m.View()
-	for _, text := range []string{"BIGBOARD / Worklist", "REPOSITORIES", "LAST AUTHOR", "RECENT COMMITS", "Local:"} {
+	for _, text := range []string{"BIGBOARD / Activity", "REPOSITORIES", "COMMITS", "PEOPLE", "LINES +/-", "Local:"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing original-style element %q", text)
 		}
@@ -269,7 +269,7 @@ func TestAwarenessKeepsBigBoardVisualIdentity(t *testing.T) {
 	}
 	m.width = 40
 	m.height = 18
-	if !strings.Contains(m.View(), "BIGBOARD / Worklist") {
+	if !strings.Contains(m.View(), "BIGBOARD / Activity") {
 		t.Fatalf("compact Big Board banner missing:\n%s", m.View())
 	}
 }

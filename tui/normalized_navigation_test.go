@@ -32,12 +32,12 @@ func normalizedPRFixture() Model {
 }
 
 func TestNormalizedRootsAndQuit(t *testing.T) {
-	for _, board := range []string{"l", "w", "p"} {
+	for _, board := range []string{"c", "a", "p"} {
 		m := keyboardContractPress(t, normalizedPRFixture(), board, "esc", "left", "esc")
-		if m.quitting || board == "p" && !m.showPRs || board == "w" && m.areaRepoID != "" {
+		if m.quitting || board == "p" && !m.showPRs || board == "a" && m.areaRepoID != "" {
 			t.Fatalf("%s back left the board root", board)
 		}
-		if board == "l" {
+		if board == "c" {
 			m.filterQuery = "robot"
 		}
 		next, cmd := m.Update(keyboardContractKey("q"))
@@ -48,15 +48,15 @@ func TestNormalizedRootsAndQuit(t *testing.T) {
 }
 
 func TestNormalizedBoardListPaging(t *testing.T) {
-	for _, board := range []string{"l", "w", "p"} {
+	for _, board := range []string{"c", "a", "p"} {
 		m := normalizedPRFixture()
-		if board == "l" {
+		if board == "c" {
 			m = keyboardContractFixture()
 		}
 		m = keyboardContractPress(t, m, board)
 		row := func(m Model) int {
 			switch board {
-			case "l":
+			case "c":
 				return m.selectedRow
 			case "p":
 				return m.prRow
@@ -116,7 +116,7 @@ func TestPRScopeIsIndependentAndPlainPReturnsAll(t *testing.T) {
 	if m.prRepoID != "" || len(m.visiblePRs()) != 60 {
 		t.Fatal("p retained repository scope")
 	}
-	m = keyboardContractPress(t, m, "w", "v")
+	m = keyboardContractPress(t, m, "a", "v")
 	if !m.showPRs || m.prRepoID != "/api" || len(m.visiblePRs()) != 30 {
 		t.Fatal("contextual PR jump lost selected repository")
 	}
@@ -165,8 +165,8 @@ func TestPRSearchSortAndRefreshRetainIdentity(t *testing.T) {
 }
 
 func TestRepositoryControlsApplyAndCancelFromEveryBoard(t *testing.T) {
-	for _, board := range []string{"l", "w", "p"} {
-		for _, close := range []string{"enter", "esc", "left", "l", "w", "p"} {
+	for _, board := range []string{"c", "a", "p"} {
+		for _, close := range []string{"enter", "esc", "left", "c", "a", "p"} {
 			m := keyboardContractPress(t, normalizedPRFixture(), board, "i", "down", " ", close)
 			if m.excludedRepos["/web"] != (close == "enter") || m.viewMode == ViewRepoOverlay {
 				t.Fatalf("%s/%s applied or canceled incorrectly", board, close)

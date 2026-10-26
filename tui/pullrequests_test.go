@@ -267,6 +267,8 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 			if len(m.allRecords) != before || m.loading || m.prState.loading {
 				t.Fatal("local history blocked/changed")
 			}
+			m = pressAwareness(m, "enter")
+			m = pressAwareness(m, "1")
 			if !strings.Contains(m.prStatus(), tc.label) || !strings.Contains(m.View(), "Fix login") {
 				t.Fatalf("missing useful status/history: %s", m.View())
 			}

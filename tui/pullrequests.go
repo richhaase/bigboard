@@ -413,11 +413,11 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openSelectedPR()
 	case "f":
 		m.openPRFilter("repo")
-	case "a":
+	case "u":
 		m.openPRFilter("author")
 	case "v":
 		m.openPRFilter("review")
-	case "c":
+	case "k":
 		m.openPRFilter("checks")
 	case "d":
 		m.openPRFilter("state")

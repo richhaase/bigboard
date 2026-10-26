@@ -41,11 +41,17 @@ func TestWorklistContributorPreviewFollowsSelection(t *testing.T) {
 
 	m = awarenessFixture()
 	m.width = 120
-	if !worklistPeopleInOrder(m.View(), "Ada", "Grace") {
-		t.Fatal("repository preview did not reveal its contributors")
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "1")
+	if !strings.Contains(m.View(), "Contributors: Ada 1 · Grace 1") {
+		t.Fatal("repository drill-down did not reveal its contributors")
 	}
+	m = pressAwareness(m, "esc")
+	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "down")
-	if !worklistPeopleInOrder(m.View(), "Ada") || worklistPeopleInOrder(m.View(), "Grace") {
+	m = pressAwareness(m, "enter")
+	m = pressAwareness(m, "1")
+	if !strings.Contains(m.View(), "Contributors: Ada 1") || strings.Contains(m.View(), "Grace") {
 		t.Fatal("repository selection retained another repository's contributor")
 	}
 }
@@ -80,8 +86,14 @@ func TestWorklistContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	}
 	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "esc")
-	if !worklistPeopleInOrder(m.View(), "Ada", "Zoe") {
-		t.Fatal("repository preview used global author totals instead of repository totals")
+	rows := m.glanceRepositories()
+	r := rows[m.selectedRepository(rows)]
+	counts := map[string]int{}
+	for _, person := range r.people {
+		counts[person.Name] = person.Commits
+	}
+	if counts["Ada"] != 11 || counts["Zoe"] != 3 {
+		t.Fatal("repository totals included another repository or date range")
 	}
 }
 
@@ -154,7 +166,7 @@ func TestWorklistContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 				m.areaRepoID = ""
 			}
 			view := m.View()
-			if lipgloss.Height(view) > m.height || !strings.Contains(view, "Person 000") || !strings.Contains(view, "author dates") {
+			if lipgloss.Height(view) > m.height || !repo && !strings.Contains(view, "Person 000") || !strings.Contains(view, "author dates") {
 				t.Fatalf("preview or footer hidden at %dx%d (repository=%t):\n%s", m.width, m.height, repo, view)
 			}
 			for _, line := range strings.Split(view, "\n") {

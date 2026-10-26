@@ -16,7 +16,7 @@ func TestCompactFooterGroupsContextAndLeavesFullListInHelp(t *testing.T) {
 		if ansi.StringWidth(footer) > width-4 || !strings.Contains(footer, "? help") || !strings.Contains(footer, "f filters") || !strings.Contains(footer, "/ find") {
 			t.Fatalf("%d lost essential footer controls: %s", width, footer)
 		}
-		for _, hidden := range []string{"a author", "c checks", "d state", "x clear", "s/S sort", "R refresh"} {
+		for _, hidden := range []string{"u author", "k checks", "d state", "x clear", "s/S sort", "R refresh"} {
 			if strings.Contains(footer, hidden) {
 				t.Fatalf("full key list leaked into footer: %s", footer)
 			}
@@ -31,7 +31,7 @@ func TestCompactFooterGroupsContextAndLeavesFullListInHelp(t *testing.T) {
 				keys[binding.key] = true
 			}
 		}
-		for _, key := range []string{"a", "c", "d", "x", "i", "r"} {
+		for _, key := range []string{"u", "k", "d", "x", "i", "r"} {
 			if !keys[key] {
 				t.Fatalf("full help lost %s", key)
 			}
@@ -40,7 +40,7 @@ func TestCompactFooterGroupsContextAndLeavesFullListInHelp(t *testing.T) {
 }
 
 func TestRefreshAndInclusionHaveDistinctLowercaseKeys(t *testing.T) {
-	for _, board := range []string{"w", "l", "p"} {
+	for _, board := range []string{"a", "c", "p"} {
 		base := boardLayoutFixture()
 		base.width, base.height = 120, 36
 		base = keyboardContractPress(t, base, board)

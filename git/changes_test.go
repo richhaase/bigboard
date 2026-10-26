@@ -16,7 +16,7 @@ func TestCollectRetainedChanges(t *testing.T) {
 	writeAndCommit(t, dir, "old\tname.go", strings.Repeat("source\n", 10), "source")
 	gitOutput(t, dir, "mv", "old\tname.go", "new\nname.go")
 	gitOutput(t, dir, "commit", "-m", "rename")
-	if got := scanFixture(t, dir)[0].Changes; !reflect.DeepEqual(got, []git.PathChange{{Path: "new\nname.go", PreviousPath: "old\tname.go"}}) {
+	if got := scanFixture(t, dir)[0].Changes; !reflect.DeepEqual(got, []git.PathChange{{Path: "new\nname.go", PreviousPath: "old\tname.go", LinesKnown: true}}) {
 		t.Fatalf("rename paths: %+v", got)
 	}
 	// Copy detection uses an independently modified source; retaining the old
@@ -27,7 +27,7 @@ func TestCollectRetainedChanges(t *testing.T) {
 	gitOutput(t, dir, "add", "copy\tname.go")
 	writeAndCommit(t, dir, "new\nname.go", strings.Repeat("source\n", 10)+"modified\n", "copy")
 	copied := scanFixture(t, dir)[0]
-	want := []git.PathChange{{Path: "copy\tname.go", PreviousPath: "new\nname.go"}, {Path: "new\nname.go"}}
+	want := []git.PathChange{{Path: "copy\tname.go", PreviousPath: "new\nname.go", LinesKnown: true}, {Path: "new\nname.go", Added: 1, LinesKnown: true}}
 	if !reflect.DeepEqual(copied.Changes, want) || copied.Added != 1 {
 		t.Fatalf("copy paths/counts: %+v", copied)
 	}
@@ -36,7 +36,7 @@ func TestCollectRetainedChanges(t *testing.T) {
 	}
 	writeAndCommit(t, dir, "vendor/binary\nfile.bin", "\x00\x01\x02", "binary generated")
 	binary := scanFixture(t, dir)[0]
-	if !reflect.DeepEqual(binary.Changes, []git.PathChange{{Path: "vendor/binary\nfile.bin", Generated: true}}) || binary.Added != 0 || binary.Removed != 0 {
+	if !reflect.DeepEqual(binary.Changes, []git.PathChange{{Path: "vendor/binary\nfile.bin", Generated: true, Binary: true}}) || binary.Added != 0 || binary.Removed != 0 {
 		t.Fatalf("binary/generated paths: %+v", binary)
 	}
 	gitOutput(t, dir, "commit", "--allow-empty", "-m", "empty")
@@ -68,7 +68,7 @@ func TestShallowRetainedPathsUnknown(t *testing.T) {
 		t.Fatalf("synthetic root paths were retained: %+v", records[1])
 	}
 	full := scanFixture(t, source)
-	if full[1].PathsUnknown || !reflect.DeepEqual(full[1].Changes, []git.PathChange{{Path: "added.go"}}) {
+	if full[1].PathsUnknown || !reflect.DeepEqual(full[1].Changes, []git.PathChange{{Path: "added.go", Added: 1, LinesKnown: true}}) {
 		t.Fatalf("full boundary diff: %+v", full[1])
 	}
 }

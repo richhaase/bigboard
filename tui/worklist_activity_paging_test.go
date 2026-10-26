@@ -60,19 +60,19 @@ func TestWorklistActivityPagingMatchesVisibleRecords(t *testing.T) {
 	}
 }
 
-func TestWorklistOverviewPreviewRemainsBounded(t *testing.T) {
+func TestWorklistPreviewHintsFollowCurrentLevel(t *testing.T) {
 	m := glanceBusyFixture()
 	m.width, m.height = 160, 48
 	areaRows := m.glanceRepositories()
 	area := areaRows[m.selectedRepository(areaRows)]
 	preview := ansi.Strip(strings.Join(m.worklistEvidence(area, 156, 32, false), "\n"))
-	if strings.Count(preview, "Exact subject") != 3 {
-		t.Fatal("area preview lost its bounded evidence")
+	if strings.Count(preview, "Exact subject") != 3 || !strings.Contains(preview, "Enter Activity · 2 People · 3 Related") {
+		t.Fatal("area preview lost its bounded evidence or applicable shortcuts")
 	}
 	m.areaRepoID = ""
 	rows := m.glanceRepositories()
 	preview = ansi.Strip(strings.Join(m.worklistEvidence(rows[0], 156, 32, false), "\n"))
-	if strings.Count(preview, "Exact subject") != 3 {
-		t.Fatal("repository preview lost its bounded evidence")
+	if strings.Count(preview, "Exact subject") != 3 || !strings.Contains(preview, "Enter areas") || strings.Contains(preview, "2 People") || strings.Contains(preview, "Enter Activity") {
+		t.Fatal("repository preview advertises actions from another level")
 	}
 }

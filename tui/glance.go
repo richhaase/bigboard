@@ -17,10 +17,18 @@ const (
 
 var glanceTabs = []string{"Activity", "People", "Related", "Subareas"}
 var overviewSortLabels = []string{"Activity (commits)", "Recent", "Name"}
+var changeSortLabels = []string{"Lines +/-", "Commits", "Recent", "Name"}
 
 func (m Model) overviewSortLabel() string {
+	mode := m.overviewSort
+	labels := overviewSortLabels
+	if (m.areaRepoID == "" || m.directory.active) && !m.glance.detailOpen {
+		mode = m.repositorySort
+		labels = changeSortLabels
+	}
+	mode = max(0, min(mode, len(labels)-1))
 	direction := "↓"
-	if m.overviewSort == 2 {
+	if labels[mode] == "Name" {
 		direction = "↑"
 	}
 	if m.overviewReverse {
@@ -30,10 +38,11 @@ func (m Model) overviewSortLabel() string {
 			direction = "↑"
 		}
 	}
-	return overviewSortLabels[max(0, min(m.overviewSort, len(overviewSortLabels)-1))] + " " + direction
+	return labels[mode] + " " + direction
 }
 
 type glanceFrame struct {
+	literal, relatedFromLiteral                       bool
 	relatedOverlap, relatedPeople                     bool
 	areaID, name, path, leafID                        string
 	relatedFromID, relatedFromPath, relatedFromLeafID string
@@ -57,6 +66,9 @@ func (m Model) glanceQuery() string {
 	if m.glance.detailOpen {
 		return m.glance.frame.queries[m.glance.frame.tab]
 	}
+	if m.directory.active {
+		return m.directory.frame.query
+	}
 	if m.areaRepoID != "" {
 		return m.glance.overviewQueries[1]
 	}
@@ -65,6 +77,10 @@ func (m Model) glanceQuery() string {
 func (m *Model) setGlanceQuery(q string) {
 	if m.glance.detailOpen {
 		m.glance.frame.queries[m.glance.frame.tab] = q
+		return
+	}
+	if m.directory.active {
+		m.directory.frame.query = q
 		return
 	}
 	i := 0
@@ -157,6 +173,9 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				step = 3
 			}
 			m.glance.frame.tab = (m.glance.frame.tab + step) % 4
+			if m.glance.frame.literal && m.glance.frame.tab == glanceSubareas {
+				m.closeGlanceDetail()
+			}
 		case "up":
 			m.pathOffset = max(0, m.pathOffset-1)
 		case "down":
@@ -208,6 +227,10 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.areaRepoID != "" {
+			if m.directory.active {
+				m.leaveDirectory()
+				return m, nil
+			}
 			m.areaRepoID = ""
 			m.personID = ""
 			return m, nil
@@ -220,11 +243,18 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.glance.detailOpen {
 		return m.handleGlanceDetailKey(key), nil
 	}
+	if m.directory.active {
+		return m.handleDirectoryKey(key), nil
+	}
 	rows := m.glanceRepositories()
 	selected := m.selectedRepository(rows)
 	switch key {
 	case "s":
-		m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+		if m.areaRepoID == "" {
+			m.repositorySort = (m.repositorySort + 1) % len(changeSortLabels)
+		} else {
+			m.overviewSort = (m.overviewSort + 1) % len(overviewSortLabels)
+		}
 	case "S":
 		m.overviewReverse = !m.overviewReverse
 	case "tab", "1", "2", "3", "4":
@@ -237,9 +267,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(rows) > 0 {
 			if m.areaRepoID == "" {
-				m.areaRepoID = rows[selected].repo.ID
-				m.selectedAreaID = ""
-				m.glance.overviewQueries[1] = ""
+				m.openDirectoryRepository(rows[selected].repo.ID)
 			} else {
 				m.openGlanceArea(rows[selected])
 			}
@@ -297,6 +325,10 @@ func (m Model) handleGlanceSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleGlanceDetailKey(key string) Model {
 	f := &m.glance.frame
+	if f.literal && (key == "4" || key == "tab" && f.tab == glanceRelated || key == "shift+tab" && f.tab == glanceActivity) {
+		m.closeGlanceDetail()
+		return m
+	}
 	switch key {
 	case "tab":
 		f.tab = (f.tab + 1) % 4
@@ -307,7 +339,7 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 	case "1", "2", "3", "4":
 		f.tab = int(key[0] - '1')
 		return m
-	case "c":
+	case "m":
 		if f.tab == glanceRelated {
 			f.relatedOverlap = !f.relatedOverlap
 			f.ids[glanceRelated] = ""
@@ -351,7 +383,7 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 		if f.relatedOverlap {
 			for _, related := range m.glanceRelatedAreas() {
 				if related.area.ID == ids[selected] {
-					m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, relatedPeople: true, tab: glancePeople})
+					m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, relatedFromLiteral: f.literal, relatedPeople: true, tab: glancePeople})
 					break
 				}
 			}
@@ -359,7 +391,7 @@ func (m Model) handleGlanceDetailKey(key string) Model {
 		}
 		for _, related := range m.glanceCochangedAreas() {
 			if related.area.ID == ids[selected] {
-				m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, tab: glanceActivity})
+				m.pushGlanceFrame(glanceFrame{areaID: related.area.ID, name: related.area.Name, relatedFromID: f.areaID, relatedFromPath: f.path, relatedFromLeafID: f.leafID, relatedFromLiteral: f.literal, tab: glanceActivity})
 				break
 			}
 		}

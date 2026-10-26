@@ -1,22 +1,24 @@
-# Worklist visual guide
+# Activity visual guide
 
 [README](../README.md) · [Full controls](../README.md#controls) ·
 [Configuration](../README.md#config-file) · [PR context](../README.md#automatic-github-pr-awareness)
 
-Bigboard starts with repositories, path-based work areas, the contributors who
-worked there, and concrete commit evidence. Run `bigboard ~/src/` for multiple
+Bigboard starts with repository change volume, then literal directories and files,
+with contributors and commits available as scoped evidence. Run `bigboard ~/src/` for multiple
 repositories or `bigboard /path/to/repo` for one. A single included repository
-opens directly into its work areas.
+opens directly into its directories.
 
 All screenshots in this guide are **actual terminal captures of Bigboard's own
 public Git history**, not mockups or fixture data. They use the 14-day range with
 bots shown; the custom entry shows an unapplied 21-day value. The capture
 environment intentionally omits `gh`; the UI reports unavailable PR context
-and keeps local history usable. See [capture details](#capture-details).
+and keeps local history usable. These captures predate the repository ranking
+and Contributors rename; the current controls and behavior are described below.
+See [capture details](#capture-details).
 
 ## Scan work, then inspect its evidence
 
-![120-column Worklist with tui selected; latest authors and commit subjects are aligned above scoped contributor and commit evidence](images/worklist-wide.png)
+![120-column Activity with tui selected; latest authors and commit subjects are aligned above scoped contributor and commit evidence](images/worklist-wide.png)
 
 *Overview, 120 × 36. `tui` is the only selected row. The list shows where recent
 work happened; the lower pane explains that selected area's history.*
@@ -24,22 +26,31 @@ work happened; the lower pane explains that selected area's history.*
 Within each commit preview, the author/date/hash and changed areas are indented
 beneath the title.
 
-Read the top list **area → latest contributor + others → latest commit → age**. Recent is the default sort. `s` cycles Recent, Name, and Activity
-(commit count). Commit volume is not priority or productivity.
+At the repository level, compare **where change occurred** using a full-height
+ranking with bars. Added + removed lines is the default sort; commit counts stay
+visible and sortable. Bars always show added and removed lines. Counts follow the
+current range and bot filter; quiet repositories remain visible, and unknown line
+totals keep their `?` qualifiers. There is no selected repository text pane.
+Enter opens a literal directory/file ranking with the same columns and bars.
+Directory totals count only the changes to files inside that directory. Enter
+a directory to go deeper, or a file to see its commits. Configured named work
+areas retain their separate meaning in secondary evidence views. These measures
+do not indicate priority or productivity.
 
-- `↑/↓` selects a row; the evidence underneath follows that selection
-- `→` or `Enter` opens repository → work areas → area detail → full commit evidence
+- `↑/↓` selects a repository, directory, file, or evidence row
+- `→` or `Enter` opens repository → directories → files → commit evidence
 - `←` goes back with selection preserved; at the repository root it stays there
 - `+N` beside the latest author counts the other distinct contributors in the
   current local time range and bot filter, not the number of extra commits
 - Counts beside names in the lower pane are scoped commit totals. `+N more`
-  means the preview is bounded; `2` opens the full alphabetical People list
+  means the older area preview is bounded; `2` opens the current scope's
+  full alphabetical People list
 - Ages are calculated at each repository's last successful local scan. They
   do not tick or imply a new scan. Future author dates say `future`
 - `t` opens the range picker, `b` toggles bots, and `/` searches the active list
 
-One commit can touch several areas, so **area counts overlap and must not be
-summed**. Shared contributors describe historical overlap, not live presence
+One commit can touch several directories, so **commit counts overlap and must
+not be summed**. Line totals belong only to the files in each directory. Shared contributors describe historical overlap, not live presence
 or ownership. GitHub handles stay separate from canonical
 Git identities. Historical paths can appear even after removal from the checkout.
 
@@ -64,9 +75,9 @@ does not scan Git, fetch objects, or refresh PR data. The startup default remain
 *Compact overview, 80 × 30. Six areas fit on this page. The second line preserves
 the concrete commit subject rather than compressing several narrow panels.*
 
-At 80 columns, each item uses two content lines. `Enter` replaces
+At 80 columns, each area uses two content lines. `Enter` replaces
 the list with the selected area's evidence; `Esc` restores its selection and
-scroll position. `PgUp/PgDown` pages through Worklist lists, and `Home/End`
+scroll position. `PgUp/PgDown` pages through Activity lists, and `Home/End`
 selects their first/last item.
 
 ![80-column tui Activity detail with one selected commit, author dates, identities, subjects and object IDs](images/worklist-detail.png)
@@ -75,11 +86,11 @@ selects their first/last item.
 active cursor. `Enter` on the highlighted commit opens the complete subject and
 changed-path inspector.*
 
-The wide overview and lower evidence pane start at **110 columns × 28 rows**.
-Below either dimension, Worklist uses one primary surface. The minimum supported
+The wide area overview and lower evidence pane start at **110 columns × 28 rows**.
+Below either dimension, Activity uses one primary surface. The minimum supported
 size is **40 × 18**:
 
-![40-column Worklist with tui selected, three lines per area and condensed navigation](images/worklist-small.png)
+![40-column Activity with tui selected, three lines per area and condensed navigation](images/worklist-small.png)
 
 *Small overview, 40 × 18. Each item uses three lines. Long subjects and status
 text are visibly truncated; detail and the PR overlay remain available for the
@@ -118,9 +129,9 @@ filter does not change the Related inventory. Missing commit IDs never count as
 shared evidence.
 
 The separate **Contributor overlap** section names canonical identities present
-in both areas in the selected range. Press `c` for
+in both areas in the selected range. Press `m` for
 the full scrollable overlap list, including on narrow terminals; `Enter` opens
-its shared names and their identity-filtered Activity. Press `c` again to return
+its shared names and their identity-filtered Activity. Press `m` again to return
 to co-change.
 
 ![40-column scrollable contributor overlap showing names in both areas](images/worklist-overlap.png)
@@ -147,7 +158,7 @@ listed PR touches the selected child.
 
 ## Inspect a full commit
 
-![80-column commit inspector showing the complete Worklist commit subject, canonical author identity, timestamp, object ID and changed paths](images/worklist-commit.png)
+![80-column commit inspector showing the complete Activity commit subject, canonical author identity, timestamp, object ID and changed paths](images/worklist-commit.png)
 
 *Commit inspector, 80 × 30. The selected commit changed 29 paths, including files
 outside `tui`. The line range shows that more evidence is available below.*
@@ -160,7 +171,7 @@ cells. Rename/copy origins and generated-file exclusions are labeled when presen
 `←` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
 lens. `r` refreshes directly from the inspector. Return to a list or lens before changing local filters. The
 inspector's “Last updated” is the same retained local scan time called “Local” in
-Worklist. A refresh that removes the commit cannot silently retarget this
+Activity. A refresh that removes the commit cannot silently retarget this
 inspector to a different commit.
 
 ## Local and PR freshness are separate
@@ -181,7 +192,7 @@ fetch when known and space permits. Unknown inventory is never shown as zero;
 `p` provides detailed status and any remote retry/cooldown time.
 
 Lowercase `p` opens PRs across all included repositories. `f` chooses a
-repository scope, and Worklist's `v` opens PRs for its selected repository.
+repository scope, and Activity's `v` opens PRs for its selected repository.
 Both paths use the same PR board. Repository scope is separate from global
 inclusion (`i`); the PR board uses the shared date range on PR last-updated time.
 `t` changes the range from any board; All time includes unknown update dates.
@@ -207,9 +218,9 @@ existing API budgets and cooldowns. There is no timer refresh or automatic retry
 
 The main boards align their list heading, column labels, and first data row.
 The heading shows sort and visible range; scope and accepted search text stay
-in the shared row above the freshness indicators. Leaderboard totals are a
-compact heading summary. Worklist keeps its selected-repository evidence pane,
-and known PR signals have a labeled PRs column.
+in the shared row above the freshness indicators. Contributors totals are a
+compact heading summary. Activity uses the full height for repository and
+directory comparisons, with details available through Enter.
 
 PR rows separate PR number, state, and title, and reserve review, checks, and
 updated-age fields. `◇` and a subdued title identify drafts; `●` identifies
@@ -221,7 +232,7 @@ review/check states. Long titles continue in Enter detail. Repository labels
 omit redundant owners only when the remaining names are unambiguous.
 Filter pickers are centered modals over the board, with category tabs, a search
 field, and separate selected-row and applied-value indicators. They use
-`f` repository, `a` author, `v` review, `c` checks, and `d`
+`f` repository, `u` author, `v` review, `k` checks, and `d`
 draft/open state. They combine with text search; `/` searches picker options,
 Tab changes category, Enter applies, and Esc cancels. `x` clears all PR filters.
 At 80 columns the title
@@ -234,9 +245,9 @@ Lowercase `r` refreshes, while `i` opens global repository inclusion.
 
 ## Contributor statistics
 
-![120-column contributor leaderboard with arrow selection, Enter detail, and lowercase w to return to Worklist](images/worklist-leaderboard.png)
+![Earlier 120-column contributor statistics layout with arrow selection and Enter detail](images/worklist-leaderboard.png)
 
-*Leaderboard, 120 × 36. Lowercase `w` switches back to Worklist; arrows select and `Enter` opens contributor detail.*
+*Contributor statistics before the rename, 120 × 36. Lowercase `a` switches back to Activity; arrows select and `Enter` opens contributor detail.*
 
 ![Scrolled 80-column contributor detail showing labeled repository metrics, activity timeline, heatmap and pinned paging controls](images/worklist-statistics.png)
 
@@ -244,28 +255,28 @@ Lowercase `r` refreshes, while `i` opens global repository inclusion.
 rather than squeezed into columns. The footer identifies Rich Haase and shows
 lines 12–39/39, while paging and back controls remain visible.*
 
-From Worklist, lowercase `l` opens the statistics leaderboard and `Enter` opens
+From Activity, lowercase `c` opens Contributors and `Enter` opens
 a contributor.
-In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` scrolls the same contributor. `Esc` returns to the leaderboard. Lowercase `l`, `w`, and `p`
-open the leaderboard, Worklist, and all included PRs from either statistics view.
+In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` scrolls the same contributor. `Esc` returns to Contributors. Lowercase `c`, `a`, and `p`
+open Contributors, Activity, and all included PRs from either statistics view.
 Both statistics views use `t` for the global range. `→` opens the
-selected contributor, `←` returns, and `←` at the leaderboard stays there.
+selected contributor, `←` returns, and `←` at Contributors stays there.
 
 Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`i`),
-and refresh (`r`) live on the statistics leaderboard. Worklist's lens keys
-remain specific to Worklist. See the [view-specific controls](../README.md#controls)
+and refresh (`r`) live on Contributors. Activity's lens keys
+remain specific to Activity. See the [view-specific controls](../README.md#controls)
 for search, quit, and overlay behavior.
 
 ## Keyboard help
 
-![120-column Worklist help with arrow navigation, Home and End, and lowercase l for contributor statistics](images/worklist-help.png)
+![Earlier 120-column Activity help with arrow navigation and Home and End](images/worklist-help.png)
 
-*Help, 120 × 36. `?` opens these controls from Worklist. Navigation uses arrows,
-`Enter/Esc`, and the page/edge keys shown here; `l` opens the leaderboard.*
+*Earlier help layout, 120 × 36. `?` opens contextual controls from Activity. Navigation uses arrows,
+`Enter/Esc`, and the page/edge keys shown here; `c` opens Contributors.*
 
 ## Capture details
 
-All fourteen images were captured on October 3, 2026 with the current keyboard
+All fourteen images were captured on October 3, 2026 with the then-current keyboard
 controls and indented commit metadata, scanning public Bigboard history at
 [3b2f417](https://github.com/richhaase/bigboard/commit/3b2f417bba9864b590e7201eeb006ff8495b4ff4)
 in an isolated local clone named `bigboard`. The capture config sets `since` to
@@ -273,7 +284,7 @@ in an isolated local clone named `bigboard`. The capture config sets `since` to
 Git on PATH and `gh` omitted, so “gh not installed” is real and no GitHub request
 is made. Timestamps use **UTC**. Counts and ages describe that retained snapshot.
 
-The opt-in `TestWorklistTerminalCapture` harness separately tests synthetic
+The opt-in `TestActivityTerminalCapture` harness separately tests synthetic
 Unicode, long-name, 120-contributor and partial-PR states. It is skipped by normal
 tests and is not a production mode. **None of this guide's screenshots uses that
 fixture.**

@@ -56,8 +56,30 @@ func (m Model) activityRepositories() []repositoryActivity {
 		sortPeople(activity.people)
 		result = append(result, activity)
 	}
-	sortRepositoryActivities(result, m.overviewSort)
+	sortChangeActivities(result, m.repositorySort)
 	return result
+}
+
+func sortChangeActivities(rows []repositoryActivity, mode int) {
+	if mode == 0 {
+		sort.Slice(rows, func(i, j int) bool {
+			a, b := rows[i], rows[j]
+			aa, ar, _ := repositoryLineTotals(a)
+			ba, br, _ := repositoryLineTotals(b)
+			if aa+ar != ba+br {
+				return aa+ar > ba+br
+			}
+			if a.commits != b.commits {
+				return a.commits > b.commits
+			}
+			if a.repo.Name != b.repo.Name {
+				return a.repo.Name < b.repo.Name
+			}
+			return a.repo.ID < b.repo.ID
+		})
+	} else {
+		sortRepositoryActivities(rows, mode-1)
+	}
 }
 
 // Activity is volume, not priority or a ranking of people. Ties are stable.

@@ -100,6 +100,10 @@ func (f pathFilter) shouldCount(path string) bool {
 type PathChange struct {
 	Path         string
 	PreviousPath string
+	Added        int
+	Removed      int
+	LinesKnown   bool
+	Binary       bool
 	// Generated is true when the current generated-path filter excludes Path.
 	Generated bool
 }

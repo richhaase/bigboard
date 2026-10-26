@@ -32,6 +32,8 @@ type Model struct {
 	glance          glanceState
 	overviewSort    int
 	overviewReverse bool
+	repositorySort  int
+	directory       directoryState
 	prState         prState
 	prProvider      PRProvider
 	prGeneration    uint64
@@ -429,7 +431,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "l", "w", "p":
+	case "c", "l", "a", "w", "p":
 		if m.helpSearchActive() && !m.showHelp {
 			break
 		}
@@ -451,7 +453,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.prBrowserError = ""
 			m.prRepoID = ""
 			m.selectPR(selectedPR)
-		} else if msg.String() == "l" {
+		} else if msg.String() == "c" || msg.String() == "l" {
 			m.viewMode = ViewAggregate
 		} else {
 			m.viewMode = ViewAwareness
@@ -858,10 +860,10 @@ func (m Model) renderBootSequence() string {
 }
 
 func (m Model) renderAggregateView() string {
-	lines := m.screenHeader("Leaderboard", m.width)
+	lines := m.screenHeader("Contributors", m.width)
 	total := len(m.displayedAuthors())
 	end := min(total, m.scrollOffset+m.tableViewport())
-	label := []string{"Impact", "Commits", "Added", "Removed", "Net", "AI"}[m.sortField]
+	label := []string{"Lines +/-", "Commits", "Added", "Removed", "Net", "AI"}[m.sortField]
 	direction := "↓"
 	if m.sortAsc {
 		direction = "↑"
@@ -910,7 +912,7 @@ func (m *Model) clampStatDetailScroll() {
 }
 
 func (m Model) renderOperativeView() string {
-	lines := m.screenHeader("Leaderboard / "+m.activeOperative, m.width)
+	lines := m.screenHeader("Contributors / "+m.activeOperative, m.width)
 	body := strings.Split(m.operativeDetailContent(), "\n")
 	budget := m.statisticsBodyBudget()
 	offset := max(0, min(m.statDetailOffset, len(body)-budget))

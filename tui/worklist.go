@@ -11,14 +11,15 @@ import (
 
 var worklistRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#415665"))
 
-// Worklist is one scan across scope, last author, concrete work and age. Narrow
-// terminals replace the overview with detail instead of squeezing two panels.
 func (m Model) renderWorklist(width, height int) string {
 	if m.showPaths {
 		return m.renderCommitInspector(width, height)
 	}
 	if m.glance.detailOpen {
 		return m.renderWorklistDetail(width, height)
+	}
+	if m.directory.active {
+		return m.renderDirectoryBoard(width, height)
 	}
 	rows := m.glanceRepositories()
 	selected := m.selectedRepository(rows)
@@ -32,8 +33,14 @@ func (m Model) renderWorklist(width, height int) string {
 	listBudget := m.worklistPageSize()
 	start := max(0, min(selected-listBudget/2, len(rows)-listBudget))
 	end := min(len(rows), start+listBudget)
-	lines = append(lines, boardListHeading(scope, m.overviewSortLabel(), nil, start, end, len(rows), width))
-	if wide {
+	var summary []string
+	if m.areaRepoID == "" {
+		summary = worklistOverviewSummary(rows)
+	}
+	lines = append(lines, boardListHeading(scope, m.overviewSortLabel(), summary, start, end, len(rows), width))
+	if m.areaRepoID == "" {
+		lines = append(lines, "  "+m.repositoryOverviewColumns(inner))
+	} else if wide {
 		lines = append(lines, "  "+m.worklistColumns(inner))
 	} else if inner >= 66 {
 		a := (inner - 11) / 2
@@ -43,8 +50,13 @@ func (m Model) renderWorklist(width, height int) string {
 		lines = append(lines, boardColumns("  "+padCells("REPO / AREA", max(1, inner-9))+" "+rightCells("AGE", 6), width))
 	}
 
+	maxValue := m.repositoryMeasureMax(rows)
 	for i := start; i < end; i++ {
-		lines = append(lines, m.worklistRow(rows[i], i == selected, inner, wide)...)
+		if m.areaRepoID == "" {
+			lines = append(lines, m.worklistRepositoryRow(rows[i], i == selected, inner, i+1, maxValue)...)
+		} else {
+			lines = append(lines, m.worklistRow(rows[i], i == selected, inner, wide)...)
+		}
 	}
 	if len(rows) == 0 {
 		empty := "No matching names. Esc clears search."
@@ -57,22 +69,21 @@ func (m Model) renderWorklist(width, height int) string {
 		lines = append(lines, "  "+empty)
 	}
 
-	if wide && len(rows) > 0 {
+	if m.areaRepoID != "" && wide && len(rows) > 0 {
 		lines = append(lines, "  "+worklistRule.Render(strings.Repeat("─", inner)))
 		preview := m
-		if m.areaRepoID != "" {
-			preview.openGlanceArea(rows[selected])
-		}
+		preview.openGlanceArea(rows[selected])
 		lines = append(lines, preview.worklistEvidence(rows[selected], inner, height-len(lines)-3, false)...)
-	} else if len(rows) > 0 {
+	} else if m.areaRepoID != "" && len(rows) > 0 {
 		r := rows[selected]
-		lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Selected: %s commits · %d contributors", FormatNumber(r.commits), len(r.people))))
+		label := fmt.Sprintf("Selected: %s commits · %d contributors", FormatNumber(r.commits), len(r.people))
+		lines = append(lines, StyleDimWhite.Render("  "+label))
 	}
 	return m.worklistFinish(lines, width, height, false)
 }
 
 func (m Model) worklistHeader(width int) []string {
-	title := "BIGBOARD / Worklist"
+	title := "BIGBOARD / Activity"
 	if m.glance.detailOpen {
 		repo, _ := m.areaRepository()
 		title += " / " + displayText(repo.Name) + " / " + displayText(m.glanceDetailArea().Name)
@@ -283,7 +294,7 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · v repo PRs · r refresh"
 	}
 	if width >= 70 && width < 110 {
-		footer = "v repo PRs · / find · ↑↓ select · → open · r refresh"
+		footer = "v repo PRs · / find · s sort · ↑↓ select · → open · r refresh"
 		if detail {
 			footer = "←/Esc back · v repo PRs · Tab lens · → evidence"
 		}
@@ -304,6 +315,15 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 }
 
 func (m Model) worklistPageSize() int {
+	if m.areaRepoID == "" || m.directory.active {
+		rowHeight := 3
+		if m.width-4 >= 96 {
+			rowHeight = 1
+		} else if m.width-4 >= 66 {
+			rowHeight = 2
+		}
+		return max(1, (m.height-screenHeaderRows-screenFooterRows-2)/rowHeight)
+	}
 	if m.width >= 110 && m.height >= 28 {
 		return max(3, (m.height-19)/2)
 	}

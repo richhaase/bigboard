@@ -17,7 +17,7 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 	if len(m.visiblePRs()) != 3 || m.prRepoID != "/sample/gateway" {
 		t.Fatal("repository search did not select the repository")
 	}
-	m = keyboardContractPress(t, m, "a", "/", "contributor03", "enter", "enter", "v", "home", "down", "down", "down", "enter", "c", "home", "down", "enter", "d", "end", "enter")
+	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", "enter", "v", "home", "down", "down", "down", "enter", "k", "home", "down", "enter", "d", "end", "enter")
 	prs := m.visiblePRs()
 	if len(prs) != 1 || prs[0].Number != 102 || !prs[0].Draft {
 		t.Fatalf("combined filters returned wrong PRs: %+v", prs)
@@ -40,8 +40,8 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 80, 24
-	m = keyboardContractPress(t, m, "p", "a", "/", "w", "p", "q", "d")
-	if !m.showPRs || !m.prRepoPicker || !m.prFilterSearch || m.prFilterQuery != "wpqd" || m.quitting {
+	m = keyboardContractPress(t, m, "p", "u", "/", "a", "p", "q", "d")
+	if !m.showPRs || !m.prRepoPicker || !m.prFilterSearch || m.prFilterQuery != "apqd" || m.quitting {
 		t.Fatal("filter search leaked a command")
 	}
 	m = keyboardContractPress(t, m, "f1", "esc")
@@ -56,7 +56,7 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 	if m.prFilterKind != "author" {
 		t.Fatal("Tab did not advance filter category")
 	}
-	m = keyboardContractPress(t, m, "end", "w")
+	m = keyboardContractPress(t, m, "end", "a")
 	if m.showPRs || m.prRepoPicker || m.prFilters != (prFilters{}) {
 		t.Fatal("board switch applied pending filter")
 	}
@@ -104,7 +104,7 @@ func TestPRNumberDraftAndSuccessPresentation(t *testing.T) {
 	}
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 36}} {
 		m.width, m.height = size[0], size[1]
-		m = keyboardContractPress(t, m, "p", "a", "/", "contributor", "enter")
+		m = keyboardContractPress(t, m, "p", "u", "/", "contributor", "enter")
 		lines := strings.Split(m.View(), "\n")
 		if len(lines) != m.height {
 			t.Fatal("filter picker lost its frame")

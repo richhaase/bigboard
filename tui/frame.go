@@ -155,12 +155,12 @@ func screenFinish(lines []string, footer, coverage string, width, height int) st
 
 func boardShortcuts(width int) string {
 	if width < 70 {
-		return "l/w/p"
+		return "c/a/p"
 	}
 	if width < 110 {
-		return "l/w/p boards"
+		return "c/a/p boards"
 	}
-	return "l leaderboard · w worklist · p PRs"
+	return "c contributors · a activity · p PRs"
 }
 
 func screenFooter(footer string, width int) string {
