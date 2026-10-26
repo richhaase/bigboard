@@ -259,9 +259,12 @@ Shared choices apply to every board. Activity has Git contributor and bot filter
 Contributors has its own bot setting; PRs has GitHub author, review, checks, and
 open/draft filters. Each board keeps its own search. Git identities and GitHub
 authors remain separate. Viewing filters do not change repository tracking or
-refresh coverage; manage tracked repositories with `i`.
+refresh coverage; `i` opens repository controls in a centered modal over the
+current board. Space stages inclusion choices, Enter applies, and Esc cancels.
+Arrows, Page Up/Down, and Home/End navigate the list. Inclusion choices keep
+their existing session-only behavior.
 
-In the modal, left/right or Tab changes categories, up/down selects an option,
+In the filter modal, left/right or Tab changes categories, up/down selects an option,
 and Space stages a choice. Multiple values within a category match any selected
 value; different categories must all match. Enter applies all staged choices;
 Esc cancels. `/` finds options, and the Search category edits the board search.

@@ -46,7 +46,8 @@ func (m Model) handleRepositoryControls(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlayExcluded[id] = !m.overlayExcluded[id]
 		}
 	default:
-		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(m.loadedRepos), max(1, m.height-12)); ok {
+		_, page := repositoryModalSize(m.width, m.height)
+		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(m.loadedRepos), page); ok {
 			m.overlayCursor = row
 		}
 	}

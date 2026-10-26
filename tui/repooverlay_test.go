@@ -23,7 +23,7 @@ func TestRenderRepoOverlayContent(t *testing.T) {
 	result := m.renderRepoOverlay()
 
 	// Should contain the title
-	if !strings.Contains(result, "REPOSITORY") {
+	if !strings.Contains(result, "Repository controls") {
 		t.Error("expected REPOSITORY title in overlay")
 	}
 
@@ -45,7 +45,7 @@ func TestRenderRepoOverlayContent(t *testing.T) {
 	}
 
 	// Should contain help text
-	if !strings.Contains(result, "space") || !strings.Contains(result, "toggle") {
+	if !strings.Contains(result, "Space") || !strings.Contains(result, "toggle") {
 		t.Error("expected help text mentioning space/toggle")
 	}
 }
