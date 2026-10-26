@@ -1,66 +1,65 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
+func repositoryModalSize(width, height int) (int, int) {
+	return max(6, min(76, width-2)), max(1, min(16, height-10))
+}
+
 func (m Model) renderRepoOverlay() string {
-	var sections []string
-
-	sections = append(sections, renderBanner(m.width)...)
-	sections = append(sections, "")
-
-	sections = append(sections, RenderSectionHeader("REPOSITORY CONTROL", m.width))
-	sections = append(sections, "")
-
-	if m.height > 0 && m.height < 5 {
-		return fitGlanceLines([]string{"Resize terminal · Esc back"}, max(1, m.width), m.height)
+	width, height := m.width, m.height
+	if width < 1 {
+		width = 80
 	}
-	if m.height > 0 && m.height < len(sections)+8 {
-		sections = []string{RenderSectionHeader("REPOSITORY CONTROL", m.width), ""}
+	if height < 1 {
+		height = 24
 	}
-	visible := len(m.loadedRepos)
-	if m.height > 0 {
-		visible = max(1, m.height-len(sections)-5)
+	if width < 30 || height < 10 {
+		return fitGlanceLines([]string{"Repository controls", "Resize terminal · Esc cancel"}, width, height)
 	}
-	start := max(0, min(m.overlayCursor-visible+1, len(m.loadedRepos)-visible))
-	end := min(len(m.loadedRepos), start+visible)
+	background := m
+	background.width, background.height = width, height
+	background.viewMode, background.showPRs = m.returnView, m.overlayPRs
+	if background.viewMode == ViewRepoOverlay {
+		background.viewMode = ViewAggregate
+	}
+	panelWidth, page := repositoryModalSize(width, height)
+	inner := panelWidth - 4
+	sections := []string{
+		StyleTitle.Render("Repository controls"),
+		StyleDimWhite.Render(padCells("Changes apply when you press Enter", inner)),
+		worklistRule.Render(strings.Repeat("─", inner)),
+	}
+	selected := max(0, min(m.overlayCursor, len(m.loadedRepos)-1))
+	start := max(0, min(selected-page/2, len(m.loadedRepos)-page))
+	end := min(len(m.loadedRepos), start+page)
 	for i := start; i < end; i++ {
 		repo := m.loadedRepos[i]
-		checkbox := "[x]"
+		checkbox, style := "[x] ", StyleAuthor
 		if m.overlayExcluded[repo.ID] {
-			checkbox = "[ ]"
+			checkbox, style = "[ ] ", StyleDimWhite
 		}
-
 		cursor := "  "
-		if i == m.overlayCursor {
-			cursor = StyleCursor.Render("▸ ")
+		if i == selected {
+			cursor = "▸ "
 		}
-
-		checkStyle := StyleCyan
-		nameStyle := StyleAuthor
-		if m.overlayExcluded[repo.ID] {
-			checkStyle = StyleDimWhite
-			nameStyle = StyleDimWhite
+		line := style.Render(padCells(cursor+checkbox+displayText(repo.Name), inner))
+		if i == selected {
+			line = selectedRowBackground(StyleRowSelected.Render(line))
 		}
-
-		line := "  " + cursor + checkStyle.Render(checkbox) + " " + nameStyle.Render(displayText(repo.Name))
-
-		var rowStyle lipgloss.Style
-		switch {
-		case i == m.overlayCursor:
-			rowStyle = StyleRowSelected
-		case i%2 == 0:
-			rowStyle = StyleRowEven
-		default:
-			rowStyle = StyleRowOdd
-		}
-		sections = append(sections, rowStyle.Render(line))
+		sections = append(sections, line)
 	}
-
-	sections = append(sections, "")
+	if len(m.loadedRepos) == 0 {
+		sections = append(sections, StyleDimWhite.Render("No repositories available"))
+	}
+	for len(sections) < 3+page {
+		sections = append(sections, "")
+	}
 	excluded := 0
 	for _, repo := range m.loadedRepos {
 		if m.overlayExcluded[repo.ID] {
@@ -68,20 +67,30 @@ func (m Model) renderRepoOverlay() string {
 		}
 	}
 	total := len(m.loadedRepos)
-	summary := RenderRepoCount(total, excluded)
-	sections = append(sections, summary)
-
-	sections = append(sections, "")
-	help := StyleHelpKey.Render("  ? help · Enter apply · Esc cancel · space toggle · ↑↓ select")
-	boards := "  " + boardShortcuts(m.width)
-	if m.width < 70 {
-		help = "  ? help · space toggle · ↑↓ select"
-		boards = "  Enter apply · Esc cancel · " + boardShortcuts(m.width)
+	position := fmt.Sprintf("%d–%d of %d · %d included", start+1, end, total, total-excluded)
+	if inner < 50 {
+		position = fmt.Sprintf("%d–%d/%d · %d included", start+1, end, total, total-excluded)
 	}
-	sections = append(sections, help, boards)
-
-	if m.width > 0 && m.height > 0 {
-		return fitGlanceLines(sections, m.width, m.height)
+	if total == 0 {
+		position = "0 repositories · 0 included"
 	}
-	return strings.Join(sections, "\n")
+	hints := "Esc cancel · ↑↓ select · ? help"
+	boards := boardShortcuts(inner)
+	if ansi.StringWidth(hints+" · "+boards) <= inner {
+		hints += " · " + boards
+	} else if inner < 50 {
+		hints = "Esc cancel · ? help"
+		if ansi.StringWidth(hints+" · "+boards) <= inner {
+			hints += " · " + boards
+		}
+	}
+	sections = append(sections,
+		StyleDimWhite.Render(ansi.Truncate(position, inner, "…")),
+		StyleTitle.Render("Space toggle · Enter apply"),
+		StyleDimWhite.Render(hints),
+	)
+	for i, line := range sections {
+		sections[i] = ansi.Truncate(line, inner, "…")
+	}
+	return renderCenteredModal(background.viewContent(), sections, panelWidth, width, height)
 }

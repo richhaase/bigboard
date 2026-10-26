@@ -95,7 +95,7 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 				selected = true
 			}
 		}
-		if !selected || !strings.Contains(out, "space") {
+		if !selected || !strings.Contains(out, "Space") {
 			t.Fatalf("selection or controls missing at row %d:\n%s", m.overlayCursor, out)
 		}
 	}

@@ -21,7 +21,7 @@ tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, fo
 tui/help.go             Shared contextual help modal, keyboard capture, and terminal-sized overlay
 tui/aggregate.go        Contributors table (scrollable, AI% column, BOT tag)
 tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
-tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
+tui/repooverlay.go      Centered repo inclusion/exclusion modal
 ```
 
 ## Data Flow
@@ -135,6 +135,6 @@ Enter/right opens; left/Escape backs out. All scrollable lists/details support
 arrows, paging, Home/End. `r` refreshes while preserving navigation; uppercase R
 is a compatibility alias. `q` quits outside text entry. Footer hints prioritize
 filters, contextual actions and help; full shortcuts stay in contextual help.
-Data status and PR details use centered scrollable modals. Data status `d`
+Repository controls, Data status and PR details use centered scrollable modals. Data status `d`
 reveals diagnostics; `o` opens the selected PR externally. Related `m` switches
 shared-commit and contributor-overlap evidence. Sorting remains `s`/`S`.
