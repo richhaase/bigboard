@@ -132,7 +132,7 @@ func TestRangeKeysRespectSearchAndOtherModals(t *testing.T) {
 			t.Fatal("range/nav keys escaped search")
 		}
 	}
-	for _, mode := range []string{"help", "paths", "prs", "repos", "errors"} {
+	for _, mode := range []string{"help", "paths", "pr filters", "repos", "errors"} {
 		m := glanceBusyFixture()
 		switch mode {
 		case "help":
@@ -140,8 +140,9 @@ func TestRangeKeysRespectSearchAndOtherModals(t *testing.T) {
 		case "paths":
 			m = rangeKey(t, m, "right")
 			m = rangeKey(t, m, "right")
-		case "prs":
+		case "pr filters":
 			m.showPRs = true
+			m.openPRFilter("repo")
 		case "repos":
 			m.viewMode = ViewRepoOverlay
 		case "errors":

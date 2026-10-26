@@ -264,7 +264,12 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	prs := m.allPRs()
 	kept := prs[:0]
 	query := strings.ToLower(m.prQuery)
+	duration := m.rangeDuration()
+	cutoff := time.Now().Add(-duration)
 	for _, pr := range prs {
+		if duration > 0 && !pr.UpdatedAt.After(cutoff) {
+			continue
+		}
 		if !m.prFilters.matches(pr) {
 			continue
 		}
@@ -402,6 +407,8 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prOffset = max(0, min(m.prOffset, m.prDetailMaxOffset()))
 	}
 	switch key {
+	case "t":
+		m.openRangePicker()
 	case "o":
 		return m.openSelectedPR()
 	case "f":

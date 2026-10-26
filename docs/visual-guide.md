@@ -43,12 +43,13 @@ summed**. Shared contributors describe historical overlap, not live presence
 or ownership. GitHub handles stay separate from canonical
 Git identities. Historical paths can appear even after removal from the checkout.
 
-## Choose a local range
+## Choose the global range
 
 The visible **Range: 14 days · t to change** control opens with `t`. Use `↑/↓`
 to choose 1 day, 7 days, 14 days, 30 days, 90 days, 1 year, or All time.
 Custom days accepts 1–3650 whole days. `Enter` applies; `Esc` cancels.
-Changing range keeps navigation and filters the loaded records in memory; it
+The range applies to all three boards: commit author time for local history,
+last-updated time for PRs. Changing range filters the loaded data in memory; it
 does not scan Git, fetch objects, or refresh PR data. The startup default remains
 14 days, or the `since` preset in config. Custom choices last for the session.
 
@@ -182,7 +183,9 @@ fetch when known and space permits. Unknown inventory is never shown as zero;
 Lowercase `p` opens PRs across all included repositories. `f` chooses a
 repository scope, and Worklist's `v` opens PRs for its selected repository.
 Both paths use the same PR board. Repository scope is separate from global
-inclusion (`i`); PRs use all open dates, independent of local history filters.
+inclusion (`i`); the PR board uses the shared date range on PR last-updated time.
+`t` changes the range from any board; All time includes unknown update dates.
+Local contributor and bot filters do not apply to PRs.
 Plain `p` restores all-repository scope. `/` searches repository, title, author,
 or PR number; `s` selects a sort and `S` reverses it.
 
@@ -245,7 +248,7 @@ From Worklist, lowercase `l` opens the statistics leaderboard and `Enter` opens
 a contributor.
 In detail, `PgUp/PgDown` scrolls, `Home/End` jumps to an edge, and `↑/↓` scrolls the same contributor. `Esc` returns to the leaderboard. Lowercase `l`, `w`, and `p`
 open the leaderboard, Worklist, and all included PRs from either statistics view.
-Both statistics views use `t` for the local range. `→` opens the
+Both statistics views use `t` for the global range. `→` opens the
 selected contributor, `←` returns, and `←` at the leaderboard stays there.
 
 Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`i`),

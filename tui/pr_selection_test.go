@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/richhaase/bigboard/github"
 )
@@ -19,11 +20,15 @@ func prOnlySelectionFixture() Model {
 		{Repo: "org/repo", Number: 261, Title: "Bump term", Files: []gh.File{{Path: "go.mod"}}, FilesComplete: true, ContextComplete: true},
 		{Repo: "org/repo", Number: 262, Title: "Update docs", Files: []gh.File{{Path: "docs/guide.md"}}, FilesComplete: true, ContextComplete: true},
 	}
+	now := time.Now()
+	for i := range snapshot.prs {
+		snapshot.prs[i].UpdatedAt = now
+	}
 	m.prState.snapshots["org/repo"] = snapshot
 	return m
 }
 
-func TestPRBoardIgnoresWorklistFilters(t *testing.T) {
+func TestPRBoardIgnoresWorklistSearchPersonAndBots(t *testing.T) {
 	for _, query := range []string{"", "docs", "no-match"} {
 		m := prOnlySelectionFixture()
 		m.areaRepoID, m.selectedAreaID = "/api", "root"

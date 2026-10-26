@@ -180,8 +180,10 @@ approval or merge readiness; “updated” includes any PR activity.
 Changed file paths map to the same configured prefixes and automatic Work areas
 as local history, including new PR-only areas. Generated files follow `all_files`.
 A PR touching multiple areas appears in each; the overall count deduplicates it,
-including across duplicate local clones. PRs remain independent of local date,
-contributor and bot filters and never enter commit totals or the JSON export.
+including across duplicate local clones. The PR board follows the global range
+using PR last-updated time; local contributor and bot filters do not apply.
+Work-area PR summaries and fetch coverage retain all open PRs. PRs never enter
+commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
 `r` fetches repository history and refreshes PR context, including inside the PR
@@ -315,8 +317,10 @@ returns to Activity. `Tab` / `Shift+Tab` leaves it for the next / previous lens.
 
 ### PRs
 
-The PR board defaults to all open PRs across included repositories, independent
-of local time, person, and bot filters. `f` opens a repository scope picker:
+The PR board shows open PRs across included repositories updated within the
+global date range. `t` changes that range for all three boards; All time restores
+all open PRs. Missing update timestamps appear only in All time. Local person
+and bot filters do not apply. `f` opens a repository scope picker:
 choose All included repositories or one repository, then Enter to apply or Esc
 to cancel. Scope is a view filter; it never changes inclusion or fetch coverage.
 Worklist's `v` enters this same board with explicit repository scope. Plain `p`
@@ -357,7 +361,8 @@ Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
 Enter applies choices; Esc / left cancels. Exclusion removes a repository from
 all boards and subsequent fetch/PR requests. It does not write the config file.
 
-`t` opens the local range picker on Worklist and statistics list/detail views.
+`t` opens the global range picker on Worklist, statistics, and PR list/detail views.
+It uses commit author time for local history and last-updated time for PRs.
 Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
 preset; End or `c` selects Custom. Enter applies a preset or opens day entry.
 Custom entry accepts 1–3650 days; Backspace edits and Ctrl+U clears it. Enter

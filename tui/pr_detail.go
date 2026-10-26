@@ -182,7 +182,7 @@ func (m Model) renderPRDetailModal(background string, pr gh.PullRequest, width, 
 	end := min(len(lines), offset+page)
 	heading := fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
 	snapshot := m.prState.snapshots[pr.Repo]
-	status, style := "All dates · PR snapshot", StyleDimWhite
+	status, style := "Range: "+m.rangeLabel()+" · PR updated time", StyleDimWhite
 	if !pr.ContextComplete || !pr.FilesComplete || !pr.RequestedReviewersComplete || !pr.ReviewsComplete {
 		status, style = "PARTIAL context · details below", StyleAmber
 	}

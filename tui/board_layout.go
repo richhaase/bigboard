@@ -63,6 +63,9 @@ func fitFooter(footer string, width int) string {
 		if has("/ ") {
 			local = append(local, "/ find")
 		}
+		if has("t range") {
+			local = append(local, "t range")
+		}
 		if has("→") {
 			local = append(local, "Enter open")
 		}

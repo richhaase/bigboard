@@ -222,7 +222,7 @@ func (m Model) prFooter(prs []gh.PullRequest) string {
 	if m.prSearching {
 		return "F1 help · Enter accept · Esc clear"
 	}
-	return footer
+	return footer + " · t range"
 }
 
 func (m Model) prListErrors() []string {
@@ -254,6 +254,9 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 		if m.prQuery != "" || m.prFilters != (prFilters{}) {
 			empty = "No matching PRs. x clears filters and search."
 		}
+		if m.rangeDuration() > 0 && len(m.allPRs()) > 0 {
+			empty = "No matching PRs in range. t changes range; x clears PR filters."
+		}
 		lines = append(lines, "  "+empty)
 	}
 	labels := m.prRepositoryLabels()
@@ -281,5 +284,5 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 }
 
 func (m Model) prBoardCoverage() string {
-	return strings.TrimSpace("All dates · " + m.prScopeLabel() + " · ◇ draft · ● open · local history filters do not apply")
+	return "PR updated time · " + m.rangeLabel() + " · " + m.prScopeLabel() + " · ◇ draft · ● open · contributor and bot filters do not apply"
 }

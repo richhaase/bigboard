@@ -630,11 +630,7 @@ func (m *Model) filteredRecords() []git.CommitRecord {
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
 	}
-	duration := TimePresets[m.timeIdx].Duration
-	if m.customRangeDays > 0 {
-		duration = time.Duration(m.customRangeDays) * 24 * time.Hour
-	}
-	return stats.FilterByTime(filtered, duration)
+	return stats.FilterByTime(filtered, m.rangeDuration())
 }
 
 func (m *Model) recomputeAuthors() {
