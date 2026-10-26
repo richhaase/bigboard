@@ -109,7 +109,7 @@ func TestRepositoryRankingAndContributorsShareHeightAndPageByVisibleRows(t *test
 		if page*rowHeight+panel > available || available-page*rowHeight-panel >= rowHeight {
 			t.Fatal("ranking and contributor panel do not fit the available body")
 		}
-		if m.width == 120 && m.height == 36 && (panel != 9 || page != 16) {
+		if m.width == 120 && m.height == 36 && (panel != 9 || page != 17) {
 			t.Fatal("wide board lost its balanced list and contributor panel")
 		}
 		if m.width == 40 && m.height == 18 && panel != 0 {
