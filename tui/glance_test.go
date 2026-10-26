@@ -35,7 +35,7 @@ func TestWorklistOverviewDensityAndConcreteContext(t *testing.T) {
 		m := glanceBusyFixture()
 		m.width, m.height = size[0], size[1]
 		view := ansi.Strip(m.View())
-		for _, want := range []string{"Worklist", "feature", "Person 000", "Exact subject", "120"} {
+		for _, want := range []string{"Activity", "feature", "Person 000", "Exact subject", "120"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("%v missing %q:\n%s", size, want, view)
 			}

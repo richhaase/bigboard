@@ -49,9 +49,10 @@ func boardLayoutFixture() Model {
 
 func TestMainBoardsAlignFirstRowsAndKeepFrame(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 36}, {180, 48}} {
-		for _, key := range []string{"w", "l", "p"} {
+		for _, key := range []string{"a", "l", "p"} {
 			m := boardLayoutFixture()
 			m.width, m.height = size[0], size[1]
+			m.selectedRepoID = ""
 			m = keyboardContractPress(t, m, key)
 			view := ansi.Strip(m.View())
 			lines := strings.Split(view, "\n")
@@ -111,6 +112,7 @@ func TestPRRowsProtectReviewChecksAgeAndDraft(t *testing.T) {
 
 func TestWorklistPRColumnHasLabelAndReservedCells(t *testing.T) {
 	m := boardLayoutFixture()
+	m.areaRepoID = "/sample/gateway"
 	m.width, m.height = 120, 36
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	a, p, s, pr, _ := m.worklistColumnWidths(116)
@@ -127,11 +129,11 @@ func TestWorklistPRColumnHasLabelAndReservedCells(t *testing.T) {
 }
 
 func TestBoardFiltersAndSortStayInPredictableRows(t *testing.T) {
-	for _, key := range []string{"w", "l", "p"} {
+	for _, key := range []string{"a", "l", "p"} {
 		m := boardLayoutFixture()
 		m.width, m.height = 120, 36
 		m = keyboardContractPress(t, m, key, "/", "contributor", "enter")
-		if key == "w" {
+		if key == "a" {
 			m = keyboardContractPress(t, m, "esc", "/", "gateway", "enter")
 		}
 		lines := strings.Split(ansi.Strip(m.View()), "\n")
@@ -143,7 +145,7 @@ func TestBoardFiltersAndSortStayInPredictableRows(t *testing.T) {
 
 func TestBoardFootersHideWholeHintsAndSeparateCoverage(t *testing.T) {
 	for _, width := range []int{40, 80, 120, 180} {
-		for _, key := range []string{"w", "l", "p"} {
+		for _, key := range []string{"a", "l", "p"} {
 			m := boardLayoutFixture()
 			m.width, m.height = width, 36
 			m = keyboardContractPress(t, m, key)

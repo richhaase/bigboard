@@ -2,9 +2,9 @@
 
 A terminal situational-awareness board for seeing who has worked where across your Git repositories, how that work connects, and the commits behind it. Inspired by Hiro Protagonist's Big Board from Neal Stephenson's *Snow Crash*.
 
-![Worklist at 120 columns: work areas, latest authors and commits, with selected-area evidence below](docs/images/worklist-wide.png)
+![Activity at 120 columns: work areas, latest authors and commits, with selected-area evidence below](docs/images/worklist-wide.png)
 
-*Worklist at 120 × 36, with `tui` selected in Bigboard's own public Git history.
+*Activity at 120 × 36, with `tui` selected in Bigboard's own public Git history.
 The lower pane shows the contributors, commits, and related areas behind that
 selection. The capture omits `gh`, so PR context is
 shown as unavailable rather than zero. Local and PR snapshots refresh on launch or `r`.*
@@ -65,14 +65,19 @@ Those dates alone cannot reconstruct totals for a narrower time window.
 
 ## Work relationships
 
-Worklist puts each repository or area on one reading line: **where → latest
-contributor + other contributors → latest commit → age**.
-At 110 columns × 28 rows and above, a spacious evidence pane below the list shows
-named contributors with scoped commit counts, recent titles, authors, times, hashes,
-and affected areas. Shared PR availability appears once in the header; retained
-area-specific PR evidence stays beside the relevant area. Moving the selection updates the evidence immediately. Recent is the
-default sort; `s` cycles to Name and Activity (commits) without changing the selected
-identity. Commit volume is not priority or productivity.
+Activity ranks repositories by **lines changed (added + removed)** in the selected
+period, using the full list height for comparison. Bars always show the balance
+of added and removed lines. Commit counts remain visible; `s` can sort by commits
+without changing what the bars measure.
+Quiet repositories stay visible, and unknown line totals remain marked with `?`.
+These are activity measures, not productivity or priority scores.
+
+Press `Enter` to inspect a repository's immediate directories and files. Each
+level uses the same ranked bars, commit and contributor counts, and recency.
+Directory line totals sum only the files in that directory, using the per-file
+counts retained from Git. Enter a directory to see its children; enter a file
+to see its commits. The date range and bot filter carry through every level.
+`Esc` returns to the parent with its selection and search preserved.
 
 `+N` beside the latest contributor counts the **other distinct contributors** in
 the current local range and bot filter. It is not an online-presence count. The
@@ -81,20 +86,20 @@ bounded. People retains the full alphabetical list. GitHub handles remain separa
 from canonical Git identities. Ages are fixed at each repository's last successful
 local scan; future author dates are labeled `future`.
 
-Press `Enter` on a repository to open its work areas. A single included repository
-opens directly into work areas after scanning. `Enter` on an area opens a dedicated
-detail view, moving keyboard focus from the list into the selected lens.
-`Tab` or `1`–`4` also opens a lens directly from the area inventory. In detail,
-`Tab` / `Shift+Tab` or `1`–`4` switches Activity, People, Related, and Subareas;
-only one detail surface is expanded at a time. Activity shows real subjects with
+Commit, People, and Related evidence remains available as secondary views.
+Configured named work areas retain their separate grouping; the directory
+browser uses literal paths and does not silently merge directories. In detail,
+`Tab` / `Shift+Tab` or `1`–`3` switches Commits, People, and Related; `4`
+returns to the directory ranking. Only one detail surface is expanded at a time.
+Commits shows real subjects with
 author-date evidence, contributor identity, and short object IDs. `Enter` opens a
 scrollable inspector with the
 full subject, canonical contributor identity, timestamp, object ID, and all changed
-paths. People is alphabetical; selecting a person filters Activity. Related lists
+paths. People is alphabetical; selecting a person filters Commits. Related lists
 exact commits touching both areas, their counts, and the latest shared title;
 `Enter` opens those commits and then their full changed paths. Contributor overlap
 is separate: it lists names appearing in both areas in the selected range. Press
-`c` in Related for its scrollable overlap list, then `Enter` for names and their
+`m` in Related for its scrollable overlap list, then `Enter` for names and their
 identity-filtered evidence.
 
 Subareas refines automatic path areas by one literal directory level at a time.
@@ -102,8 +107,7 @@ Direct files are a separate leaf; multi-path commits can appear in several child
 Configured named areas keep their explicit meaning and are not automatically
 reinterpreted. `Esc` returns through each level, restoring the prior selection.
 `/` searches the current list, `Enter` accepts the query, and `Esc` clears it before
-leaving. `?` opens help for the current screen. `l` switches to the contributor-statistics
-leaderboard. Time ranges, bot hiding, repository inclusion, and manual refresh
+leaving. `?` opens help for the current screen. `c` switches to the Contributors board. Time ranges, bot hiding, repository inclusion, and manual refresh
 apply to both views.
 
 Work areas are path-based groups, not inferred features or ownership. Automatic
@@ -149,9 +153,9 @@ STALE marker and diagnostics under `e`; a failed scan retains that repository's
 last successful data. A successful fetch and scan, including an empty one, clears
 the stale state. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
-surface with the same controls. At 80 columns, two-line rows keep names and
-subjects readable. `Enter` replaces the list with detail; `Esc` restores its
-selection and scroll position. At 40 columns, each row uses three lines. Shallow,
+surface with the same controls. In area lists, two-line rows at 80 columns keep
+names and subjects readable. `Enter` replaces the list with detail; `Esc` restores its
+selection and scroll position. At 40 columns, each area row uses three lines. Shallow,
 stale, failed, partial, and unknown data remain visibly qualified.
 Statistics retain their wide layout; narrow contributor detail uses labeled
 repository metrics so every value remains readable. On short terminals, contributor detail
@@ -171,7 +175,7 @@ Only a supported GitHub `origin` is used, with no upstream guessing.
 
 PR summaries appear beside repositories and work areas when width permits.
 Press lowercase `p` for all included repositories, `f` within PRs to choose one
-repository, or `v` from Worklist for its selected repository. Enter opens a
+repository, or `v` from Activity for its selected repository. Enter opens a
 scrollable detail modal over the retained PR list; left / Esc closes it. Details show the canonical link, GitHub author and reviewers,
 aggregate review decision, check rollup, mergeability and update time. GitHub
 handles remain separate from local Git contributor identities. `UNKNOWN` is not
@@ -209,7 +213,7 @@ origins are reported in the PR board without suppressing local history.
 
 - **Author identity** is resolved by Git's native `.mailmap`, then grouped by canonical email. Shared or similar names do not merge people. Use `.mailmap` to combine aliases with different emails. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
-- **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on the leaderboard with a `BOT` tag; press `b` to toggle them out of view.
+- **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on Contributors with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
 - **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and `r` fetch included repositories before scanning; export uses cached history. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
@@ -218,12 +222,12 @@ origins are reported in the PR board without suppressing local history.
 
 ## Board layout
 
-Worklist, Leaderboard, and PRs share the title, scope/search row, separate local
+Activity, Contributors, and PRs share the title, scope/search row, separate local
 and PR freshness rows, and pinned footer. Their list headings show the active
 sort and visible row range in the same place, followed by column labels and rows.
 Search text stays in the scope row while typing and after acceptance.
 
-Leaderboard totals use a compact summary in its list heading. PRs use columns
+Contributors totals use a compact summary in its list heading. PRs use columns
 for repository, PR number, state, title, review, checks, and updated age at wide widths;
 80-column rows stack title and metadata, and 40-column rows put review/check/age
 on their own line. Titles shorten before status fields. PR ages use their
@@ -235,11 +239,15 @@ omit the owner only when the name is unique across included PR repositories.
 Drafts use a `◇` state marker and subdued titles; `●` identifies open non-draft
 PRs. Approved reviews and passing checks are green, independently of draft state.
 Neither signals that branch protection or merge readiness has been evaluated.
-Worklist labels its PR column explicitly and retains the
-selected repository evidence pane at 110×28 and above.
+Activity's repository and directory inventories fill the available height with
+ranked bars, commit and contributor counts, and changed-line totals. Bars always
+show added and removed lines; `s` changes sorting among lines changed, commits,
+recent activity, and name. There is no selected text preview in these inventories.
+Enter opens a deeper directory or a file's commit history. Commit evidence uses
+the available height and pages by visible commits.
 
-PR filters combine with each other and text search: `f` repository, `a` author
-(owner), `v` review status, `c` check status, and `d` draft/open state. Pickers are
+PR filters combine with each other and text search: `f` repository, `u` author
+(owner), `v` review status, `k` check status, and `d` draft/open state. Pickers are
 centered modals over the retained board, with an active category tab, search
 field, highlighted cursor, and a separate checkmark for the applied value. Each picker
 supports `/` to find options, Tab/Shift+Tab to change category, Enter to apply,
@@ -251,26 +259,26 @@ to local history filters or repository inclusion.
 The footer separates board navigation, a few contextual actions, and help/refresh
 into compact groups. Keys are brighter than labels. Extra shortcuts live in `?`
 help rather than expanding the footer on wide screens; narrow screens omit whole
-hints. Coverage stays on its own row. Narrow Leaderboard rows stack contributor/commit counts
+hints. Coverage stays on its own row. Narrow Contributors rows stack contributor/commit counts
 above net change and AI share.
 
 ## Controls
 
-BigBoard has three peer boards. Lowercase `l` opens the contributor leaderboard,
-`w` opens Worklist, and `p` opens PRs across all included repositories. Switching
+BigBoard has three peer boards. Lowercase `c` opens Contributors,
+`a` opens Activity, and `p` opens PRs across all included repositories. Switching
 uses cached data and keeps selections, searches, and sorts. Plain `p` clears PR
-repository scope. Worklist retains its repository, area, lens, and person context.
+repository scope. Activity retains its repository, directory, lens, and person context.
 Pending dialog choices cancel when switching boards.
 
 | Key | Shared behavior |
 |-----|-----------------|
-| `l` / `w` / `p` | Open Leaderboard / Worklist / all-repository PRs |
+| `c` / `a` / `p` | Open Contributors / Activity / all-repository PRs |
 | `↑` / `↓` | Select rows in lists; scroll lines in details |
 | `PgUp` / `PgDown` | Move a page in lists and details |
 | `Home` / `End` | First / last row or detail page |
 | `→` / `Enter` | Open the selected item or drill down; does not toggle detail closed |
 | `←` / `Esc` | Clear a current filter or return one level; stay at board roots |
-| `/` | Search the current board list or Worklist lens; reopen the existing query for editing |
+| `/` | Search the current board list or Activity lens; reopen the existing query for editing |
 | `s` / `S` | Change sort / reverse order in sortable lists |
 | `i` | Open global repository inclusion controls from any board or detail |
 | `r` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
@@ -292,26 +300,26 @@ Repository headings and short summaries appear first; `d` expands the complete
 technical diagnostics. Arrows, paging, and Home/End scroll the modal, `r` retries,
 and Esc closes it without changing board selection or filters.
 
-### Worklist
+### Activity
 
-Worklist shows included repositories and their default-branch history in the
-selected local time range. `→` / `Enter` drills through repositories, areas,
-lenses, and commit details. `←` / `Esc` clears a current search/person filter or
+Activity shows included repositories and their default-branch history in the
+selected local time range. `→` / `Enter` drills through repositories, directories,
+files, and commit details. `←` / `Esc` clears a current search/person filter or
 returns to the parent. At the repository root it stays there; use `q` to quit.
 
-| Key | Worklist behavior |
+| Key | Activity behavior |
 |-----|-------------------|
-| `Tab`, `1`–`4` | From an area list, open Activity / People / Related / Subareas |
-| `Tab` / `Shift+Tab`, `1`–`4` | Switch lenses in area detail |
-| `s` / `S` | Change Recent / Name / Activity sort, or reverse it, in overview and Subareas |
+| `Tab`, `1`–`3` | Open Commits / People / Related for the current directory scope |
+| `Tab` / `Shift+Tab`, `1`–`3` | Switch detail lenses |
+| `4` | Return to the directory ranking |
+| `s` / `S` | Change sort / reverse order; directories support Lines +/- / Commits / Recent / Name |
 | `t` | Change the local history range |
 | `b` | Show / hide bot contributors in local history |
 | `v` | Open the PR board scoped to the selected repository, including from area or commit detail |
-| `c` | In Related, switch between shared commits and contributor overlap |
+| `m` | In Related, switch between shared commits and contributor overlap |
 
-People, Activity, and Related keep their meaningful fixed ordering. In People,
-Enter opens that contributor's Activity. Related and Subareas open the selected
-evidence. The full commit inspector uses arrows and paging to scroll; `←` / `Esc`
+People, Commits, and Related keep their meaningful fixed ordering. In People,
+Enter opens that contributor's commits. Related opens the selected evidence. The full commit inspector uses arrows and paging to scroll; `←` / `Esc`
 returns to Activity. `Tab` / `Shift+Tab` leaves it for the next / previous lens.
 `r` refreshes directly from the inspector without changing the selected commit.
 
@@ -323,7 +331,7 @@ all open PRs. Missing update timestamps appear only in All time. Local person
 and bot filters do not apply. `f` opens a repository scope picker:
 choose All included repositories or one repository, then Enter to apply or Esc
 to cancel. Scope is a view filter; it never changes inclusion or fetch coverage.
-Worklist's `v` enters this same board with explicit repository scope. Plain `p`
+Activity's `v` enters this same board with explicit repository scope. Plain `p`
 returns to all included repositories while preserving the selected PR if visible.
 
 Enter opens a centered detail modal with a wrapped title, author and draft state,
@@ -344,10 +352,11 @@ its canonical GitHub URL is valid. Launch errors appear on the board. `r`
 refreshes repository history and PR context from list or detail. `i` changes
 global inclusion and returns to the same PR view.
 
-### Leaderboard
+### Contributors
 
-The leaderboard aggregates included repositories in the selected local history
-range. `/` filters contributor names; `s` selects the metric and `S` reverses it.
+Contributors aggregates included repositories in the selected local history
+range. Bars always show added and removed lines, including when sorted by commit
+count. `/` filters contributor names; `s` selects a sort field and `S` reverses it.
 `b` toggles bots and `t` changes the range. Enter / right opens contributor detail.
 In detail, arrows and paging scroll the same contributor; left / Esc returns to
 the list. Select another contributor there to open their detail. `i` and `r`
@@ -361,13 +370,13 @@ Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
 Enter applies choices; Esc / left cancels. Exclusion removes a repository from
 all boards and subsequent fetch/PR requests. It does not write the config file.
 
-`t` opens the global range picker on Worklist, statistics, and PR list/detail views.
+`t` opens the global range picker on Activity, statistics, and PR list/detail views.
 It uses commit author time for local history and last-updated time for PRs.
 Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
-preset; End or `c` selects Custom. Enter applies a preset or opens day entry.
+preset; End or `d` selects Custom. Enter applies a preset or opens day entry.
 Custom entry accepts 1–3650 days; Backspace edits and Ctrl+U clears it. Enter
-applies a valid range; Esc cancels. Custom ranges are session-only. Time and bot
-filters affect Worklist and statistics; PRs remain independent.
+applies a valid range; Esc cancels. Custom ranges are session-only. The time range affects all three boards; the bot filter applies only to local
+history in Activity and Contributors.
 
 ## Config file
 
@@ -398,8 +407,8 @@ interactive filters and inclusion changes do not rewrite the file.
 
 - `paths` supplies scan roots when no positional paths or `--group` are given; without any of these, Bigboard scans the current directory.
 - `depth` controls recursive repository discovery, with a default of `1`; values below `1` also use `1`. It does not change work-area grouping.
-- `sort` sets the statistics metric: `commits`, `added`, `removed`, `net`, `ai`, or `total` (`impact` is an alias for `total`). The default is `total`. Worklist starts in Recent regardless of this setting.
-- `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Worklist canvas uses its fixed high-contrast palette.
+- `sort` sets the Contributors sort: `commits`, `added`, `removed`, `net`, `ai`, or `total` (`impact` is an alias for `total`). The default is `total`. This setting changes contributor ordering; bars still show lines changed. Activity starts ranked by lines changed and can independently sort by commits, recency, or name.
+- `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Activity canvas uses its fixed high-contrast palette.
 - `all_files` includes generated/vendored paths in line totals; it defaults to `false`.
 - `work_areas` defines optional cross-directory groups using the [rules above](#work-relationships).
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
@@ -413,13 +422,13 @@ interactive filters and inclusion changes do not rewrite the file.
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
 - Local updates on launch or `r`, separate local/PR freshness, and retained last-good data on refresh failures
-- High-contrast Worklist with responsive full-width evidence and compact list-to-detail navigation
+- High-contrast Activity with responsive full-width evidence and compact list-to-detail navigation
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
-- AI-authorship as a first-class metric: leaderboard `AI%` column, per-month AI share, per-repo AI %
+- AI-authorship as a first-class metric: Contributors `AI%` column, per-month AI share, per-repo AI %
 - Bot contributors counted and tagged (`BOT`), with a one-key toggle to hide them
 - Per-contributor drill-down: repo breakdown, gap-aware monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)
-- Scrollable, height-aware leaderboard with incremental `/` search — every contributor reachable
+- Scrollable, height-aware Contributors board with incremental `/` search — every contributor reachable
 - Headless `--export` (JSON, same pipeline and identity policy as the TUI), config file with named `--group`s, glob excludes, and recursive scan depth
 - Accurate-by-default: native `.mailmap`, generated/vendored files excluded, deterministic ordering, rename/copy-aware churn
 - Git worktree detection (linked worktrees are skipped); separate-Git-directory repositories are supported, and symlinked repo directories are followed and deduplicated

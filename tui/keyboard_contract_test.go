@@ -87,7 +87,7 @@ func keyboardContractOrdinaryContexts() []keyboardContractContext {
 			return keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "enter", "down")
 		}},
 		{"contributor overlap", func(t *testing.T) Model {
-			return keyboardContractPress(t, keyboardContractFixture(), "right", "3", "c", "down")
+			return keyboardContractPress(t, keyboardContractFixture(), "right", "3", "m", "down")
 		}},
 	}
 	for tab, name := range glanceTabs {
@@ -174,7 +174,7 @@ func TestKeyboardContractBoardRoundTripPreservesWorklist(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := keyboardContractPress(t, tc.setup(t), "")
 			before := m
-			m = keyboardContractPress(t, m, "l", "p", "w")
+			m = keyboardContractPress(t, m, "l", "p", "a")
 			if m.viewMode != ViewAwareness || m.showPRs || m.showPaths {
 				t.Fatal("w did not return to Worklist")
 			}
@@ -189,7 +189,7 @@ func TestKeyboardContractBoardRoundTripPreservesWorklist(t *testing.T) {
 func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 	contexts := append(keyboardContractOrdinaryContexts(), keyboardContractOwnedContexts()...)
 	contexts = append(contexts, keyboardContractContext{"custom range", func(t *testing.T) Model {
-		return keyboardContractPress(t, awarenessFixture(), "t", "c", "enter")
+		return keyboardContractPress(t, awarenessFixture(), "t", "d", "enter")
 	}}, keyboardContractContext{"load error", func(t *testing.T) Model {
 		m := awarenessFixture()
 		m.err = errors.New("all repositories failed")
@@ -198,7 +198,7 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 		return m
 	}})
 	for _, tc := range contexts {
-		for _, shortcut := range []string{"l", "w", "p"} {
+		for _, shortcut := range []string{"c", "a", "p"} {
 			t.Run(tc.name+"/"+shortcut, func(t *testing.T) {
 				m := keyboardContractPress(t, tc.setup(t), shortcut)
 				if m.showHelp || m.showScanErrors || m.showPaths || m.rangePicker.open || m.viewMode == ViewRepoOverlay {
@@ -216,7 +216,7 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 					}
 				} else {
 					want := ViewAggregate
-					if shortcut == "w" {
+					if shortcut == "a" {
 						want = ViewAwareness
 					}
 					if m.showPRs || m.viewMode != want {
@@ -241,7 +241,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := keyboardContractPress(t, tc.setup(t), "/")
 			view, scan, prs := m.viewMode, m.scanGeneration, m.prGeneration
-			const typed = "hjklwgGvLpPoRré"
+			const typed = "hjklcmwaugGvLpPoRré"
 			for _, r := range typed {
 				m = keyboardContractPress(t, m, string(r))
 			}
@@ -270,14 +270,14 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 }
 
 func TestBoardKeysCancelRepositoryChoicesAndPendingRanges(t *testing.T) {
-	for _, shortcut := range []string{"l", "w", "p"} {
+	for _, shortcut := range []string{"c", "a", "p"} {
 		m := keyboardContractPress(t, awarenessFixture(), "i", "down", " ", shortcut)
 		if m.excludedRepos["/web"] || m.overlayExcluded != nil {
 			t.Fatal("leaving repository controls applied unconfirmed choices")
 		}
 		m = awarenessFixture()
 		timeIndex, customDays := m.timeIdx, m.customRangeDays
-		m = keyboardContractPress(t, m, "t", "c", "enter", "21", shortcut)
+		m = keyboardContractPress(t, m, "t", "d", "enter", "21", shortcut)
 		if m.timeIdx != timeIndex || m.customRangeDays != customDays || m.rangePicker.open {
 			t.Fatal("leaving the range picker applied an unconfirmed range")
 		}
@@ -285,18 +285,33 @@ func TestBoardKeysCancelRepositoryChoicesAndPendingRanges(t *testing.T) {
 }
 
 func TestBoardKeyFromSearchHelpKeepsAcceptedFilter(t *testing.T) {
-	m := keyboardContractPress(t, awarenessFixture(), "/", "l", "w", "p")
-	if m.glanceQuery() != "lwp" || m.viewMode != ViewAwareness || m.showPRs {
+	m := keyboardContractPress(t, awarenessFixture(), "/", "c", "a", "p")
+	if m.glanceQuery() != "cap" || m.viewMode != ViewAwareness || m.showPRs {
 		t.Fatal("search intercepted letters as board shortcuts")
 	}
-	m = keyboardContractPress(t, m, "f1", "l", "w")
-	if m.showHelp || m.glance.searching || m.glanceQuery() != "lwp" {
+	m = keyboardContractPress(t, m, "f1", "c", "a")
+	if m.showHelp || m.glance.searching || m.glanceQuery() != "cap" {
 		t.Fatal("switching from search help lost the filter or kept input active")
 	}
 }
 
+func TestActivityShortcutKeepsLegacyAliasAndPRAuthorFilter(t *testing.T) {
+	m := keyboardContractPress(t, boardLayoutFixture(), "p", "u")
+	if !m.showPRs || !m.prRepoPicker || m.prFilterKind != "author" {
+		t.Fatal("u did not open the PR author filter")
+	}
+	m = keyboardContractPress(t, m, "a")
+	if m.showPRs || m.prRepoPicker || m.viewMode != ViewAwareness {
+		t.Fatal("a did not leave the filter modal for Activity")
+	}
+	m = keyboardContractPress(t, m, "c", "w")
+	if m.showPRs || m.viewMode != ViewAwareness {
+		t.Fatal("legacy w alias no longer opens Activity")
+	}
+}
+
 func TestKeyboardContractCustomRangeRejectsLettersWithoutNavigation(t *testing.T) {
-	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "c", "enter", "ctrl+u", "21")
+	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "d", "enter", "ctrl+u", "21")
 	before := m.glance
 	for _, k := range []string{"h", "j", "k", "g", "G", "v", "P", "o", "R", "i"} {
 		m = keyboardContractPress(t, m, k)
@@ -319,10 +334,14 @@ func TestKeyboardContractFocusedNavigationRetainsArrowsAndPaging(t *testing.T) {
 			if count < 3 {
 				t.Fatal("fixture must expose at least three rows")
 			}
+			page := m.height - 10
+			if tab == glanceActivity {
+				page = strings.Count(m.View(), "Changed areas:")
+			}
 			for _, tc := range []struct {
 				key string
 				row int
-			}{{"down", 1}, {"up", 0}, {"end", count - 1}, {"home", 0}, {"pgdown", min(count-1, m.height-10)}, {"pgup", 0}} {
+			}{{"down", 1}, {"up", 0}, {"end", count - 1}, {"home", 0}, {"pgdown", min(count-1, page)}, {"pgup", 0}} {
 				m = keyboardContractPress(t, m, tc.key)
 				if m.glance.frame.rows[tab] != tc.row {
 					t.Fatalf("%s selected row %d, want %d", tc.key, m.glance.frame.rows[tab], tc.row)
@@ -457,7 +476,7 @@ func TestKeyboardContractLeaderboardAndContributorRetainNavigation(t *testing.T)
 	if m.viewMode != ViewAggregate || m.activeAuthorID != "" || m.statDetailOffset != 0 {
 		t.Fatal("Home/left failed to return to leaderboard")
 	}
-	m = keyboardContractPress(t, m, "enter", "esc", "w", "left")
+	m = keyboardContractPress(t, m, "enter", "esc", "a", "left")
 	if m.viewMode != ViewAwareness || m.quitting {
 		t.Fatal("Enter/Esc and w did not restore Worklist")
 	}

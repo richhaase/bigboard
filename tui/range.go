@@ -131,7 +131,7 @@ func (m Model) handleRangeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		picker.cursor = min(len(TimePresets), picker.cursor+1)
 	case "home":
 		picker.cursor = 0
-	case "end", "c":
+	case "end", "d":
 		picker.cursor = len(TimePresets)
 	case "enter":
 		if picker.cursor == len(TimePresets) {
@@ -193,7 +193,7 @@ func (m Model) renderRangePicker() string {
 			}
 			lines = append(lines, awarenessRow(glanceCursor(i == m.rangePicker.cursor)+" "+label, i == m.rangePicker.cursor, i, width))
 		}
-		lines = append(lines, "", "  ↑↓ choose · c custom")
+		lines = append(lines, "", "  ↑↓ choose · d custom")
 	}
 	lines = append(lines, "  ? help · Enter apply · Esc cancel", "  "+boardShortcuts(width))
 	return fitGlanceLines(lines, width, height)

@@ -23,7 +23,7 @@ func TestHelpAvailableAcrossScreensAndRestoresNavigation(t *testing.T) {
 			return m
 		}},
 		keyboardContractContext{"custom range", func(t *testing.T) Model {
-			return keyboardContractPress(t, awarenessFixture(), "t", "c", "enter")
+			return keyboardContractPress(t, awarenessFixture(), "t", "d", "enter")
 		}},
 	)
 	for _, tc := range contexts {
@@ -53,7 +53,7 @@ func TestHelpContextContainsOnlyRelevantControls(t *testing.T) {
 		name, want, absent string
 		setup              func(Model) Model
 	}{
-		{"repository list", "Open repository areas", "Next / previous lens", func(m Model) Model { return m }},
+		{"repository list", "Open repository directories", "Next / previous lens", func(m Model) Model { return m }},
 		{"people", "Show this contributor's activity", "Shared commits / contributor overlap", func(m Model) Model {
 			return keyboardContractPress(t, m, "enter", "enter", "2")
 		}},

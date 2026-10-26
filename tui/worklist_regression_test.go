@@ -176,7 +176,7 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"BIGBOARD / Worklist", "Local:", "r refresh", "LAST AUTHOR", "LATEST COMMIT"} {
+	for _, want := range []string{"BIGBOARD / Activity", "Local:", "r refresh", "LAST AUTHOR", "LATEST COMMIT"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}
@@ -189,7 +189,7 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 		t.Fatal("refresh status hidden")
 	}
 	m.width = 80
-	if !strings.Contains(m.View(), "BIGBOARD / Worklist") || !strings.Contains(m.View(), "Updating…") {
+	if !strings.Contains(m.View(), "BIGBOARD / Activity") || !strings.Contains(m.View(), "Updating…") {
 		t.Fatal("compact status differs")
 	}
 }
@@ -199,7 +199,7 @@ func TestWorklistHelpShowsRepositoryControls(t *testing.T) {
 	m.width, m.height = 160, 48
 	m = pressAwareness(m, "?")
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Help · Worklist") || !strings.Contains(view, "Refresh repos and PRs") || strings.Contains(view, "never runs git fetch") {
+	if !strings.Contains(view, "Help · Activity") || !strings.Contains(view, "Refresh repos and PRs") || strings.Contains(view, "never runs git fetch") {
 		t.Fatalf("help does not explain repository controls: %s", view)
 	}
 }

@@ -19,7 +19,7 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 	for _, profile := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		lipgloss.SetColorProfile(profile)
 		for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 40}} {
-			for _, screen := range []string{"Worklist", "Leaderboard", "Contributor", "PR list", "PR detail"} {
+			for _, screen := range []string{"Activity", "Leaderboard", "Contributor", "PR list", "PR detail"} {
 				t.Run(fmt.Sprintf("%d/%dx%d/%s", profile, size[0], size[1], screen), func(t *testing.T) {
 					m := prFixture()
 					m.width, m.height = size[0], size[1]

@@ -156,7 +156,7 @@ func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, wid
 func (m Model) renderAwareness() string {
 	width, height := max(1, m.width), max(1, m.height)
 	if width < 40 || height < 18 {
-		return ansi.Truncate("Resize to 40×18 · l stats · q quit", width, "…")
+		return ansi.Truncate("Resize to 40×18 · c contributors · q quit", width, "…")
 	}
 	m.normalizeAreaScope()
 	if !m.glance.detailOpen {

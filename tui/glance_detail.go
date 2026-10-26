@@ -17,6 +17,9 @@ type relatedArea struct {
 }
 
 func (m Model) glanceAreaForFrame(f glanceFrame) stats.WorkArea {
+	if f.literal {
+		return stats.WorkArea{ID: f.areaID, Name: f.name, Records: stats.DirectoryRecords(m.glanceScopeRecords(), f.areaID)}
+	}
 	root := stats.WorkArea{ID: f.areaID, Name: f.name}
 	for _, area := range m.currentWorkAreas() {
 		if area.ID == f.areaID {
@@ -52,7 +55,10 @@ func (m Model) glanceDetailArea() stats.WorkArea { return m.glanceAreaForFrame(m
 func (m Model) glanceAreaRecords() []git.CommitRecord {
 	records := m.glanceDetailArea().Records
 	if source := m.glance.frame.relatedFromID; source != "" {
-		from := glanceFrame{areaID: source, path: m.glance.frame.relatedFromPath, leafID: m.glance.frame.relatedFromLeafID}
+		if m.glance.frame.relatedFromLiteral {
+			records = outsideDirectoryRecords(records, source)
+		}
+		from := glanceFrame{areaID: source, path: m.glance.frame.relatedFromPath, leafID: m.glance.frame.relatedFromLeafID, literal: m.glance.frame.relatedFromLiteral}
 		shared := make(map[string]bool)
 		for _, r := range m.glanceAreaForFrame(from).Records {
 			if m.glance.frame.relatedPeople {
@@ -123,7 +129,7 @@ func (m Model) glanceRelatedAreas() []relatedArea {
 	}
 	var result []relatedArea
 	q := strings.ToLower(m.glance.frame.queries[glanceRelated])
-	for _, area := range m.currentWorkAreas() {
+	for _, area := range m.relatedScopeAreas() {
 		if area.ID == m.glance.frame.areaID || (q != "" && !strings.Contains(strings.ToLower(area.Name), q)) {
 			continue
 		}

@@ -118,16 +118,14 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 
 	maxTotal := 0
 	for _, a := range authors {
-		if a.TotalChange > maxTotal {
-			maxTotal = a.TotalChange
-		}
+		maxTotal = max(maxTotal, a.TotalChange)
 	}
 
 	arrow := " ↓"
 	if ts.SortAsc {
 		arrow = " ↑"
 	}
-	colCommits, colAdded, colRemoved, colNet, colAI, colImpact := "COMMITS", "ADDED", "REMOVED", "NET", "AI%", "+/- IMPACT"
+	colCommits, colAdded, colRemoved, colNet, colAI, colImpact := "COMMITS", "ADDED", "REMOVED", "NET", "AI%", "LINES +/-"
 	switch ts.SortField {
 	case stats.SortByCommits:
 		colCommits += arrow

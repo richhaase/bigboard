@@ -139,15 +139,19 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 		}
 		countPath := filter.shouldCount(path)
 		record := &records[len(records)-1]
-		record.Changes = append(record.Changes, PathChange{Path: path, PreviousPath: previousPath, Generated: !countPath})
+		change := PathChange{Path: path, PreviousPath: previousPath, Generated: !countPath}
 		if fields[0] == "-" || fields[1] == "-" {
-			continue // Binary files have no line measurement.
+			change.Binary = true
+			record.Changes = append(record.Changes, change)
+			continue
 		}
 		added, errA := strconv.Atoi(fields[0])
 		removed, errR := strconv.Atoi(fields[1])
 		if errA != nil || errR != nil || added < 0 || removed < 0 {
 			return nil, fmt.Errorf("invalid line counts %q", token)
 		}
+		change.Added, change.Removed, change.LinesKnown = added, removed, true
+		record.Changes = append(record.Changes, change)
 		if countPath {
 			record.Added += added
 			record.Removed += removed

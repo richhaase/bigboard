@@ -29,11 +29,11 @@ func TestPRRangePresetCustomAndAllTime(t *testing.T) {
 	if len(m.visiblePRs()) != 2 || len(m.allPRs()) != 4 {
 		t.Fatal("default range did not filter updated time independently of snapshot inventory")
 	}
-	m = keyboardContractPress(t, m, "t", "c", "enter", "21", "enter")
+	m = keyboardContractPress(t, m, "t", "d", "enter", "21", "enter")
 	if m.rangePicker.open || m.customRangeDays != 21 || len(m.visiblePRs()) != 3 {
 		t.Fatal("custom range did not apply from the PR board")
 	}
-	for _, board := range []string{"w", "l", "p"} {
+	for _, board := range []string{"a", "l", "p"} {
 		m = rangeKey(t, m, board)
 		if !strings.Contains(m.View(), "Range: 21 days") {
 			t.Fatalf("%s did not share the range", board)
@@ -43,7 +43,7 @@ func TestPRRangePresetCustomAndAllTime(t *testing.T) {
 	if m.rangeDuration() != 0 || len(m.visiblePRs()) != 4 {
 		t.Fatal("All time did not restore old and unknown dates")
 	}
-	m = keyboardContractPress(t, m, "w", "t", "home", "enter", "p")
+	m = keyboardContractPress(t, m, "a", "t", "home", "enter", "p")
 	if len(m.visiblePRs()) != 2 {
 		t.Fatal("range set on another board did not carry into PRs")
 	}

@@ -57,7 +57,7 @@ func TestRangeCustomValidationAndSharedFiltering(t *testing.T) {
 	m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: "old", Author: "Old", Email: "old@x", RepoID: "/api", RepoName: "api", Date: time.Now().Add(-20 * 24 * time.Hour)})
 	m.recomputeAuthors()
 	m = rangeKey(t, m, "t")
-	m = rangeKey(t, m, "c")
+	m = rangeKey(t, m, "d")
 	m = rangeKey(t, m, "enter")
 	for _, input := range []string{"0", "3651", "99999999999", "0036501", ""} {
 		m = rangeKey(t, m, "ctrl+u")
@@ -163,7 +163,7 @@ func TestRangePickerFitsTerminalAndKeepsApplyCancelVisible(t *testing.T) {
 		for _, mode := range []string{"preset", "custom", "invalid"} {
 			m = rangeKey(t, m, "t")
 			if mode != "preset" {
-				m = rangeKey(t, m, "c")
+				m = rangeKey(t, m, "d")
 				m = rangeKey(t, m, "enter")
 			}
 			if mode == "invalid" {

@@ -60,11 +60,17 @@ func fitFooter(footer string, width int) string {
 		if has("f ") {
 			local = append(local, "f filters")
 		}
+		if has("Tab details") {
+			local = append(local, "Tab details")
+		}
 		if has("/ ") {
 			local = append(local, "/ find")
 		}
 		if has("t range") {
 			local = append(local, "t range")
+		}
+		if has("s/S sort") || has("s sort") {
+			local = append(local, "s sort")
 		}
 		if has("→") {
 			local = append(local, "Enter open")
@@ -84,11 +90,11 @@ func fitFooter(footer string, width int) string {
 	}
 	if !has("F1 help") && (!editing || width >= 70) {
 		if width >= 160 {
-			boards = []string{"l leaderboard", "w worklist", "p PRs"}
+			boards = []string{"c contributors", "a activity", "p PRs"}
 		} else if width >= 70 {
-			boards = []string{"l/w/p boards"}
+			boards = []string{"c/a/p boards"}
 		} else {
-			boards = []string{"l/w/p"}
+			boards = []string{"c/a/p"}
 		}
 	}
 	var chosen []string

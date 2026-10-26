@@ -18,9 +18,11 @@ func (m Model) areaRepository() (git.Repository, bool) {
 
 func (m *Model) normalizeAreaScope() {
 	if m.areaRepoID == "" {
+		m.directory = directoryState{}
 		return
 	}
 	if _, ok := m.areaRepository(); !ok {
+		m.directory = directoryState{}
 		m.areaRepoID = ""
 		m.selectedAreaID = ""
 		m.personID = ""
@@ -39,8 +41,7 @@ func (m *Model) openSingleRepositoryAreas() {
 		}
 	}
 	if len(included) == 1 {
-		m.areaRepoID = included[0].ID
-		m.selectedRepoID = included[0].ID
+		m.openDirectoryRepository(included[0].ID)
 	}
 }
 

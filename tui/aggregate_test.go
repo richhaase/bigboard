@@ -59,8 +59,8 @@ func TestRenderTableColumnTiers(t *testing.T) {
 	if !strings.Contains(wide, "ADDED") || !strings.Contains(wide, "REMOVED") {
 		t.Errorf("wide tier should keep ADDED/REMOVED:\n%s", wide)
 	}
-	if !strings.Contains(wide, "IMPACT") {
-		t.Errorf("wide tier should keep the impact bar header:\n%s", wide)
+	if !strings.Contains(wide, "LINES +/-") {
+		t.Errorf("wide tier should keep the lines bar header:\n%s", wide)
 	}
 
 	mid := AggregateView{}.RenderTable(authors, TableState{VisibleRows: len(authors), Width: 80, SortField: stats.SortByTotal})
@@ -69,8 +69,8 @@ func TestRenderTableColumnTiers(t *testing.T) {
 	}
 
 	narrow := AggregateView{}.RenderTable(authors, TableState{VisibleRows: len(authors), Width: 60, SortField: stats.SortByTotal})
-	if strings.Contains(narrow, "IMPACT") {
-		t.Errorf("narrow tier should drop the impact bar header:\n%s", narrow)
+	if strings.Contains(narrow, "LINES +/-") {
+		t.Errorf("narrow tier should drop the lines bar header:\n%s", narrow)
 	}
 	if !strings.Contains(narrow, "CONTRIBUTOR") || !strings.Contains(narrow, "NET") || !strings.Contains(narrow, "AI%") {
 		t.Errorf("narrow tier should keep CONTRIBUTOR/NET/AI%%:\n%s", narrow)
