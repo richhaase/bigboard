@@ -39,7 +39,7 @@ func (m Model) filtersTextEditing() bool {
 }
 
 func (m Model) filterCategories() []filterCategory {
-	categories := []filterCategory{{"range", "Range", true}, {"repos", "Repositories", true}, {"shared-reset", "Reset shared", true}}
+	categories := []filterCategory{{"range", "Date range", true}, {"repos", "Repositories", true}, {"shared-reset", "Reset shared", true}}
 	switch m.filters.board {
 	case "prs":
 		categories = append(categories, filterCategory{"author", "Authors", false}, filterCategory{"review", "Review", false}, filterCategory{"checks", "Checks", false}, filterCategory{"state", "State", false})
@@ -484,7 +484,7 @@ func (m Model) renderFiltersModal(background string, width, height int) string {
 	description := "Space stages choices · Enter applies all"
 	switch m.filters.category {
 	case "range":
-		description = "Range applies to all three boards"
+		description = "Date range applies to all three boards"
 	case "repos":
 		description = "Repository scope applies to all boards"
 	case "shared-reset":
@@ -547,13 +547,17 @@ func (m Model) renderFiltersModal(background string, width, height int) string {
 	}
 	content = append(content, StyleAmber.Render(padCells(position, inner)))
 	if m.filtersTextEditing() {
-		content = append(content, StyleTitle.Render(padCells("Enter done · Esc undo", inner)), StyleDimWhite.Render(padCells("Ctrl+U clears · Backspace edits", inner)))
+		content = append(content, StyleTitle.Render(padCells("Enter keep edit · Esc cancel edit", inner)), StyleDimWhite.Render(padCells("Ctrl+U clear · F1 help", inner)))
 	} else {
-		hints := "↑↓ move · ←→/Tab tabs · / find · Esc cancel"
-		if inner < 50 {
-			hints = "↑↓ move · ←→ tabs · / · Esc cancel"
+		actions := "Space toggle · Enter apply · Esc cancel"
+		if ansi.StringWidth(actions) > inner {
+			actions = "Space · Enter apply · Esc cancel"
 		}
-		content = append(content, StyleTitle.Render(padCells("Space select · Enter apply", inner)), StyleDimWhite.Render(padCells(hints, inner)))
+		hints := "↑↓ select · ←→/Tab category · / find · ? help"
+		if ansi.StringWidth(hints) > inner {
+			hints = "↑↓ · ←→/Tab · / find · ? help"
+		}
+		content = append(content, StyleTitle.Render(padCells(actions, inner)), StyleDimWhite.Render(padCells(hints, inner)))
 	}
 	return renderCenteredModal(background, content, panelWidth, width, height)
 }

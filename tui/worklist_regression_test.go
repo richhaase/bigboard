@@ -206,7 +206,7 @@ func TestWorklistHelpShowsRepositoryControls(t *testing.T) {
 	m.width, m.height = 160, 48
 	m = pressAwareness(m, "?")
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Help · Activity") || !strings.Contains(view, "Refresh repos and PRs") || strings.Contains(view, "never runs git fetch") {
+	if !strings.Contains(view, "Help · Activity") || !strings.Contains(view, "Repository controls") || !strings.Contains(view, "Refresh Git and PRs") || strings.Contains(view, "never runs git fetch") {
 		t.Fatalf("help does not explain repository controls: %s", view)
 	}
 }

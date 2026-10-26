@@ -247,7 +247,7 @@ func TestSharedFilterModalFitsEveryBoardAndCategory(t *testing.T) {
 						t.Fatalf("%s/%s/%v modal overflowed", board, category.id, size)
 					}
 				}
-				for _, want := range []string{"Shared:", "This board:", "↑↓ move", "Enter apply", "Esc cancel"} {
+				for _, want := range []string{"Shared:", "This board:", "↑↓", "Enter apply", "Esc cancel", "? help"} {
 					if !strings.Contains(view, want) {
 						t.Fatalf("%s/%s/%v missing %q:\n%s", board, category.id, size, want, view)
 					}

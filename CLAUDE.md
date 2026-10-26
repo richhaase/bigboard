@@ -107,7 +107,7 @@ clears applied filters. At a normal board root it stays there. Search Enter
 accepts text; Escape restores the previous applied query. While typing, shortcut
 letters are literal; F1 opens help and Ctrl+C quits.
 
-`f` opens one shared filter modal; `t` opens its Range category. Shared scope is
+`f` opens one shared filter modal; `t` opens its Date range category. Shared scope is
 date plus repository viewing selection, applied in memory across all boards.
 `i` separately manages repository tracking/refresh coverage. Board-specific
 filters: Activity Git contributors/bots, Contributors bots/name search, PRs
@@ -135,6 +135,9 @@ Enter/right opens; left/Escape backs out. All scrollable lists/details support
 arrows, paging, Home/End. `r` refreshes while preserving navigation; uppercase R
 is a compatibility alias. `q` quits outside text entry. Footer hints prioritize
 filters, contextual actions and help; full shortcuts stay in contextual help.
+Help lists the active context first, shared filter commands once, and board
+navigation last. Use Repository controls, Filters, Date range and Data status
+consistently; modal help must describe only the actions its key handler accepts.
 Repository controls, Data status and PR details use centered scrollable modals. Data status `d`
 reveals diagnostics; `o` opens the selected PR externally. Related `m` switches
 shared-commit and contributor-overlap evidence. Sorting remains `s`/`S`.

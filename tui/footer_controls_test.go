@@ -62,3 +62,44 @@ func TestRefreshAndInclusionHaveDistinctLowercaseKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestFooterPrioritizesFocusedPaneAndDetailControls(t *testing.T) {
+	for _, width := range []int{40, 80, 120, 220} {
+		m := boardLayoutFixture()
+		m.width, m.height = width, 36
+		m = keyboardContractPress(t, m, "tab")
+		footer := strings.Split(ansi.Strip(m.View()), "\n")[m.height-2]
+		for _, want := range []string{"Tab ranking", "↑↓ scroll", "? help"} {
+			if !strings.Contains(footer, want) {
+				t.Fatalf("%d: focused pane lost %q: %s", width, want, footer)
+			}
+		}
+		if strings.Contains(footer, "Enter open") {
+			t.Fatalf("%d: focused pane advertises inactive open: %s", width, footer)
+		}
+		m = keyboardContractPress(t, m, "c", "enter")
+		footer = strings.Split(ansi.Strip(m.View()), "\n")[m.height-2]
+		if !strings.Contains(footer, "Esc back") || !strings.Contains(footer, "? help") {
+			t.Fatalf("%d: contributor details lost navigation: %s", width, footer)
+		}
+	}
+}
+
+func TestFilterModalKeepsHelpAndConfirmationHintsVisible(t *testing.T) {
+	for _, width := range []int{40, 80, 120} {
+		m := boardLayoutFixture()
+		m.width, m.height = width, 24
+		m = keyboardContractPress(t, m, "f")
+		for _, want := range []string{"Enter apply", "Esc cancel", "? help"} {
+			if !strings.Contains(ansi.Strip(m.View()), want) {
+				t.Fatalf("%d: filter modal lost %q", width, want)
+			}
+		}
+		m = keyboardContractPress(t, m, "/")
+		for _, want := range []string{"Enter keep edit", "Esc cancel edit", "F1 help"} {
+			if !strings.Contains(ansi.Strip(m.View()), want) {
+				t.Fatalf("%d: filter editor lost %q", width, want)
+			}
+		}
+	}
+}

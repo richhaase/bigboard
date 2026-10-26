@@ -55,7 +55,7 @@ bigboard --config ./bigboard.json
 bigboard --version
 ```
 
-The shared scope row shows the active range. Press `t` to open Range in the
+The shared scope row shows the active range. Press `t` to open Date range in the
 filter modal. Space stages a preset or opens custom entry for 1–3650 days;
 Enter applies pending choices and Esc cancels.
 Range changes filter the loaded history in memory, with no scan or fetch.
@@ -254,7 +254,7 @@ Enter opens a deeper directory or a file's commit history. Commit evidence uses
 the available height and pages by visible commits.
 
 All three boards share an in-memory **date range and repository viewing scope**.
-`f` opens the same centered filter modal; `t` opens its Range category directly.
+`f` opens the same centered filter modal; `t` opens its Date range category directly.
 Shared choices apply to every board. Activity has Git contributor and bot filters;
 Contributors has its own bot setting; PRs has GitHub author, review, checks, and
 open/draft filters. Each board keeps its own search. Git identities and GitHub
@@ -298,11 +298,11 @@ location. Applied filters are cleared explicitly, never by Back.
 | `←` / `Esc` | Close or return one level; preserve applied filters; stay at board roots |
 | `/` | Search the current board list or Activity lens; reopen the existing query for editing |
 | `s` / `S` | Change sort / reverse order in sortable lists |
-| `f` / `t` | Edit shared scope and board filters / open Range directly |
+| `f` / `t` | Open Filters / open its shared Date range category directly |
 | `x` | Clear this board’s filters and search; preserve shared scope and location |
-| `i` | Manage tracked repositories and refresh coverage |
+| `i` | Open Repository controls to choose tracked repositories and refresh coverage |
 | `r` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
-| `e` | Open repository update errors when present |
+| `e` | Open Data status for Git/PR freshness, coverage and diagnostics |
 | `?` / `F1` | Open contextual help |
 | `q` / `Ctrl+C` | Quit outside text entry; `Ctrl+C` always quits |
 
@@ -315,10 +315,15 @@ enter text. `Enter` accepts the search, `Esc` restores the previous applied sear
 paging, and Home/End scroll; `Esc`, `Enter`, `?`, or `F1` dismiss it. Board keys
 can leave help directly. Dialogs own their other keys while open.
 
-`e` opens repository update errors in a centered modal over the current board.
-Repository headings and short summaries appear first; `d` expands the complete
-technical diagnostics. Arrows, paging, and Home/End scroll the modal, `r` retries,
-and Esc closes it without changing board selection or filters.
+Help starts with the current board, focused pane or modal controls, then lists
+shared filters and board navigation. Shared commands appear once. Footer hints
+prioritize the current context and keep help available; secondary actions remain
+in the help modal. Filter editors show `F1` for help while typing.
+
+`e` opens Data status in a centered modal over the current board, even when
+there are no errors. Git/PR freshness and tracked-repository coverage appear
+first; `d` shows repository diagnostics. Arrows, paging, and Home/End scroll
+the modal, `r` refreshes, and Esc closes it without changing selection or filters.
 
 ### Activity
 
@@ -392,7 +397,7 @@ Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
 Enter applies choices; Esc / left cancels. Exclusion removes a repository from
 all boards and subsequent fetch/PR requests. It does not write the config file.
 
-`t` opens Range in the shared filter modal on all three boards and their details.
+`t` opens Date range in the shared filter modal on all three boards and their details.
 It uses commit author time for local history and last-updated time for PRs.
 Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
 preset; End selects Custom. Space stages a preset or opens day entry.
