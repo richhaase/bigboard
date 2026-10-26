@@ -23,8 +23,8 @@ func TestPRPreviewFollowsSelectionAndPreservesFullTitle(t *testing.T) {
 			}
 		}
 		view := strings.Split(ansi.Strip(m.View()), "\n")
-		if strings.Contains(view[screenHeaderRows+1], "AUTHOR") || !strings.Contains(view[screenHeaderRows+1], "REVIEW") {
-			t.Fatal("wide table did not return author space to the title")
+		if !strings.Contains(view[screenHeaderRows+1], "AUTHOR") || !strings.Contains(view[screenHeaderRows+1], "REVIEW") {
+			t.Fatal("wide table did not preserve author and review columns")
 		}
 		if !strings.Contains(strings.Join(view[len(view)-5:len(view)-3], "\n"), githubIdentity(pr.Author)) {
 			t.Fatal("preview is not pinned above the footer")

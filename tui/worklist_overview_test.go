@@ -40,7 +40,7 @@ func TestRepositoryOverviewShowsScopedCountsAndRecency(t *testing.T) {
 	}
 }
 
-func TestRepositoryOverviewPagesWithoutSelectedPreview(t *testing.T) {
+func TestRepositoryOverviewPagesWithContributorBreakdown(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {110, 28}, {120, 36}, {180, 48}} {
 		m := boardLayoutFixture()
 		m.width, m.height = size[0], size[1]
@@ -49,8 +49,14 @@ func TestRepositoryOverviewPagesWithoutSelectedPreview(t *testing.T) {
 		view := ansi.Strip(m.View())
 		rows := m.glanceRepositories()
 		selected := rows[m.selectedRepository(rows)]
-		if !strings.Contains(view, selected.repo.Name) || len(strings.Split(view, "\n")) != m.height {
+		panel := activityContributorsHeight(m.width, m.height)
+		listEnd := m.height - screenFooterRows - panel
+		frame := strings.Split(view, "\n")
+		if !strings.Contains(strings.Join(frame[screenHeaderRows+2:listEnd], "\n"), selected.repo.Name) || len(frame) != m.height {
 			t.Fatal("paging hid the selected repository or changed frame height")
+		}
+		if panel > 0 && !strings.Contains(strings.Join(frame[listEnd:], "\n"), "CONTRIBUTORS · "+selected.repo.Name) {
+			t.Fatal("contributor breakdown did not follow the highlighted repository")
 		}
 		if strings.Contains(view, "SELECTED") || strings.Contains(view, "RECENT COMMITS") {
 			t.Fatal("repository ranking retained the selected text preview")
@@ -65,5 +71,18 @@ func TestRepositoryOverviewPagesWithoutSelectedPreview(t *testing.T) {
 		if !strings.Contains(ansi.Strip(m.View()), "[STALE]") {
 			t.Fatal("root comparison lost stale warning")
 		}
+	}
+}
+
+func TestActivityPanelHeightDoesNotChangeWithSelection(t *testing.T) {
+	m := boardLayoutFixture()
+	m.width, m.height = 120, 36
+	page := m.worklistPageSize()
+	m.selectedRepoID = "/sample/gateway"
+	m.allRecords = nil
+	m.recomputeAuthors()
+	view := ansi.Strip(m.View())
+	if m.worklistPageSize() != page || !strings.Contains(view, "No contributors in this scope and range.") {
+		t.Fatal("quiet repository changed the paging stride or hid its empty contributor state")
 	}
 }

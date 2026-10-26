@@ -92,7 +92,7 @@ func TestRepositoryMeasuresRespectScopeAndUnknownLines(t *testing.T) {
 	}
 }
 
-func TestRepositoryRankingUsesFullHeightAndPagesByVisibleRows(t *testing.T) {
+func TestRepositoryRankingAndContributorsShareHeightAndPageByVisibleRows(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 20}, {120, 36}} {
 		m := boardLayoutFixture()
 		m.width, m.height = size[0], size[1]
@@ -103,8 +103,17 @@ func TestRepositoryRankingUsesFullHeightAndPagesByVisibleRows(t *testing.T) {
 		if m.selectedRepository(rows) != min(page, len(rows)-1) {
 			t.Fatal("repository paging skipped more than the visible rows")
 		}
-		if m.width == 120 && m.height == 36 && page != m.height-screenHeaderRows-screenFooterRows-2 {
-			t.Fatal("full-height repository board reserved a selected preview")
+		available := m.height - screenHeaderRows - screenFooterRows - 2
+		panel := activityContributorsHeight(m.width, m.height)
+		rowHeight := activityRankingRowHeight(m.width)
+		if page*rowHeight+panel > available || available-page*rowHeight-panel >= rowHeight {
+			t.Fatal("ranking and contributor panel do not fit the available body")
+		}
+		if m.width == 120 && m.height == 36 && (panel != 9 || page != 17) {
+			t.Fatal("wide board lost its balanced list and contributor panel")
+		}
+		if m.width == 40 && m.height == 18 && panel != 0 {
+			t.Fatal("small terminal sacrificed the ranking to the contributor panel")
 		}
 	}
 }

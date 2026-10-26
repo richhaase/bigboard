@@ -57,7 +57,16 @@ func fitFooter(footer string, width int) string {
 		if has("←/Esc back") || has("Esc back") {
 			local = append(local, "Esc back")
 		}
+		if has("Tab ranking") {
+			local = append(local, "Tab ranking", "↑↓ scroll")
+		}
 		local = append(local, "f filters")
+		if has("Tab contributors") {
+			local = append(local, "Tab contributors")
+		}
+		if has("2 people") {
+			local = append(local, "2 people")
+		}
 		if has("x ") {
 			local = append(local, "x clear")
 		}
@@ -79,13 +88,13 @@ func fitFooter(footer string, width int) string {
 		if has("o ") {
 			local = append(local, "o browser")
 		}
-		if len(local) < 4 && has("↑↓ scroll") {
+		if len(local) < 4 && has("↑↓ scroll") && !has("Tab ranking") {
 			local = append(local, "↑↓ scroll")
 		}
 		if len(local) < 4 && has("v repo PRs") {
 			local = append(local, "v PRs")
 		}
-		if len(local) < 4 && has("Tab") {
+		if len(local) < 4 && has("Tab") && !has("Tab ranking") && !has("Tab contributors") {
 			local = append(local, "Tab lenses")
 		}
 	}

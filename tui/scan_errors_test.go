@@ -116,7 +116,7 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 			m = keyboardContractPress(t, m, "d")
 			var pages string
 			m, pages = collectStatusPages(t, m)
-			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(pages), "END-OF-DIAGNOSTIC") {
+			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "", "┃", "").Replace(pages), "END-OF-DIAGNOSTIC") {
 				t.Fatalf("%s/%v technical details are not fully accessible (%d):\n%s", board, size, m.scanErrorOffset, pages)
 			}
 			m = keyboardContractPress(t, m, "?", "esc")

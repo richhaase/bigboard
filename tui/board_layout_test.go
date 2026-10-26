@@ -56,7 +56,7 @@ func TestMainBoardsAlignFirstRowsAndKeepFrame(t *testing.T) {
 			m = keyboardContractPress(t, m, key)
 			view := ansi.Strip(m.View())
 			lines := strings.Split(view, "\n")
-			if len(lines) != m.height || !strings.HasPrefix(strings.TrimSpace(lines[screenHeaderRows+2]), "› ") {
+			if len(lines) != m.height || !strings.HasPrefix(strings.TrimSpace(ansi.Cut(lines[screenHeaderRows+2], 2, m.width)), "› ") {
 				t.Fatalf("%s/%v first data row moved or height changed:\n%s", key, size, view)
 			}
 			if !strings.Contains(lines[screenHeaderRows], " of ") {
