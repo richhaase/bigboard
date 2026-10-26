@@ -109,10 +109,10 @@ bots retain their `[BOT]` tag. Identities are based on canonical Git email after
 names do not merge people; duplicate display names include distinguishing identity
 text. Preview ranking by commit count does not change this alphabetical list.
 
-Select a person and press `Enter` to filter Activity. `Esc` clears that person
-filter and returns to People, unless a search must be cleared first. Choosing
-“All contributors” also removes the person filter. This local filter never
-filters GitHub PRs.
+Select a person and press `Enter` to open their scoped Activity. `Esc` returns
+to People, preserving applied board filters and searches. Choosing
+“All contributors” also leaves that person's focused view. These Git identity
+selections never filter GitHub PRs.
 
 ## Related: separate co-change from contributor overlap
 
@@ -169,7 +169,7 @@ cells. Rename/copy origins and generated-file exclusions are labeled when presen
 
 `↑/↓` scrolls lines. `PgUp/PgDown` or `Home/End` moves farther.
 `←` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
-lens. `r` refreshes directly from the inspector. Return to a list or lens before changing local filters. The
+lens. `r` refreshes directly from the inspector; `f` edits filters there too. The
 inspector's “Last updated” is the same retained local scan time called “Local” in
 Activity. A refresh that removes the commit cannot silently retarget this
 inspector to a different commit.
@@ -191,21 +191,18 @@ competes with commit titles. Retained area-specific PR signals remain visible.
 fetch when known and space permits. Unknown inventory is never shown as zero;
 `p` provides detailed status and any remote retry/cooldown time.
 
-Lowercase `p` opens PRs across all included repositories. `f` chooses a
-repository scope, and Activity's `v` opens PRs for its selected repository.
-Both paths use the same PR board. Repository scope is separate from global
-inclusion (`i`); the PR board uses the shared date range on PR last-updated time.
-`t` changes the range from any board; All time includes unknown update dates.
-Local contributor and bot filters do not apply to PRs.
-Plain `p` restores all-repository scope. `/` searches repository, title, author,
-or PR number; `s` selects a sort and `S` reverses it.
+Lowercase `p` resumes PRs. Shared date and repository viewing scope apply to
+all three boards, independently of tracked repositories (`i`). PRs use last-updated
+time; local history uses author dates. Activity's `v` opens repository PR context
+with the shared scope and temporarily omits saved PR filters. Back restores
+Activity and the saved normal PR board. Git contributor and bot filters remain
+board-specific. `/` searches the current list; `s` sorts and `S` reverses.
 
 Enter / right opens a centered detail modal over the list. It separates the
 title and status fields from coverage, reviewer, affected-area, and file sections.
 PR identity and partial/stale warnings remain visible while scrolling.
 Arrows, paging, and Home/End navigate lists or
-scroll details. Left / Esc returns one level, clearing search and repository
-scope on the way to the PR root. At a board root, back stays on that board.
+scroll details. Left / Esc closes or returns one level, preserving applied filters. Back from an Activity-linked PR list restores Activity and the previous normal PR state. At a board root, back stays on that board.
 `o` opens a valid canonical PR URL in your browser. `r` refreshes repository
 history and PR context from any board or detail, including the commit inspector.
 
@@ -230,11 +227,14 @@ appears at 70×24 and above, keeps at least three list entries visible, and show
 the full repository identity, wrapped title, author, draft state, and separate
 review/check states. Long titles continue in Enter detail. Repository labels
 omit redundant owners only when the remaining names are unambiguous.
-Filter pickers are centered modals over the board, with category tabs, a search
-field, and separate selected-row and applied-value indicators. They use
-`f` repository, `u` author, `v` review, `k` checks, and `d`
-draft/open state. They combine with text search; `/` searches picker options,
-Tab changes category, Enter applies, and Esc cancels. `x` clears all PR filters.
+`f` opens the common centered filter modal with Shared and This board categories.
+`t` opens Range; PR shortcuts `u`/`v`/`k`/`d` open author/review/checks/state.
+Left/right or Tab changes category, arrows select, Space stages choices, Enter
+applies the whole draft, and Escape cancels. Multiple choices within one category
+mean any selected value; categories combine. `/` searches options. Reset shared
+selects all time/all repositories; Reset this board and `x` clear board filters
+and search while preserving shared scope and navigation. The title is followed
+by separate shared-scope and board-filter rows; cache coverage remains distinct.
 At 80 columns the title
 and metadata occupy separate lines; at 40 columns status and age use a third
 line. Commands stay in the command footer, while coverage occupies the final

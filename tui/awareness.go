@@ -33,21 +33,14 @@ func (m Model) activityRepositories() []repositoryActivity {
 		return m.activityAreas()
 	}
 	var result []repositoryActivity
-	records := m.filteredRecords()
-	visible := make(map[string]bool)
-	for _, a := range m.authors {
-		visible[a.ID] = true
-	}
+	records := m.activityRecords()
 	for _, repo := range m.loadedRepos {
-		if m.excludedRepos[repo.ID] {
+		if !m.repoInView(repo.ID) {
 			continue
 		}
 		activity := repositoryActivity{repo: repo}
 		var kept []git.CommitRecord
 		for _, r := range m.recordsInRepository(repo, records) {
-			if !visible[stats.IdentityID(r)] {
-				continue
-			}
 			kept = append(kept, r)
 			activity.commits++
 			activity.observe(r)
@@ -127,7 +120,7 @@ func (m *Model) selectedRepository(rows []repositoryActivity) int {
 // evidence preserves all repository associations while selecting one canonical
 // identity per object ID. A copied commit must not become two different people.
 func (m Model) evidence(repoName, personID string) []git.CommitRecord {
-	records := m.filteredRecords()
+	records := m.activityRecords()
 	if m.areaRepoID != "" {
 		records = nil
 		for _, area := range m.currentWorkAreas() {
@@ -144,13 +137,9 @@ func (m Model) evidence(repoName, personID string) []git.CommitRecord {
 			inRepository[r.CommitID] = true
 		}
 	}
-	visible := make(map[string]bool)
-	for _, a := range m.authors {
-		visible[a.ID] = true
-	}
 	var out []git.CommitRecord
 	for _, r := range stats.UniqueRecords(records) {
-		if !visible[stats.IdentityID(r)] || (personID != "" && stats.IdentityID(r) != personID) {
+		if personID != "" && stats.IdentityID(r) != personID {
 			continue
 		}
 		if repoName != "" && !inRepository[r.CommitID] && (r.CommitID != "" || r.RepoName != repoName) {
@@ -171,12 +160,11 @@ func (m *Model) normalizeAwarenessFocus() {
 	if m.personID == "" {
 		return
 	}
-	for _, a := range m.authors {
-		if a.ID == m.personID {
+	for _, record := range stats.UniqueRecords(m.activityRecords()) {
+		if stats.IdentityID(record) == m.personID {
 			return
 		}
 	}
-	m.personID = ""
 	m.showPaths = false
 	m.pathOffset = 0
 }

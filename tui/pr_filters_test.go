@@ -13,11 +13,11 @@ import (
 func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 120, 36
-	m = keyboardContractPress(t, m, "p", "f", "/", "gateway", "enter", "enter")
-	if len(m.visiblePRs()) != 3 || m.prRepoID != "/sample/gateway" {
+	m = keyboardContractPress(t, m, "p", "f", "right", "/", "gateway", "enter", " ", "enter")
+	if len(m.visiblePRs()) != 3 || len(m.sharedRepos) != 1 || m.sharedRepos[0] != "/sample/gateway" || m.prRepoID != "" {
 		t.Fatal("repository search did not select the repository")
 	}
-	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", "enter", "v", "home", "down", "down", "down", "enter", "k", "home", "down", "enter", "d", "end", "enter")
+	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", " ", "right", "home", "down", "down", "down", " ", "right", "home", "down", " ", "right", "end", " ", "enter")
 	prs := m.visiblePRs()
 	if len(prs) != 1 || prs[0].Number != 102 || !prs[0].Draft {
 		t.Fatalf("combined filters returned wrong PRs: %+v", prs)
@@ -27,13 +27,18 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 			t.Fatalf("active filter missing: %s", want)
 		}
 	}
-	m = keyboardContractPress(t, m, "v", "home", "down", "down", "enter")
+	m = keyboardContractPress(t, m, "v", "home", " ", "down", "down", " ", "enter")
 	if len(m.visiblePRs()) != 0 || !strings.Contains(m.View(), "No matching PRs") || strings.Contains(m.View(), "SELECTED") {
 		t.Fatal("contradictory filters did not show an empty result")
 	}
 	m = keyboardContractPress(t, m, "x")
-	if len(m.visiblePRs()) != 48 || len(m.excludedRepos) != 0 || m.prFilters != (prFilters{}) || m.prRepoID != "" {
-		t.Fatal("clear did not restore all included PRs")
+	if len(m.visiblePRs()) != 3 || len(m.excludedRepos) != 0 || !m.prFilters.empty() || m.prRepoID != "" {
+		t.Fatal("board reset changed shared scope or failed to clear PR filters")
+	}
+	m.openFilters("shared-reset")
+	m = keyboardContractPress(t, m, " ", "enter")
+	if len(m.visiblePRs()) != 48 || len(m.sharedRepos) != 0 || len(m.excludedRepos) != 0 {
+		t.Fatal("shared reset did not restore the included repository scope")
 	}
 }
 
@@ -41,39 +46,39 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 80, 24
 	m = keyboardContractPress(t, m, "p", "u", "/", "a", "p", "q", "d")
-	if !m.showPRs || !m.prRepoPicker || !m.prFilterSearch || m.prFilterQuery != "apqd" || m.quitting {
+	if !m.showPRs || !m.filtersTextEditing() || m.filters.input != "apqd" || m.quitting {
 		t.Fatal("filter search leaked a command")
 	}
 	m = keyboardContractPress(t, m, "f1", "esc")
-	if !m.prFilterSearch {
+	if !m.filtersTextEditing() {
 		t.Fatal("help dismissal lost filter search")
 	}
 	m = keyboardContractPress(t, m, "esc", "end", "esc")
-	if m.prFilters != (prFilters{}) || m.prRepoPicker {
+	if !m.prFilters.empty() || m.filters.open {
 		t.Fatal("cancel applied pending author")
 	}
 	m = keyboardContractPress(t, m, "f", "tab")
-	if m.prFilterKind != "author" {
+	if m.filters.category != "repos" {
 		t.Fatal("Tab did not advance filter category")
 	}
 	m = keyboardContractPress(t, m, "end", "a")
-	if m.showPRs || m.prRepoPicker || m.prFilters != (prFilters{}) {
+	if m.showPRs || m.filters.open || !m.prFilters.empty() {
 		t.Fatal("board switch applied pending filter")
 	}
 }
 
 func TestPRUnknownFiltersDoNotImplyApproval(t *testing.T) {
 	pr := gh.PullRequest{ReviewDecision: "UNRECOGNIZED", CheckState: "", Draft: true}
-	if !(prFilters{author: "?", review: "Unknown", checks: "Unknown", state: "draft"}).matches(pr) {
+	if !(prFilters{author: filterValues{"?"}, review: filterValues{"Unknown"}, checks: filterValues{"Unknown"}, state: filterValues{"draft"}}).matches(pr) {
 		t.Fatal("unknown evidence disappeared from explicit unknown filters")
 	}
-	for _, f := range []prFilters{{review: "Approved"}, {checks: "Passing"}, {state: "open"}} {
+	for _, f := range []prFilters{{review: filterValues{"Approved"}}, {checks: filterValues{"Passing"}}, {state: filterValues{"open"}}} {
 		if f.matches(pr) {
 			t.Fatal("unknown or draft PR matched a stronger state")
 		}
 	}
 	pr.Author = "Contributor"
-	if !(prFilters{author: "contributor"}).matches(pr) {
+	if !(prFilters{author: filterValues{"contributor"}}).matches(pr) {
 		t.Fatal("author filtering is case sensitive")
 	}
 }
@@ -103,6 +108,7 @@ func TestPRNumberDraftAndSuccessPresentation(t *testing.T) {
 		}
 	}
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 36}} {
+		m.filters = sharedFilterState{}
 		m.width, m.height = size[0], size[1]
 		m = keyboardContractPress(t, m, "p", "u", "/", "contributor", "enter")
 		lines := strings.Split(m.View(), "\n")
@@ -123,9 +129,13 @@ func TestPRFilterModalPreservesBoardAndPagesItsOwnViewport(t *testing.T) {
 		m.width, m.height = size[0], size[1]
 		m = keyboardContractPress(t, m, "p", "down")
 		before := ansi.Strip(m.View())
-		m = keyboardContractPress(t, m, "f")
+		m = keyboardContractPress(t, m, "f", "right")
 		view := ansi.Strip(m.View())
-		for _, want := range []string{"PR filters · Repository", "[f Repo]", "Find options", "✓ applied", "Enter apply", "Esc cancel", "╭"} {
+		wants := []string{"Filters · PRs", "[Repos]", "Find options", "staged choices", "Enter apply", "Esc cancel", "╭"}
+		if m.height < 18 {
+			wants = []string{"Resize to 40×18", "Esc cancels"}
+		}
+		for _, want := range wants {
 			if !strings.Contains(view, want) {
 				t.Fatalf("%v modal missing %q:\n%s", size, want, view)
 			}
@@ -142,18 +152,18 @@ func TestPRFilterModalPreservesBoardAndPagesItsOwnViewport(t *testing.T) {
 		if m.width >= 80 && !strings.Contains(view, "BIGBOARD / Pull requests") {
 			t.Fatal("filter picker replaced the board")
 		}
-		_, page := m.prFilterModalSize(m.width, m.height)
+		_, page := filterModalSize(m.width, m.height)
 		m = keyboardContractPress(t, m, "pgdown")
-		if m.prRepoRow != page {
+		if m.filters.rows["repos"] != page {
 			t.Fatal("filter paging did not use modal viewport")
 		}
 		m = keyboardContractPress(t, m, "end")
-		options := m.prFilterOptions()
-		if m.prRepoRow != len(options)-1 || !strings.Contains(ansi.Strip(m.View()), options[len(options)-1].label) {
+		options := m.filterOptions()
+		if m.filters.rows["repos"] != len(options)-1 || m.height >= 18 && !strings.Contains(ansi.Strip(m.View()), options[len(options)-1].label) {
 			t.Fatal("last option is not visible")
 		}
 		m = keyboardContractPress(t, m, "?", "esc", "esc")
-		if m.prRepoPicker || ansi.Strip(m.View()) != before {
+		if m.filters.open || ansi.Strip(m.View()) != before {
 			t.Fatal("help or cancellation changed the underlying board")
 		}
 	}

@@ -35,7 +35,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 ## Key Design Decisions
 
 - **Git CLI integration**: there is no Git library dependency; operations invoke the `git` executable, with timeouts and bounded concurrent repository scans. `git log` output is parsed as a stream (pipe + scanner), never buffered whole.
-- **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state. The `t` range picker also supports session-only custom day counts (1–3650), with Enter apply/Esc cancel; it filters in memory without scans or fetches. Left/right arrows navigate back/drill in, never change time; back at any board root stays there. Navigation uses arrows, Enter/Esc, Home/End and PageUp/PageDown where supported; there are no Vim movement aliases. Lowercase `c`, `a`, and `p` directly select Contributors, Activity, and all-included PR board from any page. These keys close help, inspectors, and dialogs; pending repository and range choices cancel on departure. Searches retain literal letters while editing, and board selections/filters survive switching.
+- **TUI-first CLI**: exactly 4 flags (`--version`, `--config`, `--group`, `--export`); every preference lives in the config file. `since` accepts only the TUI preset labels (1d/7d/14d/30d/90d/1y/all) so the initial window always matches a picker state. The shared filter modal, opened by `f` or directly at Range by `t`, also supports session-only custom day counts (1–3650), with Space staging choices and Enter applying all pending changes; Esc cancels; it filters in memory without scans or fetches. Left/right arrows navigate back/drill in outside dialogs; back at any board root stays there. Navigation uses arrows, Enter/Esc, Home/End and PageUp/PageDown where supported; there are no Vim movement aliases. Lowercase `c`, `a`, and `p` resume Contributors, Activity, and the normal PR board from any page. These keys close temporary dialogs and cancel pending choices on departure while preserving stable board detail locations. Searches retain literal letters while editing, and board selections/filters survive switching.
 - **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
 - **Identity merging**: canonical emails after Git `.mailmap` establish identity; names never merge contributors. Missing-email identities are repository-scoped. `fuzzy` is accepted for old configs but does not affect aggregation. Contributor selection follows the stable identity, not its current display name.
 - **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; the `"all_files": true` config setting includes them.
@@ -47,7 +47,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **Dates and retained behavior**: use `time.Local` for all calendar grouping and display. Future-dated commits remain counted, with no upper time cutoff. Keep the current churn formula and its zero-additions `0.00` convention. Keep the existing UI, JSON export, and merge-commit exclusion.
 - **Repository refresh**: Startup and `r`, including in the PR board, fetch remote-tracking branches only with existing Git credentials, no tags, submodules, local branch updates, or working-tree changes. Fetches share the eight scan slots, have a two-minute timeout, and disable Git/SSH credential prompts. Repositories without `origin` stay local-only; excluded repositories are never fetched. A fetch failure still runs the offline scan and marks its result stale with visible diagnostics.
 - **Contextual help**: `?` or `F1` opens a centered, scrollable help modal over every screen. Search input retains literal `?` and uses `F1` for help. Help owns its scrolling/dismissal keys; `c`/`a`/`p` leave help for a board. Ordinary dismissal preserves the underlying selection, filters, and overlays.
-- **Shared screen frame**: Activity, Contributors/detail, and PR list/detail use the same compact title band, scope/search row, local/PR freshness rows, and pinned three-row footer. Main lists align their heading (sort, summary, visible range), column labels, and first row. Contributors totals use the heading, and narrow contributor rows stack metrics. PR rows reserve review/check/updated fields and stack at 80/40 columns. At 70×24+ a selected-PR preview above the footer shows wrapped title, full repo identity, author, draft, and review/check states; wide tables move the author there. Short repo labels retain owners when ambiguous; Activity area rows label their known-PR column; repository and directory rows use a full-height ranking with added/removed bars and no selected preview. Footer hints omit whole optional commands; coverage contains no commands. Wide titles include repository counts and version. The status rows report global included-repository freshness on every screen; selected repository timestamps stay in Activity evidence. The title count includes failed repositories, and tables share full-width gutters and selection rows. The oldest included local scan and stale/missing coverage stay explicit. The PR board follows the global range using UpdatedAt, while local person/bot filters remain independent. Work-area PR summaries and snapshot counts retain all open PRs. Contributor paging scrolls only the body, preserving its frame, and `r` refreshes without leaving detail.
+- **Shared screen frame**: Activity, Contributors/detail, and PR list/detail use the same compact title band, separate shared-scope and board-filter rows, local/PR freshness rows, and pinned three-row footer. Main lists align their heading (sort, summary, visible range), column labels, and first row. Contributors totals use the heading, and narrow contributor rows stack metrics. PR rows reserve review/check/updated fields and stack at 80/40 columns. At 70×24+ a selected-PR preview above the footer shows wrapped title, full repo identity, author, draft, and review/check states; wide tables move the author there. Short repo labels retain owners when ambiguous; Activity area rows label their known-PR column; repository and directory rows use a full-height ranking with added/removed bars and no selected preview. Footer hints omit whole optional commands; coverage contains no commands. Wide titles include repository counts and version. The status rows report global included-repository freshness on every screen; selected repository timestamps stay in Activity evidence. The title count includes failed repositories, and tables share full-width gutters and selection rows. The oldest included local scan and stale/missing coverage stay explicit. The PR board follows the global range using UpdatedAt, while local person/bot filters remain independent. Work-area PR summaries obey shared date/repository scope. Cached snapshot inventory remains explicitly labeled and independent of view counts. Contributor paging scrolls only the body, preserving its frame, and `r` refreshes without leaving detail.
 - **Git isolation**: resolve branch OIDs, parse NUL-delimited paths, pin diff settings, clear repository-local environment overrides, and retain specific-agent AI matching with explicit user overrides.
 - **Activity awareness**: Repository and directory rows use the full list height to show where change occurred, defaulting to added + removed lines with split bars. Bars retain that meaning when sorting by commits, recency, or name; there is no measure toggle. Enter follows literal directories and files, then commit evidence. Directory totals use retained per-file Git numstat counts, excluding generated paths according to scan options; whole-commit totals must not be repeated for every touched directory. Quiet repositories remain visible and unknown line counts retain `?` qualifiers. Date and bot filters apply at each scope. Secondary commit, People, and Related evidence remains available. Configured named areas retain their existing meaning separately from the literal directory hierarchy. Focused commit evidence fills the available height and pages by visible records. Ages use each row repository's retained scan timestamp. All modes share a high-contrast blue-gray canvas.
 
@@ -81,7 +81,7 @@ GitHub PR context loads automatically with existing gh authentication for suppor
 
 ## Progressive disclosure
 
-`tui/worklist*.go` owns repository and directory rankings. Enter follows literal child directories, then files and commit evidence. `s` cycles lines changed, commits, recency, and name; bars always show added/removed lines. Tab or `1`–`3` opens the current scope's Commits/People/Related evidence; `4` returns to its directory ranking. Esc clears a search before returning to the parent with selection preserved. Directory line totals are computed from retained per-file counts. Commit counts can overlap across directories. Configured named areas remain secondary related evidence and never replace the literal directory hierarchy. `p` opens all included PRs; `v` opens PRs for the selected repository.
+`tui/worklist*.go` owns repository and directory rankings. Enter follows literal child directories, then files and commit evidence. `s` cycles lines changed, commits, recency, and name; bars always show added/removed lines. Tab or `1`–`3` opens the current scope's Commits/People/Related evidence; `4` returns to its directory ranking. Esc navigates to the parent with applied searches and filters preserved; during text entry it restores the prior query. Directory line totals are computed from retained per-file counts. Commit counts can overlap across directories. Configured named areas remain secondary related evidence and never replace the literal directory hierarchy. `p` resumes the normal PR board; `v` opens a temporary repository PR context with a return to Activity.
 
 ## Related evidence
 
@@ -94,33 +94,41 @@ titles first, then author/time/hash and affected areas. No extra scans or reques
 
 ## Shared command contract
 
-Lowercase `c`/`a`/`p` select peer boards; `p` clears PR repository scope. Back
-clears filters or unwinds one level and stays at roots. `q` always quits outside
-text entry; Ctrl+C always quits. Enter/right opens; left/Esc backs out. All
-scrollable lists and details support arrows, paging, Home/End. Contributor-detail
-arrows scroll without switching identity. Searches reopen their existing text.
-`i` opens global inclusion from all boards and details; Enter applies and Esc
-cancels. Pending dialogs cancel on board switches. `r` refreshes from every
-board/detail, including commit inspection, preserving navigation.
-Uppercase `R` remains a refresh compatibility alias. Footers group board keys,
-primary contextual actions, and help/refresh; complete shortcuts stay in `?` help.
-Repository errors use the shared centered modal surface over the retained board;
-`d` toggles full diagnostics beneath per-repository summaries, with scrolling,
-`r` retry, and Esc dismissal preserving board state.
+Lowercase `c`/`a`/`p` resume peer boards with filters, sort, selection, scroll,
+and stable drill-down state preserved. Board switching cancels pending choices
+and closes temporary dialogs. Back closes details or moves to a parent; it never
+clears applied filters. At a normal board root it stays there. Search Enter
+accepts text; Escape restores the previous applied query. While typing, shortcut
+letters are literal; F1 opens help and Ctrl+C quits.
 
-PRs use `f` repository, `u` author, `v` review, `k` checks, and `d` draft/open
-filter modals over the retained PR board/detail. Tabs highlight the active category;
-the cursor and applied-value checkmark are separate. Paging uses the modal viewport.
-Filters compose with `/` repo/title/author/number search; picker
-`/` searches options, Tab switches categories, Enter applies, and Esc cancels.
-`x` clears all PR filters and search. Wide rows separate number/state/title;
-`◇` and subdued titles mark drafts, `●` marks non-drafts, and approved/passing
-are green without implying merge readiness.
-PR details are centered modals over the retained list, with labeled status and
-evidence sections. Identity, snapshot warnings, browser errors, and controls stay
-pinned; scrolling and End use the modal's wrapped body budget.
-`s` cycles Updated/Repository/Author/Title and `S` reverses. Activity's
-`v` enters the same PR board scoped to its selected repository without altering
-inclusion. PR scope and search never enter local statistics. `t` changes the shared range from PR list/detail too; presets and custom days filter UpdatedAt in memory, with unknown dates visible only in All time. Range changes preserve PR identity when visible and close detail if its PR leaves the range. Activity overview
-and Subareas also support `S`; Related uses `m` to switch shared commits and
-contributor overlap. `o` remains the external PR-opening action.
+`f` opens one shared filter modal; `t` opens its Range category. Shared scope is
+date plus repository viewing selection, applied in memory across all boards.
+`i` separately manages repository tracking/refresh coverage. Board-specific
+filters: Activity Git contributors/bots, Contributors bots/name search, PRs
+GitHub authors/review/checks/state/search. Git identities are not GitHub accounts.
+Multiple values within a facet are OR; facets combine with AND. Empty selections
+mean All. Left/right and Tab switch categories, arrows/page keys select options,
+Space stages choices, Enter applies the entire draft, Escape cancels. Custom-day
+and search editors accept into the draft before the final Apply. Reset shared
+means All time/all tracked repositories. Reset board and `x` clear board filters
+and searches without changing shared scope or navigation. Use copy-on-write for
+pending selections so canceled edits cannot mutate the source model.
+
+PR shortcuts `u`/`v`/`k`/`d` open Authors/Review/Checks/State in the common modal.
+Activity `v` opens a contextual repository PR list using shared scope and no
+unrelated saved PR filters. It snapshots only PR UI state, never fetched data.
+Back from the contextual list returns to Activity and restores the saved normal
+PR board; ordinary board switching also ends that temporary context. Repeated
+`p` on the normal PR board preserves location. PR range uses last-updated time;
+local history uses author dates. Unknown PR dates appear only in All time.
+Shared scope and board filters have separate visible rows; raw cache inventory
+is labeled separately from result counts. PR summaries use shared scope so a
+contextual jump is not silently narrowed by unrelated PR author/status filters.
+
+Enter/right opens; left/Escape backs out. All scrollable lists/details support
+arrows, paging, Home/End. `r` refreshes while preserving navigation; uppercase R
+is a compatibility alias. `q` quits outside text entry. Footer hints prioritize
+filters, contextual actions and help; full shortcuts stay in contextual help.
+Repository errors and PR details use centered scrollable modals. Error `d`
+reveals diagnostics; `o` opens the selected PR externally. Related `m` switches
+shared-commit and contributor-overlap evidence. Sorting remains `s`/`S`.

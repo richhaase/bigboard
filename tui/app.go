@@ -29,33 +29,39 @@ const (
 // Model is the root Bubble Tea model.
 type Model struct {
 	// Glance navigation is separate from the aggregate statistics view.
-	glance          glanceState
-	overviewSort    int
-	overviewReverse bool
-	repositorySort  int
-	directory       directoryState
-	prState         prState
-	prProvider      PRProvider
-	prGeneration    uint64
-	cancelPRs       context.CancelFunc
-	showPRs         bool
-	prDetail        bool
-	prRepoID        string
-	prRepoPicker    bool
-	prRepoRow       int
-	prFilters       prFilters
-	prFilterKind    string
-	prFilterQuery   string
-	prFilterSearch  bool
-	prQuery         string
-	prSearching     bool
-	prSort          int
-	prReverse       bool
-	overlayPRs      bool
-	prRow           int
-	prOffset        int
-	prBrowserError  string
-	prBrowserOpener func(string) error
+	glance             glanceState
+	overviewSort       int
+	overviewReverse    bool
+	repositorySort     int
+	directory          directoryState
+	filters            sharedFilterState
+	sharedRepos        filterValues
+	activityPeople     filterValues
+	activityHideBots   bool
+	contributorsView   ViewMode
+	searchBefore       string
+	prSearchBefore     string
+	glanceSearchBefore string
+	prContext          prContextState
+	prState            prState
+	prProvider         PRProvider
+	prGeneration       uint64
+	cancelPRs          context.CancelFunc
+	showPRs            bool
+	prDetail           bool
+	prRepoID           string
+	prFilters          prFilters
+	prFilterKind       string
+	prFilterQuery      string
+	prQuery            string
+	prSearching        bool
+	prSort             int
+	prReverse          bool
+	overlayPRs         bool
+	prRow              int
+	prOffset           int
+	prBrowserError     string
+	prBrowserOpener    func(string) error
 
 	showPaths        bool
 	showHelp         bool
@@ -94,7 +100,6 @@ type Model struct {
 	sortField        stats.SortField
 	timeIdx          int
 	customRangeDays  int
-	rangePicker      rangePickerState
 	version          string
 	width            int
 	height           int
@@ -309,6 +314,7 @@ func (m *Model) finalizeLoad() {
 	personID := m.personID
 	showPaths, pathOffset := m.showPaths, m.pathOffset
 	m.recomputeAuthors()
+	m.normalizeContributorDetail()
 	if !initial {
 		// A refresh is not a navigation action. Retain vanished-person/commit
 		// intent so the existing detail can explain its empty evidence instead
@@ -435,30 +441,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.helpSearchActive() && !m.showHelp {
 			break
 		}
-		if m.viewMode == ViewRepoOverlay {
-			m.closeRepositoryControls(false)
-		}
-		m.showHelp, m.helpOffset = false, 0
-		m.showScanErrors, m.scanErrorOffset = false, 0
-		m.showPaths, m.pathOffset = false, 0
-		m.rangePicker = rangePickerState{}
-		m.err = nil
-		m.searching, m.glance.searching, m.prSearching = false, false, false
-		m.prRepoPicker = false
-		m.prFilterSearch = false
-		selectedPR := m.selectedPRKey()
-		m.showPRs = msg.String() == "p"
-		m.prDetail, m.prOffset = false, 0
-		if m.showPRs {
-			m.prBrowserError = ""
-			m.prRepoID = ""
-			m.selectPR(selectedPR)
-		} else if msg.String() == "c" || msg.String() == "l" {
-			m.viewMode = ViewAggregate
-		} else {
-			m.viewMode = ViewAwareness
-		}
-		return m, nil
+		return m.switchBoard(msg.String()), nil
 	}
 	if m.showHelp {
 		return m.handleHelpKey(msg)
@@ -471,6 +454,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleScanErrorKey(msg)
 	}
 	if m.err != nil && !m.loading {
+		m.filters = sharedFilterState{}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m.quit()
@@ -481,8 +465,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.rangePicker.open {
-		return m.handleRangeKey(msg)
+	if m.filters.open {
+		return m.handleFiltersKey(msg)
 	}
 	if m.helpSearchActive() {
 		if m.showPRs {
@@ -495,6 +479,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.viewMode == ViewRepoOverlay {
 		return m.handleRepositoryControls(msg)
+	}
+	if !m.loading && m.err == nil {
+		switch msg.String() {
+		case "f":
+			m.openFilters("")
+			return m, nil
+		case "t":
+			m.openFilters("range")
+			return m, nil
+		case "x":
+			m.clearBoardFilters()
+			return m, nil
+		}
 	}
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -518,6 +515,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "/":
 		if m.viewMode == ViewAggregate {
+			m.searchBefore = m.filterQuery
 			m.searching = true
 			selectedID := m.selectedContributorID()
 			m.selectContributor(selectedID)
@@ -535,11 +533,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.activeOperative = ""
 			m.activeAuthorID = ""
 		default:
-			if m.filterQuery != "" {
-				selectedID := m.selectedContributorID()
-				m.filterQuery = ""
-				m.selectContributor(selectedID)
-			}
 		}
 
 	case "up":
@@ -629,6 +622,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) filteredRecords() []git.CommitRecord {
 	filtered := stats.FilterByRepo(m.allRecords, m.excludedRepos)
+	filtered = m.filterSharedRecords(filtered)
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
 	}
@@ -754,6 +748,8 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searching = false
 	case "esc":
 		m.searching = false
+		m.filterQuery = m.searchBefore
+	case "ctrl+u":
 		m.filterQuery = ""
 	case "backspace":
 		if r := []rune(m.filterQuery); len(r) > 0 {
@@ -790,6 +786,9 @@ func (m Model) View() string {
 	if height < 1 {
 		height = lipgloss.Height(content)
 	}
+	if m.filters.open && m.err == nil && !m.loading {
+		content = m.renderFiltersModal(content, max(1, width), max(1, height))
+	}
 	if m.showScanErrors {
 		content = m.renderScanErrors(content, max(1, width), max(1, height))
 	}
@@ -820,9 +819,6 @@ func (m Model) viewContent() string {
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
-	if m.rangePicker.open {
-		return m.renderRangePicker()
-	}
 	if m.showPRs {
 		return m.renderPRs()
 	}

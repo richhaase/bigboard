@@ -153,8 +153,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			id = rows[m.selectedRepository(rows)].repo.ID
 		}
-		m.showPRs, m.prDetail, m.prRepoPicker = true, false, false
-		m.prRepoID, m.prQuery, m.prOffset, m.prRow = id, "", 0, 0
+		m.openContextPRs(id)
 		return m, nil
 	}
 	if key == "q" || key == "ctrl+c" {
@@ -193,8 +192,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "b":
-		m.hideBots = !m.hideBots
-		m.recomputeAuthors()
+		m.activityHideBots = !m.activityHideBots
 		return m, nil
 	case "t":
 		if !m.loading && m.err == nil {
@@ -202,13 +200,10 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "/":
+		m.glanceSearchBefore = m.glanceQuery()
 		m.glance.searching = true
 		return m, nil
 	case "esc", "left":
-		if m.glanceQuery() != "" {
-			m.setGlanceQuery("")
-			return m, nil
-		}
 		if m.glance.detailOpen {
 			if m.personID != "" {
 				m.personID = ""
@@ -309,6 +304,8 @@ func (m Model) handleGlanceSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.glance.searching = false
 	case "esc":
 		m.glance.searching = false
+		m.setGlanceQuery(m.glanceSearchBefore)
+	case "ctrl+u":
 		m.setGlanceQuery("")
 	case "backspace":
 		q := []rune(m.glanceQuery())

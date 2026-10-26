@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const screenHeaderRows = 5
+const screenHeaderRows = 6
 const screenFooterRows = 3
 
 func (m Model) screenHeader(title string, width int) []string {
@@ -41,49 +41,16 @@ func (m Model) screenHeader(title string, width int) []string {
 		left += strings.Repeat(" ", max(2, width-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 	}
 	left = worklistBand.Render(worklistLine(ansi.Truncate(left, max(1, width), "…"), width))
-	bots := "bots shown"
-	if m.hideBots {
-		bots = "bots hidden"
-	}
-	scope := "all repos"
-	if m.showPRs && m.prRepoID != "" {
-		scope = m.prScopeLabel()
-	} else if !m.showPRs && m.viewMode == ViewAwareness {
-		if repo, ok := m.areaRepository(); ok {
-			scope = displayText(repo.Name)
-		}
-	}
-	context := "Scope: " + scope + " · Range: " + m.rangeLabel() + " · " + bots
-	query, searching := m.filterQuery, m.searching
-	if m.viewMode == ViewAwareness {
-		query, searching = m.glanceQuery(), m.glance.searching
-	}
-	if m.showPRs {
-		context = m.prFilterContext(scope, width)
-		query, searching = m.prQuery, m.prSearching
-	}
-	if query != "" || searching {
-		cursor := ""
-		if searching {
-			cursor = "▌"
-		}
-		find := "/ " + ansi.Truncate(displayText(query), max(1, width/3), "…") + cursor
-		if m.showPRs {
-			context = m.prFilterContext(scope, width-ansi.StringWidth(find)-3)
-		}
-		context = find + " · " + context
-	}
-
 	pr := strings.TrimPrefix(m.prStatus(), "GitHub")
 	pr = strings.TrimPrefix(pr, " PRs")
 	pr = strings.TrimSpace(strings.TrimPrefix(pr, " · "))
 	pr, _, _ = strings.Cut(pr, " · p ")
 	state, rest, _ := strings.Cut(pr, " · ")
-	pr = "PRs: " + state + " · all dates"
+	pr = "PR cache: " + state + " · all dates"
 	if rest != "" {
 		pr += " · " + rest
 	}
-	return []string{left, StyleDimWhite.Render("  " + context), m.worklistSignal("  " + m.screenLocalFreshness("")), m.worklistSignal("  " + pr), "  " + worklistRule.Render(strings.Repeat("─", max(1, width-4)))}
+	return []string{left, StyleDimWhite.Render("  " + m.sharedScopeLabel(width)), StyleCyan.Render("  " + m.boardFiltersLabel(width)), m.worklistSignal("  " + m.screenLocalFreshness("")), m.worklistSignal("  " + pr), "  " + worklistRule.Render(strings.Repeat("─", max(1, width-4)))}
 }
 
 func (m Model) screenLocalFreshness(repoID string) string {
@@ -178,7 +145,7 @@ func (m Model) statisticsFooter() string {
 		return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · t range · r refresh · q quit"
 	}
 	if m.searching {
-		return "F1 help · Enter accept · Esc clear"
+		return "F1 help · Enter accept · Esc cancel"
 	}
 	if m.width < 70 {
 		return "? help · ↑↓ · → open"
@@ -194,7 +161,7 @@ func (m Model) screenCoverage() string {
 	coverage := strings.ReplaceAll(strings.TrimSpace(ansi.Strip(m.glanceCoverageLine())), "shallow sample", "Shallow history")
 	if m.width < 70 {
 		bots := "bots shown"
-		if m.hideBots {
+		if m.boardBotsHidden() {
 			bots = "bots hidden"
 		}
 		coverage = bots + " · " + coverage

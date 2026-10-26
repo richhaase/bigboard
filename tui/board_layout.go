@@ -57,8 +57,9 @@ func fitFooter(footer string, width int) string {
 		if has("←/Esc back") || has("Esc back") {
 			local = append(local, "Esc back")
 		}
-		if has("f ") {
-			local = append(local, "f filters")
+		local = append(local, "f filters")
+		if has("x ") {
+			local = append(local, "x clear")
 		}
 		if has("Tab details") {
 			local = append(local, "Tab details")

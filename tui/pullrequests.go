@@ -233,7 +233,17 @@ func (m Model) prAreas(repo git.Repository, pr gh.PullRequest) []stats.WorkArea 
 func (m Model) scopePRs(scope string) []gh.PullRequest {
 	if repo, ok := m.areaRepository(); ok {
 		var prs []gh.PullRequest
-		for _, pr := range m.prsForRepository(repo.ID) {
+		for _, pr := range m.prsInViewForRepository(repo.ID) {
+			if scope == repo.ID {
+				prs = append(prs, pr)
+				continue
+			}
+			if strings.HasPrefix(scope, "dir:") || strings.HasPrefix(scope, "file:") || scope == "unknown" || scope == "empty" {
+				if m.prTouchesLiteralScope(pr, scope) {
+					prs = append(prs, pr)
+				}
+				continue
+			}
 			for _, area := range m.prAreas(repo, pr) {
 				if area.ID == scope {
 					prs = append(prs, pr)
@@ -243,7 +253,7 @@ func (m Model) scopePRs(scope string) []gh.PullRequest {
 		}
 		return prs
 	}
-	return m.prsForRepository(scope)
+	return m.prsInViewForRepository(scope)
 }
 func (m Model) allPRs() []gh.PullRequest {
 	unique := map[string]gh.PullRequest{}
@@ -261,19 +271,14 @@ func (m Model) allPRs() []gh.PullRequest {
 	return prs
 }
 func (m Model) visiblePRs() []gh.PullRequest {
-	prs := m.allPRs()
+	prs := m.sharedPRs()
 	kept := prs[:0]
 	query := strings.ToLower(m.prQuery)
-	duration := m.rangeDuration()
-	cutoff := time.Now().Add(-duration)
 	for _, pr := range prs {
-		if duration > 0 && !pr.UpdatedAt.After(cutoff) {
-			continue
-		}
 		if !m.prFilters.matches(pr) {
 			continue
 		}
-		if m.prRepoID != "" && (m.excludedRepos[m.prRepoID] || pr.Repo != m.prState.repositories[m.prRepoID]) {
+		if m.prRepoID != "" && (!m.repoInView(m.prRepoID) || pr.Repo != m.prState.repositories[m.prRepoID]) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(fmt.Sprintf("%s %s %s #%d", pr.Repo, pr.Title, pr.Author, pr.Number)), query) {
@@ -379,9 +384,6 @@ func (m Model) prStatus() string {
 }
 
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.prRepoPicker {
-		return m.handlePRScopeKey(msg)
-	}
 	key := msg.String()
 	if !m.prDetail {
 		if row, ok := glanceMove(key, m.prRow, len(m.visiblePRs()), m.prListPageSize()); ok {
@@ -412,30 +414,22 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		return m.openSelectedPR()
 	case "f":
-		m.openPRFilter("repo")
+		m.openFilters("repos")
 	case "u":
-		m.openPRFilter("author")
+		m.openFilters("author")
 	case "v":
-		m.openPRFilter("review")
+		m.openFilters("review")
 	case "k":
-		m.openPRFilter("checks")
+		m.openFilters("checks")
 	case "d":
-		m.openPRFilter("state")
+		m.openFilters("state")
 	case "x":
-		m.clearPRFilters()
+		m.clearBoardFilters()
 	case "esc", "left":
 		if m.prDetail {
 			m.prDetail, m.prOffset = false, 0
-		} else if m.prQuery != "" {
-			selected := m.selectedPRKey()
-			m.prQuery = ""
-			m.selectPR(selected)
-		} else if m.prRepoID != "" {
-			selected := m.selectedPRKey()
-			m.prRepoID = ""
-			m.selectPR(selected)
-		} else if m.prFilters != (prFilters{}) {
-			m.clearPRFilters()
+		} else if m.prContext.active {
+			m.closeContextPRs(true)
 		}
 	case "enter", "right":
 		if len(m.visiblePRs()) > 0 {
@@ -443,6 +437,7 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		if !m.prDetail {
+			m.prSearchBefore = m.prQuery
 			m.prSearching = true
 		}
 	case "s", "S":
@@ -463,12 +458,10 @@ func (m Model) renderPRs() string {
 	if width < 40 || height < 12 {
 		return ansi.Truncate("Resize to 40×12 · Esc back · q quit", width, "…")
 	}
-	if m.prRepoPicker {
-		background := m
-		background.prRepoPicker = false
-		return m.renderPRScopePicker(background.renderPRs(), width, height)
-	}
 	title := "Pull requests"
+	if m.prContext.active {
+		title = "PRs from Activity"
+	}
 	if m.prRepoID != "" {
 		title += " / " + m.prScopeLabel()
 	}

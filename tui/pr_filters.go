@@ -1,48 +1,68 @@
 package tui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	gh "github.com/richhaase/bigboard/github"
 )
 
 type prFilters struct {
-	author, review, checks, state string
+	author, review, checks, state filterValues
 }
 
 type prFilterOption struct {
 	value, label string
 }
 
-var prFilterKinds = []string{"repo", "author", "review", "checks", "state"}
-
 func (f prFilters) matches(pr gh.PullRequest) bool {
 	author := strings.ToLower(pr.Author)
 	if author == "" {
 		author = "?"
 	}
-	return (f.author == "" || f.author == author) &&
-		(f.review == "" || f.review == prReviewLabel(pr.ReviewDecision)) &&
-		(f.checks == "" || f.checks == prCheckLabel(pr.CheckState)) &&
-		(f.state == "" || f.state == "draft" && pr.Draft || f.state == "open" && !pr.Draft)
+	state := "open"
+	if pr.Draft {
+		state = "draft"
+	}
+	return f.author.includes(author) &&
+		f.review.includes(prReviewLabel(pr.ReviewDecision)) &&
+		f.checks.includes(prCheckLabel(pr.CheckState)) &&
+		f.state.includes(state)
 }
 
-func (m Model) prFilterValue() string {
-	switch m.prFilterKind {
+func (f prFilters) empty() bool {
+	return len(f.author)+len(f.review)+len(f.checks)+len(f.state) == 0
+}
+
+func (f prFilters) clone() prFilters {
+	return prFilters{author: f.author.clone(), review: f.review.clone(), checks: f.checks.clone(), state: f.state.clone()}
+}
+
+func (f prFilters) values(kind string) filterValues {
+	switch kind {
 	case "author":
-		return m.prFilters.author
+		return f.author
 	case "review":
-		return m.prFilters.review
+		return f.review
 	case "checks":
-		return m.prFilters.checks
+		return f.checks
 	case "state":
-		return m.prFilters.state
+		return f.state
 	default:
-		return m.prRepoID
+		return nil
+	}
+}
+
+func (f *prFilters) setValues(kind string, values filterValues) {
+	switch kind {
+	case "author":
+		f.author = values.clone()
+	case "review":
+		f.review = values.clone()
+	case "checks":
+		f.checks = values.clone()
+	case "state":
+		f.state = values.clone()
 	}
 }
 
@@ -52,7 +72,7 @@ func (m Model) prFilterOptions() []prFilterOption {
 	case "author":
 		options[0].label = "All authors"
 		authors := map[string]string{}
-		for _, pr := range m.allPRs() {
+		for _, pr := range m.sharedPRs() {
 			value := strings.ToLower(pr.Author)
 			if value == "" {
 				value = "?"
@@ -62,8 +82,13 @@ func (m Model) prFilterOptions() []prFilterOption {
 				authors[value] = "Unknown author"
 			}
 		}
-		if active := m.prFilters.author; active != "" && authors[active] == "" {
-			authors[active] = githubIdentity(active)
+		for _, active := range m.prFilters.author {
+			if authors[active] == "" {
+				authors[active] = githubIdentity(active)
+				if active == "?" {
+					authors[active] = "Unknown author"
+				}
+			}
 		}
 		for value, label := range authors {
 			options = append(options, prFilterOption{value, label})
@@ -98,79 +123,4 @@ func (m Model) prFilterOptions() []prFilterOption {
 		}
 	}
 	return filtered
-}
-
-func (m *Model) openPRFilter(kind string) {
-	m.prRepoPicker, m.prFilterKind = true, kind
-	m.prFilterQuery, m.prFilterSearch, m.prRepoRow = "", false, 0
-	for i, option := range m.prFilterOptions() {
-		if option.value == m.prFilterValue() {
-			m.prRepoRow = i
-			break
-		}
-	}
-}
-
-func (m *Model) clearPRFilters() {
-	selected := m.selectedPRKey()
-	m.prFilters, m.prRepoID, m.prQuery = prFilters{}, "", ""
-	m.prRepoPicker, m.prFilterSearch, m.prDetail, m.prOffset = false, false, false, 0
-	m.selectPR(selected)
-}
-
-func (m Model) handlePRFilterSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		return m.quit()
-	case "enter":
-		m.prFilterSearch = false
-	case "esc":
-		m.prFilterSearch, m.prFilterQuery = false, ""
-	case "backspace":
-		if runes := []rune(m.prFilterQuery); len(runes) > 0 {
-			m.prFilterQuery = string(runes[:len(runes)-1])
-		}
-	case "ctrl+u":
-		m.prFilterQuery = ""
-	default:
-		m.prFilterQuery += string(msg.Runes)
-	}
-	m.prRepoRow = 0
-	return m, nil
-}
-
-func (m Model) prFilterContext(scope string, width int) string {
-	parts := []string{"Repo: " + scope}
-	if m.prFilters.author != "" {
-		label := githubIdentity(m.prFilters.author)
-		if m.prFilters.author == "?" {
-			label = "Unknown"
-		}
-		parts = append(parts, "Author: "+label)
-	}
-	if m.prFilters.review != "" {
-		parts = append(parts, "Review: "+m.prFilters.review)
-	}
-	if m.prFilters.checks != "" {
-		parts = append(parts, "Checks: "+m.prFilters.checks)
-	}
-	if m.prFilters.state != "" {
-		parts = append(parts, "State: "+m.prFilters.state)
-	}
-	if len(parts) == 1 {
-		return "All open PRs · Range: " + m.rangeLabel() + " · Scope: " + scope
-	}
-	if width < 70 {
-		count := len(parts) - 1
-		if m.prRepoID != "" {
-			count++
-		}
-		return fmt.Sprintf("Range: %s · %d PR filters", m.rangeLabel(), count)
-	}
-	rangePrefix := "Range: " + m.rangeLabel() + " · "
-	partWidth := max(1, (width-ansi.StringWidth(rangePrefix)-4-3*(len(parts)-1))/len(parts))
-	for i, part := range parts {
-		parts[i] = ansi.Truncate(part, partWidth, "…")
-	}
-	return rangePrefix + strings.Join(parts, " · ")
 }

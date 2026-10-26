@@ -88,7 +88,7 @@ func TestWorklistSmallSnapshotAndPRTitle(t *testing.T) {
 	m.scannedAt["/api"] = at
 	m.failedRepos = []string{"/web"}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "all dates · local filters do not apply"} {
+	for _, want := range []string{"Update errors: 1", at.Format("Jan 02 15:04 MST"), "#7 Add feature", "shared range · Git person/bot filters do not apply"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q at120x36:\n%s", want, view)
 		}
@@ -107,17 +107,18 @@ func TestWorklistRelatedAndParentPRProvenance(t *testing.T) {
 	}
 	m = glanceBusyFixture()
 	m.width, m.height = 160, 48
+	now := time.Now()
 	m.prState = prState{repositories: map[string]string{"/mono": "org/mono"}, snapshots: map[string]prSnapshot{
-		"org/mono": {lastGood: time.Now(), prs: []gh.PullRequest{
-			{Repo: "org/mono", Number: 7, Title: "Parent area change", Files: []gh.File{{Path: "feature/another-child/file.go"}}, FilesComplete: true, ContextComplete: true},
-			{Repo: "org/mono", Number: 8, Title: "Unrelated area change", Files: []gh.File{{Path: "unrelated/file.go"}}, FilesComplete: true, ContextComplete: true},
+		"org/mono": {lastGood: now, prs: []gh.PullRequest{
+			{Repo: "org/mono", Number: 7, Title: "Parent area change", UpdatedAt: now, Files: []gh.File{{Path: "feature/another-child/file.go"}}, FilesComplete: true, ContextComplete: true},
+			{Repo: "org/mono", Number: 8, Title: "Unrelated area change", UpdatedAt: now, Files: []gh.File{{Path: "unrelated/file.go"}}, FilesComplete: true, ContextComplete: true},
 		}},
 	}}
 	for _, key := range []string{"enter", "4", "enter"} {
 		m = pressAwareness(m, key)
 	}
 	view := ansi.Strip(m.View())
-	if m.glance.frame.path == "" || !strings.Contains(view, "PARENT AREA PRs") || !strings.Contains(view, "#7 Parent area change") || strings.Contains(view, "#8 Unrelated area change") {
+	if m.glance.frame.path == "" || !strings.Contains(view, "SCOPE PRs / shared range") || !strings.Contains(view, "#7 Parent area change") || strings.Contains(view, "#8 Unrelated area change") {
 		t.Fatalf("child lost parent-area scope:\n%s", view)
 	}
 	m = pressAwareness(m, "p")

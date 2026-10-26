@@ -235,8 +235,8 @@ func TestArrowNavigationInStatistics(t *testing.T) {
 		t.Fatal("repeated arrow navigation changed time")
 	}
 	m = send(m, "/", "Ada", "enter", "left")
-	if m.filterQuery != "" || m.quitting || m.viewMode != ViewAggregate {
-		t.Fatal("left should clear an accepted name filter without quitting")
+	if m.filterQuery != "Ada" || m.quitting || m.viewMode != ViewAggregate {
+		t.Fatal("left should preserve an accepted name filter without quitting")
 	}
 }
 
@@ -256,8 +256,12 @@ func TestSearchFilter(t *testing.T) {
 		t.Errorf("enter should apply+close: searching=%v query=%q", m.searching, m.filterQuery)
 	}
 	m = send(m, "esc")
+	if m.filterQuery != "grace" {
+		t.Errorf("esc should preserve filter, got %q", m.filterQuery)
+	}
+	m = send(m, "x")
 	if m.filterQuery != "" {
-		t.Errorf("esc should clear filter, got %q", m.filterQuery)
+		t.Fatal("x should clear board filters")
 	}
 }
 

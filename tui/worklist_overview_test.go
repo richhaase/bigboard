@@ -19,22 +19,23 @@ func TestRepositoryOverviewShowsScopedCountsAndRecency(t *testing.T) {
 		t.Fatal("fixture must contain five recent commits by distinct people")
 	}
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	heading, columns, firstRow := screenHeaderRows, screenHeaderRows+1, screenHeaderRows+2
 	l := repositoryOverviewWidths(m.width - 4)
 	start := 7 + l.name + 1
 	for _, cell := range []struct {
 		start, width int
 		value        string
 	}{{start, l.commits, "5"}, {start + l.commits + 1, l.people, "5"}} {
-		if strings.TrimSpace(ansi.Cut(lines[7], cell.start, cell.start+cell.width)) != cell.value {
-			t.Fatalf("wrong repository metric at column %d: %s", cell.start, lines[7])
+		if strings.TrimSpace(ansi.Cut(lines[firstRow], cell.start, cell.start+cell.width)) != cell.value {
+			t.Fatalf("wrong repository metric at column %d: %s", cell.start, lines[firstRow])
 		}
 	}
-	if !strings.Contains(lines[6], "COMMITS") || !strings.Contains(lines[6], "PEOPLE") || !strings.Contains(lines[5], "quiet") {
+	if !strings.Contains(lines[columns], "COMMITS") || !strings.Contains(lines[columns], "PEOPLE") || !strings.Contains(lines[heading], "quiet") {
 		t.Fatal("overview lost comparison labels or quiet repository context")
 	}
 	m.prState.snapshots = nil
 	withoutPRs := strings.Split(ansi.Strip(m.View()), "\n")
-	if withoutPRs[6] != lines[6] || withoutPRs[7] != lines[7] {
+	if withoutPRs[columns] != lines[columns] || withoutPRs[firstRow] != lines[firstRow] {
 		t.Fatal("PR availability shifted the activity comparison columns")
 	}
 }

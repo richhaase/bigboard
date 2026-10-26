@@ -62,7 +62,7 @@ func TestNarrowContributorsHeadingShowsSort(t *testing.T) {
 		for _, label := range []string{"Lines +/-", "Commits", "Added"} {
 			view := ansi.Strip(m.View())
 			lines := strings.Split(view, "\n")
-			if len(lines) != m.height || !strings.Contains(lines[5], label) {
+			if len(lines) != m.height || !strings.Contains(lines[screenHeaderRows], label) {
 				t.Fatalf("width %d should show %q in fixed heading:\n%s", width, label, view)
 			}
 			for _, line := range lines {

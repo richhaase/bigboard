@@ -143,7 +143,7 @@ func keyboardContractState(m Model) string {
 		m.selectedRow, m.scrollOffset, m.activeAuthorID, m.activeOperative, m.statDetailOffset,
 		m.showPaths, m.pathOffset, m.showPRs, m.prDetail, m.prRow, m.prOffset,
 		m.prBrowserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
-		m.filterQuery, m.searching, m.rangePicker, m.timeIdx, m.customRangeDays, m.overviewSort,
+		m.filterQuery, m.searching, m.filters, m.timeIdx, m.customRangeDays, m.overviewSort,
 		m.showHelp, m.helpOffset,
 		m.sortField, m.sortAsc, m.hideBots, m.loading, m.refreshing, m.quitting, m.scanGeneration, m.prGeneration,
 	})
@@ -160,6 +160,12 @@ func TestKeyboardContractRemovedAliasesAreInert(t *testing.T) {
 				t.Run(k, func(t *testing.T) {
 					before := keyboardContractState(base)
 					after := keyboardContractPress(t, base, k)
+					if k == "k" && base.showPRs && !base.showHelp && !base.showScanErrors && !base.filters.open {
+						if !after.filters.open || after.filters.category != "checks" || after.prRow != base.prRow || after.prOffset != base.prOffset {
+							t.Fatal("k should open check filters without moving PR selection")
+						}
+						return
+					}
 					if got := keyboardContractState(after); got != before {
 						t.Fatalf("removed alias %q changed navigation\nbefore: %s\nafter:  %s", k, before, got)
 					}
@@ -175,8 +181,8 @@ func TestKeyboardContractBoardRoundTripPreservesWorklist(t *testing.T) {
 			m := keyboardContractPress(t, tc.setup(t), "")
 			before := m
 			m = keyboardContractPress(t, m, "l", "p", "a")
-			if m.viewMode != ViewAwareness || m.showPRs || m.showPaths {
-				t.Fatal("w did not return to Worklist")
+			if m.viewMode != ViewAwareness || m.showPRs || m.showPaths != before.showPaths || m.pathOffset != before.pathOffset {
+				t.Fatal("a did not restore Activity")
 			}
 			if !reflect.DeepEqual(before.glance, m.glance) || before.selectedRepoID != m.selectedRepoID ||
 				before.areaRepoID != m.areaRepoID || before.selectedAreaID != m.selectedAreaID || before.personID != m.personID {
@@ -189,7 +195,7 @@ func TestKeyboardContractBoardRoundTripPreservesWorklist(t *testing.T) {
 func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 	contexts := append(keyboardContractOrdinaryContexts(), keyboardContractOwnedContexts()...)
 	contexts = append(contexts, keyboardContractContext{"custom range", func(t *testing.T) Model {
-		return keyboardContractPress(t, awarenessFixture(), "t", "d", "enter")
+		return keyboardContractPress(t, awarenessFixture(), "t", "end", " ", "f1")
 	}}, keyboardContractContext{"load error", func(t *testing.T) Model {
 		m := awarenessFixture()
 		m.err = errors.New("all repositories failed")
@@ -200,9 +206,12 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 	for _, tc := range contexts {
 		for _, shortcut := range []string{"c", "a", "p"} {
 			t.Run(tc.name+"/"+shortcut, func(t *testing.T) {
-				m := keyboardContractPress(t, tc.setup(t), shortcut)
-				if m.showHelp || m.showScanErrors || m.showPaths || m.rangePicker.open || m.viewMode == ViewRepoOverlay {
-					t.Fatal("board shortcut left a dialog or inspector open")
+				m := tc.setup(t)
+				contributorDetail := !m.showPRs && (m.viewMode == ViewOperative || m.viewMode == ViewRepoOverlay && m.returnView == ViewOperative)
+				prDetail := m.showPRs && m.prDetail && !m.prContext.active
+				m = keyboardContractPress(t, m, shortcut)
+				if m.showHelp || m.showScanErrors || m.filters.open || m.viewMode == ViewRepoOverlay {
+					t.Fatal("board shortcut left a temporary dialog open")
 				}
 				if m.err != nil {
 					t.Fatal("load error still covers the destination board")
@@ -211,13 +220,15 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 					t.Fatal("board navigation discarded repository diagnostics")
 				}
 				if shortcut == "p" {
-					if !m.showPRs || m.prDetail || len(m.visiblePRs()) != len(m.allPRs()) {
-						t.Fatal("p did not open the complete PR board")
+					if !m.showPRs || m.prDetail != prDetail {
+						t.Fatal("p did not restore the PR board")
 					}
 				} else {
 					want := ViewAggregate
 					if shortcut == "a" {
 						want = ViewAwareness
+					} else if contributorDetail {
+						want = ViewOperative
 					}
 					if m.showPRs || m.viewMode != want {
 						t.Fatal("board shortcut went to the wrong board")
@@ -253,7 +264,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 				query = m.filterQuery
 			}
 			if query != typed || m.viewMode != view || m.scanGeneration != scan || m.prGeneration != prs ||
-				m.showPaths || m.showPRs || m.rangePicker.open || m.showScanErrors {
+				m.showPaths || m.showPRs || m.filters.open || m.showScanErrors {
 				t.Fatalf("search lost text or leaked shortcut: query=%q, view=%v", query, m.viewMode)
 			}
 			m = keyboardContractPress(t, m, "backspace", "enter")
@@ -261,9 +272,10 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 				t.Fatal("Enter did not finish search")
 			}
 			m = keyboardContractPress(t, m, "/", "esc")
-			if m.searching || m.glance.searching || (view == ViewAggregate && m.filterQuery != "") ||
-				(view == ViewAwareness && m.glanceQuery() != "") {
-				t.Fatal("Esc did not cancel search")
+			accepted := string([]rune(typed)[:len([]rune(typed))-1])
+			if m.searching || m.glance.searching || (view == ViewAggregate && m.filterQuery != accepted) ||
+				(view == ViewAwareness && m.glanceQuery() != accepted) {
+				t.Fatal("Esc did not restore accepted search")
 			}
 		})
 	}
@@ -277,31 +289,31 @@ func TestBoardKeysCancelRepositoryChoicesAndPendingRanges(t *testing.T) {
 		}
 		m = awarenessFixture()
 		timeIndex, customDays := m.timeIdx, m.customRangeDays
-		m = keyboardContractPress(t, m, "t", "d", "enter", "21", shortcut)
-		if m.timeIdx != timeIndex || m.customRangeDays != customDays || m.rangePicker.open {
+		m = keyboardContractPress(t, m, "t", "end", " ", "21", "enter", shortcut)
+		if m.timeIdx != timeIndex || m.customRangeDays != customDays || m.filters.open {
 			t.Fatal("leaving the range picker applied an unconfirmed range")
 		}
 	}
 }
 
-func TestBoardKeyFromSearchHelpKeepsAcceptedFilter(t *testing.T) {
+func TestBoardKeyFromSearchHelpCancelsUnacceptedFilter(t *testing.T) {
 	m := keyboardContractPress(t, awarenessFixture(), "/", "c", "a", "p")
 	if m.glanceQuery() != "cap" || m.viewMode != ViewAwareness || m.showPRs {
 		t.Fatal("search intercepted letters as board shortcuts")
 	}
 	m = keyboardContractPress(t, m, "f1", "c", "a")
-	if m.showHelp || m.glance.searching || m.glanceQuery() != "cap" {
-		t.Fatal("switching from search help lost the filter or kept input active")
+	if m.showHelp || m.glance.searching || m.glanceQuery() != "" {
+		t.Fatal("switching from search help retained unaccepted text or active input")
 	}
 }
 
 func TestActivityShortcutKeepsLegacyAliasAndPRAuthorFilter(t *testing.T) {
 	m := keyboardContractPress(t, boardLayoutFixture(), "p", "u")
-	if !m.showPRs || !m.prRepoPicker || m.prFilterKind != "author" {
+	if !m.showPRs || !m.filters.open || m.filters.category != "author" {
 		t.Fatal("u did not open the PR author filter")
 	}
 	m = keyboardContractPress(t, m, "a")
-	if m.showPRs || m.prRepoPicker || m.viewMode != ViewAwareness {
+	if m.showPRs || m.filters.open || m.viewMode != ViewAwareness {
 		t.Fatal("a did not leave the filter modal for Activity")
 	}
 	m = keyboardContractPress(t, m, "c", "w")
@@ -311,17 +323,17 @@ func TestActivityShortcutKeepsLegacyAliasAndPRAuthorFilter(t *testing.T) {
 }
 
 func TestKeyboardContractCustomRangeRejectsLettersWithoutNavigation(t *testing.T) {
-	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "d", "enter", "ctrl+u", "21")
+	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "end", " ", "ctrl+u", "21")
 	before := m.glance
 	for _, k := range []string{"h", "j", "k", "g", "G", "v", "P", "o", "R", "i"} {
 		m = keyboardContractPress(t, m, k)
-		if !m.rangePicker.open || !m.rangePicker.custom || m.rangePicker.input != "21" || m.rangePicker.error == "" ||
+		if !m.filters.open || m.filters.edit != "custom" || m.filters.input != "21" || m.filters.error == "" ||
 			m.viewMode != ViewAwareness || !reflect.DeepEqual(before, m.glance) {
 			t.Fatalf("%q escaped numeric input or was accepted as days", k)
 		}
 	}
-	m = keyboardContractPress(t, m, "backspace", "0", "enter")
-	if m.rangePicker.open || m.customRangeDays != 20 || !reflect.DeepEqual(before, m.glance) {
+	m = keyboardContractPress(t, m, "backspace", "0", "enter", "enter")
+	if m.filters.open || m.customRangeDays != 20 || !reflect.DeepEqual(before, m.glance) {
 		t.Fatal("numeric editing and Enter no longer apply the custom range in place")
 	}
 }
@@ -493,12 +505,12 @@ func TestKeyboardContractRepositoryAndRangePickersRetainNavigation(t *testing.T)
 			t.Fatalf("repository %s did not apply/cancel choices and return", closeKey)
 		}
 	}
-	m := keyboardContractPress(t, awarenessFixture(), "t", "home", "down", "up", "down", "enter")
-	if m.rangePicker.open || m.timeIdx != 1 {
+	m := keyboardContractPress(t, awarenessFixture(), "t", "home", "down", "up", "down", " ", "enter")
+	if m.filters.open || m.timeIdx != 1 {
 		t.Fatal("range arrows/Enter did not apply the selected preset")
 	}
-	m = keyboardContractPress(t, m, "t", "end", "enter", "ctrl+u", "30", "esc")
-	if m.rangePicker.open || m.timeIdx != 1 || m.customRangeDays != 0 {
+	m = keyboardContractPress(t, m, "t", "end", " ", "ctrl+u", "30", "esc", "esc")
+	if m.filters.open || m.timeIdx != 1 || m.customRangeDays != 0 {
 		t.Fatal("custom range Esc changed the applied range")
 	}
 }

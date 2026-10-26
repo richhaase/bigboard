@@ -220,7 +220,10 @@ func (m Model) prFooter(prs []gh.PullRequest) string {
 		footer += " · o browser"
 	}
 	if m.prSearching {
-		return "F1 help · Enter accept · Esc clear"
+		return "F1 help · Enter accept · Esc cancel"
+	}
+	if m.prContext.active {
+		footer = "Esc back · " + footer
 	}
 	return footer + " · t range"
 }
@@ -228,7 +231,7 @@ func (m Model) prFooter(prs []gh.PullRequest) string {
 func (m Model) prListErrors() []string {
 	var lines []string
 	for _, repo := range m.loadedRepos {
-		if m.excludedRepos[repo.ID] || m.prRepoID != "" && repo.ID != m.prRepoID {
+		if !m.repoInView(repo.ID) || m.prRepoID != "" && repo.ID != m.prRepoID {
 			continue
 		}
 		err := m.prState.errors[repo.ID]
@@ -251,7 +254,7 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 	lines := []string{boardListHeading("OPEN PRs", m.prSortLabel(), nil, start, end, len(prs), width), prTableColumns(width)}
 	if len(prs) == 0 {
 		empty := "No PRs to display in this snapshot."
-		if m.prQuery != "" || m.prFilters != (prFilters{}) {
+		if m.prQuery != "" || !m.prFilters.empty() {
 			empty = "No matching PRs. x clears filters and search."
 		}
 		if m.rangeDuration() > 0 && len(m.allPRs()) > 0 {

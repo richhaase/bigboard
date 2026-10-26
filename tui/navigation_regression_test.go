@@ -129,7 +129,7 @@ func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 				m.err = errors.New("all repositories failed")
 				m.loadedRepos = nil
 				m = pressAwareness(m, key)
-				if m.showHelp || m.glance.searching || m.searching || m.showPRs || m.rangePicker.open || m.viewMode != view {
+				if m.showHelp || m.glance.searching || m.searching || m.showPRs || m.filters.open || m.viewMode != view {
 					t.Fatal("error screen changed hidden navigation")
 				}
 				next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
@@ -144,7 +144,7 @@ func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	m.err = errors.New("all repositories failed")
 	m.scanErrors = map[string]string{"/api": "unreadable"}
 	m.glance.searching, m.searching, m.showPRs = true, true, true
-	m.rangePicker.open = true
+	m.filters.open = true
 	m = pressAwareness(m, "e")
 	if !m.showScanErrors {
 		t.Fatal("error inspector unavailable")

@@ -177,13 +177,13 @@ func (m Model) renderDirectoryBoard(width, height int) string {
 	if len(rows) == 0 {
 		message := "No file changes in this directory and range."
 		if m.directory.frame.query != "" {
-			message = "No matching paths. Esc clears search."
+			message = "No matching paths. x clears board filters."
 		}
 		lines = append(lines, "  "+message)
 	}
 	footer := "? help · ←/Esc back · →/Enter open · / find · s/S sort · t range · Tab details · r refresh"
 	if m.glance.searching {
-		footer = "F1 help · Enter accept · Esc clear"
+		footer = "F1 help · Enter accept · Esc cancel"
 	}
 	coverage := "Lines belong to files here · commits can touch multiple entries"
 	return screenFinish(lines, footer, coverage, width, height)

@@ -49,32 +49,25 @@ func fitGlanceLines(lines []string, width, height int) string {
 }
 
 func (m Model) glanceScopeRecords() []git.CommitRecord {
-	records := m.filteredRecords()
+	records := m.activityRecords()
 	if repo, ok := m.areaRepository(); ok {
 		records = m.recordsInRepository(repo, records)
+	} else if m.areaRepoID != "" {
+		return nil
 	}
-	visible := make(map[string]bool)
-	for _, a := range m.authors {
-		visible[a.ID] = true
-	}
-	var kept []git.CommitRecord
-	for _, r := range stats.UniqueRecords(records) {
-		if visible[stats.IdentityID(r)] {
-			kept = append(kept, r)
-		}
-	}
-	return kept
+	return stats.UniqueRecords(records)
 }
 func (m Model) glanceCoverageLine() string {
 	shallow := false
-	for _, r := range m.allRecords {
-		if r.LinesUnknown && !m.excludedRepos[r.RepoID] && (m.areaRepoID == "" || r.RepoID == m.areaRepoID) {
+	records := m.glanceScopeRecords()
+	for _, r := range records {
+		if r.LinesUnknown {
 			shallow = true
 			break
 		}
 	}
 	unknown := 0
-	for _, r := range m.glanceScopeRecords() {
+	for _, r := range records {
 		if r.PathsUnknown {
 			unknown++
 		}

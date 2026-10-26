@@ -74,7 +74,7 @@ func TestStatisticsViewportReachesAllSections(t *testing.T) {
 		t.Fatal("PageUp did not restore top for short detail")
 	}
 }
-func TestStatisticsViewportResetsForAuthorTimeAndReopen(t *testing.T) {
+func TestStatisticsViewportPreservesRangeScrollAndResetsForReopen(t *testing.T) {
 	m := statisticsViewportFixture()
 	oldTime := m.timeIdx
 	oldAuthor := m.activeAuthorID
@@ -83,9 +83,10 @@ func TestStatisticsViewportResetsForAuthorTimeAndReopen(t *testing.T) {
 	if m.activeAuthorID != oldAuthor {
 		t.Fatal("scrolling changed contributor")
 	}
-	m = send(m, "t", "up", "enter")
-	if m.timeIdx == oldTime || m.statDetailOffset != 0 {
-		t.Fatal("range change did not reset detail scroll")
+	oldOffset := m.statDetailOffset
+	m = send(m, "t", "up", " ", "enter")
+	if m.timeIdx == oldTime || m.statDetailOffset != oldOffset {
+		t.Fatal("range change lost scroll while the same contributor and content remained visible")
 	}
 	m = send(m, "esc", "down", "enter")
 	if m.activeAuthorID == oldAuthor || m.statDetailOffset != 0 {

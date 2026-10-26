@@ -55,7 +55,7 @@ func TestWorklistSharedUnavailableStatusAndTitleSpace(t *testing.T) {
 	m.width, m.height = 120, 36
 	m.prState.errors = map[string]error{"/mono": errors.New("gh not installed")}
 	view := ansi.Strip(m.View())
-	if strings.Count(view, "PRs: unavailable") != 1 || strings.Contains(view, "? unknown") || strings.Contains(view, "OPEN PRs") {
+	if strings.Count(view, "PR cache: unavailable") != 1 || strings.Contains(view, "? unknown") || strings.Contains(view, "OPEN PRs") {
 		t.Fatalf("shared status duplicated:\n%s", view)
 	}
 	_, _, subject, _, _ := m.worklistColumnWidths(116)

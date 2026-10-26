@@ -55,8 +55,9 @@ bigboard --config ./bigboard.json
 bigboard --version
 ```
 
-The visible `Range: 14 days · t to change` control opens with `t`. Choose a
-preset or enter a custom range of 1–3650 days; `Enter` applies and `Esc` cancels.
+The shared scope row shows the active range. Press `t` to open Range in the
+filter modal. Space stages a preset or opens custom entry for 1–3650 days;
+Enter applies pending choices and Esc cancels.
 Range changes filter the loaded history in memory, with no scan or fetch.
 The initial range defaults to 14 days. Set
 `since` in the config to choose the initial range. `--export` always covers
@@ -106,9 +107,7 @@ Subareas refines automatic path areas by one literal directory level at a time.
 Direct files are a separate leaf; multi-path commits can appear in several children.
 Configured named areas keep their explicit meaning and are not automatically
 reinterpreted. `Esc` returns through each level, restoring the prior selection.
-`/` searches the current list, `Enter` accepts the query, and `Esc` clears it before
-leaving. `?` opens help for the current screen. `c` switches to the Contributors board. Time ranges, bot hiding, repository inclusion, and manual refresh
-apply to both views.
+`/` searches the current list. Enter accepts the query; Esc during editing restores the previous query. After editing, Esc navigates back and keeps applied searches. Use `x` to clear board filters and search. `?` opens help for the current screen. `c` switches to the Contributors board. Date and repository viewing scope apply to all boards. Bot visibility is independent on Activity and Contributors; refresh coverage is managed separately.
 
 Work areas are path-based groups, not inferred features or ownership. Automatic
 grouping expands containers such as `src`, `services`, `packages`, `apps`, `cmd`,
@@ -246,15 +245,23 @@ recent activity, and name. There is no selected text preview in these inventorie
 Enter opens a deeper directory or a file's commit history. Commit evidence uses
 the available height and pages by visible commits.
 
-PR filters combine with each other and text search: `f` repository, `u` author
-(owner), `v` review status, `k` check status, and `d` draft/open state. Pickers are
-centered modals over the retained board, with an active category tab, search
-field, highlighted cursor, and a separate checkmark for the applied value. Each picker
-supports `/` to find options, Tab/Shift+Tab to change category, Enter to apply,
-and Esc to cancel. Choose All to remove one filter, or `x` to clear all PR filters
-and search. Active filters appear in the header; narrow terminals show their
-count. Filtering uses the current snapshot without network requests or changes
-to local history filters or repository inclusion.
+All three boards share an in-memory **date range and repository viewing scope**.
+`f` opens the same centered filter modal; `t` opens its Range category directly.
+Shared choices apply to every board. Activity has Git contributor and bot filters;
+Contributors has its own bot setting; PRs has GitHub author, review, checks, and
+open/draft filters. Each board keeps its own search. Git identities and GitHub
+authors remain separate. Viewing filters do not change repository tracking or
+refresh coverage; manage tracked repositories with `i`.
+
+In the modal, left/right or Tab changes categories, up/down selects an option,
+and Space stages a choice. Multiple values within a category match any selected
+value; different categories must all match. Enter applies all staged choices;
+Esc cancels. `/` finds options, and the Search category edits the board search.
+Custom days are validated before being staged, then applied with the other choices.
+Reset shared selects All time and all tracked repositories. Reset this board
+clears its filters and searches while preserving shared scope and navigation.
+`x` performs that board reset directly. Active shared scope and board filters
+have separate rows beneath the title; cached inventory has a separate status row.
 
 The footer separates board navigation, a few contextual actions, and help/refresh
 into compact groups. Keys are brighter than labels. Extra shortcuts live in `?`
@@ -264,23 +271,25 @@ above net change and AI share.
 
 ## Controls
 
-BigBoard has three peer boards. Lowercase `c` opens Contributors,
-`a` opens Activity, and `p` opens PRs across all included repositories. Switching
-uses cached data and keeps selections, searches, and sorts. Plain `p` clears PR
-repository scope. Activity retains its repository, directory, lens, and person context.
-Pending dialog choices cancel when switching boards.
+BigBoard has three peer boards. Lowercase `c`, `a`, and `p` resume Contributors,
+Activity, and PRs. Each remembers its filters, sort, selection, scroll, and
+navigation location. Board switching cancels pending filter/repository choices
+and dismisses temporary dialogs. Re-selecting the current board preserves its
+location. Applied filters are cleared explicitly, never by Back.
 
 | Key | Shared behavior |
 |-----|-----------------|
-| `c` / `a` / `p` | Open Contributors / Activity / all-repository PRs |
+| `c` / `a` / `p` | Resume Contributors / Activity / PRs |
 | `↑` / `↓` | Select rows in lists; scroll lines in details |
 | `PgUp` / `PgDown` | Move a page in lists and details |
 | `Home` / `End` | First / last row or detail page |
 | `→` / `Enter` | Open the selected item or drill down; does not toggle detail closed |
-| `←` / `Esc` | Clear a current filter or return one level; stay at board roots |
+| `←` / `Esc` | Close or return one level; preserve applied filters; stay at board roots |
 | `/` | Search the current board list or Activity lens; reopen the existing query for editing |
 | `s` / `S` | Change sort / reverse order in sortable lists |
-| `i` | Open global repository inclusion controls from any board or detail |
+| `f` / `t` | Edit shared scope and board filters / open Range directly |
+| `x` | Clear this board’s filters and search; preserve shared scope and location |
+| `i` | Manage tracked repositories and refresh coverage |
 | `r` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
 | `e` | Open repository update errors when present |
 | `?` / `F1` | Open contextual help |
@@ -290,7 +299,7 @@ Uppercase `R` remains a compatibility alias for refresh. Repository inclusion
 uses `i`, so refresh and inclusion no longer differ only by letter case.
 
 During search entry, ordinary characters, including shortcut letters and `?`,
-enter text. `Enter` accepts the filter, `Esc` clears it, and `Backspace` edits.
+enter text. `Enter` accepts the search, `Esc` restores the previous applied search, and `Backspace` edits. `Ctrl+U` clears the edit buffer.
 `F1` opens help while typing. Help is a centered, scrollable modal: arrows,
 paging, and Home/End scroll; `Esc`, `Enter`, `?`, or `F1` dismiss it. Board keys
 can leave help directly. Dialogs own their other keys while open.
@@ -304,8 +313,7 @@ and Esc closes it without changing board selection or filters.
 
 Activity shows included repositories and their default-branch history in the
 selected local time range. `→` / `Enter` drills through repositories, directories,
-files, and commit details. `←` / `Esc` clears a current search/person filter or
-returns to the parent. At the repository root it stays there; use `q` to quit.
+files, and commit details. `←` / `Esc` returns to the parent, preserving board filters and searches. At the repository root it stays there; use `q` to quit.
 
 | Key | Activity behavior |
 |-----|-------------------|
@@ -313,8 +321,8 @@ returns to the parent. At the repository root it stays there; use `q` to quit.
 | `Tab` / `Shift+Tab`, `1`–`3` | Switch detail lenses |
 | `4` | Return to the directory ranking |
 | `s` / `S` | Change sort / reverse order; directories support Lines +/- / Commits / Recent / Name |
-| `t` | Change the local history range |
-| `b` | Show / hide bot contributors in local history |
+| `t` | Edit the shared date range |
+| `b` | Show / hide bot contributors on Activity |
 | `v` | Open the PR board scoped to the selected repository, including from area or commit detail |
 | `m` | In Related, switch between shared commits and contributor overlap |
 
@@ -328,11 +336,12 @@ returns to Activity. `Tab` / `Shift+Tab` leaves it for the next / previous lens.
 The PR board shows open PRs across included repositories updated within the
 global date range. `t` changes that range for all three boards; All time restores
 all open PRs. Missing update timestamps appear only in All time. Local person
-and bot filters do not apply. `f` opens a repository scope picker:
-choose All included repositories or one repository, then Enter to apply or Esc
-to cancel. Scope is a view filter; it never changes inclusion or fetch coverage.
-Activity's `v` enters this same board with explicit repository scope. Plain `p`
-returns to all included repositories while preserving the selected PR if visible.
+and bot filters do not apply. `f` edits shared repositories and PR filters in one
+modal. `u`, `v`, `k`, and `d` open its author, review, checks, and state categories.
+Activity's `v` opens a contextual repository PR view with the shared range and
+repository scope, temporarily omitting unrelated saved PR filters. Back from its
+list returns to Activity. Leaving this context restores the normal PR board's
+saved filters and selection. Plain `p` resumes that saved normal PR board.
 
 Enter opens a centered detail modal with a wrapped title, author and draft state,
 colored review/check fields, conflict status, and sections for coverage,
@@ -343,9 +352,10 @@ the same list selection and filters.
 `/` searches repository, title, author, or `#number`. `s` cycles Updated,
 Repository, Author, and Title; `S` reverses the order. Updated defaults newest
 first. The heading shows the active scope and sort; accepted search text stays
-visible. Enter / right opens PR details; left / Esc returns to the list, clears
-an active search, then clears repository scope. Back at the all-repository root
-stays on PRs. All lists and details support arrows, paging, and Home/End.
+visible. Enter / right opens PR details; left / Esc closes details and preserves
+applied filters. Back from a temporary Activity PR context restores Activity;
+at the normal PR root it stays on PRs. All lists and details support arrows,
+paging, and Home/End.
 
 `o` opens the selected PR in your default browser from the list or detail when
 its canonical GitHub URL is valid. Launch errors appear on the board. `r`
@@ -360,23 +370,24 @@ count. `/` filters contributor names; `s` selects a sort field and `S` reverses 
 `b` toggles bots and `t` changes the range. Enter / right opens contributor detail.
 In detail, arrows and paging scroll the same contributor; left / Esc returns to
 the list. Select another contributor there to open their detail. `i` and `r`
-remain available in detail. At the list root, Esc clears a search if present,
-otherwise stays there; `q` quits immediately.
+remain available in detail. At the list root, Esc stays there and preserves
+applied searches; `x` clears board filters and search. `q` quits immediately.
 
 ### Dialogs
 
-Repository inclusion is session-wide and separate from PR repository scope.
+Repository tracking is session-wide and separate from shared viewing scope.
 Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
 Enter applies choices; Esc / left cancels. Exclusion removes a repository from
 all boards and subsequent fetch/PR requests. It does not write the config file.
 
-`t` opens the global range picker on Activity, statistics, and PR list/detail views.
+`t` opens Range in the shared filter modal on all three boards and their details.
 It uses commit author time for local history and last-updated time for PRs.
 Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
-preset; End or `d` selects Custom. Enter applies a preset or opens day entry.
+preset; End selects Custom. Space stages a preset or opens day entry.
 Custom entry accepts 1–3650 days; Backspace edits and Ctrl+U clears it. Enter
-applies a valid range; Esc cancels. Custom ranges are session-only. The time range affects all three boards; the bot filter applies only to local
-history in Activity and Contributors.
+stages a valid custom range; Enter from the options applies the whole draft.
+Esc cancels. Custom ranges are session-only. Range affects all three boards;
+Activity and Contributors each keep their own bot visibility.
 
 ## Config file
 

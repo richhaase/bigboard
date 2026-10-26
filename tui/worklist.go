@@ -59,7 +59,7 @@ func (m Model) renderWorklist(width, height int) string {
 		}
 	}
 	if len(rows) == 0 {
-		empty := "No matching names. Esc clears search."
+		empty := "No matching names. x clears search and board filters."
 		if m.glanceQuery() == "" {
 			empty = "No local activity or known PRs. t range · i repos"
 			if m.areaRepoID != "" {
@@ -306,7 +306,7 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 		}
 	}
 	if m.glance.searching {
-		footer = "F1 help · Enter accept · Esc clear"
+		footer = "F1 help · Enter accept · Esc cancel"
 	} else {
 		footer = "? help · " + footer
 	}
