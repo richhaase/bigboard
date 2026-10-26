@@ -167,7 +167,7 @@ func TestPRSearchSortAndRefreshRetainIdentity(t *testing.T) {
 func TestRepositoryControlsApplyAndCancelFromEveryBoard(t *testing.T) {
 	for _, board := range []string{"l", "w", "p"} {
 		for _, close := range []string{"enter", "esc", "left", "l", "w", "p"} {
-			m := keyboardContractPress(t, normalizedPRFixture(), board, "r", "down", " ", close)
+			m := keyboardContractPress(t, normalizedPRFixture(), board, "i", "down", " ", close)
 			if m.excludedRepos["/web"] != (close == "enter") || m.viewMode == ViewRepoOverlay {
 				t.Fatalf("%s/%s applied or canceled incorrectly", board, close)
 			}
@@ -185,7 +185,7 @@ func TestRepositoryControlsApplyAndCancelFromEveryBoard(t *testing.T) {
 			break
 		}
 	}
-	m = keyboardContractPress(t, m, "right", "r", " ", "enter")
+	m = keyboardContractPress(t, m, "right", "i", " ", "enter")
 	if m.prDetail {
 		t.Fatal("excluding selected PR's repository silently retargeted detail")
 	}
@@ -272,15 +272,14 @@ func TestContextControlsStayVisibleAtNarrowWidths(t *testing.T) {
 		m.width, m.height = size[0], size[1]
 		m = keyboardContractPress(t, m, "p")
 		footer := strings.Split(ansi.Strip(m.View()), "\n")[m.height-2]
-		if !strings.Contains(footer, "f repo") || !strings.Contains(footer, "/ find") {
+		if !strings.Contains(footer, "f filters") || !strings.Contains(footer, "/ find") {
 			t.Fatalf("PR controls clipped: %s", footer)
 		}
 		m = keyboardContractPress(t, m, "f")
-		footer = strings.Split(ansi.Strip(m.View()), "\n")[m.height-2]
-		if !strings.Contains(footer, "Esc cancel") {
-			t.Fatalf("scope cancellation clipped: %s", footer)
+		if !strings.Contains(ansi.Strip(m.View()), "Esc cancel") {
+			t.Fatal("scope modal cancellation clipped")
 		}
-		m = keyboardContractPress(t, m, "esc", "r")
+		m = keyboardContractPress(t, m, "esc", "i")
 		view := ansi.Strip(m.View())
 		if !strings.Contains(view, "Enter apply") || !strings.Contains(view, "Esc cancel") {
 			t.Fatal("inclusion dialog apply/cancel hints clipped")

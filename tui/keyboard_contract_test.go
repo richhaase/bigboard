@@ -119,12 +119,13 @@ func keyboardContractOwnedContexts() []keyboardContractContext {
 			return keyboardContractPress(t, m, "p", "enter", "down")
 		}},
 		{"repository overlay", func(t *testing.T) Model {
-			return keyboardContractPress(t, awarenessFixture(), "r", "down")
+			return keyboardContractPress(t, awarenessFixture(), "i", "down")
 		}},
 		{"scan errors", func(t *testing.T) Model {
 			m := awarenessFixture()
 			m.width, m.height = 40, 18
 			m.scanErrors = map[string]string{"/api": strings.Repeat("Long diagnostic ", 120)}
+			m.scanErrorDetails = true
 			return keyboardContractPress(t, m, "e", "down")
 		}},
 		{"range picker", func(t *testing.T) Model {
@@ -270,7 +271,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 
 func TestBoardKeysCancelRepositoryChoicesAndPendingRanges(t *testing.T) {
 	for _, shortcut := range []string{"l", "w", "p"} {
-		m := keyboardContractPress(t, awarenessFixture(), "r", "down", " ", shortcut)
+		m := keyboardContractPress(t, awarenessFixture(), "i", "down", " ", shortcut)
 		if m.excludedRepos["/web"] || m.overlayExcluded != nil {
 			t.Fatal("leaving repository controls applied unconfirmed choices")
 		}
@@ -297,7 +298,7 @@ func TestBoardKeyFromSearchHelpKeepsAcceptedFilter(t *testing.T) {
 func TestKeyboardContractCustomRangeRejectsLettersWithoutNavigation(t *testing.T) {
 	m := keyboardContractPress(t, keyboardContractFixture(), "right", "4", "down", "t", "c", "enter", "ctrl+u", "21")
 	before := m.glance
-	for _, k := range []string{"h", "j", "k", "g", "G", "v", "P", "o", "R", "r"} {
+	for _, k := range []string{"h", "j", "k", "g", "G", "v", "P", "o", "R", "i"} {
 		m = keyboardContractPress(t, m, k)
 		if !m.rangePicker.open || !m.rangePicker.custom || m.rangePicker.input != "21" || m.rangePicker.error == "" ||
 			m.viewMode != ViewAwareness || !reflect.DeepEqual(before, m.glance) {
@@ -464,7 +465,7 @@ func TestKeyboardContractLeaderboardAndContributorRetainNavigation(t *testing.T)
 
 func TestKeyboardContractRepositoryAndRangePickersRetainNavigation(t *testing.T) {
 	for _, closeKey := range []string{"enter", "esc"} {
-		m := keyboardContractPress(t, awarenessFixture(), "r", "down", "up", "down", " ")
+		m := keyboardContractPress(t, awarenessFixture(), "i", "down", "up", "down", " ")
 		if m.overlayCursor != 1 || !m.overlayExcluded[m.loadedRepos[1].ID] {
 			t.Fatal("repository arrows/space no longer select and toggle the target row")
 		}

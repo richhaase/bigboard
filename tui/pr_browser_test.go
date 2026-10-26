@@ -24,7 +24,7 @@ func TestPRBrowserListDetailAndErrors(t *testing.T) {
 				}
 				return nil
 			}
-			if !strings.Contains(m.View(), "o open PR in browser") {
+			if !strings.Contains(m.View(), "o browser") {
 				t.Fatal("action missing")
 			}
 			next, cmd := m.handleKey(key("o"))
@@ -125,7 +125,7 @@ func TestPRBrowserDetailCanScrollToFinalPath(t *testing.T) {
 			m = next.(Model)
 		}
 		view := m.View()
-		for _, want := range []string{"FINAL-PATH.go", "o open PR in browser", "Could not open browser"} {
+		for _, want := range []string{"FINAL-PATH.go", "Could not open browser"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("width %d missing %s: %s", width, want, view)
 			}

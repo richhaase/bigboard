@@ -1,58 +1,140 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
+
+func scanErrorSummary(detail string) string {
+	switch {
+	case strings.Contains(detail, "partial clone") && strings.Contains(detail, "automatic fetching disabled"):
+		return "Partial clone cannot be scanned offline. Required Git objects may be missing locally."
+	case strings.Contains(detail, "partial clone") && strings.Contains(detail, "requires Git"):
+		return "Git must be updated before this partial clone can be scanned offline."
+	case strings.Contains(detail, "fetch failed"):
+		return "Remote update failed. Remote-tracking branches may be out of date."
+	default:
+		return detail
+	}
+}
 
 func (m Model) scanErrorLines() []string {
 	var lines []string
+	inner := max(1, m.width-4)
 	for _, repo := range m.repositories {
-		if detail := m.scanErrors[repo.ID]; detail != "" {
-			lines = append(lines, wrapGlanceText(displayText(repo.Name)+": "+displayText(detail), max(1, m.width-4))...)
+		detail := displayText(m.scanErrors[repo.ID])
+		if detail == "" {
+			continue
+		}
+		if len(lines) > 0 {
 			lines = append(lines, "")
+		}
+		name := strings.Split(ansi.Wrap(displayText(repo.Name), inner, ""), "\n")
+		for _, line := range name {
+			lines = append(lines, StyleTitle.Render(line))
+		}
+		summary := strings.Split(ansi.Wrap(scanErrorSummary(detail), max(1, inner-2), ""), "\n")
+		if len(summary) > 2 {
+			summary = summary[:2]
+			summary[1] = ansi.Truncate(summary[1]+"…", max(1, inner-2), "…")
+		}
+		for _, line := range summary {
+			lines = append(lines, StyleAmber.Render("  "+line))
+		}
+		if m.scanErrorDetails {
+			lines = append(lines, StyleDimWhite.Render("  Technical details"))
+			for _, line := range strings.Split(ansi.Wrap(detail, max(1, inner-2), ""), "\n") {
+				lines = append(lines, "  "+line)
+			}
 		}
 	}
 	return lines
 }
 
-func (m Model) renderScanErrors() string {
-	lines := m.scanErrorLines()
+func scanErrorSize(width, height int) (int, int) {
+	return max(6, min(96, width-2)), max(1, min(20, height-10))
+}
+
+func (m Model) scanErrorModalLines() ([]string, int, int) {
+	panelWidth, page := scanErrorSize(m.width, m.height)
+	m.width = panelWidth
+	return m.scanErrorLines(), panelWidth, page
+}
+
+func (m Model) renderScanErrors(background string, width, height int) string {
+	if width < 30 || height < 10 {
+		return fitGlanceLines([]string{"Repository update errors", "Resize to read errors", "Esc closes · r retries"}, width, height)
+	}
+	m.width, m.height = width, height
+	lines, panelWidth, page := m.scanErrorModalLines()
+	count := 0
+	for _, repo := range m.repositories {
+		if m.scanErrors[repo.ID] != "" {
+			count++
+		}
+	}
 	if len(lines) == 0 {
-		lines = []string{"All repository update errors have cleared."}
+		lines = strings.Split(ansi.Wrap("All repository update errors have cleared.", panelWidth-4, ""), "\n")
 	}
-	budget := max(1, m.height-3)
-	offset := max(0, min(m.scanErrorOffset, len(lines)-budget))
-	visible := []string{"REPOSITORY UPDATE ERRORS"}
-	visible = append(visible, lines[offset:min(len(lines), offset+budget)]...)
-	help := "? help · ↑↓ PgUp/PgDn scroll · R retry · Esc back · q quit"
-	if m.width < 60 {
-		help = "? help · ↑↓ scroll · R retry · Esc back"
+	offset := max(0, min(m.scanErrorOffset, len(lines)-page))
+	end := min(len(lines), offset+page)
+	repositories := fmt.Sprintf("%d repositories", count)
+	if count == 1 {
+		repositories = "1 repository"
 	}
-	visible = append(visible, screenFooter(help, m.width))
-	return fitGlanceLines(visible, max(1, m.width), max(1, m.height))
+	state := repositories + " · update errors"
+	if count == 0 {
+		state = "Updates recovered"
+	}
+	if m.refreshing {
+		state = "Refreshing… · " + repositories
+	}
+	content := []string{StyleTitle.Render("Repository update errors"), StyleDimWhite.Render(ansi.Truncate(state, panelWidth-4, "…")), ""}
+	content = append(content, lines[offset:end]...)
+	for len(content) < min(page, len(lines))+3 {
+		content = append(content, "")
+	}
+	progress := fmt.Sprintf("%d–%d of %d · ↑↓ scroll · ? help", offset+1, end, len(lines))
+	if panelWidth < 60 {
+		progress = fmt.Sprintf("%d–%d/%d · ↑↓ scroll · ? help", offset+1, end, len(lines))
+	}
+	details := "d details"
+	if m.scanErrorDetails {
+		details = "d less"
+	}
+	content = append(content, "", StyleDimWhite.Render(ansi.Truncate(progress, panelWidth-4, "…")), StyleCyan.Render("Esc close · "+details+" · r retry"))
+	return renderCenteredModal(background, content, panelWidth, width, height)
 }
 
 func (m Model) handleScanErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	lines, _, page := m.scanErrorModalLines()
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
 	case "esc", "left", "e":
 		m.showScanErrors = false
-	case "R":
+	case "r", "R":
 		return m, m.startLocalRefresh()
+	case "d":
+		m.scanErrorDetails = !m.scanErrorDetails
+		m.scanErrorOffset = 0
+		return m, nil
 	case "up":
 		m.scanErrorOffset--
 	case "down":
 		m.scanErrorOffset++
 	case "pgup":
-		m.scanErrorOffset -= max(1, m.height-3)
+		m.scanErrorOffset -= page
 	case "pgdown":
-		m.scanErrorOffset += max(1, m.height-3)
+		m.scanErrorOffset += page
 	case "home":
 		m.scanErrorOffset = 0
 	case "end":
-		m.scanErrorOffset = len(m.scanErrorLines())
+		m.scanErrorOffset = len(lines)
 	}
-	m.scanErrorOffset = max(0, min(m.scanErrorOffset, len(m.scanErrorLines())-max(1, m.height-3)))
+	m.scanErrorOffset = max(0, min(m.scanErrorOffset, len(lines)-page))
 	return m, nil
 }

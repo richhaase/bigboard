@@ -78,7 +78,7 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 	for i := 0; i < 45; i++ {
 		m.loadedRepos = append(m.loadedRepos, git.Repository{ID: fmt.Sprintf("/r%d", i), Name: fmt.Sprintf("repo-%02d", i)})
 	}
-	m = pressAwareness(m, "r")
+	m = pressAwareness(m, "i")
 	check := func() {
 		t.Helper()
 		out := m.View()
@@ -122,7 +122,7 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 
 func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
-		for _, key := range []string{"/", "r", "t"} {
+		for _, key := range []string{"/", "i", "t"} {
 			t.Run(fmt.Sprintf("%d/%s", view, key), func(t *testing.T) {
 				m := awarenessFixture()
 				m.viewMode = view

@@ -58,7 +58,7 @@ func TestWorklistSharedUnavailableStatusAndTitleSpace(t *testing.T) {
 	if strings.Count(view, "PRs: unavailable") != 1 || strings.Contains(view, "? unknown") || strings.Contains(view, "OPEN PRs") {
 		t.Fatalf("shared status duplicated:\n%s", view)
 	}
-	_, _, subject, _ := worklistColumnWidths(116)
+	_, _, subject, _, _ := m.worklistColumnWidths(116)
 	if subject < 45 {
 		t.Fatalf("title cramped to %d cells", subject)
 	}

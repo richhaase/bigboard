@@ -35,7 +35,7 @@ func TestPRQuotaStopsWholeQueueAndRetainsSnapshot(t *testing.T) {
 		if cmd := m.startPRRefresh(); cmd != nil {
 			t.Fatal("cooldown ignored")
 		}
-		if !strings.Contains(m.prStatus(), "R after") {
+		if !strings.Contains(m.prStatus(), "r after") {
 			t.Fatal("cooldown hidden")
 		}
 		for _, result := range msg.results {

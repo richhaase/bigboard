@@ -176,7 +176,7 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	m := monorepoFixture()
 	m.width, m.height = 160, 48
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"BIGBOARD / Worklist", "Local:", "R refresh", "LAST AUTHOR", "LATEST COMMIT"} {
+	for _, want := range []string{"BIGBOARD / Worklist", "Local:", "r refresh", "LAST AUTHOR", "LATEST COMMIT"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}

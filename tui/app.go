@@ -41,6 +41,10 @@ type Model struct {
 	prRepoID        string
 	prRepoPicker    bool
 	prRepoRow       int
+	prFilters       prFilters
+	prFilterKind    string
+	prFilterQuery   string
+	prFilterSearch  bool
 	prQuery         string
 	prSearching     bool
 	prSort          int
@@ -71,6 +75,7 @@ type Model struct {
 	scanErrors       map[string]string
 	showScanErrors   bool
 	scanErrorOffset  int
+	scanErrorDetails bool
 	excludedRepos    map[string]bool
 	overlayExcluded  map[string]bool
 	overlayCursor    int
@@ -438,6 +443,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.searching, m.glance.searching, m.prSearching = false, false, false
 		m.prRepoPicker = false
+		m.prFilterSearch = false
 		selectedPR := m.selectedPRKey()
 		m.showPRs = msg.String() == "p"
 		m.prDetail, m.prOffset = false, 0
@@ -466,7 +472,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m.quit()
-		case "R":
+		case "r", "R":
 			return m, m.startLocalRefresh()
 		case "e":
 			m.showScanErrors, m.scanErrorOffset = true, 0
@@ -491,9 +497,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
-	case "R":
+	case "r", "R":
 		return m, m.startLocalRefresh()
-	case "r":
+	case "i":
 		m.openRepositoryControls()
 		return m, nil
 	}
@@ -702,22 +708,20 @@ func (m Model) displayedAuthors() []stats.AuthorStats {
 	return out
 }
 
-func (m Model) leaderboardSummary() string {
-	var sections []string
-	if notice := m.historyNotice(); notice != "" {
-		sections = append(sections, StyleAmber.Render(notice))
-	}
+func (m Model) leaderboardSummary() []string {
 	commits, added, removed, ai := m.aggregateTotals()
-	sections = append(sections, renderStatBoxes(commits, added, removed, ai, m.width, m.unknownLineCommits()))
-	return wrapStatistics(strings.Join(sections, "\n"), m.width)
+	summary := []string{FormatNumber(commits) + " commits", "+" + formatLineCount(added, m.unknownLineCommits()), "−" + formatLineCount(removed, m.unknownLineCommits())}
+	if ai > 0 {
+		summary = append(summary, "AI "+aiBoxValue(commits, ai))
+	}
+	return summary
 }
 
 func (m Model) tableViewport() int {
 	chrome := AggregateView{}.RenderTable(m.displayedAuthors(), TableState{Width: m.width, Searching: m.searching, Query: m.filterQuery})
 	chromeHeight := lipgloss.Height(wrapStatistics(chrome, m.width))
-	rowHeight := max(1, (resolveTableLayout(m.width, m.displayedAuthors()...).rowWidth()+2+max(1, m.width)-1)/max(1, m.width))
-	budget := m.statisticsBodyBudget() - lipgloss.Height(m.leaderboardSummary()) - chromeHeight
-	return max(1, budget/rowHeight)
+	rowHeight := aggregateRowHeight(m.width, m.displayedAuthors())
+	return max(1, (m.statisticsBodyBudget()-1-chromeHeight)/rowHeight)
 }
 
 func (m *Model) clampScroll() {
@@ -788,6 +792,9 @@ func (m Model) View() string {
 	if height < 1 {
 		height = lipgloss.Height(content)
 	}
+	if m.showScanErrors {
+		content = m.renderScanErrors(content, max(1, width), max(1, height))
+	}
 	if m.showHelp {
 		content = m.renderHelpModal(content, max(1, width), max(1, height))
 	}
@@ -795,9 +802,6 @@ func (m Model) View() string {
 }
 
 func (m Model) viewContent() string {
-	if m.showScanErrors {
-		return m.renderScanErrors()
-	}
 	if m.loading {
 		return m.renderBootSequence()
 	}
@@ -810,7 +814,7 @@ func (m Model) viewContent() string {
 			"",
 			lipgloss.NewStyle().Foreground(ColorRed).Render("  "+displayText(m.err.Error())),
 			"",
-			StyleHelpKey.Render("  ? help · ")+StyleDimCyan.Render("▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit · R retry · e errors"),
+			StyleHelpKey.Render("  ? help · ")+StyleDimCyan.Render("▐")+StyleHelpKey.Render("q")+StyleDimCyan.Render("▌")+StyleHelpDesc.Render("quit · r retry · e errors"),
 		)
 		if details := m.scanErrorLines(); len(details) > 0 {
 			lines = append(lines, "", details[0])
@@ -859,7 +863,14 @@ func (m Model) renderBootSequence() string {
 
 func (m Model) renderAggregateView() string {
 	lines := m.screenHeader("Leaderboard", m.width)
-	lines = append(lines, strings.Split(m.leaderboardSummary(), "\n")...)
+	total := len(m.displayedAuthors())
+	end := min(total, m.scrollOffset+m.tableViewport())
+	label := []string{"Impact", "Commits", "Added", "Removed", "Net", "AI"}[m.sortField]
+	direction := "↓"
+	if m.sortAsc {
+		direction = "↑"
+	}
+	lines = append(lines, boardListHeading("CONTRIBUTORS", label+" "+direction, m.leaderboardSummary(), m.scrollOffset, end, total, m.width))
 	table := AggregateView{}.RenderTable(m.displayedAuthors(), TableState{
 		SelectedRow: m.selectedRow, ScrollOffset: m.scrollOffset,
 		VisibleRows: m.tableViewport(), SortField: m.sortField, SortAsc: m.sortAsc,
@@ -932,13 +943,4 @@ func (m Model) unknownLineCommits() int {
 		n += a.UnknownLineCommits
 	}
 	return n
-}
-
-func (m Model) historyNotice() string {
-	for _, r := range m.allRecords {
-		if r.LinesUnknown && !m.excludedRepos[r.RepoID] {
-			return Truncate("  ⚠ Shallow history; ? marks unknown line counts.", m.width)
-		}
-	}
-	return ""
 }

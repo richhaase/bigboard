@@ -28,7 +28,7 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 
 1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
 2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
-3. `Model.Init` streams bounded fetch-and-scan commands once on launch. Only explicit `R` requests start subsequent refreshes; there is no periodic refresh timer. Generation-tagged `RepoLoadedMsg` results accumulate into a pending snapshot, committed atomically when the batch finishes. Background updates preserve the visible last-good data and navigation; startup and `R` fetch included repositories from `origin` before scanning. Export uses cached history.
+3. `Model.Init` streams bounded fetch-and-scan commands once on launch. Only explicit `r` requests start subsequent refreshes; there is no periodic refresh timer. Generation-tagged `RepoLoadedMsg` results accumulate into a pending snapshot, committed atomically when the batch finishes. Background updates preserve the visible last-good data and navigation; startup and `r` fetch included repositories from `origin` before scanning. Export uses cached history.
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
 5. Worklist renders scoped repository/area rows and selected evidence through `worklist*.go`; focused lenses share identity-preserving navigation in `glance*.go`. Statistics renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 
@@ -45,9 +45,9 @@ tui/repooverlay.go      Repo inclusion/exclusion toggle overlay
 - **Worktree detection**: compare Git directory and common directory to skip linked worktrees while retaining separate-Git-directory repositories. Symlinked directories are followed and deduplicated.
 - **Counting**: deduplicate object IDs globally after repository/time filtering; repository subtotals overlap. Prefer known counts from full copies over unknown shallow boundaries. Shallow counts use `LinesUnknown` / `unknown_line_commits` and visible `?` qualifiers. Scans never lazily fetch missing objects. Cached remote default history precedes local history.
 - **Dates and retained behavior**: use `time.Local` for all calendar grouping and display. Future-dated commits remain counted, with no upper time cutoff. Keep the current churn formula and its zero-additions `0.00` convention. Keep the existing UI, JSON export, and merge-commit exclusion.
-- **Repository refresh**: Startup and `R`, including in the PR board, fetch remote-tracking branches only with existing Git credentials, no tags, submodules, local branch updates, or working-tree changes. Fetches share the eight scan slots, have a two-minute timeout, and disable Git/SSH credential prompts. Repositories without `origin` stay local-only; excluded repositories are never fetched. A fetch failure still runs the offline scan and marks its result stale with visible diagnostics.
+- **Repository refresh**: Startup and `r`, including in the PR board, fetch remote-tracking branches only with existing Git credentials, no tags, submodules, local branch updates, or working-tree changes. Fetches share the eight scan slots, have a two-minute timeout, and disable Git/SSH credential prompts. Repositories without `origin` stay local-only; excluded repositories are never fetched. A fetch failure still runs the offline scan and marks its result stale with visible diagnostics.
 - **Contextual help**: `?` or `F1` opens a centered, scrollable help modal over every screen. Search input retains literal `?` and uses `F1` for help. Help owns its scrolling/dismissal keys; `l`/`w`/`p` leave help for a board. Ordinary dismissal preserves the underlying selection, filters, and overlays.
-- **Shared screen frame**: Worklist, contributor leaderboard/detail, and PR list/detail use the same compact title band, scope row, local/PR freshness rows, and pinned three-row footer. Wide titles include repository counts and version. The status rows report global included-repository freshness on every screen; selected repository timestamps stay in Worklist evidence. The title count includes failed repositories, and tables share full-width gutters and selection rows. The oldest included local scan and stale/missing coverage stay explicit; PR views explicitly ignore local date/person/bot filters. Contributor paging scrolls only the body, preserving its frame, and `R` refreshes without leaving detail.
+- **Shared screen frame**: Worklist, contributor leaderboard/detail, and PR list/detail use the same compact title band, scope/search row, local/PR freshness rows, and pinned three-row footer. Main lists align their heading (sort, summary, visible range), column labels, and first row. Leaderboard totals use the heading, and narrow contributor rows stack metrics. PR rows reserve review/check/updated fields and stack at 80/40 columns. At 70×24+ a selected-PR preview above the footer shows wrapped title, full repo identity, author, draft, and review/check states; wide tables move the author there. Short repo labels retain owners when ambiguous; Worklist labels its known-PR column. Footer hints omit whole optional commands; coverage contains no commands. Wide titles include repository counts and version. The status rows report global included-repository freshness on every screen; selected repository timestamps stay in Worklist evidence. The title count includes failed repositories, and tables share full-width gutters and selection rows. The oldest included local scan and stale/missing coverage stay explicit; PR views explicitly ignore local date/person/bot filters. Contributor paging scrolls only the body, preserving its frame, and `r` refreshes without leaving detail.
 - **Git isolation**: resolve branch OIDs, parse NUL-delimited paths, pin diff settings, clear repository-local environment overrides, and retain specific-agent AI matching with explicit user overrides.
 - **Worklist awareness**: `tui/worklist*.go` renders a horizontal repo/area → last author + others → concrete commit → age list. At 110×28+ selected evidence fills the pane underneath; narrower terminals use multiline list rows and Enter replaces the list with detail. Recent is the default overview sort, independent of statistics sort. Ages use each row repository's own retained scan timestamp. Latest author, subject, and time come from the same deterministic commit (date, then object ID). All modes share a high-contrast blue-gray canvas; statistics retain their arrangement.
 
@@ -76,7 +76,7 @@ go test ./...
 
 ## Automatic PR context
 
-GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `R` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped, each refresh shares a 128-call cap, and provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No polling, automatic retries, persistent cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
+GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped, each refresh shares a 128-call cap, and provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No polling, automatic retries, persistent cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
 
 ## Progressive disclosure
 
@@ -105,12 +105,27 @@ clears filters or unwinds one level and stays at roots. `q` always quits outside
 text entry; Ctrl+C always quits. Enter/right opens; left/Esc backs out. All
 scrollable lists and details support arrows, paging, Home/End. Contributor-detail
 arrows scroll without switching identity. Searches reopen their existing text.
-`r` opens global inclusion from all boards and details; Enter applies and Esc
-cancels. Pending dialogs cancel on board switches. `R` refreshes from every
+`i` opens global inclusion from all boards and details; Enter applies and Esc
+cancels. Pending dialogs cancel on board switches. `r` refreshes from every
 board/detail, including commit inspection, preserving navigation.
+Uppercase `R` remains a refresh compatibility alias. Footers group board keys,
+primary contextual actions, and help/refresh; complete shortcuts stay in `?` help.
+Repository errors use the shared centered modal surface over the retained board;
+`d` toggles full diagnostics beneath per-repository summaries, with scrolling,
+`r` retry, and Esc dismissal preserving board state.
 
-PRs use `f` for a repository scope picker and `/` for repo/title/author/number
-search. `s` cycles Updated/Repository/Author/Title and `S` reverses. Worklist's
+PRs use `f` repository, `a` author, `v` review, `c` checks, and `d` draft/open
+filter modals over the retained PR board/detail. Tabs highlight the active category;
+the cursor and applied-value checkmark are separate. Paging uses the modal viewport.
+Filters compose with `/` repo/title/author/number search; picker
+`/` searches options, Tab switches categories, Enter applies, and Esc cancels.
+`x` clears all PR filters and search. Wide rows separate number/state/title;
+`◇` and subdued titles mark drafts, `●` marks non-drafts, and approved/passing
+are green without implying merge readiness.
+PR details are centered modals over the retained list, with labeled status and
+evidence sections. Identity, snapshot warnings, browser errors, and controls stay
+pinned; scrolling and End use the modal's wrapped body budget.
+`s` cycles Updated/Repository/Author/Title and `S` reverses. Worklist's
 `v` enters the same PR board scoped to its selected repository without altering
 inclusion. PR scope and search never enter local statistics. Worklist overview
 and Subareas also support `S`; Related uses `c` to switch shared commits and
