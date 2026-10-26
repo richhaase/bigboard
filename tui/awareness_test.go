@@ -186,13 +186,18 @@ func TestAwarenessEvidenceScrollAndFiltering(t *testing.T) {
 	}
 }
 
-func TestAwarenessFocusRemovedByFilters(t *testing.T) {
+func TestAwarenessFocusRetainedWhenFiltersHidePerson(t *testing.T) {
 	m := awarenessFixture()
 	m.personID = "email:grace@x"
 	m.excludedRepos["/api"] = true
 	m.recomputeAuthors()
-	if m.personID != "" {
-		t.Fatal("filtered focus survived")
+	if m.personID != "email:grace@x" || len(m.evidence("", m.personID)) != 0 {
+		t.Fatal("filtering a person broadened or discarded their focus")
+	}
+	m.excludedRepos["/api"] = false
+	m.recomputeAuthors()
+	if records := m.evidence("", m.personID); len(records) != 1 || records[0].Email != "grace@x" {
+		t.Fatal("restoring the repository did not restore the focused person's evidence")
 	}
 }
 func TestAwarenessDuplicateNamesAndHostileFailure(t *testing.T) {
@@ -236,7 +241,7 @@ func TestAwarenessHiddenBotsDoNotSetRecency(t *testing.T) {
 	r.CommitID = "bot"
 	r.Date = time.Now().Add(time.Hour)
 	m.allRecords = append(m.allRecords, r)
-	m.hideBots = true
+	m.activityHideBots = true
 	m.recomputeAuthors()
 	for _, repository := range m.activityRepositories() {
 		if repository.repo.ID == "/empty" && (!repository.latest.IsZero() || len(repository.people) != 0) {
@@ -249,7 +254,7 @@ func TestAwarenessNarrowRangeAlwaysVisible(t *testing.T) {
 	m := awarenessFixture()
 	m.width = 40
 	m.height = 18
-	if !strings.Contains(m.View(), "Range: All time") {
+	if !strings.Contains(m.View(), "Shared: All time") {
 		t.Fatal("active range hidden on narrow terminal")
 	}
 }

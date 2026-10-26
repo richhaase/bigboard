@@ -42,7 +42,8 @@ func TestPRGlanceRespectsAreaAndIndependentLocalFilters(t *testing.T) {
 	m := prFixture()
 	m.areaRepoID = "/api"
 	m.personID = "does-not-exist"
-	m.hideBots = true
+	m.activityPeople = filterValues{"does-not-exist"}
+	m.activityHideBots = true
 	if got := m.prGlanceSignal("auto:feature"); !strings.HasPrefix(got, "1 open") {
 		t.Fatal(got)
 	}

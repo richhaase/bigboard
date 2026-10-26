@@ -85,10 +85,10 @@ func TestDirectoryDrilldownUsesLiteralPathsAndExactLines(t *testing.T) {
 		t.Fatal("Back lost parent selection or search")
 	}
 	m = keyboardContractPress(t, m, "esc")
-	if m.directory.frame.path != "services" || m.directory.frame.query != "" {
-		t.Fatal("Back did not clear search before changing scope")
+	if m.directory.frame.path != "" || m.directory.frame.selectedID != "dir:services" {
+		t.Fatal("Back did not return to the parent directory")
 	}
-	m = keyboardContractPress(t, m, "esc", "esc")
+	m = keyboardContractPress(t, m, "esc")
 	if m.directory.active || m.areaRepoID != "" || m.selectedRepoID != "/mono" {
 		t.Fatal("Back did not restore selected repository")
 	}

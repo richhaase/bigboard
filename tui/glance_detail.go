@@ -252,7 +252,7 @@ func (m Model) glanceLensLines(width, height int) []string {
 			lines = append(lines, awarenessRow("  "+glanceCursor(i == selected)+" "+labels[ids[i]], i == selected, i, width))
 		}
 		if len(ids) == 0 {
-			lines = append(lines, "  No matching contributors. Esc clears search.")
+			lines = append(lines, "  No matching contributors. x clears search and board filters.")
 		}
 	case glanceSubareas:
 		rows := m.glanceSubareas()

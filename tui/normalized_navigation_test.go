@@ -83,10 +83,10 @@ func TestNormalizedBoardListPaging(t *testing.T) {
 	}
 }
 
-func TestPRScopeIsIndependentAndPlainPReturnsAll(t *testing.T) {
-	m := keyboardContractPress(t, normalizedPRFixture(), "p", "f", "down", "enter")
-	if m.prRepoID != "/api" || len(m.visiblePRs()) != 30 || m.excludedRepos["/web"] || !strings.Contains(m.View(), "Pull requests / api") {
-		t.Fatal("repository scope did not focus the PR board independently of inclusion")
+func TestContextPRScopeIsIndependentAndBoardKeysRestoreNormalPRs(t *testing.T) {
+	m := keyboardContractPress(t, normalizedPRFixture(), "a", "v")
+	if m.prRepoID != "/api" || len(m.visiblePRs()) != 30 || m.excludedRepos["/web"] {
+		t.Fatal("context scope did not focus the PR board independently of inclusion")
 	}
 	m = keyboardContractPress(t, m, "right", "enter")
 	if !m.prDetail {
@@ -105,20 +105,12 @@ func TestPRScopeIsIndependentAndPlainPReturnsAll(t *testing.T) {
 		t.Fatal("detail back lost repository scope")
 	}
 	m = keyboardContractPress(t, m, "left")
-	if m.prRepoID != "" || !m.showPRs || len(m.visiblePRs()) != 60 {
-		t.Fatal("repo back did not return to all PRs")
+	if m.prContext.active || m.showPRs || m.viewMode != ViewAwareness {
+		t.Fatal("context Back did not return to Activity")
 	}
-	m = keyboardContractPress(t, m, "f", "end", "esc")
-	if m.prRepoPicker || m.prRepoID != "" {
-		t.Fatal("cancel applied repository choice")
-	}
-	m = keyboardContractPress(t, m, "f", "down", "enter", "p")
-	if m.prRepoID != "" || len(m.visiblePRs()) != 60 {
-		t.Fatal("p retained repository scope")
-	}
-	m = keyboardContractPress(t, m, "a", "v")
-	if !m.showPRs || m.prRepoID != "/api" || len(m.visiblePRs()) != 30 {
-		t.Fatal("contextual PR jump lost selected repository")
+	m = keyboardContractPress(t, m, "v", "p")
+	if !m.showPRs || m.prContext.active || m.prRepoID != "" || len(m.visiblePRs()) != 60 {
+		t.Fatal("PR board key did not restore its regular scope")
 	}
 }
 
@@ -139,23 +131,23 @@ func TestPRSearchSortAndRefreshRetainIdentity(t *testing.T) {
 	if m.prQuery != "Change 02" {
 		t.Fatal("reopening search cleared the query")
 	}
-	m = keyboardContractPress(t, m, "esc", "/", "lwp?Roq", "f1", "esc")
+	m = keyboardContractPress(t, m, "esc", "/", "ctrl+u", "lwp?Roq", "f1", "esc")
 	if !m.prSearching || m.prQuery != "lwp?Roq" || !m.showPRs || m.showHelp {
 		t.Fatal("PR search leaked shortcuts")
 	}
-	m = keyboardContractPress(t, m, "esc", "/", "org/web", "enter")
+	m = keyboardContractPress(t, m, "esc", "x", "/", "org/web", "enter")
 	if len(m.visiblePRs()) != 30 {
 		t.Fatal("repository text search failed")
 	}
-	m = keyboardContractPress(t, m, "esc", "/", "#30", "enter")
+	m = keyboardContractPress(t, m, "x", "/", "#30", "enter")
 	if len(m.visiblePRs()) != 2 {
 		t.Fatal("PR number search failed")
 	}
-	m = keyboardContractPress(t, m, "esc", "/", "author29", "enter")
+	m = keyboardContractPress(t, m, "x", "/", "author29", "enter")
 	if len(m.visiblePRs()) != 2 {
 		t.Fatal("PR author search failed")
 	}
-	m = keyboardContractPress(t, m, "esc", "f", "down", "enter", "end", "right")
+	m = keyboardContractPress(t, m, "x", "a", "v", "end", "right")
 	selected = m.selectedPRKey()
 	old := m.prState.snapshots["org/repo"]
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Complete: true, PRs: old.prs}}, checked: time.Now()})
@@ -242,7 +234,7 @@ func TestPRScopePickerFitsAndExplainsControls(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 36}} {
 		m := normalizedPRFixture()
 		m.width, m.height = size[0], size[1]
-		m = keyboardContractPress(t, m, "p", "f", "end")
+		m = keyboardContractPress(t, m, "p", "f", "right", "end")
 		for _, line := range strings.Split(m.View(), "\n") {
 			if ansi.StringWidth(line) > m.width {
 				t.Fatal("scope picker overflowed")
@@ -252,7 +244,7 @@ func TestPRScopePickerFitsAndExplainsControls(t *testing.T) {
 			t.Fatal("scope picker clipped selected repo")
 		}
 		m = keyboardContractPress(t, m, "?")
-		if m.currentHelp().title != "PR repository scope" {
+		if m.currentHelp().title != "Filters" {
 			t.Fatal("scope picker help is not contextual")
 		}
 	}

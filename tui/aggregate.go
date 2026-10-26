@@ -166,7 +166,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 	}
 	if len(authors) == 0 {
 		if ts.Searching || ts.Query != "" {
-			return header + "\n" + StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", displayText(ts.Query)))
+			return header + "\n" + StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — x to clear board filters.", displayText(ts.Query)))
 		}
 		return header + "\n" + StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range.")
 	}

@@ -16,7 +16,7 @@ func TestWorklistHeaderShowsRangeWithAndWithoutANSI(t *testing.T) {
 		lipgloss.SetColorProfile(profile)
 		m := awarenessFixture()
 		header := m.worklistHeader(120)
-		if len(header) != 5 || !strings.Contains(ansi.Strip(header[1]), "Range: All time") {
+		if len(header) != screenHeaderRows || !strings.Contains(ansi.Strip(header[1]), "Shared: All time") {
 			t.Fatalf("range missing from Worklist header: %v", header)
 		}
 		for _, line := range header {

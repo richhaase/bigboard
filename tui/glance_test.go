@@ -71,8 +71,8 @@ func TestGlanceSortAndBackPreserveIdentityAndSearch(t *testing.T) {
 		t.Fatal("back lost overview identity or search")
 	}
 	m = pressAwareness(m, "esc")
-	if m.glanceQuery() != "" || m.areaRepoID == "" {
-		t.Fatal("first escape should only clear search")
+	if m.areaRepoID != "" || m.glance.overviewQueries[1] != "feature" {
+		t.Fatal("Back should return to repositories without clearing applied area search")
 	}
 }
 func TestGlanceAllPeopleAndCommitEvidenceRemainReachable(t *testing.T) {
@@ -241,7 +241,7 @@ func TestGlanceNarrowActiveFiltersAndDuplicateNamesStayVisible(t *testing.T) {
 	m.allRecords[1].Changes = []git.PathChange{{Path: "services/auth/second.go"}}
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()
-	m.hideBots = true
+	m.activityHideBots = true
 	m.selectedAreaID = "auto:services/auth"
 	if !strings.Contains(m.View(), "bots hidden") {
 		t.Fatal("overview hides active bot filter")
@@ -255,7 +255,7 @@ func TestGlanceNarrowActiveFiltersAndDuplicateNamesStayVisible(t *testing.T) {
 	}
 	m = pressAwareness(m, "down")
 	m = pressAwareness(m, "enter")
-	if !strings.Contains(m.View(), "Activity: ada@x") || !strings.Contains(m.View(), "Esc clears") || !strings.Contains(m.View(), "bots hidden") {
+	if !strings.Contains(m.View(), "Activity: ada@x") || !strings.Contains(m.View(), "Esc back") || !strings.Contains(m.View(), "bots hidden") {
 		t.Fatalf("active filter invisible:\n%s", m.View())
 	}
 	if lipgloss.Height(m.View()) > m.height {

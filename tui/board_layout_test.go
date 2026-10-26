@@ -56,10 +56,10 @@ func TestMainBoardsAlignFirstRowsAndKeepFrame(t *testing.T) {
 			m = keyboardContractPress(t, m, key)
 			view := ansi.Strip(m.View())
 			lines := strings.Split(view, "\n")
-			if len(lines) != m.height || !strings.HasPrefix(strings.TrimSpace(lines[7]), "› ") {
+			if len(lines) != m.height || !strings.HasPrefix(strings.TrimSpace(lines[screenHeaderRows+2]), "› ") {
 				t.Fatalf("%s/%v first data row moved or height changed:\n%s", key, size, view)
 			}
-			if !strings.Contains(lines[5], " of ") {
+			if !strings.Contains(lines[screenHeaderRows], " of ") {
 				t.Fatalf("%s list position missing from heading", key)
 			}
 			if !strings.Contains(lines[m.height-2], "? help") {
@@ -93,7 +93,7 @@ func TestPRRowsProtectReviewChecksAgeAndDraft(t *testing.T) {
 			snap.prs[0].UpdatedAt = snap.checked.Add(-3 * time.Hour)
 			m.prState.snapshots["org/repo"] = snap
 			m = keyboardContractPress(t, m, "p")
-			rows := strings.Split(m.View(), "\n")[7 : 7+m.prListRowHeight()]
+			rows := strings.Split(m.View(), "\n")[screenHeaderRows+2 : screenHeaderRows+2+m.prListRowHeight()]
 			text := ansi.Strip(strings.Join(rows, "\n"))
 			for _, want := range []string{"#7", "◇", "Changes req.", "Failing", "3h"} {
 				if !strings.Contains(text, want) {
@@ -117,13 +117,13 @@ func TestWorklistPRColumnHasLabelAndReservedCells(t *testing.T) {
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	a, p, s, pr, _ := m.worklistColumnWidths(116)
 	start := 2 + 2 + a + 1 + p + 1 + s + 1
-	if strings.TrimSpace(ansi.Cut(lines[6], start, start+pr)) != "PRs" {
+	if strings.TrimSpace(ansi.Cut(lines[screenHeaderRows+1], start, start+pr)) != "PRs" {
 		t.Fatal("Worklist PR signals have no column label")
 	}
-	if !strings.Contains(ansi.Cut(lines[7], start, start+pr), "3 open") {
+	if !strings.Contains(ansi.Cut(lines[screenHeaderRows+2], start, start+pr), "3 open") {
 		t.Fatal("Worklist PR column does not line up")
 	}
-	if strings.Contains(ansi.Cut(lines[7], 4+a+1+p+1, start-1), "3 open") {
+	if strings.Contains(ansi.Cut(lines[screenHeaderRows+2], 4+a+1+p+1, start-1), "3 open") {
 		t.Fatal("PR signals leaked into commit title cells")
 	}
 }
@@ -134,10 +134,10 @@ func TestBoardFiltersAndSortStayInPredictableRows(t *testing.T) {
 		m.width, m.height = 120, 36
 		m = keyboardContractPress(t, m, key, "/", "contributor", "enter")
 		if key == "a" {
-			m = keyboardContractPress(t, m, "esc", "/", "gateway", "enter")
+			m = keyboardContractPress(t, m, "x", "/", "gateway", "enter")
 		}
 		lines := strings.Split(ansi.Strip(m.View()), "\n")
-		if !strings.Contains(lines[1], "/ ") || !strings.Contains(lines[1], "Scope:") || !strings.Contains(lines[5], "↓") {
+		if !strings.Contains(lines[2], "Find:") || !strings.Contains(lines[1], "Shared:") || !strings.Contains(lines[screenHeaderRows], "↓") {
 			t.Fatalf("%s misplaced filter, scope or sort", key)
 		}
 	}
@@ -183,7 +183,7 @@ func TestNarrowLeaderboardKeepsMetricsTogether(t *testing.T) {
 	m.width, m.height = 40, 18
 	m = keyboardContractPress(t, m, "l")
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	if !strings.Contains(lines[7], "Contributor 03") || !strings.Contains(lines[7], "16") || !strings.Contains(lines[8], "NET 12,080 · AI 25%") {
+	if !strings.Contains(lines[screenHeaderRows+2], "Contributor 03") || !strings.Contains(lines[screenHeaderRows+2], "16") || !strings.Contains(lines[screenHeaderRows+3], "NET 12,080 · AI 25%") {
 		t.Fatalf("narrow contributor row scattered its metrics:\n%s", m.View())
 	}
 	a := m.authors[0]

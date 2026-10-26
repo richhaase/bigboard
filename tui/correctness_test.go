@@ -27,7 +27,7 @@ func TestContributorSelectionSurvivesNameChangesAndSameNamePeople(t *testing.T) 
 	if m.activeAuthorID != "email:alice@test" {
 		t.Fatalf("selected %q", m.activeAuthorID)
 	}
-	m = send(m, "t", "home", "down", "enter")
+	m = send(m, "t", "home", "down", " ", "enter")
 	out := m.View()
 	if strings.Contains(out, "NO SIGNAL") || !strings.Contains(out, "CONTRIBUTOR: ASMITH") {
 		t.Fatalf("lost identity after range change:\n%s", out)

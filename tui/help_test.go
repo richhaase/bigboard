@@ -63,7 +63,7 @@ func TestHelpContextContainsOnlyRelevantControls(t *testing.T) {
 		{"PR list", "Open the selected PR in your browser", "Show / hide bots", func(m Model) Model { m.showPRs = true; return m }},
 		{"PR detail", "Scroll PR details", "Select a pull request", func(m Model) Model { m.showPRs, m.prDetail = true, true; return m }},
 		{"repository controls", "Include / exclude the repository", "Refresh repos and PRs", func(m Model) Model { m.viewMode = ViewRepoOverlay; return m }},
-		{"range", "Apply preset / edit custom days", "Show / hide bots", func(m Model) Model { m.openRangePicker(); return m }},
+		{"range", "Apply all pending changes", "Show / hide bots", func(m Model) Model { m.openRangePicker(); return m }},
 		{"contributor", "Scroll contributor details", "Change sort / reverse order", func(m Model) Model { m.viewMode = ViewOperative; return m }},
 		{"scan errors", "Retry repository refresh", "Include / exclude the repository", func(m Model) Model { m.showScanErrors = true; return m }},
 	} {
@@ -105,7 +105,7 @@ func TestHelpScrollAndDismissKeys(t *testing.T) {
 	m := awarenessFixture()
 	m.width, m.height = 40, 18
 	m = keyboardContractPress(t, m, "?", "end")
-	if m.helpOffset == 0 || !strings.Contains(ansi.Strip(m.View()), "Refresh repos and PRs") {
+	if m.helpOffset == 0 || !strings.Contains(ansi.Strip(m.View()), "location") {
 		t.Fatal("cannot reach the final help bindings")
 	}
 	m = keyboardContractPress(t, m, "home")

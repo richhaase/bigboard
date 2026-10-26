@@ -62,7 +62,7 @@ func TestPRBoardRetainsSelectionAcrossBoardChanges(t *testing.T) {
 		t.Fatal("returning to the PR board lost selection")
 	}
 	m = keyboardContractPress(t, m, "enter", "down", "w", "p")
-	if m.prDetail || m.prOffset != 0 || m.visiblePRs()[m.prRow].Key() != selected {
+	if m.prDetail || m.visiblePRs()[m.prRow].Key() != selected {
 		t.Fatal("p did not return from detail to the selected PR in the board")
 	}
 }

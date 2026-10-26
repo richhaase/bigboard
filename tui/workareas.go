@@ -9,7 +9,7 @@ import (
 
 func (m Model) areaRepository() (git.Repository, bool) {
 	for _, repo := range m.loadedRepos {
-		if repo.ID == m.areaRepoID && !m.excludedRepos[repo.ID] {
+		if repo.ID == m.areaRepoID && m.repoInView(repo.ID) {
 			return repo, true
 		}
 	}
@@ -36,7 +36,7 @@ func (m *Model) openSingleRepositoryAreas() {
 	}
 	var included []git.Repository
 	for _, repo := range m.loadedRepos {
-		if !m.excludedRepos[repo.ID] {
+		if m.repoInView(repo.ID) {
 			included = append(included, repo)
 		}
 	}
@@ -98,23 +98,13 @@ func (m Model) currentWorkAreas() []stats.WorkArea {
 	if !ok {
 		definition = stats.DefineWorkAreas(m.recordsInRepository(repo, m.allRecords), m.rulesForRepository(repo))
 	}
-	records := m.recordsInRepository(repo, m.filteredRecords())
-	visible := make(map[string]bool)
-	for _, a := range m.authors {
-		visible[a.ID] = true
-	}
-	kept := make([]git.CommitRecord, 0, len(records))
-	for _, r := range records {
-		if visible[stats.IdentityID(r)] {
-			kept = append(kept, r)
-		}
-	}
-	areas := definition.Build(kept)
+	records := m.recordsInRepository(repo, m.activityRecords())
+	areas := definition.Build(records)
 	seen := make(map[string]bool)
 	for _, area := range areas {
 		seen[area.ID] = true
 	}
-	for _, pr := range m.prsForRepository(repo.ID) {
+	for _, pr := range m.prsInViewForRepository(repo.ID) {
 		for _, area := range m.prAreas(repo, pr) {
 			if !seen[area.ID] {
 				areas = append(areas, area)

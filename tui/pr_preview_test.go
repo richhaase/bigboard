@@ -23,7 +23,7 @@ func TestPRPreviewFollowsSelectionAndPreservesFullTitle(t *testing.T) {
 			}
 		}
 		view := strings.Split(ansi.Strip(m.View()), "\n")
-		if strings.Contains(view[6], "AUTHOR") || !strings.Contains(view[6], "REVIEW") {
+		if strings.Contains(view[screenHeaderRows+1], "AUTHOR") || !strings.Contains(view[screenHeaderRows+1], "REVIEW") {
 			t.Fatal("wide table did not return author space to the title")
 		}
 		if !strings.Contains(strings.Join(view[len(view)-5:len(view)-3], "\n"), githubIdentity(pr.Author)) {
@@ -70,7 +70,7 @@ func TestPRPreviewReservesListAndDiagnosticSpace(t *testing.T) {
 				t.Fatalf("%dx%d did not bound long title while preserving list", width, height)
 			}
 			pr := m.visiblePRs()[m.prRow]
-			list := strings.Join(lines[7:height-screenFooterRows-len(preview)-1], "\n")
+			list := strings.Join(lines[screenHeaderRows+2:height-screenFooterRows-len(preview)-1], "\n")
 			if !strings.Contains(list, "› ") || !strings.Contains(list, fmt.Sprintf("#%d", pr.Number)) {
 				t.Fatalf("%dx%d selected PR is missing from the list:\n%s", width, height, list)
 			}

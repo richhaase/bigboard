@@ -54,7 +54,7 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 						}
 						return
 					}
-					if !strings.Contains(lines[2], "Local:") || !strings.Contains(lines[3], "PRs:") {
+					if !strings.Contains(lines[3], "Local:") || !strings.Contains(lines[4], "PR cache:") {
 						t.Fatal("freshness rows moved or disappeared")
 					}
 					if !strings.Contains(lines[m.height-2], "? help") || !strings.Contains(lines[m.height-3], "────") {
@@ -63,7 +63,7 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 					if m.width >= 90 && !strings.Contains(lines[0], "v-test") {
 						t.Fatal("version missing from wide title band")
 					}
-					if m.showPRs && (!strings.Contains(lines[1], "Range:") || !strings.Contains(lines[m.height-1], "PR updated time")) {
+					if m.showPRs && (!strings.Contains(lines[1], "Shared:") || !strings.Contains(lines[m.height-1], "PR updated time")) {
 						t.Fatal("PR screen lost its date scope")
 					}
 					if profile == termenv.Ascii && strings.Contains(raw, "\x1b[") {
@@ -88,7 +88,7 @@ func TestStatisticsFrameUsesAllIncludedRepositoryFreshness(t *testing.T) {
 	m.prState.repositories["/web"] = "org/web"
 	m.prState.snapshots["org/web"] = prSnapshot{err: gh.ErrRateLimited}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Local: STALE") || !strings.Contains(view, old.Local().Format("Jan 02 15:04 MST")) || !strings.Contains(view, "PRs: STALE") {
+	if !strings.Contains(view, "Local: STALE") || !strings.Contains(view, old.Local().Format("Jan 02 15:04 MST")) || !strings.Contains(view, "PR cache: STALE") {
 		t.Fatal("selected repository masked stale data elsewhere")
 	}
 	m.excludedRepos["/web"] = true
@@ -163,7 +163,7 @@ func TestSwitchingViewsPreservesGlobalStatusAndCoverage(t *testing.T) {
 		t.Fatal("coverage text or indentation differs between views")
 	}
 	for _, lines := range [][]string{worklist, leaderboard} {
-		if !strings.Contains(lines[0], "2/3 repos") || !strings.Contains(lines[2], "STALE") || !strings.Contains(lines[2], "Update errors: 1") {
+		if !strings.Contains(lines[0], "2/3 repos") || !strings.Contains(lines[3], "STALE") || !strings.Contains(lines[3], "Update errors: 1") {
 			t.Fatal("global header masked a failed repository")
 		}
 		if strings.Contains(strings.Join(lines[screenHeaderRows:], "\n"), "update failed") {

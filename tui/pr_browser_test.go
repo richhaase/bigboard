@@ -88,10 +88,10 @@ func TestPRBrowserDoesNotCaptureRelatedShortcut(t *testing.T) {
 	m.selectedAreaID = "auto:services/auth"
 	m = pressAwareness(m, "3")
 	m.prBrowserOpener = func(string) error { t.Fatal("Related opened browser"); return nil }
-	next, cmd := m.handleKey(key("o"))
+	next, cmd := m.handleKey(key("m"))
 	m = next.(Model)
-	if cmd != nil || m.showPRs || !strings.Contains(m.View(), "CONTRIBUTOR OVERLAP") {
-		t.Fatal("Related o changed")
+	if cmd != nil || m.showPRs || !m.glance.frame.relatedOverlap || !strings.Contains(m.View(), "CONTRIBUTOR OVERLAP") {
+		t.Fatal("Related m changed")
 	}
 }
 

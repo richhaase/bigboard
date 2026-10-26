@@ -122,9 +122,9 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	// earns space here; the complete inventory remains available via p.
 	prs := m.scopePRs(r.repo.ID)
 	if len(prs) > 0 && len(lines)+3 <= height {
-		prTitle := "OPEN PRs / all dates · local filters do not apply"
+		prTitle := "OPEN PRs / shared range · Git person/bot filters do not apply"
 		if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
-			prTitle = "PARENT AREA PRs / all dates · local filters do not apply"
+			prTitle = "SCOPE PRs / shared range · Git person/bot filters do not apply"
 		}
 		lines = append(lines, StyleDimWhite.Bold(true).Render(prTitle), m.worklistSignal(m.prGlanceSignal(r.repo.ID)))
 		pr := prs[0]
@@ -204,7 +204,7 @@ func (m Model) worklistDetailHeader(width int) []string {
 				label = glancePersonLabel(p, people)
 			}
 		}
-		lines = append(lines, StyleCyan.Render("  Activity: "+ansi.Truncate(label, max(1, width-25), "…")+" · Esc clears"))
+		lines = append(lines, StyleCyan.Render("  Activity: "+ansi.Truncate(label, max(1, width-25), "…")+" · Esc back"))
 	}
 	if m.glance.frame.relatedFromID != "" {
 		label := "Commits touching both areas"

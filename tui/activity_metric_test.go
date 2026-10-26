@@ -103,7 +103,7 @@ func TestRepositoryRankingUsesFullHeightAndPagesByVisibleRows(t *testing.T) {
 		if m.selectedRepository(rows) != min(page, len(rows)-1) {
 			t.Fatal("repository paging skipped more than the visible rows")
 		}
-		if m.width == 120 && m.height == 36 && page != 26 {
+		if m.width == 120 && m.height == 36 && page != m.height-screenHeaderRows-screenFooterRows-2 {
 			t.Fatal("full-height repository board reserved a selected preview")
 		}
 	}
