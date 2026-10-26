@@ -160,10 +160,14 @@ func TestViewStatesRender(t *testing.T) {
 
 	t.Run("failed-repos-warning", func(t *testing.T) {
 		m := modelWithData()
-		m.failedRepos = []string{"brokenrepo"}
+		m.failedRepos = []string{"engine"}
+		m.scannedAt = map[string]time.Time{"compiler": time.Now(), "engine": time.Now()}
 		out := m.View()
-		if !strings.Contains(out, "Local: STALE") || !strings.Contains(out, "Update errors: 1") || !strings.Contains(out, "e details") {
+		if !strings.Contains(out, "Git: STALE") || !strings.Contains(out, "e status") {
 			t.Errorf("aggregate view missing failed-repo warning:\n%s", out)
+		}
+		if details := strings.Join(m.dataStatusLines(m.width), "\n"); !strings.Contains(details, "1 repository updates failed") || !strings.Contains(details, "engine") {
+			t.Errorf("status details lost failed repository coverage:\n%s", details)
 		}
 	})
 }

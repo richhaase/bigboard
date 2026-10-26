@@ -502,7 +502,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openRepositoryControls()
 		return m, nil
 	}
-	if msg.String() == "e" && len(m.scanErrors) > 0 {
+	if msg.String() == "e" {
 		m.showScanErrors, m.scanErrorOffset = true, 0
 		return m, nil
 	}

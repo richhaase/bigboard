@@ -44,8 +44,8 @@ func (m Model) currentHelp() screenHelp {
 	help.sections = append([]helpSection{{"Boards", []helpBinding{
 		{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume pull requests"},
 	}}}, help.sections...)
-	if len(m.scanErrors) > 0 && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
-		help.sections = append(help.sections, helpSection{"Diagnostics", []helpBinding{{"e", "Read repository update errors"}}})
+	if !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
+		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Read Git/PR freshness, coverage and diagnostics"}}})
 	}
 	return help
 }
@@ -66,9 +66,9 @@ func (m Model) screenHelp() screenHelp {
 		}}}}
 	}
 	if m.showScanErrors {
-		return screenHelp{"Repository errors", []helpSection{{"Actions", []helpBinding{
-			{"↑ / ↓", "Scroll errors"}, {"d", "Show / hide technical details"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
-			{"e / ← / Esc", "Return to the previous screen"}, {"r", "Retry repository refresh"},
+		return screenHelp{"Data status", []helpSection{{"Actions", []helpBinding{
+			{"↑ / ↓", "Scroll freshness and coverage"}, {"d", "Show / hide repository diagnostics"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
+			{"e / ← / Esc", "Return to the previous screen"}, {"r", "Refresh Git and PRs"},
 		}}}}
 	}
 	if m.loading {

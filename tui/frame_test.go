@@ -54,8 +54,8 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 						}
 						return
 					}
-					if !strings.Contains(lines[3], "Local:") || !strings.Contains(lines[4], "PR cache:") {
-						t.Fatal("freshness rows moved or disappeared")
+					if !strings.Contains(lines[3], "Git") || !strings.Contains(lines[3], "PR") || !strings.Contains(lines[4], "────") {
+						t.Fatal("compact status row moved or disappeared")
 					}
 					if !strings.Contains(lines[m.height-2], "? help") || !strings.Contains(lines[m.height-3], "────") {
 						t.Fatal("footer is not pinned to the bottom")
@@ -88,15 +88,18 @@ func TestStatisticsFrameUsesAllIncludedRepositoryFreshness(t *testing.T) {
 	m.prState.repositories["/web"] = "org/web"
 	m.prState.snapshots["org/web"] = prSnapshot{err: gh.ErrRateLimited}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Local: STALE") || !strings.Contains(view, old.Local().Format("Jan 02 15:04 MST")) || !strings.Contains(view, "PR cache: STALE") {
+	if !strings.Contains(view, "Git: STALE") || !strings.Contains(view, "PRs: STALE") {
 		t.Fatal("selected repository masked stale data elsewhere")
+	}
+	if details := ansi.Strip(strings.Join(m.dataStatusLines(m.width), "\n")); !strings.Contains(details, old.Local().Format("Jan 02 15:04:05 MST")) || !strings.Contains(details, "web") {
+		t.Fatal("status details lost the oldest scan or failing repository")
 	}
 	m.excludedRepos["/web"] = true
 	if view = ansi.Strip(m.View()); strings.Contains(view, "STALE") {
 		t.Fatal("excluded repository spoiled freshness")
 	}
 	delete(m.scannedAt, "/empty")
-	if !strings.Contains(m.View(), "Local: PARTIAL") {
+	if !strings.Contains(m.View(), "Git: PARTIAL") {
 		t.Fatal("missing local scan was presented as current")
 	}
 }
@@ -149,7 +152,7 @@ func TestSwitchingViewsPreservesGlobalStatusAndCoverage(t *testing.T) {
 	m := prFixture()
 	m.width, m.height = 220, 50
 	m.loadedRepos = m.loadedRepos[:2]
-	m.failedRepos = []string{"unavailable-repository"}
+	m.failedRepos = []string{"empty"}
 	m.staleRepos["/empty"] = true
 	m.prState.snapshots = nil
 	m.prState.loading = true
@@ -163,11 +166,14 @@ func TestSwitchingViewsPreservesGlobalStatusAndCoverage(t *testing.T) {
 		t.Fatal("coverage text or indentation differs between views")
 	}
 	for _, lines := range [][]string{worklist, leaderboard} {
-		if !strings.Contains(lines[0], "2/3 repos") || !strings.Contains(lines[3], "STALE") || !strings.Contains(lines[3], "Update errors: 1") {
+		if !strings.Contains(lines[0], "2/3 repos") || !strings.Contains(lines[3], "STALE") {
 			t.Fatal("global header masked a failed repository")
 		}
 		if strings.Contains(strings.Join(lines[screenHeaderRows:], "\n"), "update failed") {
 			t.Fatal("global warning was duplicated in one screen body")
 		}
+	}
+	if details := strings.Join(m.dataStatusLines(m.width), "\n"); !strings.Contains(details, "1 repository updates failed") || !strings.Contains(details, "empty") {
+		t.Fatal("global status details lost failed repository coverage")
 	}
 }

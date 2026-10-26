@@ -60,39 +60,18 @@ func scanErrorSize(width, height int) (int, int) {
 
 func (m Model) scanErrorModalLines() ([]string, int, int) {
 	panelWidth, page := scanErrorSize(m.width, m.height)
-	m.width = panelWidth
-	return m.scanErrorLines(), panelWidth, page
+	return m.dataStatusLines(panelWidth), panelWidth, page
 }
 
 func (m Model) renderScanErrors(background string, width, height int) string {
 	if width < 30 || height < 10 {
-		return fitGlanceLines([]string{"Repository update errors", "Resize to read errors", "Esc closes · r retries"}, width, height)
+		return fitGlanceLines([]string{"Data status", "Resize to read status", "Esc closes · r refreshes"}, width, height)
 	}
 	m.width, m.height = width, height
 	lines, panelWidth, page := m.scanErrorModalLines()
-	count := 0
-	for _, repo := range m.repositories {
-		if m.scanErrors[repo.ID] != "" {
-			count++
-		}
-	}
-	if len(lines) == 0 {
-		lines = strings.Split(ansi.Wrap("All repository update errors have cleared.", panelWidth-4, ""), "\n")
-	}
 	offset := max(0, min(m.scanErrorOffset, len(lines)-page))
 	end := min(len(lines), offset+page)
-	repositories := fmt.Sprintf("%d repositories", count)
-	if count == 1 {
-		repositories = "1 repository"
-	}
-	state := repositories + " · update errors"
-	if count == 0 {
-		state = "Updates recovered"
-	}
-	if m.refreshing {
-		state = "Refreshing… · " + repositories
-	}
-	content := []string{StyleTitle.Render("Repository update errors"), StyleDimWhite.Render(ansi.Truncate(state, panelWidth-4, "…")), ""}
+	content := []string{StyleTitle.Render("Data status"), StyleDimWhite.Render(ansi.Truncate("All tracked repositories · independent of view filters", panelWidth-4, "…")), ""}
 	content = append(content, lines[offset:end]...)
 	for len(content) < min(page, len(lines))+3 {
 		content = append(content, "")
@@ -101,11 +80,14 @@ func (m Model) renderScanErrors(background string, width, height int) string {
 	if panelWidth < 60 {
 		progress = fmt.Sprintf("%d–%d/%d · ↑↓ scroll · ? help", offset+1, end, len(lines))
 	}
-	details := "d details"
+	details := "d diagnostics"
+	if panelWidth < 60 {
+		details = "d more"
+	}
 	if m.scanErrorDetails {
 		details = "d less"
 	}
-	content = append(content, "", StyleDimWhite.Render(ansi.Truncate(progress, panelWidth-4, "…")), StyleCyan.Render("Esc close · "+details+" · r retry"))
+	content = append(content, "", StyleDimWhite.Render(ansi.Truncate(progress, panelWidth-4, "…")), StyleCyan.Render("Esc close · "+details+" · r refresh"))
 	return renderCenteredModal(background, content, panelWidth, width, height)
 }
 
