@@ -48,9 +48,10 @@ func TestScanErrorViewScrollsLongDiagnosticAndPreservesNavigation(t *testing.T) 
 	m.scanErrors = map[string]string{"/api": strings.Repeat("explanation ", 100) + "FINAL CAUSE"}
 	selected := m.selectedRepoID
 	m, _ = applyLocal(t, m, key("e"))
+	m, _ = applyLocal(t, m, key("d"))
 	m, _ = applyLocal(t, m, tea.KeyMsg{Type: tea.KeyEnd})
-	if !strings.Contains(m.View(), "FINAL CAUSE") {
-		t.Fatal("cannot inspect end of long diagnostic")
+	if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(ansi.Strip(m.View())), "FINALCAUSE") {
+		t.Fatalf("cannot inspect end of long diagnostic (%d):\n%s", m.scanErrorOffset, ansi.Strip(m.View()))
 	}
 	m, _ = applyLocal(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.showScanErrors || m.selectedRepoID != selected {
@@ -65,5 +66,60 @@ func TestSearchTypingDoesNotOpenScanErrors(t *testing.T) {
 	m, _ = applyLocal(t, m, key("e"))
 	if m.showScanErrors {
 		t.Fatal("typing search text opened diagnostics")
+	}
+}
+
+func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
+	for _, board := range []string{"w", "l", "p"} {
+		for _, size := range [][2]int{{40, 12}, {80, 24}, {160, 48}} {
+			m := boardLayoutFixture()
+			m.width, m.height = size[0], size[1]
+			m = keyboardContractPress(t, m, board, "down")
+			before := ansi.Strip(m.View())
+			m.scanErrors = map[string]string{m.repositories[0].ID: "partial clone /example/cache/project could not be scanned with automatic fetching disabled: exit status 128: fatal: missing object END-OF-DIAGNOSTIC"}
+			m = keyboardContractPress(t, m, "e")
+			view := ansi.Strip(m.View())
+			if !strings.Contains(view, "Repository update errors") || !strings.Contains(view, "╭") || strings.Contains(view, "/example/cache") {
+				t.Fatalf("%s/%v did not render the summary modal:\n%s", board, size, view)
+			}
+			lines := strings.Split(view, "\n")
+			if len(lines) != m.height {
+				t.Fatal("modal changed terminal height")
+			}
+			for _, line := range lines {
+				if ansi.StringWidth(line) > m.width {
+					t.Fatal("modal overflowed terminal width")
+				}
+			}
+			if size[0] >= 80 && !strings.Contains(view, "BIGBOARD /") {
+				t.Fatal("modal replaced the underlying board")
+			}
+			m = keyboardContractPress(t, m, "d", "end")
+			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(ansi.Strip(m.View())), "END-OF-DIAGNOSTIC") {
+				t.Fatalf("%s/%v technical details are not fully accessible (%d):\n%s", board, size, m.scanErrorOffset, ansi.Strip(m.View()))
+			}
+			m = keyboardContractPress(t, m, "?", "esc")
+			if !m.showScanErrors || !m.scanErrorDetails {
+				t.Fatal("contextual help lost diagnostic state")
+			}
+			m = keyboardContractPress(t, m, "esc")
+			m.scanErrors = nil
+			if ansi.Strip(m.View()) != before {
+				t.Fatal("closing modal changed board state")
+			}
+		}
+	}
+}
+
+func TestScanErrorRefreshRetainsModal(t *testing.T) {
+	m := boardLayoutFixture()
+	m.width, m.height = 80, 24
+	m.scanErrors = map[string]string{m.repositories[0].ID: "fetch failed"}
+	m = keyboardContractPress(t, m, "p", "down", "e")
+	next, cmd := m.Update(keyboardContractKey("r"))
+	refreshed := next.(Model)
+	defer refreshed.Close()
+	if cmd == nil || !refreshed.refreshing || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "Refreshing…") {
+		t.Fatal("refresh lost the modal or its board selection")
 	}
 }

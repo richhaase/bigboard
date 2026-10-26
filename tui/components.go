@@ -340,8 +340,8 @@ func RenderHelpBar(ctx HelpContext) string {
 			{"/", "find"},
 			{"s", sortDesc},
 			{"b", botsDesc},
-			{"r", "repos"},
-			{"R", "refresh"},
+			{"i", "repos"},
+			{"r", "refresh"},
 			{"q", "quit"},
 		}
 	}

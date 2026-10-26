@@ -26,39 +26,37 @@ func (m Model) renderWorklist(width, height int) string {
 	wide := width >= 110 && height >= 28
 	inner := width - 4
 	scope := "REPOSITORIES"
-	if repo, ok := m.areaRepository(); ok {
-		scope = displayText(repo.Name) + " / WORK AREAS"
+	if _, ok := m.areaRepository(); ok {
+		scope = "WORK AREAS"
 	}
-	heading := scope + " · " + m.overviewSortLabel()
-	lines = append(lines, StyleTitle.Render("  "+heading))
 	listBudget := m.worklistPageSize()
-	if wide {
-		lines = append(lines, "  "+m.worklistColumns(inner))
-	}
 	start := max(0, min(selected-listBudget/2, len(rows)-listBudget))
 	end := min(len(rows), start+listBudget)
+	lines = append(lines, boardListHeading(scope, m.overviewSortLabel(), nil, start, end, len(rows), width))
+	if wide {
+		lines = append(lines, "  "+m.worklistColumns(inner))
+	} else if inner >= 66 {
+		a := (inner - 11) / 2
+		p := inner - a - 10
+		lines = append(lines, boardColumns("  "+padCells("REPO / AREA", a)+" "+padCells("LAST AUTHOR +OTHERS", p)+" "+rightCells("AGE", 6), width))
+	} else {
+		lines = append(lines, boardColumns("  "+padCells("REPO / AREA", max(1, inner-9))+" "+rightCells("AGE", 6), width))
+	}
+
 	for i := start; i < end; i++ {
 		lines = append(lines, m.worklistRow(rows[i], i == selected, inner, wide)...)
 	}
 	if len(rows) == 0 {
 		empty := "No matching names. Esc clears search."
 		if m.glanceQuery() == "" {
-			empty = "No local activity or known PRs. t range · r repos"
+			empty = "No local activity or known PRs. t range · i repos"
 			if m.areaRepoID != "" {
 				empty = "No work-area activity. t range · Esc back"
 			}
 		}
 		lines = append(lines, "  "+empty)
 	}
-	position := "0/0"
-	if len(rows) > 0 {
-		position = fmt.Sprintf("%d–%d/%d", start+1, end, len(rows))
-	}
-	qualifier := " · +N other contributors in range"
-	if width < 70 {
-		qualifier = " · +N others in range"
-	}
-	lines = append(lines, StyleDimWhite.Render("  "+position+qualifier))
+
 	if wide && len(rows) > 0 {
 		lines = append(lines, "  "+worklistRule.Render(strings.Repeat("─", inner)))
 		preview := m
@@ -127,16 +125,27 @@ func (m Model) worklistPRFreshness(id string) string {
 	return line
 }
 
-func worklistColumnWidths(width int) (area, author, subject, age int) {
+func (m Model) worklistColumnWidths(width int) (area, author, subject, prs, age int) {
 	area = max(18, width/5)
 	author = max(18, width/6)
 	age = 6
-	subject = max(1, width-area-author-age-5)
+	if len(m.allPRs()) > 0 {
+		prs = 30
+	}
+	gaps := 5
+	if prs > 0 {
+		gaps++
+	}
+	subject = max(1, width-area-author-prs-age-gaps)
 	return
 }
 func (m Model) worklistColumns(width int) string {
-	a, p, s, t := worklistColumnWidths(width)
-	return StyleDimWhite.Render("  " + padCells("REPO / AREA", a) + " " + padCells("LAST AUTHOR +OTHERS", p) + " " + padCells("LATEST COMMIT", s) + " " + padCells("AGE", t))
+	a, p, s, pr, t := m.worklistColumnWidths(width)
+	columns := "  " + padCells("REPO / AREA", a) + " " + padCells("LAST AUTHOR +OTHERS", p) + " " + padCells("LATEST COMMIT", s)
+	if pr > 0 {
+		columns += " " + padCells("PRs", pr)
+	}
+	return StyleDimWhite.Render(columns + " " + padCells("AGE", t))
 }
 func worklistLastAuthor(r repositoryActivity) string {
 	if len(r.people) == 0 {
@@ -161,15 +170,17 @@ func worklistAuthorCell(r repositoryActivity, width int) string {
 	return padCells(ansi.Truncate(worklistLastAuthor(r), max(1, width-ansi.StringWidth(suffix)), "…")+suffix, width)
 }
 func (m Model) worklistAge(at time.Time, repoID string) string {
+	return activityAge(at, m.scannedAt[repoID])
+}
+
+func activityAge(at, ref time.Time) string {
 	if at.IsZero() {
 		return "—"
 	}
-	// Each row uses its own repository's retained scan time. A newer scan in
-	// another repository cannot make stale local evidence appear more current.
-	ref := m.scannedAt[repoID]
 	if ref.IsZero() {
 		return at.Local().Format("Jan02")
 	}
+
 	if at.After(ref) {
 		return "future"
 	}
@@ -221,17 +232,21 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 	}
 	var lines []string
 	if wide {
-		a, p, s, t := worklistColumnWidths(width)
+		a, p, s, pr, t := m.worklistColumnWidths(width)
+		signal := ""
 		if len(m.scopePRs(r.repo.ID)) > 0 {
-			signal := m.worklistSignal(m.worklistPRSignal(r.repo.ID))
-			subject = padCells(subject, max(1, s-27)) + "  " + padCells(signal, min(25, s-3))
+			signal = m.worklistSignal(m.worklistPRSignal(r.repo.ID))
 		}
-		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + padCells(subject, s) + " " + padCells(m.worklistAge(r.latest, id), t)}
+		line := cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + padCells(subject, s)
+		if pr > 0 {
+			line += " " + padCells(signal, pr)
+		}
+		lines = []string{line + " " + padCells(m.worklistAge(r.latest, id), t)}
 	} else if width >= 66 {
 		a := (width - 11) / 2
 		p := width - a - 10
 		if len(m.scopePRs(r.repo.ID)) > 0 {
-			subject = padCells(subject, width-29) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), 26)
+			subject = padCells(subject, width-33) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), 30)
 		}
 		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + padCells(subject, width-2)}
 	} else {
@@ -248,9 +263,7 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 		}
 		lines[i] = "  " + line
 	}
-	if !wide && width >= 66 {
-		lines = append(lines, "")
-	}
+
 	return lines
 }
 
@@ -265,12 +278,12 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · v repo PRs · R refresh · q quit"
+	footer := "↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · v repo PRs · r refresh · q quit"
 	if detail {
-		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · v repo PRs · R refresh"
+		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · v repo PRs · r refresh"
 	}
 	if width >= 70 && width < 110 {
-		footer = "v repo PRs · / find · ↑↓ select · → open · R refresh"
+		footer = "v repo PRs · / find · ↑↓ select · → open · r refresh"
 		if detail {
 			footer = "←/Esc back · v repo PRs · Tab lens · → evidence"
 		}
@@ -281,16 +294,12 @@ func (m Model) worklistFinish(lines []string, width, height int, detail bool) st
 			footer = "←/Esc back · ↑↓ select"
 		}
 	}
-	if m.glance.searching || m.glanceQuery() != "" {
-		footer = "/ " + displayText(m.glanceQuery())
-		if m.glance.searching {
-			footer = "F1 help · " + footer + " · Enter accept · Esc clear"
-		} else {
-			footer = "? help · " + footer + " · Esc clear"
-		}
+	if m.glance.searching {
+		footer = "F1 help · Enter accept · Esc clear"
 	} else {
 		footer = "? help · " + footer
 	}
+
 	return screenFinish(lines, footer, m.screenCoverage(), width, height)
 }
 
@@ -298,5 +307,9 @@ func (m Model) worklistPageSize() int {
 	if m.width >= 110 && m.height >= 28 {
 		return max(3, (m.height-19)/2)
 	}
-	return max(1, (m.height-11)/3)
+	rowHeight := 3
+	if m.width-4 >= 66 {
+		rowHeight = 2
+	}
+	return max(1, (m.height-screenHeaderRows-screenFooterRows-3)/rowHeight)
 }

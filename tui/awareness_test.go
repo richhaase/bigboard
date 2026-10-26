@@ -81,7 +81,7 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 	if m.personID != "" || m.glance.frame.tab != glancePeople {
 		t.Fatal("escape must clear focus")
 	}
-	m = pressAwareness(m, "r")
+	m = pressAwareness(m, "i")
 	m = pressAwareness(m, "enter")
 	if m.viewMode != ViewAwareness {
 		t.Fatal("overlay lost origin view")

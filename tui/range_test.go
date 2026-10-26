@@ -81,7 +81,7 @@ func TestRangeCustomValidationAndSharedFiltering(t *testing.T) {
 	}
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate, ViewOperative} {
 		m.viewMode = view
-		if !strings.Contains(ansi.Strip(m.viewContent()), "Range: 21 days · t to change") {
+		if !strings.Contains(ansi.Strip(m.viewContent()), "Range: 21 days") {
 			t.Fatalf("view %v does not show custom range", view)
 		}
 	}

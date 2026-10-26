@@ -44,6 +44,16 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 							t.Fatalf("line exceeds %d columns: %s", m.width, line)
 						}
 					}
+					if screen == "PR detail" {
+						plain := ansi.Strip(raw)
+						if !strings.Contains(plain, "╭") || !strings.Contains(plain, "PR #7") || !strings.Contains(plain, "Esc close") {
+							t.Fatal("PR detail lost its modal frame")
+						}
+						if profile == termenv.Ascii && strings.Contains(raw, "\x1b[") {
+							t.Fatal("plain modal contains ANSI styling")
+						}
+						return
+					}
 					if !strings.Contains(lines[2], "Local:") || !strings.Contains(lines[3], "PRs:") {
 						t.Fatal("freshness rows moved or disappeared")
 					}

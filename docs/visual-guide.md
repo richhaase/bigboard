@@ -63,7 +63,7 @@ does not scan Git, fetch objects, or refresh PR data. The startup default remain
 *Compact overview, 80 × 30. Six areas fit on this page. The second line preserves
 the concrete commit subject rather than compressing several narrow panels.*
 
-At 80 columns, each item uses two content lines plus spacing. `Enter` replaces
+At 80 columns, each item uses two content lines. `Enter` replaces
 the list with the selected area's evidence; `Esc` restores its selection and
 scroll position. `PgUp/PgDown` pages through Worklist lists, and `Home/End`
 selects their first/last item.
@@ -157,7 +157,7 @@ cells. Rename/copy origins and generated-file exclusions are labeled when presen
 
 `↑/↓` scrolls lines. `PgUp/PgDown` or `Home/End` moves farther.
 `←` or `Esc` returns to Activity; `Tab/Shift+Tab` leaves for the next/previous
-lens. `R` refreshes directly from the inspector. Return to a list or lens before changing local filters. The
+lens. `r` refreshes directly from the inspector. Return to a list or lens before changing local filters. The
 inspector's “Last updated” is the same retained local scan time called “Local” in
 Worklist. A refresh that removes the commit cannot silently retarget this
 inspector to a different commit.
@@ -167,7 +167,9 @@ inspector to a different commit.
 **Local** is the last successful scan for the selected repository. A failed scan
 retains previous evidence with **STALE** shown before the name. **Updating…**
 keeps the current view usable during a refresh. `e` opens scan-error details when
-present; that overlay supports scrolling and `R` to retry.
+present. The centered modal keeps the board visible behind it, with a heading
+and short summary per repository. `d` expands full technical details; arrows,
+paging, and Home/End scroll, `r` retries, and Esc returns to the unchanged board.
 
 **PRs** describes the selected repository's independent all-open snapshot. A
 failed or incomplete request remains **STALE**, **PARTIAL**, or **unavailable**.
@@ -180,20 +182,52 @@ fetch when known and space permits. Unknown inventory is never shown as zero;
 Lowercase `p` opens PRs across all included repositories. `f` chooses a
 repository scope, and Worklist's `v` opens PRs for its selected repository.
 Both paths use the same PR board. Repository scope is separate from global
-inclusion (`r`); PRs use all open dates, independent of local history filters.
+inclusion (`i`); PRs use all open dates, independent of local history filters.
 Plain `p` restores all-repository scope. `/` searches repository, title, author,
 or PR number; `s` selects a sort and `S` reverses it.
 
-Enter / right opens details. Arrows, paging, and Home/End navigate lists or
+Enter / right opens a centered detail modal over the list. It separates the
+title and status fields from coverage, reviewer, affected-area, and file sections.
+PR identity and partial/stale warnings remain visible while scrolling.
+Arrows, paging, and Home/End navigate lists or
 scroll details. Left / Esc returns one level, clearing search and repository
 scope on the way to the PR root. At a board root, back stays on that board.
-`o` opens a valid canonical PR URL in your browser. `R` refreshes repository
+`o` opens a valid canonical PR URL in your browser. `r` refreshes repository
 history and PR context from any board or detail, including the commit inspector.
 
 GitHub context uses an already installed and authenticated `gh` CLI. Startup and
-`R` fetch included repositories' remote-tracking refs before offline scans;
+`r` fetch included repositories' remote-tracking refs before offline scans;
 local branches and working trees remain untouched. Remote requests retain their
 existing API budgets and cooldowns. There is no timer refresh or automatic retry.
+
+## Shared list layout
+
+The main boards align their list heading, column labels, and first data row.
+The heading shows sort and visible range; scope and accepted search text stay
+in the shared row above the freshness indicators. Leaderboard totals are a
+compact heading summary. Worklist keeps its selected-repository evidence pane,
+and known PR signals have a labeled PRs column.
+
+PR rows separate PR number, state, and title, and reserve review, checks, and
+updated-age fields. `◇` and a subdued title identify drafts; `●` identifies
+open non-drafts. Approved reviews and passing checks are green. Wide lists put the author
+in a selected-PR preview below the table, leaving more room for titles. The preview
+appears at 70×24 and above, keeps at least three list entries visible, and shows
+the full repository identity, wrapped title, author, draft state, and separate
+review/check states. Long titles continue in Enter detail. Repository labels
+omit redundant owners only when the remaining names are unambiguous.
+Filter pickers are centered modals over the board, with category tabs, a search
+field, and separate selected-row and applied-value indicators. They use
+`f` repository, `a` author, `v` review, `c` checks, and `d`
+draft/open state. They combine with text search; `/` searches picker options,
+Tab changes category, Enter applies, and Esc cancels. `x` clears all PR filters.
+At 80 columns the title
+and metadata occupy separate lines; at 40 columns status and age use a third
+line. Commands stay in the command footer, while coverage occupies the final
+row. The compact footer groups board navigation, contextual actions, and
+help/refresh, with bright keys and quieter labels. Extra shortcuts stay in `?`
+help. Optional hints disappear as whole hints instead of being clipped.
+Lowercase `r` refreshes, while `i` opens global repository inclusion.
 
 ## Contributor statistics
 
@@ -214,8 +248,8 @@ open the leaderboard, Worklist, and all included PRs from either statistics view
 Both statistics views use `t` for the local range. `→` opens the
 selected contributor, `←` returns, and `←` at the leaderboard stays there.
 
-Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`r`),
-and refresh (`R`) live on the statistics leaderboard. Worklist's lens keys
+Sorting (`s/S`), name search (`/`), bot toggles (`b`), repository controls (`i`),
+and refresh (`r`) live on the statistics leaderboard. Worklist's lens keys
 remain specific to Worklist. See the [view-specific controls](../README.md#controls)
 for search, quit, and overlay behavior.
 

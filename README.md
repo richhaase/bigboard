@@ -7,7 +7,7 @@ A terminal situational-awareness board for seeing who has worked where across yo
 *Worklist at 120 × 36, with `tui` selected in Bigboard's own public Git history.
 The lower pane shows the contributors, commits, and related areas behind that
 selection. The capture omits `gh`, so PR context is
-shown as unavailable rather than zero. Local and PR snapshots refresh on launch or `R`.*
+shown as unavailable rather than zero. Local and PR snapshots refresh on launch or `r`.*
 
 [Take the visual tour](docs/visual-guide.md) for the views, navigation, and how to
 read the counts. [Controls](#controls) · [Configuration](#config-file) ·
@@ -135,10 +135,10 @@ The longest matching prefix wins; unmatched paths keep automatic groups. Names
 must be unique within a repository, and one prefix cannot name two areas.
 The existing `depth` setting still controls repository discovery only.
 
-The board updates local repository data only on launch and when you press `R`.
+The board updates local repository data only on launch and when you press `r`.
 There is no periodic auto-refresh. “Local” shows the last successful local
 refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh.
-Startup and `R` fetch included repositories from `origin`, then scan local history
+Startup and `r` fetch included repositories from `origin`, then scan local history
 and request GitHub PR context subject to the PR cooldown described below. Export
 scans cached history without fetching. Fetches update remote-tracking branches only;
 local branches, tags, working trees, and submodules stay untouched. Repositories
@@ -172,7 +172,7 @@ Only a supported GitHub `origin` is used, with no upstream guessing.
 PR summaries appear beside repositories and work areas when width permits.
 Press lowercase `p` for all included repositories, `f` within PRs to choose one
 repository, or `v` from Worklist for its selected repository. Enter opens a
-scrollable detail view; left / Esc returns one level. Details show the canonical link, GitHub author and reviewers,
+scrollable detail modal over the retained PR list; left / Esc closes it. Details show the canonical link, GitHub author and reviewers,
 aggregate review decision, check rollup, mergeability and update time. GitHub
 handles remain separate from local Git contributor identities. `UNKNOWN` is not
 approval or merge readiness; “updated” includes any PR activity.
@@ -184,13 +184,13 @@ including across duplicate local clones. PRs remain independent of local date,
 contributor and bot filters and never enter commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
-`R` fetches repository history and refreshes PR context, including inside the PR
+`r` fetches repository history and refreshes PR context, including inside the PR
 board. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
 join an in-flight remote refresh rather than canceling and restarting it. Excluded
 repositories are not fetched. The entire remote refresh shares a 128-request cap;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
-exponential cooldowns when no retry time is available. The PR board status shows when `R`
+exponential cooldowns when no retry time is available. The PR board status shows when `r`
 can request data again; no background retry runs. There is no polling or disk cache,
 so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
@@ -209,10 +209,48 @@ origins are reported in the PR board without suppressing local history.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on the leaderboard with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and `R` fetch included repositories before scanning; export uses cached history. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
+- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and `r` fetch included repositories before scanning; export uses cached history. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
 - **Calendar dates** use your local timezone for active days, monthly totals, first/last dates, and heatmaps. Future-dated commits remain counted; ALL includes every collected commit and recent windows retain their existing lower-bound filtering. Churn remains removals/additions, with `0.00` when additions are zero.
 - **Incomplete history** is flagged for shallow clones. Boundary line counts are unknown, shown as `?` or a known subtotal followed by `?`. A complete copy of the same commit can supply its missing counts. JSON export keeps numeric known subtotals and includes `unknown_line_commits` on contributor/repository objects when nonzero; stderr reports shallow repositories. Partial clones with missing objects are reported as scan failures instead of downloading data.
+
+## Board layout
+
+Worklist, Leaderboard, and PRs share the title, scope/search row, separate local
+and PR freshness rows, and pinned footer. Their list headings show the active
+sort and visible row range in the same place, followed by column labels and rows.
+Search text stays in the scope row while typing and after acceptance.
+
+Leaderboard totals use a compact summary in its list heading. PRs use columns
+for repository, PR number, state, title, review, checks, and updated age at wide widths;
+80-column rows stack title and metadata, and 40-column rows put review/check/age
+on their own line. Titles shorten before status fields. PR ages use their
+snapshot's check time. At 70×24 and above, a selected-PR preview above the footer
+shows its full repository identity, wrapped title, author, draft state, and
+separate review/check states. Very long titles continue in Enter detail, and
+the preview reserves room for at least three list entries. Repository labels
+omit the owner only when the name is unique across included PR repositories.
+Drafts use a `◇` state marker and subdued titles; `●` identifies open non-draft
+PRs. Approved reviews and passing checks are green, independently of draft state.
+Neither signals that branch protection or merge readiness has been evaluated.
+Worklist labels its PR column explicitly and retains the
+selected repository evidence pane at 110×28 and above.
+
+PR filters combine with each other and text search: `f` repository, `a` author
+(owner), `v` review status, `c` check status, and `d` draft/open state. Pickers are
+centered modals over the retained board, with an active category tab, search
+field, highlighted cursor, and a separate checkmark for the applied value. Each picker
+supports `/` to find options, Tab/Shift+Tab to change category, Enter to apply,
+and Esc to cancel. Choose All to remove one filter, or `x` to clear all PR filters
+and search. Active filters appear in the header; narrow terminals show their
+count. Filtering uses the current snapshot without network requests or changes
+to local history filters or repository inclusion.
+
+The footer separates board navigation, a few contextual actions, and help/refresh
+into compact groups. Keys are brighter than labels. Extra shortcuts live in `?`
+help rather than expanding the footer on wide screens; narrow screens omit whole
+hints. Coverage stays on its own row. Narrow Leaderboard rows stack contributor/commit counts
+above net change and AI share.
 
 ## Controls
 
@@ -232,17 +270,25 @@ Pending dialog choices cancel when switching boards.
 | `←` / `Esc` | Clear a current filter or return one level; stay at board roots |
 | `/` | Search the current board list or Worklist lens; reopen the existing query for editing |
 | `s` / `S` | Change sort / reverse order in sortable lists |
-| `r` | Open global repository inclusion controls from any board or detail |
-| `R` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
+| `i` | Open global repository inclusion controls from any board or detail |
+| `r` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
 | `e` | Open repository update errors when present |
 | `?` / `F1` | Open contextual help |
 | `q` / `Ctrl+C` | Quit outside text entry; `Ctrl+C` always quits |
+
+Uppercase `R` remains a compatibility alias for refresh. Repository inclusion
+uses `i`, so refresh and inclusion no longer differ only by letter case.
 
 During search entry, ordinary characters, including shortcut letters and `?`,
 enter text. `Enter` accepts the filter, `Esc` clears it, and `Backspace` edits.
 `F1` opens help while typing. Help is a centered, scrollable modal: arrows,
 paging, and Home/End scroll; `Esc`, `Enter`, `?`, or `F1` dismiss it. Board keys
 can leave help directly. Dialogs own their other keys while open.
+
+`e` opens repository update errors in a centered modal over the current board.
+Repository headings and short summaries appear first; `d` expands the complete
+technical diagnostics. Arrows, paging, and Home/End scroll the modal, `r` retries,
+and Esc closes it without changing board selection or filters.
 
 ### Worklist
 
@@ -265,7 +311,7 @@ People, Activity, and Related keep their meaningful fixed ordering. In People,
 Enter opens that contributor's Activity. Related and Subareas open the selected
 evidence. The full commit inspector uses arrows and paging to scroll; `←` / `Esc`
 returns to Activity. `Tab` / `Shift+Tab` leaves it for the next / previous lens.
-`R` refreshes directly from the inspector without changing the selected commit.
+`r` refreshes directly from the inspector without changing the selected commit.
 
 ### PRs
 
@@ -276,6 +322,12 @@ to cancel. Scope is a view filter; it never changes inclusion or fetch coverage.
 Worklist's `v` enters this same board with explicit repository scope. Plain `p`
 returns to all included repositories while preserving the selected PR if visible.
 
+Enter opens a centered detail modal with a wrapped title, author and draft state,
+colored review/check fields, conflict status, and sections for coverage,
+reviewers, affected areas, and changed files. PR identity, incomplete-snapshot
+warnings, and close/browser controls stay visible while scrolling. Esc restores
+the same list selection and filters.
+
 `/` searches repository, title, author, or `#number`. `s` cycles Updated,
 Repository, Author, and Title; `S` reverses the order. Updated defaults newest
 first. The heading shows the active scope and sort; accepted search text stays
@@ -284,8 +336,8 @@ an active search, then clears repository scope. Back at the all-repository root
 stays on PRs. All lists and details support arrows, paging, and Home/End.
 
 `o` opens the selected PR in your default browser from the list or detail when
-its canonical GitHub URL is valid. Launch errors appear on the board. `R`
-refreshes repository history and PR context from list or detail. `r` changes
+its canonical GitHub URL is valid. Launch errors appear on the board. `r`
+refreshes repository history and PR context from list or detail. `i` changes
 global inclusion and returns to the same PR view.
 
 ### Leaderboard
@@ -294,7 +346,7 @@ The leaderboard aggregates included repositories in the selected local history
 range. `/` filters contributor names; `s` selects the metric and `S` reverses it.
 `b` toggles bots and `t` changes the range. Enter / right opens contributor detail.
 In detail, arrows and paging scroll the same contributor; left / Esc returns to
-the list. Select another contributor there to open their detail. `r` and `R`
+the list. Select another contributor there to open their detail. `i` and `r`
 remain available in detail. At the list root, Esc clears a search if present,
 otherwise stays there; `q` quits immediately.
 
@@ -355,7 +407,7 @@ interactive filters and inclusion changes do not rewrite the file.
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Local updates on launch or `R`, separate local/PR freshness, and retained last-good data on refresh failures
+- Local updates on launch or `r`, separate local/PR freshness, and retained last-good data on refresh failures
 - High-contrast Worklist with responsive full-width evidence and compact list-to-detail navigation
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling

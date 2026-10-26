@@ -45,13 +45,35 @@ func (m Model) screenHeader(title string, width int) []string {
 	if m.hideBots {
 		bots = "bots hidden"
 	}
-	context := "Range: " + m.rangeLabel() + " · t to change · " + bots + " · R refresh"
-	if width < 70 {
-		context = "Range: " + m.rangeLabel() + " · t to change"
+	scope := "all repos"
+	if m.showPRs && m.prRepoID != "" {
+		scope = m.prScopeLabel()
+	} else if !m.showPRs && m.viewMode == ViewAwareness {
+		if repo, ok := m.areaRepository(); ok {
+			scope = displayText(repo.Name)
+		}
+	}
+	context := "Scope: " + scope + " · Range: " + m.rangeLabel() + " · " + bots
+	query, searching := m.filterQuery, m.searching
+	if m.viewMode == ViewAwareness {
+		query, searching = m.glanceQuery(), m.glance.searching
 	}
 	if m.showPRs {
-		context = "All open PRs · independent of local date, person and bot filters"
+		context = m.prFilterContext(scope, width)
+		query, searching = m.prQuery, m.prSearching
 	}
+	if query != "" || searching {
+		cursor := ""
+		if searching {
+			cursor = "▌"
+		}
+		find := "/ " + ansi.Truncate(displayText(query), max(1, width/3), "…") + cursor
+		if m.showPRs {
+			context = m.prFilterContext(scope, width-ansi.StringWidth(find)-3)
+		}
+		context = find + " · " + context
+	}
+
 	pr := strings.TrimPrefix(m.prStatus(), "GitHub")
 	pr = strings.TrimPrefix(pr, " PRs")
 	pr = strings.TrimSpace(strings.TrimPrefix(pr, " · "))
@@ -142,11 +164,7 @@ func boardShortcuts(width int) string {
 }
 
 func screenFooter(footer string, width int) string {
-	if strings.HasPrefix(footer, "F1 help") {
-		return footer
-	}
-	footer = strings.TrimPrefix(footer, "? help · ")
-	return "? help · " + boardShortcuts(width) + " · " + footer
+	return fitFooter(footer, width)
 }
 
 func (m Model) statisticsFooter() string {
@@ -157,7 +175,7 @@ func (m Model) statisticsFooter() string {
 		if m.width < 110 {
 			return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn"
 		}
-		return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · t range · R refresh · q quit"
+		return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · t range · r refresh · q quit"
 	}
 	if m.searching {
 		return "F1 help · Enter accept · Esc clear"
@@ -168,12 +186,12 @@ func (m Model) statisticsFooter() string {
 	if m.width < 110 {
 		return "? help · ↑↓ select · →/Enter open · / find · s sort"
 	}
-	return "? help · ↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · R refresh · q quit"
+	return "? help · ↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · r refresh · q quit"
 }
 
 func (m Model) screenCoverage() string {
 	m.areaRepoID = ""
-	coverage := strings.TrimSpace(ansi.Strip(m.glanceCoverageLine()))
+	coverage := strings.ReplaceAll(strings.TrimSpace(ansi.Strip(m.glanceCoverageLine())), "shallow sample", "Shallow history")
 	if m.width < 70 {
 		bots := "bots shown"
 		if m.hideBots {
@@ -182,7 +200,7 @@ func (m Model) screenCoverage() string {
 		coverage = bots + " · " + coverage
 	}
 	if m.width >= 100 {
-		coverage += " · ages at local scan · fetch on launch and R"
+		coverage += " · ages at local scan · fetch on launch and r"
 	}
 	return coverage
 }

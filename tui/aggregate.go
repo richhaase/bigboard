@@ -112,18 +112,7 @@ func (l tableLayout) rowWidth() int {
 	return w
 }
 
-// RenderTable returns a styled leaderboard for the given authors, showing only
-// the scroll window [ScrollOffset, ScrollOffset+VisibleRows) plus a status
-// footer. Ranks and podium styling follow metric rank even when the sort is
-// ascending. Columns adapt to TableState.Width, dropping ADDED/REMOVED then the
-// impact bar as the terminal narrows.
 func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) string {
-	if len(authors) == 0 {
-		if ts.Searching || ts.Query != "" {
-			return StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", displayText(ts.Query)))
-		}
-		return StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range.")
-	}
 
 	l := resolveTableLayout(ts.Width, authors...)
 
@@ -134,9 +123,9 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		}
 	}
 
-	arrow := " ▼"
+	arrow := " ↓"
 	if ts.SortAsc {
-		arrow = " ▲"
+		arrow = " ↑"
 	}
 	colCommits, colAdded, colRemoved, colNet, colAI, colImpact := "COMMITS", "ADDED", "REMOVED", "NET", "AI%", "+/- IMPACT"
 	switch ts.SortField {
@@ -173,10 +162,16 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 	if l.showBar {
 		headerCells = append(headerCells, fmt.Sprintf("%-*s", l.barW, colImpact))
 	}
-	header := "  " + StyleDimWhite.Render(strings.Join(headerCells, " "))
-
-	separator := "  " + worklistRule.Render(strings.Repeat("─", l.rowWidth()))
-	sectionHdr := "  " + worklistRule.Render(strings.Repeat("─", max(1, ts.Width-chromeInset)))
+	header := boardColumns(strings.Join(headerCells, " "), ts.Width)
+	if ts.Width > 0 && ts.Width < 60 {
+		header = boardColumns("  # CONTRIBUTOR / COMMITS · NET / AI", ts.Width)
+	}
+	if len(authors) == 0 {
+		if ts.Searching || ts.Query != "" {
+			return header + "\n" + StyleAmber.Render(fmt.Sprintf("  ◈ NO MATCH for %q — esc to clear filter.", displayText(ts.Query)))
+		}
+		return header + "\n" + StyleAmber.Render("  ◈ NO SIGNAL — no commit data in range. Press t to change the time range.")
+	}
 
 	start := ts.ScrollOffset
 	if start < 0 {
@@ -235,10 +230,7 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 
 		aiCell := strings.Repeat(" ", l.aiW)
 		if a.AICommits > 0 {
-			label := fmt.Sprintf("%d%%", a.AIPercent())
-			if a.AIPercent() == 0 {
-				label = "<1%"
-			}
+			label := authorAIShare(a)
 			aiCell = StyleAmber.Render(fmt.Sprintf("%*s", l.aiW, label))
 		}
 		cells = append(cells, aiCell)
@@ -258,27 +250,51 @@ func (v AggregateView) RenderTable(authors []stats.AuthorStats, ts TableState) s
 		default:
 			rowStyle = StyleRowOdd
 		}
-		line = rowStyle.Render(padCells(line, max(l.rowWidth(), ansi.StringWidth(line))))
-		if i == ts.SelectedRow {
-			line = selectedRowBackground(line)
+		physical := []string{line}
+		if ts.Width > 0 && ts.Width < 60 {
+			inner := max(1, ts.Width-4)
+			commits := FormatNumber(a.Commits)
+			nameWidth := max(1, inner-6-max(7, ansi.StringWidth(commits)))
+			name := a.Name
+			if a.Bot {
+				name = ansi.Truncate(displayText(name), max(1, nameWidth-4), "…") + " BOT"
+			}
+			first := cursor + rankStr + " " + StyleAuthor.Render(padCells(displayText(name), nameWidth)) + " " + StyleNumeric.Render(rightCells(commits, max(7, ansi.StringWidth(commits))))
+			second := "     NET " + renderKnownNet(a.Net, 0, a.UnknownLineCommits) + " · AI " + authorAIShare(a)
+			physical = append([]string{first}, strings.Split(ansi.Hardwrap(second, inner, true), "\n")...)
 		}
-		rows = append(rows, "  "+line)
+		for _, physicalLine := range physical {
+			line = rowStyle.Render(padCells(physicalLine, max(l.rowWidth(), ansi.StringWidth(physicalLine))))
+			if ts.Width > 0 && ts.Width < 60 {
+				line = rowStyle.Render(padCells(physicalLine, max(1, ts.Width-4)))
+			}
+			if i == ts.SelectedRow {
+				line = selectedRowBackground(line)
+			}
+			rows = append(rows, "  "+line)
+		}
 	}
 
-	parts := []string{sectionHdr, "", header, separator}
+	parts := []string{header}
 	parts = append(parts, rows...)
-	parts = append(parts, renderTableFooter(ts, start, end, len(authors)))
 	return strings.Join(parts, "\n")
 }
 
-func renderTableFooter(ts TableState, start, end, total int) string {
-	if ts.Searching {
-		return "  " + StyleCyan.Render("/") + StyleAuthor.Render(displayText(ts.Query)) + StyleCursor.Render("▌") +
-			StyleDimWhite.Render("   (enter to apply · esc to clear)")
+func aggregateRowHeight(width int, authors []stats.AuthorStats) int {
+	if width > 0 && width < 60 {
+		height := 2
+		for _, a := range authors {
+			line := fmt.Sprintf("     NET %s · AI %s", formatLineCount(a.Net, a.UnknownLineCommits), authorAIShare(a))
+			height = max(height, 1+(ansi.StringWidth(line)+max(1, width-4)-1)/max(1, width-4))
+		}
+		return height
 	}
-	rng := fmt.Sprintf("showing %d–%d of %d", start+1, end, total)
-	if ts.Query != "" {
-		return "  " + StyleDimCyan.Render(fmt.Sprintf("filter %q · %s · esc clears", displayText(ts.Query), rng))
+	return max(1, (resolveTableLayout(width, authors...).rowWidth()+2+max(1, width)-1)/max(1, width))
+}
+
+func authorAIShare(a stats.AuthorStats) string {
+	if a.AICommits > 0 && a.AIPercent() == 0 {
+		return "<1%"
 	}
-	return "  " + StyleDimCyan.Render(rng)
+	return fmt.Sprintf("%d%%", a.AIPercent())
 }

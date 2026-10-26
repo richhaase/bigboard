@@ -26,7 +26,7 @@ func awarenessRow(line string, selected bool, index, width int) string {
 }
 func glanceCursor(selected bool) string {
 	if selected {
-		return "▸"
+		return "›"
 	}
 	return " "
 }

@@ -265,6 +265,9 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	kept := prs[:0]
 	query := strings.ToLower(m.prQuery)
 	for _, pr := range prs {
+		if !m.prFilters.matches(pr) {
+			continue
+		}
 		if m.prRepoID != "" && (m.excludedRepos[m.prRepoID] || pr.Repo != m.prState.repositories[m.prRepoID]) {
 			continue
 		}
@@ -302,7 +305,7 @@ func (m Model) prStatus() string {
 	reason := "fetch failed"
 	refreshHint := ""
 	if time.Now().Before(m.prState.nextRefresh) {
-		refreshHint = " · R after " + m.prState.nextRefresh.Local().Format("15:04:05")
+		refreshHint = " · r after " + m.prState.nextRefresh.Local().Format("15:04:05")
 	}
 	var checked time.Time
 	eligible := 0
@@ -376,7 +379,7 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	key := msg.String()
 	if !m.prDetail {
-		if row, ok := glanceMove(key, m.prRow, len(m.visiblePRs()), max(1, m.prDetailBudget()-2)); ok {
+		if row, ok := glanceMove(key, m.prRow, len(m.visiblePRs()), m.prListPageSize()); ok {
 			m.prRow = row
 			return m, nil
 		}
@@ -402,13 +405,17 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		return m.openSelectedPR()
 	case "f":
-		m.prRepoPicker, m.prRepoRow = true, 0
-		for i, repo := range m.prScopeRepositories() {
-			if repo.ID == m.prRepoID {
-				m.prRepoRow = i + 1
-				break
-			}
-		}
+		m.openPRFilter("repo")
+	case "a":
+		m.openPRFilter("author")
+	case "v":
+		m.openPRFilter("review")
+	case "c":
+		m.openPRFilter("checks")
+	case "d":
+		m.openPRFilter("state")
+	case "x":
+		m.clearPRFilters()
 	case "esc", "left":
 		if m.prDetail {
 			m.prDetail, m.prOffset = false, 0
@@ -420,6 +427,8 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selected := m.selectedPRKey()
 			m.prRepoID = ""
 			m.selectPR(selected)
+		} else if m.prFilters != (prFilters{}) {
+			m.clearPRFilters()
 		}
 	case "enter", "right":
 		if len(m.visiblePRs()) > 0 {
@@ -448,164 +457,26 @@ func (m Model) renderPRs() string {
 		return ansi.Truncate("Resize to 40×12 · Esc back · q quit", width, "…")
 	}
 	if m.prRepoPicker {
-		return m.renderPRScopePicker(width, height)
+		background := m
+		background.prRepoPicker = false
+		return m.renderPRScopePicker(background.renderPRs(), width, height)
 	}
 	title := "Pull requests"
 	if m.prRepoID != "" {
 		title += " / " + m.prScopeLabel()
 	}
 	prs := m.visiblePRs()
-	label := "OPEN PRs · " + m.prSortLabel() + " · " + m.prScopeLabel()
 	if m.prDetail && len(prs) > 0 {
-		pr := prs[min(m.prRow, len(prs)-1)]
-		label = fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
-		title += fmt.Sprintf(" / #%d", pr.Number)
+		background := m
+		background.prDetail = false
+		return m.renderPRDetailModal(background.renderPRs(), prs[max(0, min(m.prRow, len(prs)-1))], width, height)
 	}
 	lines := m.screenHeader(title, width)
-	lines = append(lines, RenderSectionHeader(label, width))
-	if len(prs) == 0 {
-		lines = append(lines, "  No PRs to display in this snapshot.")
-	} else if m.prDetail {
-		pr := prs[min(m.prRow, len(prs)-1)]
-		wrapped := m.prDetailLines(pr, width)
-		budget := m.prDetailBudget()
-		offset := max(0, min(m.prOffset, max(0, len(wrapped)-budget)))
-		lines = append(lines, wrapped[offset:min(len(wrapped), offset+budget)]...)
-	} else {
-		budget := max(1, m.prDetailBudget()-2)
-		selected := max(0, min(m.prRow, len(prs)-1))
-		start := max(0, min(selected-budget/2, len(prs)-budget))
-		for i := start; i < min(len(prs), start+budget); i++ {
-			pr := prs[i]
-			draft := ""
-			if pr.Draft {
-				draft = " DRAFT"
-			}
-			row := fmt.Sprintf("#%d%s %s · %s · %s · %s", pr.Number, draft, displayText(pr.Title), githubIdentity(pr.Author), displayText(pr.ReviewDecision), displayText(pr.CheckState))
-			row = displayText(pr.Repo) + " " + row
-			lines = append(lines, awarenessRow(glanceCursor(i == selected)+" "+row, i == selected, i, width))
-		}
-	}
-	if len(prs) == 0 || !m.prDetail {
-		for _, repo := range m.loadedRepos {
-			if m.excludedRepos[repo.ID] || m.prRepoID != "" && repo.ID != m.prRepoID {
-				continue
-			}
-			err := m.prState.errors[repo.ID]
-			if err == nil {
-				err = m.prState.snapshots[m.prState.repositories[repo.ID]].err
-			}
-			if err != nil && len(lines) < height-screenFooterRows-1 {
-				lines = append(lines, "  "+displayText(repo.Name)+": "+displayText(err.Error()))
-			}
-		}
-	}
-	help := "? help · f repo · / find · s/S sort · ↑↓ select · →/Enter open · ←/Esc back · R refresh · q quit"
-	if width < 70 {
-		help = "? help · f repo · / find · → open"
-	}
+	lines = append(lines, m.renderPRBoardRows(prs, width)...)
 	if m.prBrowserError != "" {
 		lines = append(lines, "  "+m.prBrowserError)
 	}
-	if m.prDetail {
-		help = "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · R refresh · q quit"
-	}
-	if m.prSearching {
-		help = "F1 help · Enter accept · Esc clear"
-	}
-	coverage := "All dates · " + m.prScopeLabel()
-	if m.prQuery != "" || m.prSearching {
-		coverage = "/ " + displayText(m.prQuery) + " · " + coverage
-	}
-	if len(prs) > 0 && !m.prDetail {
-		coverage += fmt.Sprintf(" · %d/%d", m.prRow+1, len(prs))
-	}
-	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
-		coverage = "o open PR in browser · " + coverage
-	}
-	return screenFinish(lines, help, coverage, width, height)
-}
-func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
-	detail := []string{fmt.Sprintf("%s #%d · %s", pr.Repo, pr.Number, pr.Title), pr.URL, "Author " + githubIdentity(pr.Author), fmt.Sprintf("Draft: %t · review: %s · checks: %s · mergeability: %s", pr.Draft, pr.ReviewDecision, pr.CheckState, pr.Mergeable), "Requested reviewers: " + strings.Join(pr.RequestedReviewers, ", "), "Updated " + pr.UpdatedAt.Local().Format("2006-01-02 15:04 MST") + " (any PR activity)"}
-	detail = append(detail, "Mergeability reports conflicts only; check rollup covers reported checks. Branch protection/readiness is not evaluated.")
-	snapshot := m.prState.snapshots[pr.Repo]
-	if !snapshot.checked.IsZero() {
-		detail = append(detail, "Snapshot checked "+snapshot.checked.Local().Format("2006-01-02 15:04:05 MST"))
-	}
-	if snapshot.err != nil || snapshot.partial {
-		detail = append(detail, "STALE/PARTIAL snapshot · retained evidence may no longer be current")
-		if !snapshot.lastGood.IsZero() {
-			detail = append(detail, "Last complete fetch "+snapshot.lastGood.Local().Format("2006-01-02 15:04:05 MST"))
-		}
-		if snapshot.err != nil {
-			detail = append(detail, snapshot.err.Error())
-		}
-	}
-	if !pr.FilesComplete {
-		detail = append(detail, "PARTIAL files · unmapped paths may touch other areas")
-	}
-	if !pr.ContextComplete {
-		detail = append(detail, "PARTIAL review/context data · unknown is not approval")
-	}
-	if !pr.PreviousPathsComplete {
-		detail = append(detail, "Rename origins unavailable · current paths shown")
-	}
-	for _, review := range pr.Reviews {
-		detail = append(detail, "Reviewer "+githubIdentity(review.Author)+": "+review.State)
-	}
-	for _, repo := range m.loadedRepos {
-		if !m.excludedRepos[repo.ID] && m.prState.repositories[repo.ID] == pr.Repo {
-			var names []string
-			for _, area := range m.prAreas(repo, pr) {
-				names = append(names, area.Name)
-			}
-			detail = append(detail, "Work areas ("+repo.Name+"): "+strings.Join(names, ", "))
-		}
-	}
-	detail = append(detail, "Changed paths:")
-	for _, file := range pr.Files {
-		path := file.Path
-		if !m.options.IncludeGenerated && git.IsGeneratedPath(file.Path) {
-			path += " [excluded]"
-		}
-		detail = append(detail, path)
-	}
-	var wrapped []string
-	for _, line := range detail {
-		line = displayText(line)
-		if line == "" {
-			wrapped = append(wrapped, "  ")
-			continue
-		}
-		for len(line) > 0 {
-			part := cutToWidth(line, max(1, width-4))
-			if part == "" {
-				break
-			}
-			wrapped = append(wrapped, "  "+part)
-			line = line[len(part):]
-		}
-	}
-
-	return wrapped
-}
-
-func (m Model) prDetailBudget() int {
-	errors := 0
-	if m.prBrowserError != "" {
-		errors = 1
-	}
-	return max(1, m.height-screenHeaderRows-1-screenFooterRows-errors)
-}
-
-func (m Model) prDetailMaxOffset() int {
-	prs := m.visiblePRs()
-	if len(prs) == 0 {
-		return 0
-	}
-	pr := prs[min(m.prRow, len(prs)-1)]
-	budget := m.prDetailBudget()
-	return max(0, len(m.prDetailLines(pr, max(1, m.width)))-budget)
+	return screenFinish(lines, m.prFooter(prs), m.prBoardCoverage(), width, height)
 }
 
 func githubIdentity(login string) string {
