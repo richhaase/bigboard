@@ -36,9 +36,27 @@ func TestScanErrorsCommitAtomicallyAndClearOnRecovery(t *testing.T) {
 	if len(m.scanErrors) != 0 || len(before) != 1 {
 		t.Fatal("recovery did not clear errors or mutated previous snapshot")
 	}
-	if !strings.Contains(m.View(), "errors have cleared") {
+	details := strings.Join(m.dataStatusLines(m.width), "\n")
+	if !m.showScanErrors || m.gitDataStatus().warning || strings.Contains(details, "permission denied") || strings.Contains(details, "repository updates failed") {
 		t.Fatal("open diagnostic view retained stale error")
 	}
+}
+
+func collectStatusPages(t *testing.T, m Model) (Model, string) {
+	t.Helper()
+	m = keyboardContractPress(t, m, "home")
+	var views []string
+	lines, _, _ := m.scanErrorModalLines()
+	for range len(lines) + 1 {
+		views = append(views, ansi.Strip(m.View()))
+		before := m.scanErrorOffset
+		m = keyboardContractPress(t, m, "pgdown")
+		if m.scanErrorOffset == before {
+			return m, strings.Join(views, "\n")
+		}
+	}
+	t.Fatal("status paging did not reach the final page")
+	return m, ""
 }
 
 func TestScanErrorViewScrollsLongDiagnosticAndPreservesNavigation(t *testing.T) {
@@ -49,9 +67,10 @@ func TestScanErrorViewScrollsLongDiagnosticAndPreservesNavigation(t *testing.T) 
 	selected := m.selectedRepoID
 	m, _ = applyLocal(t, m, key("e"))
 	m, _ = applyLocal(t, m, key("d"))
-	m, _ = applyLocal(t, m, tea.KeyMsg{Type: tea.KeyEnd})
-	if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(ansi.Strip(m.View())), "FINALCAUSE") {
-		t.Fatalf("cannot inspect end of long diagnostic (%d):\n%s", m.scanErrorOffset, ansi.Strip(m.View()))
+	var pages string
+	m, pages = collectStatusPages(t, m)
+	if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(pages), "FINALCAUSE") {
+		t.Fatalf("cannot inspect end of long diagnostic (%d):\n%s", m.scanErrorOffset, pages)
 	}
 	m, _ = applyLocal(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.showScanErrors || m.selectedRepoID != selected {
@@ -79,7 +98,7 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 			m.scanErrors = map[string]string{m.repositories[0].ID: "partial clone /example/cache/project could not be scanned with automatic fetching disabled: exit status 128: fatal: missing object END-OF-DIAGNOSTIC"}
 			m = keyboardContractPress(t, m, "e")
 			view := ansi.Strip(m.View())
-			if !strings.Contains(view, "Repository update errors") || !strings.Contains(view, "╭") || strings.Contains(view, "/example/cache") {
+			if !strings.Contains(view, "Data status") || !strings.Contains(view, "╭") || strings.Contains(view, "/example/cache") {
 				t.Fatalf("%s/%v did not render the summary modal:\n%s", board, size, view)
 			}
 			lines := strings.Split(view, "\n")
@@ -94,9 +113,11 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 			if size[0] >= 80 && !strings.Contains(view, "BIGBOARD /") {
 				t.Fatal("modal replaced the underlying board")
 			}
-			m = keyboardContractPress(t, m, "d", "end")
-			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(ansi.Strip(m.View())), "END-OF-DIAGNOSTIC") {
-				t.Fatalf("%s/%v technical details are not fully accessible (%d):\n%s", board, size, m.scanErrorOffset, ansi.Strip(m.View()))
+			m = keyboardContractPress(t, m, "d")
+			var pages string
+			m, pages = collectStatusPages(t, m)
+			if !strings.Contains(strings.NewReplacer(" ", "", "\n", "", "│", "").Replace(pages), "END-OF-DIAGNOSTIC") {
+				t.Fatalf("%s/%v technical details are not fully accessible (%d):\n%s", board, size, m.scanErrorOffset, pages)
 			}
 			m = keyboardContractPress(t, m, "?", "esc")
 			if !m.showScanErrors || !m.scanErrorDetails {
@@ -119,7 +140,7 @@ func TestScanErrorRefreshRetainsModal(t *testing.T) {
 	next, cmd := m.Update(keyboardContractKey("r"))
 	refreshed := next.(Model)
 	defer refreshed.Close()
-	if cmd == nil || !refreshed.refreshing || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "Refreshing…") {
+	if cmd == nil || !refreshed.refreshing || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "refreshing") {
 		t.Fatal("refresh lost the modal or its board selection")
 	}
 }
