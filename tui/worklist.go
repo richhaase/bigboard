@@ -12,7 +12,8 @@ import (
 var worklistRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#415665"))
 
 func (m Model) renderWorklist(width, height int) string {
-	m.normalizeActivityContributors()
+	projection := m.prepareActivityProjection()
+	m.normalizeProjectedContributors(projection)
 	if m.showPaths {
 		return m.renderCommitInspector(width, height)
 	}
@@ -20,9 +21,9 @@ func (m Model) renderWorklist(width, height int) string {
 		return m.renderWorklistDetail(width, height)
 	}
 	if m.directory.active {
-		return m.renderDirectoryBoard(width, height)
+		return m.renderDirectoryBoard(width, height, projection.rows)
 	}
-	rows := m.glanceRepositories()
+	rows := projection.rows
 	selected := m.selectedRepository(rows)
 	lines := m.worklistHeader(width)
 	wide := width >= 110 && height >= 28

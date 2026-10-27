@@ -60,6 +60,9 @@ func (m Model) filterSharedRecords(records []git.CommitRecord) []git.CommitRecor
 }
 
 func (m Model) activityFilterRecords(records []git.CommitRecord) []git.CommitRecord {
+	if len(m.activityPeople) == 0 && !m.activityHideBots {
+		return records
+	}
 	people := stats.AggregateWithOptions(records, stats.AggregateOptions{BotIdentities: m.options.BotIdentities})
 	visible := make(map[string]bool)
 	for _, person := range people {

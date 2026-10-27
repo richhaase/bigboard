@@ -113,8 +113,7 @@ func (m *Model) openDirectoryDetails(id, name string, tab int) {
 	m.personID = ""
 }
 
-func (m Model) handleDirectoryKey(key string) Model {
-	rows := m.directoryRows()
+func (m Model) handleDirectoryKey(key string, rows []activityRow) Model {
 	selected := m.selectedDirectory(rows)
 	switch key {
 	case "s":
@@ -151,14 +150,13 @@ func (m Model) handleDirectoryKey(key string) Model {
 	return m
 }
 
-func (m Model) renderDirectoryBoard(width, height int) string {
+func (m Model) renderDirectoryBoard(width, height int, rows []activityRow) string {
 	repo, _ := m.areaRepository()
 	path := m.directory.frame.path
 	if path == "" {
 		path = "."
 	}
 	lines := m.screenHeader("Activity / "+displayText(repo.Name)+" / "+displayText(path), width)
-	rows := m.directoryRows()
 	selected := m.selectedDirectory(rows)
 	page := m.worklistPageSize()
 	start := max(0, min(selected-page/2, len(rows)-page))
