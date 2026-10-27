@@ -109,7 +109,6 @@ func (m *Model) startPRRefreshWithProbe(probes *remoteProbeState) tea.Cmd {
 	provider := m.prProvider
 	managed := m.options.PrepareRepository != nil
 	snapshots := maps.Clone(m.prState.snapshots)
-	knownLogin := m.prState.login
 	aliases := maps.Clone(m.prState.aliases)
 	if aliases == nil {
 		aliases = make(map[string]string)
@@ -118,7 +117,6 @@ func (m *Model) startPRRefreshWithProbe(probes *remoteProbeState) tea.Cmd {
 		defer cancel()
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
 		msg.aliases = aliases
-		msg.login = knownLogin
 		msg.requestBudget = budget
 		if probes != nil {
 			msg.probeRequests = probes.requests
@@ -178,7 +176,7 @@ func (m *Model) startPRRefreshWithProbe(probes *remoteProbeState) tea.Cmd {
 			}
 		}
 		var results []gh.Result
-		if knownLogin == "" && (len(requests) > 0 || len(msg.results) > 0) {
+		if len(requests) > 0 || len(msg.results) > 0 {
 			before := gh.RequestCount(ctx)
 			msg.login, msg.loginErr = provider.CurrentLogin(ctx)
 			msg.accountRequests = gh.RequestCount(ctx) - before
@@ -207,9 +205,6 @@ func (m *Model) startPRRefreshWithProbe(probes *remoteProbeState) tea.Cmd {
 			}
 			msg.inventoryRequests += result.InventoryRequests
 			msg.fileRequests += result.FileRequests
-			if errors.Is(result.Err, gh.ErrAuthentication) {
-				msg.login, msg.loginErr = "", gh.ErrAuthentication
-			}
 		}
 		for id, remote := range msg.repositories {
 			if canonical := aliases[remote]; canonical != "" {

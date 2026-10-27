@@ -35,14 +35,19 @@ func (m Model) applyRediscovery(msg repositoriesRediscoveredMsg) (tea.Model, tea
 	if msg.err != nil {
 		m.discoveryErr = displayText(msg.err.Error())
 	} else {
+		selected := m.selectedPRKey()
 		excluded := normalizeExcluded(msg.repositories, msg.excluded)
-		for id := range m.excludedRepos {
+		for id, value := range m.excludedRepos {
 			if slices.ContainsFunc(msg.repositories, func(repo git.Repository) bool { return repo.ID == id }) {
-				excluded[id] = true
+				excluded[id] = value
 			}
 		}
 		m.repositories = slices.Clone(msg.repositories)
 		m.excludedRepos = excluded
+		m.selectPR(selected)
+		if m.prUI.detail && selected != m.selectedPRKey() {
+			m.prUI.detail, m.prUI.offset = false, 0
+		}
 		m.resetPending()
 	}
 	if len(m.repositories) == 0 {

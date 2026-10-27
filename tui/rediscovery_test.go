@@ -7,9 +7,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/richhaase/bigboard/git"
+	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 )
 
@@ -163,5 +166,78 @@ func TestManualRefreshDiscoversRepositoriesWhenNoneAreTracked(t *testing.T) {
 	m = runRefreshCommands(t, m, cmd)
 	if !slices.Equal(repositoryIDs(m.local.repositories), []string{"org/new"}) || !slices.Equal(fixture.prepared, []string{"org/new"}) {
 		t.Fatalf("new repository did not appear: %v", repositoryIDs(m.local.repositories))
+	}
+}
+
+func TestManualRefreshKeepsRepositoriesReincludedInRepositoryControls(t *testing.T) {
+	fixture := &rediscoveryFixture{}
+	a, b := managedRepository("org/a"), managedRepository("org/b")
+	fixture.discovery = func() ([]git.Repository, error) { return []git.Repository{a, b}, nil }
+	m := fixture.model(t, a, b)
+	m, _ = applyLocal(t, m, key("i"))
+	if rows := m.repositoryControlRows(); len(rows) == 0 || rows[m.overlayCursor].ID != "org/a" {
+		t.Fatalf("Repository controls cursor is not on org/a: %+v", rows)
+	}
+	space := tea.KeyMsg{Type: tea.KeySpace}
+	m, _ = applyLocal(t, m, space)
+	m, _ = applyLocal(t, m, space)
+	m, _ = applyLocal(t, m, key("enter"))
+	if value, exists := m.excludedRepos["org/a"]; !exists || value {
+		t.Fatalf("fixture did not store a re-included repository as false: %v", m.excludedRepos)
+	}
+	m, cmd := applyLocal(t, m, key("r"))
+	m = runRefreshCommands(t, m, cmd)
+	if m.excludedRepos["org/a"] || !slices.Equal(fixture.prepared, []string{"org/a", "org/b"}) {
+		t.Fatalf("re-included repository was excluded by rediscovery: excluded=%v prepared=%v", m.excludedRepos, fixture.prepared)
+	}
+}
+
+func TestManualRefreshPreservesOpenPRDetailAcrossRediscovery(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		listed   []string
+		selected string
+	}{
+		{"earlier repository removed", []string{"org/b", "org/c"}, "org/b#1"},
+		{"selected repository removed", []string{"org/a", "org/c"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := &rediscoveryFixture{}
+			a, b, c := managedRepository("org/a"), managedRepository("org/b"), managedRepository("org/c")
+			m := fixture.model(t, a, b, c)
+			fixture.discovery = func() ([]git.Repository, error) {
+				var repos []git.Repository
+				for _, id := range tc.listed {
+					repos = append(repos, managedRepository(id))
+				}
+				return repos, nil
+			}
+			m.prState.repositories, m.prState.snapshots = map[string]string{}, map[string]prSnapshot{}
+			for _, id := range []string{"org/a", "org/b", "org/c"} {
+				m.prState.repositories[id] = id
+				m.prState.snapshots[id] = prSnapshot{checked: time.Now(), prs: []gh.PullRequest{{Repo: id, Number: 1, Title: id, Author: "dev", UpdatedAt: time.Now()}}}
+			}
+			m.prState.nextRefresh = time.Now().Add(time.Hour)
+			m.showPRs, m.prUI.sort = true, 1
+			m.selectPR("org/b#1")
+			m.prUI.detail, m.prUI.offset = true, 2
+			if m.selectedPRKey() != "org/b#1" || m.prUI.row != 1 {
+				t.Fatalf("fixture selected %q at row %d", m.selectedPRKey(), m.prUI.row)
+			}
+			m, cmd := applyLocal(t, m, key("r"))
+			m = runRefreshCommands(t, m, cmd)
+			if m.prState.nextRefresh.Before(time.Now()) || !slices.Equal(repositoryIDs(m.repositories), tc.listed) {
+				t.Fatalf("reuse gate inactive or tracked set wrong: %v", repositoryIDs(m.repositories))
+			}
+			if tc.selected != "" {
+				if !m.prUI.detail || m.selectedPRKey() != tc.selected || m.prUI.offset != 2 {
+					t.Fatalf("detail moved to %q (open=%v)", m.selectedPRKey(), m.prUI.detail)
+				}
+				return
+			}
+			if m.prUI.detail || m.prUI.offset != 0 {
+				t.Fatalf("detail stayed open on %q after its PR disappeared", m.selectedPRKey())
+			}
+		})
 	}
 }

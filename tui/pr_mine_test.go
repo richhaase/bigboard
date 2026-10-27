@@ -146,52 +146,31 @@ func TestPRMineUnavailableHasReasonAndNeverFallsBackToAllPRs(t *testing.T) {
 	}
 }
 
-func TestPRMineLoginResolvesOncePerSessionAndAfterAuthenticationFailure(t *testing.T) {
+func TestPRMineLoginRefreshesOnceAndClearsAccountAfterFailure(t *testing.T) {
 	m := mineFixture()
-	m.prState.login = ""
 	p := &fakePRProvider{login: "viewer", result: gh.Result{Repo: "org/repo", Complete: true, PRs: m.allPRs()}}
 	m.prProvider = p
 	m.prUI.filters.mine = filterValues{prMineAuthor}
-	refresh := func() {
-		t.Helper()
-		m.prState.nextRefresh = time.Time{}
-		cmd := m.startPRRefresh()
-		if cmd == nil {
-			t.Fatal("refresh was not scheduled")
-		}
-		m.applyPRResult(cmd().(prsLoadedMsg))
-	}
 	cmd := m.startPRRefresh()
 	if m.startPRRefresh() != nil {
 		t.Fatal("active refresh was not coalesced")
 	}
 	m.applyPRResult(cmd().(prsLoadedMsg))
-	if p.logins != 1 || m.prState.login != "viewer" || m.prState.accountRequests != 0 || len(m.visiblePRs()) != 2 || m.startPRRefresh() != nil {
+	if p.logins != 1 || m.prState.login != "viewer" || len(m.visiblePRs()) != 2 || m.startPRRefresh() != nil {
 		t.Fatal("account was not resolved once per deduplicated refresh")
 	}
+	m.prState.nextRefresh = time.Time{}
 	p.login = "other"
-	for range 3 {
-		refresh()
+	m.applyPRResult(m.startPRRefresh()().(prsLoadedMsg))
+	if p.logins != 2 || m.prState.login != "other" || len(m.visiblePRs()) != 2 || m.visiblePRs()[0].Author != "other" {
+		t.Fatal("fresh account did not replace previous Mine identity")
 	}
-	if p.logins != 1 || p.fetches != 4 || m.prState.login != "viewer" || m.prState.accountRequests != 0 || !strings.Contains(m.prMineStatus(), "viewer") {
-		t.Fatalf("session account was resolved again: logins=%d fetches=%d login=%q", p.logins, p.fetches, m.prState.login)
-	}
-	p.result = gh.Result{Repo: "org/repo", Err: gh.ErrAuthentication}
-	refresh()
-	if p.logins != 1 || m.prState.login != "" || !errors.Is(m.prState.loginErr, gh.ErrAuthentication) || len(m.visiblePRs()) != 0 {
-		t.Fatal("authentication failure retained the session account")
-	}
-	p.result = gh.Result{Repo: "org/repo", Complete: true, PRs: m.allPRs()}
+	m.prState.nextRefresh = time.Time{}
 	p.loginErr = gh.ErrAuthentication
 	previousFetches := p.fetches
-	refresh()
-	if p.logins != 2 || p.fetches != previousFetches || m.prState.login != "" || !errors.Is(m.prState.loginErr, gh.ErrAuthentication) || len(m.visiblePRs()) != 0 || len(m.allPRs()) != 4 {
+	m.applyPRResult(m.startPRRefresh()().(prsLoadedMsg))
+	if p.logins != 3 || p.fetches != previousFetches || m.prState.login != "" || !errors.Is(m.prState.loginErr, gh.ErrAuthentication) || len(m.visiblePRs()) != 0 || len(m.allPRs()) != 4 {
 		t.Fatal("authentication failure retained account, repeated requests or lost stale inventory")
-	}
-	p.loginErr = nil
-	refresh()
-	if p.logins != 3 || m.prState.login != "other" || len(m.visiblePRs()) != 2 || m.visiblePRs()[0].Author != "other" {
-		t.Fatal("account was not re-resolved after the authentication failure")
 	}
 }
 
