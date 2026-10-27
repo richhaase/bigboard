@@ -104,12 +104,11 @@ func (m Model) boardFiltersLabel(width int) string {
 			query, searching = m.glanceQuery(), m.glance.searching
 		}
 	}
-	if query != "" || searching {
-		cursor := ""
-		if searching {
-			cursor = "▌"
-		}
-		parts = append(parts, "Find: "+displayText(query)+cursor)
+	if searching {
+		return inputLine("Find: ", query, max(1, width-4))
+	}
+	if query != "" {
+		parts = append(parts, "Find: "+displayText(query))
 	}
 	if len(parts) == 0 {
 		return "Filters: none · f edit"

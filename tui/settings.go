@@ -505,14 +505,31 @@ func settingsPushAge(at, now time.Time) string {
 func (m Model) settingsHelp() screenHelp {
 	if m.settings.edit != "" {
 		return screenHelp{"Settings text", []helpSection{{"Edit", []helpBinding{
-			{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Accept edit"}, {"Esc", "Cancel edit"}, {"Ctrl+C", "Quit BigBoard"},
+			{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Accept edit"}, {"Esc", "Cancel edit"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 		}}}}
+	}
+	if m.settings.busy == "saving" {
+		return screenHelp{"Saving settings", []helpSection{{"Saving", []helpBinding{{"Ctrl+C", "Quit BigBoard"}}}}}
 	}
 	back := "Previous step; cancel without saving from Sources"
 	if m.settings.required {
 		back = "Previous step; quit setup from Sources"
 	}
-	bindings := []helpBinding{{"↑ / ↓", "Select an option"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last option"}, {"Space", "Stage selection"}, {"/", "Find options"}, {"n", "Add an organization by name on the first step"}, {"A", "Select / deselect all visible repositories"}, {"r", "Retry GitHub access or repository discovery"}, {"Enter", "Continue; save and reload only on the Review step"}, {"Esc / ←", back}, {"q / Ctrl+C", "Quit BigBoard"}}
+	var bindings []helpBinding
+	if m.settings.busy == "" {
+		if m.settings.step < 2 {
+			bindings = append(bindings, helpBinding{"↑ / ↓", "Select an option"}, helpBinding{"PgUp / PgDn", "Move a page"}, helpBinding{"Home / End", "First / last option"}, helpBinding{"Space", "Stage selection"}, helpBinding{"/", "Find options"})
+			if m.settings.step == 0 {
+				bindings = append(bindings, helpBinding{"n", "Add an organization by name"}, helpBinding{"r", "Retry GitHub access"})
+			} else {
+				bindings = append(bindings, helpBinding{"A", "Select / deselect all visible repositories"}, helpBinding{"r", "Retry repository discovery"})
+			}
+			bindings = append(bindings, helpBinding{"Enter", "Continue to the next step"})
+		} else {
+			bindings = append(bindings, helpBinding{"Enter", "Save and reload the selected repositories"})
+		}
+	}
+	bindings = append(bindings, helpBinding{"Esc / ←", back}, helpBinding{"q / Ctrl+C", "Quit BigBoard"})
 	if !m.settings.required {
 		bindings = append(bindings, helpBinding{"a / c / p", "Cancel settings and switch boards"})
 	}
@@ -521,7 +538,7 @@ func (m Model) settingsHelp() screenHelp {
 
 func (m Model) renderSettings(background string, width, height int) string {
 	f := m.settings
-	if width < 40 || height < 18 {
+	if !settingsMinimum.fits(width, height) {
 		return renderCenteredModal(background, []string{"BigBoard setup / settings", "Resize to 40 columns × 18 rows", "Esc back / cancel · Ctrl+C quit"}, max(6, width-2), width, height)
 	}
 	panel, page := settingsModalSize(width, height, f.step)
@@ -564,11 +581,11 @@ func (m Model) renderSettings(background string, width, height int) string {
 		lines = append(lines, description)
 		prompt := "/ Find"
 		if f.edit == "organization" {
-			prompt = "Organization: " + displayText(f.input) + "▏"
+			prompt = inputLine("Organization: ", f.input, inner)
 		} else if f.query != "" || f.edit == "find" {
 			prompt = "/ " + displayText(f.query)
 			if f.edit == "find" {
-				prompt += "▏"
+				prompt = inputLine("/ ", f.input, inner)
 			}
 		}
 		lines = append(lines, StyleDimWhite.Render(prompt))

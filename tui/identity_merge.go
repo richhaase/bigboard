@@ -297,7 +297,7 @@ func (m *Model) remapContributorSelections(identities map[string]git.Identity) {
 
 func (m Model) renderIdentityMerge(background string, width, height int) string {
 	f := m.identityMerge
-	if width < 36 || height < 16 {
+	if !identityMinimum.fits(width, height) {
 		return renderCenteredModal(background, []string{"Contributor identities", "Resize terminal", "Esc cancel"}, max(6, width-2), width, height)
 	}
 	panel, page, rowHeight := identityMergeModalSize(width, height, f.review)
@@ -407,7 +407,7 @@ func (m Model) renderIdentityMerge(background string, width, height int) string 
 		if f.edit == "name" {
 			label = "Display name"
 		}
-		actions = label + ": " + displayText(f.input) + "▏"
+		actions = inputLine(label+": ", f.input, inner)
 		navigation = "Enter keep edit · Esc cancel edit · F1 help"
 	}
 	if f.saving {

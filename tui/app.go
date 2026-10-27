@@ -497,11 +497,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.copyStatus = ""
+	if m.blocksHiddenModalInput(msg.String()) {
+		return m, nil
+	}
 	if m.settings.open {
 		if m.settings.busy == "saving" {
 			return m.handleSettingsKey(msg)
 		}
 		if m.showHelp {
+			if !m.settings.required {
+				switch msg.String() {
+				case "a", "c", "p", "l", "w":
+					m.closeSettings()
+					return m.switchBoard(msg.String()), nil
+				}
+			}
 			return m.handleHelpKey(msg)
 		}
 		if msg.String() == "f1" || msg.String() == "?" && m.settings.edit == "" {

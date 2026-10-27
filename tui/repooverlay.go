@@ -19,7 +19,7 @@ func (m Model) renderRepoOverlay() string {
 	if height < 1 {
 		height = 24
 	}
-	if width < 30 || height < 10 {
+	if !repositoryMinimum.fits(width, height) {
 		return fitGlanceLines([]string{"Repository controls", "Resize terminal · Esc cancel"}, width, height)
 	}
 	background := m
