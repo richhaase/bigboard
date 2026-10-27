@@ -70,7 +70,7 @@ func (c *RepositoryCache) ScanRepository(ctx context.Context, repo Repository, o
 	if err := c.verify(ctx, repo, false); err != nil {
 		return nil, err
 	}
-	return ScanRepository(ctx, repo, options)
+	return c.scanCached(ctx, repo, options)
 }
 
 func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string, error) {
