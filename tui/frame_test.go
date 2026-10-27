@@ -159,11 +159,14 @@ func TestSwitchingViewsPreservesGlobalStatusAndCoverage(t *testing.T) {
 	worklist := strings.Split(ansi.Strip(m.View()), "\n")
 	m.viewMode = ViewAggregate
 	leaderboard := strings.Split(ansi.Strip(m.View()), "\n")
-	if strings.Join(worklist[1:screenHeaderRows], "\n") != strings.Join(leaderboard[1:screenHeaderRows], "\n") {
+	activityScope, _, _ := strings.Cut(worklist[1], " · Git author date")
+	contributorScope, _, _ := strings.Cut(leaderboard[1], " · commit author date")
+	if activityScope != contributorScope || !strings.Contains(worklist[1], "PR updated") || strings.Join(worklist[2:screenHeaderRows], "\n") != strings.Join(leaderboard[2:screenHeaderRows], "\n") {
 		t.Fatal("switching views changed the global scope or freshness text")
 	}
-	if worklist[m.height-1] != leaderboard[m.height-1] {
-		t.Fatal("coverage text or indentation differs between views")
+	activityCoverage := strings.Replace(worklist[m.height-1], "PRs ? incomplete/stale · ", "", 1)
+	if strings.TrimRight(activityCoverage, " ") != strings.TrimRight(leaderboard[m.height-1], " ") {
+		t.Fatalf("coverage text or indentation differs between views:\nActivity: %q\nContributors: %q", activityCoverage, leaderboard[m.height-1])
 	}
 	for _, lines := range [][]string{worklist, leaderboard} {
 		if !strings.Contains(lines[0], "2/3 repos") || !strings.Contains(lines[3], "STALE") {

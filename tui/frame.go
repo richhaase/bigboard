@@ -157,6 +157,9 @@ func (m Model) statisticsFooter() footerHints {
 func (m Model) screenCoverage() string {
 	m.areaRepoID = ""
 	coverage := strings.ReplaceAll(strings.TrimSpace(ansi.Strip(m.glanceCoverageLine())), "shallow sample", "Shallow history")
+	if m.viewMode == ViewAwareness && !m.showPRs && !m.glance.detailOpen && repositoryOverviewWidths(m.width-4).prs > 0 {
+		coverage = "PRs ? incomplete/stale · " + coverage
+	}
 	if m.width < 70 {
 		bots := "bots shown"
 		if m.boardBotsHidden() {

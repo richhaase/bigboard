@@ -126,7 +126,8 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
-	PRProvider PRProvider
+	PRProvider      PRProvider
+	PRRequestBudget int
 
 	FuzzyMatching    bool
 	IncludeGenerated bool

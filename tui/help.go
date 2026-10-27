@@ -190,7 +190,18 @@ func (m Model) screenHelp() screenHelp {
 	actions = append(actions, helpBinding{"b", "Show / hide bots"},
 		helpBinding{"i", "Repository controls: choose tracked repositories"}, helpBinding{"v", "Open PRs for this repository"},
 		helpBinding{"q / Ctrl+C", "Quit BigBoard"}, helpBinding{"r", "Refresh Git and PRs"})
-	return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}}}
+	sections := []helpSection{{"Navigate", navigation}, {"Actions", actions}}
+	if !m.glance.detailOpen {
+		sections = append(sections, helpSection{"PR counts", []helpBinding{
+			{"Open", "Known open PRs in the shared date and repository scope"},
+			{"Failing", "PRs with failing or errored checks"},
+			{"Changes", "PRs with changes requested; may also have failing checks"},
+			{"— / blank", "No open PRs / zero failing or changes-requested counts"},
+			{"?", "Incomplete or stale PR evidence; directories also need complete file lists"},
+			{"Range", "PR last-updated time; Git contributor/bot filters do not affect PR counts"},
+		}})
+	}
+	return screenHelp{title, sections}
 }
 
 func (m Model) helpLines(width int) []string {
