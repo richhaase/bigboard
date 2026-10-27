@@ -226,7 +226,15 @@ repository here does not delete its cache or write configuration.
 
 Big Board owns full bare caches of default-branch history under
 `$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git` (default cache home
-`~/.cache`). Developer checkouts are never scanned or modified. Cached repositories
+`~/.cache`). Developer checkouts are never scanned or modified. Each verified
+repository also stores disposable parsed Git records in `bigboard-scan`. Later
+launches reuse them when the branch revision, analysis options, identities,
+mailmap inputs, Git configuration/version, and object-store metadata match.
+Schema or counting changes invalidate them; missing or damaged scan files and
+cache-write failures fall back to a full local scan. A `GIT_ATTR_SOURCE` override
+also uses a full scan. The file is removed with
+its repository cache. Reuse does not certify remote freshness or advance the
+last-look bookmark; the existing fetch pass still runs. Cached repositories
 no longer listed by discovery are retained. Select one in Repository controls,
 press `d`, then Enter to explicitly confirm removal after refresh has finished.
 A group selection or exclusion does not make a listed repository removable.
@@ -320,7 +328,8 @@ a missing explicit `--config` file only after confirmation.
 
 `--export` requires valid existing configuration and a populated cache. It does
 no discovery, clone, or fetch; it exports all-time contributor statistics as JSON,
-using the same identity/counting rules and no PR data or session filters. First
+using the same identity/counting rules and no PR data or session filters. It may
+reuse or populate the disposable parsed Git scan cache. First
 and last commit dates do not let you reconstruct shorter-range totals from that
 aggregate export.
 
