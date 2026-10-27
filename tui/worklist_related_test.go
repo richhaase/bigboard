@@ -13,7 +13,7 @@ import (
 
 func TestRelatedSeparatesCommitAndContributorEvidence(t *testing.T) {
 	m := monorepoFixture()
-	m.allRecords = append(m.allRecords,
+	m.local.records = append(m.local.records,
 		git.CommitRecord{CommitID: "independent", Author: "Ada", Email: "ada@x", RepoID: "/mono", Date: time.Now(), Subject: "Independent billing work", Changes: []git.PathChange{{Path: "services/billing/other.go"}}},
 		git.CommitRecord{Author: "Ada", Email: "ada@x", RepoID: "/mono", Date: time.Now(), Subject: "No object ID", Changes: []git.PathChange{{Path: "services/auth/noid.go"}, {Path: "services/billing/noid.go"}}},
 	)
@@ -67,10 +67,10 @@ func TestWorklistSharedUnavailableStatusAndTitleSpace(t *testing.T) {
 func TestRelatedSelectionVisibleAcrossSizes(t *testing.T) {
 	m := monorepoFixture()
 	for i := 0; i < 30; i++ {
-		r := m.allRecords[0]
+		r := m.local.records[0]
 		r.CommitID = string(rune('a'+i)) + "shared"
 		r.Changes = []git.PathChange{{Path: "services/auth/session.go"}, {Path: "area" + string(rune('A'+i)) + "/file"}}
-		m.allRecords = append(m.allRecords, r)
+		m.local.records = append(m.local.records, r)
 	}
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()

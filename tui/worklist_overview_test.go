@@ -44,7 +44,7 @@ func TestRepositoryOverviewPagesWithContributorBreakdown(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {110, 28}, {120, 36}, {180, 48}} {
 		m := boardLayoutFixture()
 		m.width, m.height = size[0], size[1]
-		m.staleRepos["/sample/gateway"] = true
+		m.local.staleRepos["/sample/gateway"] = true
 		m = keyboardContractPress(t, m, "pgdown", "end")
 		view := ansi.Strip(m.View())
 		rows := m.glanceRepositories()
@@ -52,10 +52,10 @@ func TestRepositoryOverviewPagesWithContributorBreakdown(t *testing.T) {
 		panel := activityContributorsHeight(m.width, m.height)
 		listEnd := m.height - screenFooterRows - panel
 		frame := strings.Split(view, "\n")
-		if !strings.Contains(strings.Join(frame[screenHeaderRows+2:listEnd], "\n"), selected.repo.Name) || len(frame) != m.height {
+		if !strings.Contains(strings.Join(frame[screenHeaderRows+2:listEnd], "\n"), selected.label) || len(frame) != m.height {
 			t.Fatal("paging hid the selected repository or changed frame height")
 		}
-		if panel > 0 && !strings.Contains(strings.Join(frame[listEnd:], "\n"), "CONTRIBUTORS · "+selected.repo.Name) {
+		if panel > 0 && !strings.Contains(strings.Join(frame[listEnd:], "\n"), "CONTRIBUTORS · "+selected.label) {
 			t.Fatal("contributor breakdown did not follow the highlighted repository")
 		}
 		if strings.Contains(view, "SELECTED") || strings.Contains(view, "RECENT COMMITS") {
@@ -79,7 +79,7 @@ func TestActivityPanelHeightDoesNotChangeWithSelection(t *testing.T) {
 	m.width, m.height = 120, 36
 	page := m.worklistPageSize()
 	m.selectedRepoID = "/sample/gateway"
-	m.allRecords = nil
+	m.local.records = nil
 	m.recomputeAuthors()
 	view := ansi.Strip(m.View())
 	if m.worklistPageSize() != page || !strings.Contains(view, "No contributors in this scope and range.") {

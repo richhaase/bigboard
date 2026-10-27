@@ -45,7 +45,7 @@ func (m Model) filterSharedRecords(records []git.CommitRecord) []git.CommitRecor
 		included := record.RepoID != "" && m.repoInView(record.RepoID)
 		if record.RepoID == "" {
 			included = m.repoInView(record.RepoName)
-			for _, repo := range m.loadedRepos {
+			for _, repo := range m.local.repositories {
 				if repo.Name == record.RepoName && m.repoInView(repo.ID) {
 					included = true
 					break
@@ -67,23 +67,7 @@ func (m Model) activityFilterRecords(records []git.CommitRecord) []git.CommitRec
 			visible[person.ID] = true
 		}
 	}
-	canonical := make(map[string]string)
-	for _, record := range stats.UniqueRecords(records) {
-		if record.CommitID != "" {
-			canonical[record.CommitID] = stats.IdentityID(record)
-		}
-	}
-	var result []git.CommitRecord
-	for _, record := range records {
-		id := stats.IdentityID(record)
-		if record.CommitID != "" {
-			id = canonical[record.CommitID]
-		}
-		if visible[id] {
-			result = append(result, record)
-		}
-	}
-	return result
+	return stats.FilterByCanonicalIdentity(records, visible)
 }
 
 func (m Model) activityRecords() []git.CommitRecord {
@@ -136,7 +120,7 @@ func (m Model) prsInViewForRepository(id string) []gh.PullRequest {
 
 func (m Model) sharedPRs() []gh.PullRequest {
 	unique := make(map[string]gh.PullRequest)
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		for _, pr := range m.prsInViewForRepository(repo.ID) {
 			unique[pr.Key()] = pr
 		}

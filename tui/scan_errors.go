@@ -25,7 +25,7 @@ func (m Model) scanErrorLines() []string {
 	var lines []string
 	inner := max(1, m.width-4)
 	for _, repo := range m.repositories {
-		detail := displayText(m.scanErrors[repo.ID])
+		detail := displayText(m.local.errors[repo.ID])
 		if detail == "" {
 			continue
 		}

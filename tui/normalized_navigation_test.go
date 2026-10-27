@@ -193,7 +193,7 @@ func TestWorklistReverseSortKeepsSelection(t *testing.T) {
 		t.Fatal("reverse lost selection")
 	}
 	for i := range before {
-		if before[i].repo.ID != after[len(after)-1-i].repo.ID {
+		if before[i].scopeID != after[len(after)-1-i].scopeID {
 			t.Fatal("Worklist order did not reverse")
 		}
 	}
@@ -218,11 +218,11 @@ func TestInspectorRefreshAndForwardNavigation(t *testing.T) {
 		t.Fatal("Enter closed the commit inspector")
 	}
 	m.repositories = nil
-	m.refreshing = false
-	m.repositories = m.loadedRepos
+	m.scan.running = false
+	m.repositories = m.local.repositories
 	next, cmd := m.Update(keyboardContractKey("R"))
 	m = next.(Model)
-	if cmd == nil || !m.refreshing || !m.showPaths {
+	if cmd == nil || !m.scan.running || !m.showPaths {
 		t.Fatal("inspector R did not refresh in place")
 	}
 	if m.cancelScans != nil {

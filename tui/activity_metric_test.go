@@ -12,15 +12,15 @@ import (
 func measureFixture() Model {
 	m := awarenessFixture()
 	m.width, m.height = 120, 36
-	m.allRecords[0].Added, m.allRecords[0].Removed = 100, 400
-	m.allRecords[1].Added = 800
+	m.local.records[0].Added, m.local.records[0].Removed = 100, 400
+	m.local.records[1].Added = 800
 	m.recomputeAuthors()
 	return m
 }
 
 func TestCommitSortingPreservesLineBarsAndSelection(t *testing.T) {
 	m := measureFixture()
-	if rows := m.glanceRepositories(); rows[0].repo.ID != "/web" {
+	if rows := m.glanceRepositories(); rows[0].scopeID != "/web" {
 		t.Fatal("default repository order must use added plus removed lines")
 	}
 	selectedRepo := m.selectedRepoID
@@ -33,7 +33,7 @@ func TestCommitSortingPreservesLineBarsAndSelection(t *testing.T) {
 			text := ansi.Strip(strings.Join(m.worklistRepositoryRow(row, false, width-4, 1, maxValue), "\n"))
 			for _, cell := range text {
 				if strings.ContainsRune("█▓▒░", cell) {
-					bars[row.repo.ID]++
+					bars[row.scopeID]++
 				}
 			}
 		}
@@ -42,7 +42,7 @@ func TestCommitSortingPreservesLineBarsAndSelection(t *testing.T) {
 		}
 	}
 	m = keyboardContractPress(t, m, "s")
-	if m.repositorySort != 1 || m.glanceRepositories()[0].repo.ID != "/api" {
+	if m.repositorySort != 1 || m.glanceRepositories()[0].scopeID != "/api" {
 		t.Fatal("commit sorting did not change ranking")
 	}
 	if m.selectedRepoID != selectedRepo || m.repositoryMeasureMax(m.glanceRepositories()) != 800 {
@@ -64,13 +64,13 @@ func TestCommitSortingPreservesLineBarsAndSelection(t *testing.T) {
 
 func TestRepositoryMeasuresRespectScopeAndUnknownLines(t *testing.T) {
 	m := measureFixture()
-	m.allRecords[0].LinesUnknown = true
-	m.allRecords[2].Date = time.Now().Add(-48 * time.Hour)
+	m.local.records[0].LinesUnknown = true
+	m.local.records[2].Date = time.Now().Add(-48 * time.Hour)
 	m.timeIdx = 0
 	m.recomputeAuthors()
 	rows := m.glanceRepositories()
 	for _, row := range rows {
-		if row.repo.ID == "/api" {
+		if row.scopeID == "/api" {
 			added, removed, unknown := repositoryLineTotals(row)
 			if row.commits != 1 || added != 0 || removed != 0 || unknown != 1 {
 				t.Fatal("repository measure included unknown or out-of-range lines")
@@ -86,7 +86,7 @@ func TestRepositoryMeasuresRespectScopeAndUnknownLines(t *testing.T) {
 	m.excludedRepos["/web"] = true
 	m.recomputeAuthors()
 	for _, row := range m.glanceRepositories() {
-		if row.repo.ID == "/web" {
+		if row.scopeID == "/web" {
 			t.Fatal("excluded repository remained in the ranking")
 		}
 	}

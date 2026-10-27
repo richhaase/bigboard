@@ -109,8 +109,10 @@ func TestRefreshNormalizesRememberedContributorDetails(t *testing.T) {
 		m := keyboardContractPress(t, awarenessFixture(), "c")
 		m.selectContributor("email:grace@x")
 		m = keyboardContractPress(t, m, "enter", board)
-		m.pendingRecords = m.allRecords[:2]
-		m.pendingRepos = m.loadedRepos
+		m.resetPending()
+		for _, repo := range m.repositories {
+			m.scan.admit(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Records: m.recordsInRepository(repo, m.local.records[:2])}, time.Now())
+		}
 		m.finalizeLoad()
 		if board == "p" && !m.showPRs || board == "a" && m.viewMode != ViewAwareness {
 			t.Fatal("refresh changed the active board")

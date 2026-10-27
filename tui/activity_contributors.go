@@ -30,16 +30,16 @@ func activityPaneHeading(text string, width int, focused bool) string {
 	return StyleDimWhite.Render(text)
 }
 
-func (m Model) activityContributorKey(row repositoryActivity) string {
+func (m Model) activityContributorKey(row activityRow) string {
 	if m.directory.active {
-		return m.areaRepoID + "\x00" + m.directory.frame.path + "\x00" + row.repo.ID
+		return row.repositoryID + "\x00" + m.directory.frame.path + "\x00" + row.scopeID
 	}
-	return row.repo.ID
+	return row.scopeID
 }
 
-func (m *Model) activityContributorSelection() (repositoryActivity, bool) {
+func (m *Model) activityContributorSelection() (activityRow, bool) {
 	if m.glance.detailOpen || m.showPaths || m.areaRepoID != "" && !m.directory.active {
-		return repositoryActivity{}, false
+		return activityRow{}, false
 	}
 	if m.directory.active {
 		rows := m.directoryRows()
@@ -52,7 +52,7 @@ func (m *Model) activityContributorSelection() (repositoryActivity, bool) {
 			return rows[m.selectedRepository(rows)], true
 		}
 	}
-	return repositoryActivity{}, false
+	return activityRow{}, false
 }
 
 func (m *Model) normalizeActivityContributors() {
@@ -115,21 +115,21 @@ func (m *Model) handleActivityContributorKey(key string) bool {
 	return true
 }
 
-func (m Model) activityContributorScope(row repositoryActivity) string {
+func (m Model) activityContributorScope(row activityRow) string {
 	if !m.directory.active {
-		return displayText(row.repo.Name)
+		return displayText(row.label)
 	}
 	repo, _ := m.areaRepository()
-	name := row.repo.Name
-	if path, ok := strings.CutPrefix(row.repo.ID, "dir:"); ok {
+	name := row.label
+	if path, ok := strings.CutPrefix(row.scopeID, "dir:"); ok {
 		name = path + "/"
-	} else if path, ok := strings.CutPrefix(row.repo.ID, "file:"); ok {
+	} else if path, ok := strings.CutPrefix(row.scopeID, "file:"); ok {
 		name = path
 	}
 	return displayText(repo.Name + " / " + name)
 }
 
-func (m Model) activityContributorFrame(row repositoryActivity, width, height int) ([]string, int) {
+func (m Model) activityContributorFrame(row activityRow, width, height int) ([]string, int) {
 	if height < 4 || width < 12 {
 		return nil, 0
 	}
@@ -161,7 +161,7 @@ func (m Model) activityContributorFrame(row repositoryActivity, width, height in
 	return lines, page
 }
 
-func (m Model) activityContributors(row repositoryActivity, width, height int) []string {
+func (m Model) activityContributors(row activityRow, width, height int) []string {
 	lines, page := m.activityContributorFrame(row, width, height)
 	if len(lines) == 0 {
 		return nil

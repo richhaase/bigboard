@@ -40,7 +40,7 @@ func (m Model) repositoryOverviewColumns(width int) string {
 	return StyleDimWhite.Render(strings.Join(cells, " "))
 }
 
-func repositoryLineTotals(r repositoryActivity) (added, removed, unknown int) {
+func repositoryLineTotals(r activityRow) (added, removed, unknown int) {
 	for _, person := range r.people {
 		added += person.Added
 		removed += person.Removed
@@ -68,7 +68,7 @@ func repositoryLineLabel(prefix string, value, unknown, width int) string {
 	return ansi.Truncate(text, width, "…")
 }
 
-func (m Model) repositoryMeasureMax(rows []repositoryActivity) int {
+func (m Model) repositoryMeasureMax(rows []activityRow) int {
 	maxValue := 0
 	for _, r := range rows {
 		added, removed, _ := repositoryLineTotals(r)
@@ -78,16 +78,12 @@ func (m Model) repositoryMeasureMax(rows []repositoryActivity) int {
 	return maxValue
 }
 
-func (m Model) worklistRepositoryRow(r repositoryActivity, selected bool, width, rank, maxValue int) []string {
-	name := displayText(r.repo.Name)
-	repoID := r.repo.ID
-	if m.directory.active {
-		repoID = m.areaRepoID
-	}
-	if m.staleRepos[repoID] && !m.directory.active {
+func (m Model) worklistRepositoryRow(r activityRow, selected bool, width, rank, maxValue int) []string {
+	name := displayText(r.label)
+	if m.local.staleRepos[r.repositoryID] && !m.directory.active {
 		name = "[STALE] " + name
 	}
-	age := m.worklistAge(r.latest, repoID)
+	age := m.worklistAge(r.latest, r.repositoryID)
 	added, removed, unknown := repositoryLineTotals(r)
 	countWidth := 10
 	if width < 96 {
@@ -131,7 +127,7 @@ func (m Model) worklistRepositoryRow(r repositoryActivity, selected bool, width,
 	return lines
 }
 
-func worklistOverviewSummary(rows []repositoryActivity) []string {
+func worklistOverviewSummary(rows []activityRow) []string {
 	active := 0
 	for _, row := range rows {
 		if row.commits > 0 {

@@ -66,7 +66,7 @@ func TestModelBotToggle(t *testing.T) {
 		BotIdentities: []string{"tag@teamsense.com"},
 	})
 	now := time.Now()
-	m.allRecords = []git.CommitRecord{
+	m.local.records = []git.CommitRecord{
 		{Author: "Ada", Email: "ada@example.com", Date: now, Added: 5, RepoID: "/r", RepoName: "r"},
 		{Author: "renovate[bot]", Email: "29139614+renovate[bot]@users.noreply.github.com", Date: now, Added: 100, RepoID: "/r", RepoName: "r"},
 		{Author: "Tag", Email: "tag@teamsense.com", Date: now, Added: 7, RepoID: "/r", RepoName: "r"},
@@ -97,34 +97,5 @@ func TestContributorScrollKeepsMissingIdentity(t *testing.T) {
 	m = keyboardContractPress(t, m, "down", "pgdown", "up")
 	if m.activeOperative != "Vanished" || m.activeAuthorID != "email:vanished@example.test" {
 		t.Fatal("scrolling silently selected a different contributor")
-	}
-}
-
-func TestFillMonthGaps(t *testing.T) {
-	jan := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2025, 4, 1, 0, 0, 0, 0, time.UTC)
-	months := fillMonthGaps([]MonthActivity{
-		{Month: jan, Commits: 2},
-		{Month: apr, Commits: 3},
-	})
-	if len(months) != 4 {
-		t.Fatalf("expected 4 months (gaps filled), got %d: %+v", len(months), months)
-	}
-	if months[1].Month.Month() != time.February || months[1].Commits != 0 {
-		t.Errorf("expected empty February, got %+v", months[1])
-	}
-	if months[2].Month.Month() != time.March || months[2].Commits != 0 {
-		t.Errorf("expected empty March, got %+v", months[2])
-	}
-	if months[3].Commits != 3 {
-		t.Errorf("expected April data preserved, got %+v", months[3])
-	}
-
-	single := fillMonthGaps([]MonthActivity{{Month: jan, Commits: 1}})
-	if len(single) != 1 {
-		t.Errorf("single month should be unchanged, got %d", len(single))
-	}
-	if got := fillMonthGaps(nil); len(got) != 0 {
-		t.Errorf("nil input should stay empty, got %d", len(got))
 	}
 }

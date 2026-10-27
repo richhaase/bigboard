@@ -14,11 +14,11 @@ func monorepoFixture() Model {
 	now := time.Now()
 	m := awarenessFixture()
 	m.repositories = []git.Repository{{ID: "/mono", Name: "mono"}}
-	m.loadedRepos = m.repositories
+	m.local.repositories = m.repositories
 	m.selectedRepoID = "/mono"
 	m.areaRepoID = "/mono"
 	m.selectedAreaID = ""
-	m.allRecords = []git.CommitRecord{
+	m.local.records = []git.CommitRecord{
 		{CommitID: "auth", Author: "Ada", Email: "ada@x", Date: now, RepoID: "/mono", RepoName: "mono", Subject: "Renew sessions", Changes: []git.PathChange{{Path: "services/auth/session.go"}, {Path: "apps/web/login.tsx"}}},
 		{CommitID: "billing", Author: "Grace", Email: "grace@x", Date: now.Add(-time.Hour), RepoID: "/mono", RepoName: "mono", Subject: "Reconcile invoices", Changes: []git.PathChange{{Path: "services/billing/invoice.go"}}},
 		{CommitID: "root", Author: "Ada", Email: "ada@x", Date: now.Add(-2 * time.Hour), RepoID: "/mono", RepoName: "mono", Subject: "Document setup", Changes: []git.PathChange{{Path: "README.md"}}},
@@ -104,7 +104,7 @@ func TestAreasNamedRulesFilteringAndStableDefinitions(t *testing.T) {
 		t.Fatalf("named area=%+v", auth)
 	}
 	m.selectedAreaID = auth.ID
-	m.allRecords[0].Date = time.Now().Add(-30 * 24 * time.Hour)
+	m.local.records[0].Date = time.Now().Add(-30 * 24 * time.Hour)
 	m.timeIdx = 0
 	m.recomputeAuthors()
 	if strings.Contains(m.View(), "Renew sessions") {
@@ -120,16 +120,16 @@ func TestAreasNamedRulesFilteringAndStableDefinitions(t *testing.T) {
 
 func TestAreasCanonicalSharedCommitAndUnknownPaths(t *testing.T) {
 	m := monorepoFixture()
-	m.loadedRepos = append(m.loadedRepos, git.Repository{ID: "/aaa", Name: "copy"})
-	copy := m.allRecords[0]
+	m.local.repositories = append(m.local.repositories, git.Repository{ID: "/aaa", Name: "copy"})
+	copy := m.local.records[0]
 	copy.RepoID = "/aaa"
 	copy.RepoName = "copy"
 	copy.Email = "canonical@x"
 	copy.Author = "Canonical"
-	m.allRecords[0].LinesUnknown = true
-	m.allRecords[0].PathsUnknown = true
-	m.allRecords[0].Changes = nil
-	m.allRecords = append(m.allRecords, copy)
+	m.local.records[0].LinesUnknown = true
+	m.local.records[0].PathsUnknown = true
+	m.local.records[0].Changes = nil
+	m.local.records = append(m.local.records, copy)
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()
 	records := m.evidence("auto:services/auth", "email:canonical@x")
@@ -169,7 +169,7 @@ func TestAreasCompactEvidenceAndEmptyState(t *testing.T) {
 			t.Fatal("width overflow")
 		}
 	}
-	m.allRecords = nil
+	m.local.records = nil
 	m.recomputeAuthors()
 	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "esc")
@@ -180,13 +180,13 @@ func TestAreasCompactEvidenceAndEmptyState(t *testing.T) {
 
 func TestAreaSharedCommitMissingEmailPreservesCanonicalIdentity(t *testing.T) {
 	m := monorepoFixture()
-	m.allRecords = m.allRecords[:1]
-	m.allRecords[0].Email = ""
-	r := m.allRecords[0]
+	m.local.records = m.local.records[:1]
+	m.local.records[0].Email = ""
+	r := m.local.records[0]
 	r.RepoID = "/z-copy"
 	r.RepoName = "copy"
-	m.allRecords = append(m.allRecords, r)
-	m.loadedRepos = append(m.loadedRepos, git.Repository{ID: "/z-copy", Name: "copy"})
+	m.local.records = append(m.local.records, r)
+	m.local.repositories = append(m.local.repositories, git.Repository{ID: "/z-copy", Name: "copy"})
 	m.areaRepoID = "/z-copy"
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()
@@ -209,7 +209,7 @@ func TestAreaPathInspectorScrollsEveryLiteralPath(t *testing.T) {
 	m.height = 18
 	m.selectedAreaID = "auto:services/auth"
 	for i := 0; i < 30; i++ {
-		m.allRecords[0].Changes = append(m.allRecords[0].Changes, git.PathChange{Path: "services/auth/" + strings.Repeat("long", i+1) + ".go"})
+		m.local.records[0].Changes = append(m.local.records[0].Changes, git.PathChange{Path: "services/auth/" + strings.Repeat("long", i+1) + ".go"})
 	}
 	m.rebuildAreaDefinitions()
 	m = pressAwareness(m, "enter")

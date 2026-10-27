@@ -9,11 +9,11 @@ import (
 
 func TestRenderRepoOverlayContent(t *testing.T) {
 	m := Model{
-		loadedRepos: []git.Repository{
+		local: localSnapshot{repositories: []git.Repository{
 			{ID: "repo-a", Name: "repo-a"},
 			{ID: "repo-b", Name: "repo-b"},
 			{ID: "repo-c", Name: "repo-c"},
-		},
+		}},
 		overlayExcluded: map[string]bool{"repo-b": true},
 		overlayCursor:   0,
 		viewMode:        ViewRepoOverlay,
@@ -38,7 +38,7 @@ func TestRenderRepoOverlayContent(t *testing.T) {
 	}
 
 	// Should contain all repo names
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !strings.Contains(result, repo.Name) {
 			t.Errorf("expected repo name %q in overlay", repo.Name)
 		}

@@ -16,14 +16,14 @@ import (
 func modelWithData() Model {
 	now := time.Now()
 	m := Model{
-		allRecords: []git.CommitRecord{
+		local: localSnapshot{records: []git.CommitRecord{
 			{Author: "Ada Lovelace", Email: "ada@x.com", Date: now, Added: 100, Removed: 10, RepoName: "engine"},
 			{Author: "Grace Hopper", Email: "grace@x.com", Date: now, Added: 50, Removed: 5, RepoName: "compiler"},
 		},
-		loadedRepos: []git.Repository{
-			{ID: "compiler", Name: "compiler"},
-			{ID: "engine", Name: "engine"},
-		},
+			repositories: []git.Repository{
+				{ID: "compiler", Name: "compiler"},
+				{ID: "engine", Name: "engine"},
+			}},
 		excludedRepos: map[string]bool{},
 		timeIdx:       len(TimePresets) - 1, // ALL
 		width:         100,
@@ -38,10 +38,10 @@ func modelWithData() Model {
 func TestFilteredRecordsExcludesRepos(t *testing.T) {
 	now := time.Now()
 	m := Model{
-		allRecords: []git.CommitRecord{
+		local: localSnapshot{records: []git.CommitRecord{
 			{Author: "A", Email: "a@x.com", Date: now, Added: 10, RepoName: "keep"},
 			{Author: "B", Email: "b@x.com", Date: now, Added: 20, RepoName: "drop"},
-		},
+		}},
 		excludedRepos: map[string]bool{"drop": true},
 		timeIdx:       len(TimePresets) - 1, // ALL
 	}
@@ -60,10 +60,10 @@ func TestRecomputeAuthorsClampsSelectedRow(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-100 * 24 * time.Hour)
 	m := Model{
-		allRecords: []git.CommitRecord{
+		local: localSnapshot{records: []git.CommitRecord{
 			{Author: "Recent", Email: "r@x.com", Date: now, Added: 5, RepoName: "r"},
 			{Author: "Old", Email: "o@x.com", Date: old, Added: 5, RepoName: "r"},
-		},
+		}},
 		timeIdx:     len(TimePresets) - 1, // ALL → 2 authors
 		selectedRow: 1,
 	}
@@ -94,14 +94,14 @@ func TestHandleKeySortCycles(t *testing.T) {
 // don't panic and that the refactored states show their expected markers.
 func TestViewStatesRender(t *testing.T) {
 	t.Run("loading", func(t *testing.T) {
-		out := Model{loading: true, width: 100, pendingRemaining: 3}.View()
+		out := Model{loading: true, width: 100, scan: scanBatch{remaining: 3}}.View()
 		if !strings.Contains(out, "SCANNING REPOSITORIES") || !strings.Contains(out, "0/3 repos") {
 			t.Errorf("loading view missing boot markers:\n%s", out)
 		}
 	})
 
 	t.Run("boot-log-lines", func(t *testing.T) {
-		m := Model{loading: true, width: 100, pendingRemaining: 1}
+		m := Model{loading: true, width: 100, scan: scanBatch{remaining: 1}}
 		m.bootLines = []string{bootLine("engine", true), bootLine("compiler", false)}
 		out := m.View()
 		if !strings.Contains(out, "engine") || !strings.Contains(out, "unreadable") {
@@ -160,8 +160,8 @@ func TestViewStatesRender(t *testing.T) {
 
 	t.Run("failed-repos-warning", func(t *testing.T) {
 		m := modelWithData()
-		m.failedRepos = []string{"engine"}
-		m.scannedAt = map[string]time.Time{"compiler": time.Now(), "engine": time.Now()}
+		m.local.failed = []string{"engine"}
+		m.local.scannedAt = map[string]time.Time{"compiler": time.Now(), "engine": time.Now()}
 		out := m.View()
 		if !strings.Contains(out, "Git: STALE") || !strings.Contains(out, "e status") {
 			t.Errorf("aggregate view missing failed-repo warning:\n%s", out)
@@ -309,7 +309,7 @@ func TestScrollReachesAllContributors(t *testing.T) {
 			RepoName: "r",
 		})
 	}
-	m := Model{allRecords: recs, excludedRepos: map[string]bool{}, timeIdx: len(TimePresets) - 1, width: 100, height: 24}
+	m := Model{local: localSnapshot{records: recs}, excludedRepos: map[string]bool{}, timeIdx: len(TimePresets) - 1, width: 100, height: 24}
 	m.recomputeAuthors()
 	if len(m.authors) != 30 {
 		t.Fatalf("expected 30 authors, got %d", len(m.authors))
@@ -330,23 +330,23 @@ func TestScrollReachesAllContributors(t *testing.T) {
 func TestStreamingLoadFinalizes(t *testing.T) {
 	now := time.Now()
 	m := NewModel([]string{"/x/repoA", "/y/repoB"}, stats.SortByTotal, map[string]bool{}, "v", DefaultTimeIndex)
-	if !m.loading || m.pendingRemaining != 2 {
-		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.pendingRemaining)
+	if !m.loading || m.scan.remaining != 2 {
+		t.Fatalf("initial: loading=%v remaining=%d", m.loading, m.scan.remaining)
 	}
-	u, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Records: []git.CommitRecord{
+	u, _ := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[0], Records: []git.CommitRecord{
 		{Author: "A", Email: "a@x.com", Date: now, Added: 5, RepoName: "repoA"},
 	}})
 	m = u.(Model)
 	if !m.loading {
 		t.Error("should still be loading after 1 of 2")
 	}
-	u, _ = m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[1], Err: errors.New("boom")})
+	u, _ = m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[1], Err: errors.New("boom")})
 	m = u.(Model)
 	if m.loading {
 		t.Error("should finalize after 2 of 2")
 	}
-	if len(m.failedRepos) != 1 || m.failedRepos[0] != "repoB" {
-		t.Errorf("expected repoB failed, got %v", m.failedRepos)
+	if len(m.local.failed) != 1 || m.local.failed[0] != "repoB" {
+		t.Errorf("expected repoB failed, got %v", m.local.failed)
 	}
 	if len(m.authors) != 1 || m.authors[0].Name != "A" {
 		t.Errorf("expected 1 author A, got %v", m.authors)
@@ -366,8 +366,8 @@ func TestRepositoryLoadingIsBounded(t *testing.T) {
 		paths[i] = fmt.Sprintf("/workspace/repo-%02d", i)
 	}
 	m := NewModel(paths, stats.SortByTotal, nil, "v", DefaultTimeIndex)
-	if m.activeScans != maxConcurrentRepoScans || m.nextRepo != maxConcurrentRepoScans {
-		t.Fatalf("initial active/next = %d/%d, want %d/%d", m.activeScans, m.nextRepo, maxConcurrentRepoScans, maxConcurrentRepoScans)
+	if m.scan.active != maxConcurrentRepoScans || m.scan.next != maxConcurrentRepoScans {
+		t.Fatalf("initial active/next = %d/%d, want %d/%d", m.scan.active, m.scan.next, maxConcurrentRepoScans, maxConcurrentRepoScans)
 	}
 	msg := m.Init()()
 	batch, ok := msg.(tea.BatchMsg)
@@ -378,13 +378,13 @@ func TestRepositoryLoadingIsBounded(t *testing.T) {
 		t.Fatalf("initial batch has %d scans, want %d", len(batch), maxConcurrentRepoScans)
 	}
 
-	updated, next := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0]})
+	updated, next := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[0]})
 	m = updated.(Model)
 	if next == nil {
 		t.Fatal("completed scan should schedule the next repository")
 	}
-	if m.activeScans != maxConcurrentRepoScans || m.nextRepo != maxConcurrentRepoScans+1 {
-		t.Fatalf("replacement active/next = %d/%d", m.activeScans, m.nextRepo)
+	if m.scan.active != maxConcurrentRepoScans || m.scan.next != maxConcurrentRepoScans+1 {
+		t.Fatalf("replacement active/next = %d/%d", m.scan.active, m.scan.next)
 	}
 }
 
@@ -422,10 +422,10 @@ func TestTableViewportAccountsForActualStats(t *testing.T) {
 			Removed:   1_000_000_000,
 			AICommits: 1,
 		}},
-		loadedRepos: []git.Repository{{ID: "repo", Name: "repo"}},
-		timeIdx:     DefaultTimeIndex,
-		width:       78,
-		height:      40,
+		local:   localSnapshot{repositories: []git.Repository{{ID: "repo", Name: "repo"}}},
+		timeIdx: DefaultTimeIndex,
+		width:   78,
+		height:  40,
 	}
 	base := m.authors[0]
 	for i := range 20 {

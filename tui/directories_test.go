@@ -15,31 +15,31 @@ func directoryFixture() Model {
 	m := monorepoFixture()
 	m.width, m.height = 120, 30
 	m.areaRepoID = ""
-	m.allRecords[0].Changes[0].Added, m.allRecords[0].Changes[0].Removed = 60, 40
-	m.allRecords[0].Changes[1].Added = 200
-	m.allRecords[0].Added, m.allRecords[0].Removed = 260, 40
-	m.allRecords[1].Changes[0].Added, m.allRecords[1].Changes[0].Removed = 300, 50
-	m.allRecords[1].Added, m.allRecords[1].Removed = 300, 50
-	m.allRecords[2].Changes[0].Added = 10
-	m.allRecords[2].Added = 10
-	for i := range m.allRecords {
-		for j := range m.allRecords[i].Changes {
-			m.allRecords[i].Changes[j].LinesKnown = true
+	m.local.records[0].Changes[0].Added, m.local.records[0].Changes[0].Removed = 60, 40
+	m.local.records[0].Changes[1].Added = 200
+	m.local.records[0].Added, m.local.records[0].Removed = 260, 40
+	m.local.records[1].Changes[0].Added, m.local.records[1].Changes[0].Removed = 300, 50
+	m.local.records[1].Added, m.local.records[1].Removed = 300, 50
+	m.local.records[2].Changes[0].Added = 10
+	m.local.records[2].Added = 10
+	for i := range m.local.records {
+		for j := range m.local.records[i].Changes {
+			m.local.records[i].Changes[j].LinesKnown = true
 		}
 	}
 	m.recomputeAuthors()
 	return m
 }
 
-func directoryRow(t *testing.T, m Model, id string) repositoryActivity {
+func directoryRow(t *testing.T, m Model, id string) activityRow {
 	t.Helper()
 	for _, row := range m.directoryRows() {
-		if row.repo.ID == id {
+		if row.scopeID == id {
 			return row
 		}
 	}
 	t.Fatalf("missing directory entry %s", id)
-	return repositoryActivity{}
+	return activityRow{}
 }
 
 func TestDirectoryDrilldownUsesLiteralPathsAndExactLines(t *testing.T) {
@@ -47,7 +47,7 @@ func TestDirectoryDrilldownUsesLiteralPathsAndExactLines(t *testing.T) {
 	m.options.WorkAreas = map[string][]stats.WorkAreaRule{"mono": {{Name: "Cross-cutting", Paths: []string{"services/auth", "apps/web"}}}}
 	m.rebuildAreaDefinitions()
 	m = keyboardContractPress(t, m, "enter")
-	if !m.directory.active || m.glance.detailOpen || m.directoryRows()[0].repo.ID != "dir:services" {
+	if !m.directory.active || m.glance.detailOpen || m.directoryRows()[0].scopeID != "dir:services" {
 		t.Fatal("repository did not open literal directory ranking")
 	}
 	service := directoryRow(t, m, "dir:services")
@@ -124,13 +124,13 @@ func TestDirectoryEvidenceScopeAndBoardSwitches(t *testing.T) {
 
 func TestDirectoryFiltersKeepScopeAndClearExcludedRepo(t *testing.T) {
 	m := directoryFixture()
-	m.allRecords[1].Date = time.Now().Add(-48 * time.Hour)
-	m.allRecords[0].Author, m.allRecords[0].Email = "agent[bot]", "agent[bot]@example.test"
+	m.local.records[1].Date = time.Now().Add(-48 * time.Hour)
+	m.local.records[0].Author, m.local.records[0].Email = "agent[bot]", "agent[bot]@example.test"
 	m.recomputeAuthors()
 	m = keyboardContractPress(t, m, "enter", "enter")
 	m.timeIdx = 0
 	m.recomputeAuthors()
-	if len(m.directoryRows()) != 1 || m.directoryRows()[0].repo.ID != "dir:services/auth" {
+	if len(m.directoryRows()) != 1 || m.directoryRows()[0].scopeID != "dir:services/auth" {
 		t.Fatal("directory rows ignored the global range")
 	}
 	m = keyboardContractPress(t, m, "b")
@@ -148,9 +148,9 @@ func TestDirectoryPagingAndFrameFit(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {100, 24}, {120, 36}} {
 		m := directoryFixture()
 		m.width, m.height = size[0], size[1]
-		m.allRecords = nil
+		m.local.records = nil
 		for i := 0; i < 45; i++ {
-			m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: fmt.Sprint(i), RepoID: "/mono", RepoName: "mono", Author: "Ada", Email: "ada@x", Date: time.Now(), Added: 100 - i, Changes: []git.PathChange{{Path: fmt.Sprintf("dir%02d/file.go", i), Added: 100 - i, LinesKnown: true}}})
+			m.local.records = append(m.local.records, git.CommitRecord{CommitID: fmt.Sprint(i), RepoID: "/mono", RepoName: "mono", Author: "Ada", Email: "ada@x", Date: time.Now(), Added: 100 - i, Changes: []git.PathChange{{Path: fmt.Sprintf("dir%02d/file.go", i), Added: 100 - i, LinesKnown: true}}})
 		}
 		m.recomputeAuthors()
 		m = keyboardContractPress(t, m, "enter", "pgdown")
@@ -202,8 +202,8 @@ func TestLiteralRelatedEvidenceExcludesSourcePaths(t *testing.T) {
 			t.Fatal("Related detail retained lines from the source scope")
 		}
 		m = directoryFixture()
-		m.allRecords = m.allRecords[:1]
-		m.allRecords[0].Changes = m.allRecords[0].Changes[:1]
+		m.local.records = m.local.records[:1]
+		m.local.records[0].Changes = m.local.records[0].Changes[:1]
 		m.rebuildAreaDefinitions()
 		m.recomputeAuthors()
 		m.openDirectoryRepository("/mono")

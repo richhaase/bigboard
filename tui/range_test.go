@@ -48,7 +48,7 @@ func TestRangePickerPresetConfirmCancelAndSelection(t *testing.T) {
 func TestRangeCustomValidationAndSharedFiltering(t *testing.T) {
 	m := awarenessFixture()
 	m.timeIdx = DefaultTimeIndex
-	m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: "old", Author: "Old", Email: "old@x", RepoID: "/api", RepoName: "api", Date: time.Now().Add(-20 * 24 * time.Hour)})
+	m.local.records = append(m.local.records, git.CommitRecord{CommitID: "old", Author: "Old", Email: "old@x", RepoID: "/api", RepoName: "api", Date: time.Now().Add(-20 * 24 * time.Hour)})
 	m.recomputeAuthors()
 	m = keyboardContractPress(t, m, "t", "end", " ")
 	for _, input := range []string{"0", "3651", "99999999999", "0036501", ""} {
@@ -172,7 +172,7 @@ func TestRangeChangePreservesNestedAreaAndCommit(t *testing.T) {
 
 func TestRangeChangeKeepsFilteredOutPersonWithoutBroaderEvidence(t *testing.T) {
 	m := awarenessFixture()
-	m.allRecords[2].Date = time.Now().Add(-10 * 24 * time.Hour)
+	m.local.records[2].Date = time.Now().Add(-10 * 24 * time.Hour)
 	m.recomputeAuthors()
 	m = keyboardContractPress(t, m, "right", "right")
 	m.personID = "email:grace@x"

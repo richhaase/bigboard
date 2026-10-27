@@ -217,26 +217,31 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 	return lines
 }
 
-func (m Model) prFooter(prs []gh.PullRequest) string {
-	footer := "? help · →/Enter open · / find · f filters"
+func (m Model) prFooter(prs []gh.PullRequest) footerHints {
+	if m.prSearching {
+		return searchFooter()
+	}
+	var local []footerHint
+	if m.prDetail || m.prContext.active {
+		local = append(local, footerHint{"Esc", "back"})
+	}
 	if m.prDetail {
-		footer = "? help · Esc back · ↑↓ scroll · f filters"
+		local = append(local, footerHint{"↑↓", "scroll"})
+	}
+	local = append(local, footerHint{"f", "filters"})
+	if !m.prDetail {
+		local = append(local, footerHint{"/", "find"}, footerHint{"Enter", "open"})
 	}
 	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
-		footer += " · o browser"
+		local = append(local, footerHint{"o", "browser"})
 	}
-	if m.prSearching {
-		return "F1 help · Enter accept · Esc cancel"
-	}
-	if m.prContext.active {
-		footer = "Esc back · " + footer
-	}
-	return footer + " · t range"
+	local = append(local, footerHint{"t", "date range"})
+	return footerHints{local: local}
 }
 
 func (m Model) prListErrors() []string {
 	var lines []string
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.repoInView(repo.ID) || m.prRepoID != "" && repo.ID != m.prRepoID {
 			continue
 		}

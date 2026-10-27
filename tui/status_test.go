@@ -13,12 +13,12 @@ func TestDataStatusUsesTrackingScopeAndKeepsWarningsDuringRefresh(t *testing.T) 
 	m := boardLayoutFixture()
 	id, remote := m.repositories[1].ID, m.prState.repositories[m.repositories[1].ID]
 	m.sharedRepos = filterValues{m.repositories[0].ID}
-	m.staleRepos[id] = true
-	m.scanErrors = map[string]string{id: "fetch failed"}
+	m.local.staleRepos[id] = true
+	m.local.errors = map[string]string{id: "fetch failed"}
 	snapshot := m.prState.snapshots[remote]
 	snapshot.partial, snapshot.err = true, gh.ErrRateLimited
 	m.prState.snapshots[remote] = snapshot
-	m.refreshing, m.prState.loading = true, true
+	m.scan.running, m.prState.loading = true, true
 	for _, width := range []int{40, 80, 120} {
 		line := ansi.Strip(m.compactDataStatus(width))
 		if strings.Count(line, "STALE") != 2 || !strings.Contains(line, "e ") || ansi.StringWidth(line) > width-4 {
@@ -32,7 +32,7 @@ func TestDataStatusUsesTrackingScopeAndKeepsWarningsDuringRefresh(t *testing.T) 
 	if m.gitDataStatus().warning || m.prDataStatus().warning {
 		t.Fatal("excluded repository kept global status unhealthy")
 	}
-	delete(m.scannedAt, m.repositories[0].ID)
+	delete(m.local.scannedAt, m.repositories[0].ID)
 	if !m.gitDataStatus().warning || m.gitDataStatus().label != "PARTIAL" {
 		t.Fatal("loaded repository without a scan timestamp appeared healthy")
 	}
@@ -82,7 +82,7 @@ func TestDataStatusDetailsSeparateScanTimesFromCheckAttempts(t *testing.T) {
 	old := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
 	recent := time.Now().Add(-time.Minute).Truncate(time.Second)
 	id := m.repositories[0].ID
-	m.scannedAt[id] = old
+	m.local.scannedAt[id] = old
 	snapshot := m.prState.snapshots[m.prState.repositories[id]]
 	snapshot.checked, snapshot.lastGood, snapshot.partial = recent, old, true
 	snapshot.err = gh.ErrRateLimited

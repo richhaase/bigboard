@@ -35,11 +35,11 @@ func (m Model) renderRepoOverlay() string {
 		StyleDimWhite.Render(padCells("Changes apply when you press Enter", inner)),
 		worklistRule.Render(strings.Repeat("─", inner)),
 	}
-	selected := max(0, min(m.overlayCursor, len(m.loadedRepos)-1))
-	start := max(0, min(selected-page/2, len(m.loadedRepos)-page))
-	end := min(len(m.loadedRepos), start+page)
+	selected := max(0, min(m.overlayCursor, len(m.local.repositories)-1))
+	start := max(0, min(selected-page/2, len(m.local.repositories)-page))
+	end := min(len(m.local.repositories), start+page)
 	for i := start; i < end; i++ {
-		repo := m.loadedRepos[i]
+		repo := m.local.repositories[i]
 		checkbox, style := "[x] ", StyleAuthor
 		if m.overlayExcluded[repo.ID] {
 			checkbox, style = "[ ] ", StyleDimWhite
@@ -54,19 +54,19 @@ func (m Model) renderRepoOverlay() string {
 		}
 		sections = append(sections, line)
 	}
-	if len(m.loadedRepos) == 0 {
+	if len(m.local.repositories) == 0 {
 		sections = append(sections, StyleDimWhite.Render("No repositories available"))
 	}
 	for len(sections) < 3+page {
 		sections = append(sections, "")
 	}
 	excluded := 0
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if m.overlayExcluded[repo.ID] {
 			excluded++
 		}
 	}
-	total := len(m.loadedRepos)
+	total := len(m.local.repositories)
 	position := fmt.Sprintf("%d–%d of %d · %d included", start+1, end, total, total-excluded)
 	if inner < 50 {
 		position = fmt.Sprintf("%d–%d/%d · %d included", start+1, end, total, total-excluded)

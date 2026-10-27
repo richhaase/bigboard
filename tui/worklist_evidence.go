@@ -54,28 +54,24 @@ func worklistPeople(people []stats.AuthorStats, width, limit int) []string {
 	return out
 }
 
-func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused bool) []string {
+func (m Model) worklistEvidence(r activityRow, width, height int, focused bool) []string {
 	records := m.evidence(m.scopeEvidenceKey(r), "")
 	people := r.people
 	if focused {
 		records = m.glanceEvidence()
 		people = m.glanceAreaPeople()
 	}
-	title := "SELECTED  " + displayText(r.repo.Name)
+	title := "SELECTED  " + displayText(r.label)
 	if repo, ok := m.areaRepository(); ok {
-		title = "SELECTED  " + displayText(repo.Name) + " / " + displayText(r.repo.Name)
+		title = "SELECTED  " + displayText(repo.Name) + " / " + displayText(r.label)
 	}
 	counts := fmt.Sprintf("%s commits · %d contributors", FormatNumber(r.commits), len(people))
 	lines := []string{StyleTitle.Render(padCells(title, max(1, width-ansi.StringWidth(counts)-2)) + "  " + counts)}
 	if focused {
 		lines = nil
 	}
-	repoID := r.repo.ID
-	if m.areaRepoID != "" {
-		repoID = m.areaRepoID
-	}
 	if !focused || height >= 6 {
-		lines = append(lines, m.worklistSignal("Repository snapshot: "+strings.TrimPrefix(m.screenLocalFreshness(repoID), "Local: ")))
+		lines = append(lines, m.worklistSignal("Repository snapshot: "+strings.TrimPrefix(m.screenLocalFreshness(r.repositoryID), "Local: ")))
 	}
 	if !focused || height >= 7 {
 		for _, line := range worklistPeople(people, width-14, 1) {
@@ -120,13 +116,13 @@ func (m Model) worklistEvidence(r repositoryActivity, width, height int, focused
 	}
 	// The header owns shared availability. Only retained, scoped PR evidence
 	// earns space here; the complete inventory remains available via p.
-	prs := m.scopePRs(r.repo.ID)
+	prs := m.scopePRs(r.scopeID)
 	if len(prs) > 0 && len(lines)+3 <= height {
 		prTitle := "OPEN PRs / shared range · Git person/bot filters do not apply"
 		if m.glance.frame.path != "" || m.glance.frame.leafID != "" {
 			prTitle = "SCOPE PRs / shared range · Git person/bot filters do not apply"
 		}
-		lines = append(lines, StyleDimWhite.Bold(true).Render(prTitle), m.worklistSignal(m.prGlanceSignal(r.repo.ID)))
+		lines = append(lines, StyleDimWhite.Bold(true).Render(prTitle), m.worklistSignal(m.prGlanceSignal(r.scopeID)))
 		pr := prs[0]
 		lines = append(lines, fmt.Sprintf("#%d %s · p full inventory", pr.Number, displayText(pr.Title)))
 	}
@@ -222,7 +218,7 @@ func (m Model) renderWorklistDetail(width, height int) string {
 	case glanceActivity:
 		area := m.glanceDetailArea()
 		people := m.glanceAreaPeople()
-		r := repositoryActivity{repo: git.Repository{ID: m.glance.frame.areaID, Name: area.Name}, people: people, commits: len(stats.UniqueRecords(m.glanceAreaRecords()))}
+		r := activityRow{scopeID: m.glance.frame.areaID, label: area.Name, repositoryID: m.areaRepoID, people: people, commits: len(stats.UniqueRecords(m.glanceAreaRecords()))}
 		lines = append(lines, m.worklistEvidence(r, width-4, height-len(lines)-3, true)...)
 	case glanceRelated:
 		lines = append(lines, m.worklistRelatedLines(width-4, height-len(lines)-3)...)

@@ -52,7 +52,7 @@ func TestInitialModelCloseAlsoStopsLaterPRRefresh(t *testing.T) {
 	p := &cancelWaitingPRProvider{make(chan struct{}), make(chan struct{})}
 	original := NewModelWithOptions(nil, stats.SortByCommits, nil, "", DefaultTimeIndex, Options{PRProvider: p})
 	updated := original
-	updated.loadedRepos = []git.Repository{{ID: "/repo", Path: "/repo"}}
+	updated.local.repositories = []git.Repository{{ID: "/repo", Path: "/repo"}}
 	cmd := updated.startPRRefresh()
 	go cmd()
 	<-p.started

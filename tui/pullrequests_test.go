@@ -52,7 +52,7 @@ func TestPRRefreshAutomaticallySchedulesWithoutOptions(t *testing.T) {
 	}
 	next, _ := m.Update(cmd())
 	m = next.(Model)
-	if p.resolves != len(m.loadedRepos) || p.fetches != 1 || m.prState.loading {
+	if p.resolves != len(m.local.repositories) || p.fetches != 1 || m.prState.loading {
 		t.Fatal("automatic refresh incomplete")
 	}
 }
@@ -88,7 +88,7 @@ func TestPRFailurePartialAndOriginFailureRetainEvidence(t *testing.T) {
 	old := m.allPRs()[0]
 	result := gh.Result{Repo: "org/repo", Complete: false, Err: errors.New("rate limited")}
 	m.applyPRResult(prsLoadedMsg{repositories: map[string]string{}, errors: map[string]error{"/api": errors.New("origin unavailable")}, results: map[string]gh.Result{"org/repo": result}, checked: now})
-	if len(m.allPRs()) != 1 || m.prState.repositories["/api"] != "org/repo" || !strings.Contains(m.prStatus(), "STALE") {
+	if len(m.allPRs()) != 1 || m.prState.repositories["/api"] != "org/repo" || !strings.Contains(m.prDataStatus().label, "STALE") {
 		t.Fatal("lost stale evidence")
 	}
 	old.Files = nil
@@ -182,7 +182,7 @@ func TestPRInitialLoadSchedulesOnlyAfterLocalScan(t *testing.T) {
 	m.loading = true
 	m.resetPending()
 	for i, repo := range m.repositories {
-		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Records: []git.CommitRecord{}})
+		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Records: []git.CommitRecord{}})
 		m = next.(Model)
 		if i == len(m.repositories)-1 && cmd == nil {
 			t.Fatal("missing initial PR refresh")
@@ -219,7 +219,7 @@ func TestPRRefreshKeyCoalescesRemoteFetch(t *testing.T) {
 	}
 	next, _ := m.Update(first())
 	m = next.(Model)
-	if !m.refreshing || m.loading {
+	if !m.scan.running || m.loading {
 		t.Fatal("PR message interfered with background local refresh")
 	}
 }
@@ -249,12 +249,12 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 	}{{gh.ErrAuthentication, "gh not signed in"}, {gh.ErrUnavailable, "gh not installed"}} {
 		t.Run(tc.label, func(t *testing.T) {
 			m := awarenessFixture()
-			for i := range m.loadedRepos {
-				m.loadedRepos[i].Path = m.loadedRepos[i].ID
+			for i := range m.local.repositories {
+				m.local.repositories[i].Path = m.local.repositories[i].ID
 			}
 			p := &fakePRProvider{repoByPath: map[string]string{"/api": "org/api", "/web": "org/web"}, result: gh.Result{Err: tc.err}}
 			m.prProvider = p
-			before := len(m.allRecords)
+			before := len(m.local.records)
 			cmd := m.startPRRefresh()
 			if cmd == nil || m.loading {
 				t.Fatal("automatic fetch missing or blocks local history")
@@ -264,12 +264,12 @@ func TestPRAutomaticAuthUnavailableKeepsLocalHistoryAndStopsRepeatingRequests(t 
 			if p.fetches != 1 {
 				t.Fatalf("retried unavailable GitHub CLI %d times", p.fetches)
 			}
-			if len(m.allRecords) != before || m.loading || m.prState.loading {
+			if len(m.local.records) != before || m.loading || m.prState.loading {
 				t.Fatal("local history blocked/changed")
 			}
 			m = pressAwareness(m, "enter")
 			m = pressAwareness(m, "1")
-			if !strings.Contains(m.prStatus(), tc.label) || !strings.Contains(m.View(), "Fix login") {
+			if !strings.Contains(strings.Join(m.dataStatusLines(160), "\n"), tc.label) || !strings.Contains(m.View(), "Fix login") {
 				t.Fatalf("missing useful status/history: %s", m.View())
 			}
 			m = pressAwareness(m, "l")
@@ -285,7 +285,7 @@ func TestPRUnsupportedOriginNeverCallsGitHub(t *testing.T) {
 	m.prProvider = p
 	next, _ := m.Update(m.startPRRefresh()())
 	m = next.(Model)
-	if p.fetches != 0 || !strings.Contains(m.prStatus(), "not applicable") {
+	if p.fetches != 0 || !strings.Contains(m.prDataStatus().label, "not applicable") {
 		t.Fatal("unsupported origin queried or hidden")
 	}
 }
@@ -297,7 +297,7 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	m.prProvider = p
 	var refresh tea.Cmd
 	for _, repo := range m.repositories {
-		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		next, cmd := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 		m = next.(Model)
 		if !m.loading {
 			refresh = cmd
@@ -315,11 +315,11 @@ func TestPRAutomaticInitialLoadAndOverlayRefresh(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("overlay refresh not scheduled")
 	}
-	if !m.refreshing || !m.showPRs {
+	if !m.scan.running || !m.showPRs {
 		t.Fatal("overlay refresh did not start repository refresh or lost overlay")
 	}
 	for _, repo := range m.repositories {
-		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
 	m.Update(cmd())
 	if p.fetches != 2 {

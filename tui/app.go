@@ -2,11 +2,9 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,14 +72,10 @@ type Model struct {
 	selectedRepoID   string
 	personID         string
 	returnView       ViewMode
-	scannedAt        map[string]time.Time
-	staleRepos       map[string]bool
-	allRecords       []git.CommitRecord
+	local            localSnapshot
+	scan             scanBatch
 	authors          []stats.AuthorStats
 	repositories     []git.Repository
-	loadedRepos      []git.Repository
-	failedRepos      []string
-	scanErrors       map[string]string
 	showScanErrors   bool
 	scanErrorOffset  int
 	scanErrorDetails bool
@@ -105,26 +99,14 @@ type Model struct {
 	width            int
 	height           int
 	loading          bool
-	refreshing       bool
 	quitting         bool
-	scanGeneration   uint64
-	inFlight         map[string]bool
 	err              error
 	options          Options
 	scanContext      context.Context
 	cancelScans      context.CancelFunc
 	commands         *commandGroup
 
-	pendingScannedAt  map[string]time.Time
-	pendingStaleRepos map[string]bool
-	pendingRecords    []git.CommitRecord
-	pendingRepos      []git.Repository
-	pendingFailed     []string
-	pendingScanErrors map[string]string
-	pendingRemaining  int
-	activeScans       int
-	nextRepo          int
-	bootLines         []string
+	bootLines []string
 }
 
 // RepoLoadedMsg is emitted as each repository finishes scanning, so the loader
@@ -172,8 +154,7 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 	m := Model{
 		viewMode:      ViewAwareness,
 		overviewSort:  1,
-		scannedAt:     make(map[string]time.Time),
-		staleRepos:    make(map[string]bool),
+		local:         localSnapshot{scannedAt: make(map[string]time.Time), staleRepos: make(map[string]bool)},
 		repositories:  append([]git.Repository(nil), repositories...),
 		sortField:     initialSort,
 		timeIdx:       initialTimeIdx,
@@ -234,83 +215,42 @@ func loadRepoCmd(ctx context.Context, repository git.Repository, options Options
 }
 
 func (m Model) loadCmds() tea.Cmd {
-	if m.activeScans == 0 {
+	if m.scan.active == 0 {
 		return nil
 	}
-	cmds := make([]tea.Cmd, m.activeScans)
-	for i := range m.activeScans {
+	cmds := make([]tea.Cmd, m.scan.active)
+	for i := range m.scan.active {
 		cmds[i] = m.repoLoadCmd(m.repositories[i])
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m *Model) resetPending() {
-	m.scanGeneration++
-	m.refreshing = true
-	m.inFlight = make(map[string]bool)
-	for _, repo := range m.repositories[:min(len(m.repositories), maxConcurrentRepoScans)] {
-		m.inFlight[repo.ID] = true
-	}
-	m.pendingScannedAt = make(map[string]time.Time)
-	m.pendingStaleRepos = make(map[string]bool)
-	m.pendingRemaining = len(m.repositories)
-	m.pendingRecords = nil
-	m.pendingRepos = nil
-	m.pendingFailed = nil
-	m.pendingScanErrors = make(map[string]string)
+	m.scan = newScanBatch(m.repositories, m.scan.generation+1, m.loading)
 	m.bootLines = nil
-	m.activeScans = min(len(m.repositories), maxConcurrentRepoScans)
-	m.nextRepo = m.activeScans
 }
 
 func (m *Model) nextLoadCmd() tea.Cmd {
-	if m.nextRepo >= len(m.repositories) {
+	repository, ok := m.scan.scheduleNext(m.repositories)
+	if !ok {
 		return nil
 	}
-	repository := m.repositories[m.nextRepo]
-	m.nextRepo++
-	m.activeScans++
-	m.inFlight[repository.ID] = true
 	return m.repoLoadCmd(repository)
 }
 
 func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
-	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scanGeneration, !m.excludedRepos[repository.ID]))
+	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scan.generation, !m.excludedRepos[repository.ID]))
 }
 
 func (m *Model) finalizeLoad() {
+	snapshot, ready := m.scan.publish(m.local)
+	if !ready {
+		return
+	}
 	initial := m.loading
-	sort.Slice(m.pendingRepos, func(i, j int) bool {
-		return m.pendingRepos[i].Name < m.pendingRepos[j].Name
-	})
-	sort.Strings(m.pendingFailed)
-	m.allRecords = m.pendingRecords
-	m.loadedRepos = m.pendingRepos
-	m.failedRepos = m.pendingFailed
-	m.scanErrors = m.pendingScanErrors
-	// Commit freshness with the snapshot, never advertise new timestamps while
-	// still displaying old records from an unfinished batch.
-	scannedAt := make(map[string]time.Time)
-	maps.Copy(scannedAt, m.scannedAt)
-	maps.Copy(scannedAt, m.pendingScannedAt)
-	m.scannedAt = scannedAt
-	staleRepos := make(map[string]bool)
-	maps.Copy(staleRepos, m.staleRepos)
-	for id, stale := range m.pendingStaleRepos {
-		if stale {
-			staleRepos[id] = true
-		} else {
-			delete(staleRepos, id)
-		}
-	}
-	m.staleRepos = staleRepos
-	if len(m.loadedRepos) == 0 && len(m.failedRepos) > 0 {
-		m.err = fmt.Errorf("all %d repositories failed to scan", len(m.failedRepos))
-	} else {
-		m.err = nil
-	}
+	m.local = snapshot
+	m.err = m.local.loadError()
 	m.loading = false
-	m.refreshing = false
 	m.rebuildAreaDefinitions()
 	personID := m.personID
 	showPaths, pathOffset := m.showPaths, m.pathOffset
@@ -346,7 +286,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) startLocalRefresh() tea.Cmd {
-	if m.quitting || len(m.repositories) == 0 || m.refreshing {
+	if m.quitting || len(m.repositories) == 0 || m.scan.running {
 		return nil
 	}
 	m.resetPending()
@@ -380,55 +320,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case RepoLoadedMsg:
-		if !m.refreshing || msg.Generation != m.scanGeneration || !m.inFlight[msg.Repository.ID] {
+		if !m.scan.admit(msg, time.Now()) {
 			return m, nil
 		}
-		m.inFlight = maps.Clone(m.inFlight)
-		m.pendingScannedAt = maps.Clone(m.pendingScannedAt)
-		m.pendingStaleRepos = maps.Clone(m.pendingStaleRepos)
-		m.pendingScanErrors = maps.Clone(m.pendingScanErrors)
-		delete(m.inFlight, msg.Repository.ID)
-		m.activeScans--
-		if msg.Err != nil || msg.FetchErr != nil {
-			m.pendingFailed = append(m.pendingFailed, msg.Repository.Name)
-			m.pendingScanErrors[msg.Repository.ID] = displayText(errors.Join(msg.FetchErr, msg.Err).Error())
-			m.pendingStaleRepos[msg.Repository.ID] = true
+		if m.loading {
+			m.bootLines = append(slices.Clip(m.bootLines), bootLine(msg.Repository.Name, msg.Err == nil))
 		}
-		if msg.Err != nil {
-			for _, repo := range m.loadedRepos {
-				if repo.ID == msg.Repository.ID {
-					m.pendingRepos = append(m.pendingRepos, repo)
-					for _, record := range m.allRecords {
-						if record.RepoID == repo.ID {
-							m.pendingRecords = append(m.pendingRecords, record)
-						}
-					}
-					break
-				}
-			}
-			if m.loading {
-				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, false))
-			}
-		} else {
-			if msg.FetchErr == nil || m.loading {
-				m.pendingScannedAt[msg.Repository.ID] = time.Now()
-			}
-			if msg.FetchErr == nil {
-				m.pendingStaleRepos[msg.Repository.ID] = false
-			}
-			m.pendingRecords = append(m.pendingRecords, msg.Records...)
-			m.pendingRepos = append(m.pendingRepos, msg.Repository)
-			if m.loading {
-				m.bootLines = append(m.bootLines, bootLine(msg.Repository.Name, true))
-			}
-		}
-		m.pendingRemaining--
-		if m.pendingRemaining <= 0 {
+		if m.scan.remaining == 0 {
 			m.finalizeLoad()
 			return m, m.startPRRefresh()
-		} else {
-			return m, m.nextLoadCmd()
 		}
+		return m, m.nextLoadCmd()
 
 	case prBrowserResult:
 		if msg.err != nil {
@@ -629,7 +531,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) filteredRecords() []git.CommitRecord {
-	filtered := stats.FilterByRepo(m.allRecords, m.excludedRepos)
+	filtered := stats.FilterByRepo(m.local.records, m.excludedRepos)
 	filtered = m.filterSharedRecords(filtered)
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
@@ -774,7 +676,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
 	m.quitting = true
-	m.refreshing = false
+	m.scan.stop()
 	if m.cancelPRs != nil {
 		m.cancelPRs()
 	}
@@ -849,7 +751,7 @@ func (m Model) renderBootSequence() string {
 	lines = append(lines, "", StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES"), "")
 
 	done := len(m.bootLines)
-	total := done + m.pendingRemaining
+	total := done + m.scan.remaining
 
 	const maxShown = 14
 	shown := m.bootLines

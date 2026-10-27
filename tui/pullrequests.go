@@ -72,7 +72,7 @@ func (m *Model) startPRRefresh() tea.Cmd {
 	m.prState.loading = true
 	generation := m.prGeneration
 	var repos []git.Repository
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.excludedRepos[repo.ID] {
 			repos = append(repos, repo)
 		}
@@ -222,7 +222,7 @@ func (m Model) prsForRepository(id string) []gh.PullRequest {
 func (m Model) prAreas(repo git.Repository, pr gh.PullRequest) []stats.WorkArea {
 	definition, ok := m.areaDefinitions[repo.ID]
 	if !ok {
-		definition = stats.DefineWorkAreas(m.recordsInRepository(repo, m.allRecords), m.rulesForRepository(repo))
+		definition = stats.DefineWorkAreas(m.recordsInRepository(repo, m.local.records), m.rulesForRepository(repo))
 	}
 	changes := make([]git.PathChange, 0, len(pr.Files))
 	for _, file := range pr.Files {
@@ -257,7 +257,7 @@ func (m Model) scopePRs(scope string) []gh.PullRequest {
 }
 func (m Model) allPRs() []gh.PullRequest {
 	unique := map[string]gh.PullRequest{}
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.excludedRepos[repo.ID] {
 			for _, pr := range m.prsForRepository(repo.ID) {
 				unique[pr.Key()] = pr
@@ -310,79 +310,6 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	})
 	return prs
 }
-func (m Model) prStatus() string {
-	partial, failed, hasSnapshot := false, false, false
-	reason := "fetch failed"
-	refreshHint := ""
-	if time.Now().Before(m.prState.nextRefresh) {
-		refreshHint = " · r after " + m.prState.nextRefresh.Local().Format("15:04:05")
-	}
-	var checked time.Time
-	eligible := 0
-	for _, repo := range m.loadedRepos {
-		if m.excludedRepos[repo.ID] {
-			continue
-		}
-		if err := m.prState.errors[repo.ID]; err != nil {
-			if errors.Is(err, gh.ErrUnsupportedOrigin) {
-				continue
-			}
-			failed = true
-			if reason == "fetch failed" || reason == "unsupported GitHub origin" {
-				reason = prFailureReason(err)
-			}
-		}
-		eligible++
-		snapshot, exists := m.prState.snapshots[m.prState.repositories[repo.ID]]
-		hasSnapshot = hasSnapshot || exists
-		partial = partial || snapshot.partial || !exists
-		failed = failed || snapshot.err != nil
-		if snapshot.err != nil {
-			reason = prFailureReason(snapshot.err)
-		}
-		if snapshot.checked.After(checked) {
-			checked = snapshot.checked
-		}
-	}
-	count := len(m.allPRs())
-	if eligible == 0 && !m.prState.loading {
-		return "GitHub PRs not applicable · no supported origins · p details"
-	}
-	if failed && count == 0 {
-		return "GitHub PRs unavailable · " + reason + refreshHint + " · p details"
-	}
-	if !hasSnapshot {
-		if m.prState.loading {
-			return "GitHub PRs refreshing · no snapshot yet"
-		}
-		return "GitHub PRs unknown" + refreshHint + " · p details"
-	}
-	// Lead with evidence quality: fixed-width sidebars must never truncate
-	// STALE/PARTIAL after counts. A new request cannot make retained data fresh.
-	label := "GitHub"
-	if failed {
-		label += " · STALE"
-	} else if partial {
-		label += " · PARTIAL"
-	}
-	if partial && count == 0 {
-		label += " · PR count unknown"
-	} else {
-		label += fmt.Sprintf(" · %d known open PRs", count)
-	}
-	if failed {
-		label += " · " + reason
-	}
-	if m.prState.loading {
-		label += " · refreshing · previous snapshot shown"
-	}
-
-	if !checked.IsZero() {
-		label += " · checked " + checked.Local().Format("15:04 MST")
-	}
-	return label + refreshHint + " · p PRs"
-}
-
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if !m.prDetail {

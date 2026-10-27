@@ -80,11 +80,11 @@ func TestStatisticsFrameUsesAllIncludedRepositoryFreshness(t *testing.T) {
 	m.viewMode = ViewAggregate
 	m.width, m.height = 120, 40
 	old := time.Now().Add(-48 * time.Hour)
-	for _, repo := range m.loadedRepos {
-		m.scannedAt[repo.ID] = time.Now()
+	for _, repo := range m.local.repositories {
+		m.local.scannedAt[repo.ID] = time.Now()
 	}
-	m.scannedAt["/web"] = old
-	m.staleRepos["/web"] = true
+	m.local.scannedAt["/web"] = old
+	m.local.staleRepos["/web"] = true
 	m.prState.repositories["/web"] = "org/web"
 	m.prState.snapshots["org/web"] = prSnapshot{err: gh.ErrRateLimited}
 	view := ansi.Strip(m.View())
@@ -98,7 +98,7 @@ func TestStatisticsFrameUsesAllIncludedRepositoryFreshness(t *testing.T) {
 	if view = ansi.Strip(m.View()); strings.Contains(view, "STALE") {
 		t.Fatal("excluded repository spoiled freshness")
 	}
-	delete(m.scannedAt, "/empty")
+	delete(m.local.scannedAt, "/empty")
 	if !strings.Contains(m.View(), "Git: PARTIAL") {
 		t.Fatal("missing local scan was presented as current")
 	}
@@ -123,7 +123,7 @@ func TestContributorRefreshPreservesDetail(t *testing.T) {
 	m.activeAuthorID, m.activeOperative = m.authors[0].ID, m.authors[0].Name
 	next, cmd := m.handleKey(key("R"))
 	after := next.(Model)
-	if cmd == nil || !after.refreshing || after.viewMode != ViewOperative || after.activeAuthorID != m.activeAuthorID {
+	if cmd == nil || !after.scan.running || after.viewMode != ViewOperative || after.activeAuthorID != m.activeAuthorID {
 		t.Fatal("advertised refresh did not preserve contributor detail")
 	}
 }
@@ -151,9 +151,9 @@ func TestLeaderboardSelectionFitsSharedFrame(t *testing.T) {
 func TestSwitchingViewsPreservesGlobalStatusAndCoverage(t *testing.T) {
 	m := prFixture()
 	m.width, m.height = 220, 50
-	m.loadedRepos = m.loadedRepos[:2]
-	m.failedRepos = []string{"empty"}
-	m.staleRepos["/empty"] = true
+	m.local.repositories = m.local.repositories[:2]
+	m.local.failed = []string{"empty"}
+	m.local.staleRepos["/empty"] = true
 	m.prState.snapshots = nil
 	m.prState.loading = true
 	worklist := strings.Split(ansi.Strip(m.View()), "\n")

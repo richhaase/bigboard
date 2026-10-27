@@ -16,7 +16,7 @@ import (
 
 func boardLayoutFixture() Model {
 	now := time.Now()
-	m := Model{viewMode: ViewAwareness, overviewSort: 1, timeIdx: DefaultTimeIndex, sortField: stats.SortByTotal, version: "v0.14.5-dirty", excludedRepos: map[string]bool{}, scannedAt: map[string]time.Time{}, staleRepos: map[string]bool{}}
+	m := Model{viewMode: ViewAwareness, overviewSort: 1, timeIdx: DefaultTimeIndex, sortField: stats.SortByTotal, version: "v0.14.5-dirty", excludedRepos: map[string]bool{}, local: localSnapshot{scannedAt: map[string]time.Time{}, staleRepos: map[string]bool{}}}
 	m.prState = prState{repositories: map[string]string{}, snapshots: map[string]prSnapshot{}}
 	names := []string{"gateway", "web-client", "worker-service", "reporting", "identity", "mobile", "design-library", "infrastructure", "docs", "developer-tools", "billing", "analytics", "search-service", "notifications", "integrations", "test-harness"}
 	subjects := []string{"Preserve session state when reconnecting to the gateway", "Add retry handling for delayed background deliveries", "Show reporting totals for the selected period", "Update shared navigation and keyboard focus behavior", "Improve validation messages for incomplete submissions", "Remove obsolete compatibility configuration"}
@@ -24,11 +24,11 @@ func boardLayoutFixture() Model {
 		id := "/sample/" + name
 		repo := git.Repository{ID: id, Name: name, Path: id}
 		m.repositories = append(m.repositories, repo)
-		m.loadedRepos = append(m.loadedRepos, repo)
-		m.scannedAt[id] = now
+		m.local.repositories = append(m.local.repositories, repo)
+		m.local.scannedAt[id] = now
 		for i := 0; i < 24; i++ {
 			author := (r*7+i)%28 + 1
-			m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: fmt.Sprintf("%040x", r*100+i+1), RepoID: id, RepoName: name, Author: fmt.Sprintf("Contributor %02d", author), Email: fmt.Sprintf("contributor%02d@example.test", author), Date: now.Add(-time.Duration(r*3+i*5+1) * time.Hour), Subject: subjects[(r+i)%len(subjects)], Added: 30 + (r*31+i*67)%2600, Removed: 10 + (r*23+i*13)%700, AIAssisted: i%3 == 0, Changes: []git.PathChange{{Path: "src/session/state.go"}, {Path: "tests/session_test.go"}}})
+			m.local.records = append(m.local.records, git.CommitRecord{CommitID: fmt.Sprintf("%040x", r*100+i+1), RepoID: id, RepoName: name, Author: fmt.Sprintf("Contributor %02d", author), Email: fmt.Sprintf("contributor%02d@example.test", author), Date: now.Add(-time.Duration(r*3+i*5+1) * time.Hour), Subject: subjects[(r+i)%len(subjects)], Added: 30 + (r*31+i*67)%2600, Removed: 10 + (r*23+i*13)%700, AIAssisted: i%3 == 0, Changes: []git.PathChange{{Path: "src/session/state.go"}, {Path: "tests/session_test.go"}}})
 		}
 		remote := "sample/" + name
 		m.prState.repositories[id] = remote
@@ -199,7 +199,7 @@ func TestPRBrowserErrorSurvivesRepositoryDiagnostics(t *testing.T) {
 	m.showPRs = true
 	m.prState.snapshots = nil
 	m.prState.errors = map[string]error{}
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		m.prState.errors[repo.ID] = fmt.Errorf("repository snapshot unavailable")
 	}
 	m.prBrowserError = "Could not open browser: unavailable"

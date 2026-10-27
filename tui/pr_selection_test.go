@@ -11,7 +11,7 @@ import (
 func prOnlySelectionFixture() Model {
 	m := prFixture()
 	m.width, m.height = 120, 36
-	m.allRecords = nil
+	m.local.records = nil
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()
 	snapshot := m.prState.snapshots["org/repo"]

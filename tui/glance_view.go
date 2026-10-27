@@ -89,21 +89,21 @@ func (m Model) glanceScanLine(scope string) string {
 		id = m.areaRepoID
 	}
 	fresh := "not yet"
-	if t := m.scannedAt[id]; !t.IsZero() {
+	if t := m.local.scannedAt[id]; !t.IsZero() {
 		fresh = t.Local().Format("Jan 02 15:04 MST")
 	}
 	prefix := "Last updated: "
-	if m.staleRepos[id] {
+	if m.local.staleRepos[id] {
 		prefix = "STALE · last updated: "
 	}
 	line := "  " + prefix + fresh
-	if m.refreshing {
+	if m.scan.running {
 		line += " · Updating…"
 	}
-	if len(m.failedRepos) > 0 {
-		line += fmt.Sprintf(" · Update errors: %d (e details)", len(m.failedRepos))
+	if len(m.local.failed) > 0 {
+		line += fmt.Sprintf(" · Update errors: %d (e details)", len(m.local.failed))
 	}
-	if m.staleRepos[id] || len(m.failedRepos) > 0 {
+	if m.local.staleRepos[id] || len(m.local.failed) > 0 {
 		return StyleAmber.Render(line)
 	}
 	return StyleDimWhite.Render(line)
@@ -131,7 +131,7 @@ func (m Model) glanceColumnHeaderFor(width int) string {
 	line := "  " + padCells(label, name) + " " + rightCells("COMMITS", c) + " " + rightCells("PEOPLE", p) + " " + padCells(lastLabel, last)
 	return StyleCyan.Render("  " + line)
 }
-func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, width int) string {
+func (m Model) glanceActivityRow(r activityRow, selected bool, index, width int) string {
 	name, c, p, last := glanceColumns(width)
 	recent := "quiet"
 	if !r.latest.IsZero() {
@@ -143,7 +143,7 @@ func (m Model) glanceActivityRow(r repositoryActivity, selected bool, index, wid
 			}
 		}
 	}
-	line := glanceCursor(selected) + " " + padCells(displayText(r.repo.Name), name) + " " + rightCells(FormatNumber(r.commits), c) + " " + rightCells(FormatNumber(len(r.people)), p) + " " + padCells(recent, last)
+	line := glanceCursor(selected) + " " + padCells(displayText(r.label), name) + " " + rightCells(FormatNumber(r.commits), c) + " " + rightCells(FormatNumber(len(r.people)), p) + " " + padCells(recent, last)
 	return awarenessRow("  "+line, selected, index, width)
 }
 func (m Model) renderAwareness() string {

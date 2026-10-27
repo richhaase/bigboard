@@ -51,13 +51,13 @@ func TestRefreshAndInclusionHaveDistinctLowercaseKeys(t *testing.T) {
 		for _, key := range []string{"r", "R"} {
 			next, cmd := base.Update(keyboardContractKey(key))
 			m := next.(Model)
-			if cmd == nil || !m.refreshing || m.viewMode != base.viewMode || m.showPRs != base.showPRs {
+			if cmd == nil || !m.scan.running || m.viewMode != base.viewMode || m.showPRs != base.showPRs {
 				t.Fatalf("%s/%s: refresh changed location or did not start", board, key)
 			}
 			m.Close()
 		}
 		search := keyboardContractPress(t, base, "/", "r", "i")
-		if !search.helpSearchActive() || search.refreshing || search.viewMode == ViewRepoOverlay {
+		if !search.helpSearchActive() || search.scan.running || search.viewMode == ViewRepoOverlay {
 			t.Fatalf("%s: search interpreted literal keys", board)
 		}
 	}

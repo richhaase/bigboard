@@ -166,7 +166,7 @@ func (m Model) glanceSubareas() []stats.WorkArea {
 		prefix = strings.TrimPrefix(f.areaID, "auto:")
 	}
 	children := stats.Subareas(root, prefix)
-	var activities []repositoryActivity
+	var activities []activityRow
 	byID := make(map[string]stats.WorkArea)
 	q := strings.ToLower(f.queries[glanceSubareas])
 	for _, child := range children {
@@ -174,7 +174,7 @@ func (m Model) glanceSubareas() []stats.WorkArea {
 			continue
 		}
 		byID[child.ID] = child
-		activity := repositoryActivity{repo: git.Repository{ID: child.ID, Name: child.Name}, commits: len(stats.UniqueRecords(child.Records))}
+		activity := activityRow{scopeID: child.ID, label: child.Name, repositoryID: m.areaRepoID, commits: len(stats.UniqueRecords(child.Records))}
 		for _, r := range child.Records {
 			if r.Date.After(activity.latest) {
 				activity.latest = r.Date
@@ -188,7 +188,7 @@ func (m Model) glanceSubareas() []stats.WorkArea {
 	}
 	var result []stats.WorkArea
 	for _, a := range activities {
-		result = append(result, byID[a.repo.ID])
+		result = append(result, byID[a.scopeID])
 	}
 	return result
 }
@@ -258,7 +258,7 @@ func (m Model) glanceLensLines(width, height int) []string {
 		rows := m.glanceSubareas()
 		for i := start; i < end; i++ {
 			child := rows[i]
-			activity := repositoryActivity{repo: git.Repository{ID: child.ID, Name: child.Name}, commits: len(stats.UniqueRecords(child.Records)), people: stats.AggregateWithOptions(child.Records, stats.AggregateOptions{})}
+			activity := activityRow{scopeID: child.ID, label: child.Name, repositoryID: m.areaRepoID, commits: len(stats.UniqueRecords(child.Records)), people: stats.AggregateWithOptions(child.Records, stats.AggregateOptions{})}
 			for _, r := range child.Records {
 				if r.Date.After(activity.latest) {
 					activity.latest = r.Date
@@ -360,7 +360,7 @@ func (m Model) renderCommitInspector(width, height int) string {
 	budget := max(1, height-len(lines)-2)
 	offset := max(0, min(m.pathOffset, max(0, len(body)-budget)))
 	lines = append(lines, body[offset:min(len(body), offset+budget)]...)
-	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  "+screenFooter("? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · q quit", width))
+	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  "+screenFooter(footerHints{local: []footerHint{{"Esc", "back"}, {"↑↓", "scroll"}, {"f", "filters"}}}, width))
 	return fitGlanceLines(lines, width, height)
 }
 func wrapGlanceText(s string, width int) []string {

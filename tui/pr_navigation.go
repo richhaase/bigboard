@@ -30,7 +30,7 @@ func (m *Model) selectPR(key string) {
 
 func (m Model) prScopeLabel() string {
 	if m.prRepoID != "" {
-		for _, repo := range m.loadedRepos {
+		for _, repo := range m.local.repositories {
 			if repo.ID == m.prRepoID {
 				return displayText(repo.Name)
 			}
@@ -60,7 +60,7 @@ func (m Model) prSortLabel() string {
 
 func (m Model) prScopeRepositories() []git.Repository {
 	var repos []git.Repository
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.excludedRepos[repo.ID] {
 			repos = append(repos, repo)
 		}
