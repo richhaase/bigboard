@@ -172,6 +172,9 @@ func (m Model) filterDescription() string {
 	case "repos":
 		return "All boards: any selected repo. Tracking stays unchanged."
 	case "mine":
+		if m.prState.login != "" {
+			return m.prMineStatus() + "; updates mean any PR activity after your latest submitted review."
+		}
 		return m.prMineStatus()
 	case "people":
 		return "Git contributors in Activity only. Match any selected person."

@@ -216,18 +216,55 @@ func TestReviewsAndRequestedReviewersBoundedIndependentlyOfDecision(t *testing.T
 		{RequestedReviewer: &requestedReviewer{TypeName: "User", Login: "alice"}},
 		{RequestedReviewer: &requestedReviewer{TypeName: "Team", Slug: "backend", Organization: &actor{Login: "Acme"}}},
 	}, 3, true, "more-reviewers")
-	raw.LatestReviews = conn([]*rawReview{{Author: &actor{Login: "bob"}, State: pointer("CHANGES_REQUESTED")}}, 1, false, "")
+	submitted := time.Date(2026, time.September, 30, 11, 0, 0, 0, time.UTC)
+	raw.LatestReviews = conn([]*rawReview{{Author: &actor{Login: "bob"}, State: pointer("CHANGES_REQUESTED"), SubmittedAt: submitted.Format(time.RFC3339)}}, 1, false, "")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
 	result := NewProvider(runner).Fetch(context.Background(), "acme/repo")
 	row := result.PRs[0]
 	if !reflect.DeepEqual(row.RequestedReviewers, []string{"alice", "Acme/backend"}) || row.RequestedReviewersComplete || !row.ReviewsComplete || row.ContextComplete || row.ReviewDecision != "APPROVED" {
 		t.Fatalf("review context = %+v", row)
 	}
-	if !reflect.DeepEqual(row.Reviews, []Review{{Author: "bob", State: "CHANGES_REQUESTED"}}) {
+	if !reflect.DeepEqual(row.Reviews, []Review{{Author: "bob", State: "CHANGES_REQUESTED", SubmittedAt: submitted}}) {
 		t.Fatalf("reviews = %+v", row.Reviews)
 	}
 	if len(runner.calls) != 1 {
 		t.Fatal("review context must not cause unbounded pagination")
+	}
+}
+
+func TestReviewSubmissionTimeParsingPreservesReviewEvidence(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     string
+		timestamp string
+		want      time.Time
+	}{
+		{"submitted", "APPROVED", `,"submittedAt":"2026-09-30T12:30:00-06:00"`, time.Date(2026, time.September, 30, 18, 30, 0, 0, time.UTC)},
+		{"missing", "COMMENTED", "", time.Time{}},
+		{"null", "CHANGES_REQUESTED", `,"submittedAt":null`, time.Time{}},
+		{"empty", "APPROVED", `,"submittedAt":""`, time.Time{}},
+		{"malformed", "DISMISSED", `,"submittedAt":"not-a-date"`, time.Time{}},
+		{"pending", "PENDING", `,"submittedAt":null`, time.Time{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"login":"alice"},"state":%q%s}]}`, tc.state, tc.timestamp)
+			var raw connection[rawReview]
+			if err := json.Unmarshal([]byte(body), &raw); err != nil {
+				t.Fatal(err)
+			}
+			reviews, complete := convertReviews(&raw)
+			if !complete || len(reviews) != 1 || reviews[0].Author != "alice" || reviews[0].State != tc.state || !reviews[0].SubmittedAt.Equal(tc.want) {
+				t.Fatalf("reviews = %+v, complete = %v", reviews, complete)
+			}
+		})
+	}
+}
+
+func TestQueryIncludesSubmittedAtInBoundedLatestReviews(t *testing.T) {
+	query := strings.Join(strings.Fields(summaryQuery), " ")
+	if !strings.Contains(query, "latestReviews(first: 50) { totalCount pageInfo { hasNextPage endCursor } nodes { author { login } state submittedAt } }") {
+		t.Fatal("latest review submission time is missing from the bounded summary query")
 	}
 }
 

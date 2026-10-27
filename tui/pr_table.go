@@ -73,12 +73,25 @@ func prCheckStyle(state string) lipgloss.Style {
 	return worklistSignalStyle(state)
 }
 
-func (m Model) prUpdatedAge(pr gh.PullRequest) string {
+func (m Model) prUpdatedReference(pr gh.PullRequest) time.Time {
 	ref := m.prState.snapshots[pr.Repo].checked
 	if ref.IsZero() {
 		ref = time.Now()
 	}
-	return m.lastLookAge(pr.UpdatedAt, activityAge(pr.UpdatedAt, ref))
+	return ref
+}
+
+func prInactiveAt(updated, ref time.Time) bool {
+	return !updated.IsZero() && ref.Sub(updated) >= 14*24*time.Hour
+}
+
+func (m Model) prUpdatedAge(pr gh.PullRequest) string {
+	ref := m.prUpdatedReference(pr)
+	age := activityAge(pr.UpdatedAt, ref)
+	if prInactiveAt(pr.UpdatedAt, ref) {
+		age = StyleAmber.Render("!") + age
+	}
+	return m.lastLookAge(pr.UpdatedAt, age)
 }
 
 func (m Model) prListRowHeight() int {
@@ -190,13 +203,16 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		return nil
 	}
 	pr := prs[max(0, min(m.prRow, len(prs)-1))]
-	bookmarkRows := 0
+	var notices []string
 	if m.sinceLastLook(pr.UpdatedAt) {
-		bookmarkRows = 1
+		notices = append(notices, StyleCyan.Render("  + updated since last look"))
+	}
+	if prInactiveAt(pr.UpdatedAt, m.prUpdatedReference(pr)) {
+		notices = append(notices, StyleAmber.Render("  ! Inactive · no PR update for 14+ days"))
 	}
 	inner := max(1, width-4)
 	identity := wrapGlanceText(fmt.Sprintf("SELECTED  %s #%d", displayText(pr.Repo), pr.Number), inner)
-	identityBudget := max(1, budget-4-bookmarkRows)
+	identityBudget := max(1, budget-4-len(notices))
 	if len(identity) > identityBudget {
 		identity = identity[:identityBudget]
 		identity[identityBudget-1] = "  " + ansi.Truncate(strings.TrimPrefix(identity[identityBudget-1], "  ")+"…", inner, "…")
@@ -206,7 +222,7 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		author = githubIdentity(pr.Author) + " · ◇ Draft"
 	}
 	title := wrapGlanceText(displayText(pr.Title), inner)
-	titleBudget := max(1, budget-len(identity)-3-bookmarkRows)
+	titleBudget := max(1, budget-len(identity)-3-len(notices))
 	if len(title) > titleBudget {
 		title = title[:titleBudget]
 		suffix := "… · Enter full detail"
@@ -217,9 +233,7 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		lines = append(lines, StyleTitle.Render(line))
 	}
 	lines = append(lines, title...)
-	if bookmarkRows > 0 {
-		lines = append(lines, StyleCyan.Render("  + updated since last look"))
-	}
+	lines = append(lines, notices...)
 	lines = append(lines, StyleDimWhite.Render("  "+author), "  Review: "+prReviewStyle(pr.ReviewDecision).Render(prReviewLabel(pr.ReviewDecision))+" · Checks: "+prCheckStyle(pr.CheckState).Render(prCheckLabel(pr.CheckState)))
 	return lines
 }
@@ -309,9 +323,9 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 }
 
 func (m Model) prBoardCoverage() string {
-	legend := ""
+	legend := "! inactive ≥14d · "
 	if marker := m.bookmarkMarkerLegend(); marker != "" {
-		legend = marker + " · "
+		legend += marker + " · "
 	}
 	return legend + "PR updated time · " + m.rangeLabel() + " · " + m.prScopeLabel() + " · ◇ draft · ● open · contributor and bot filters do not apply"
 }

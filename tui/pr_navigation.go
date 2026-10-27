@@ -7,7 +7,7 @@ import (
 	"github.com/richhaase/bigboard/git"
 )
 
-var prSortLabels = []string{"Updated", "Repository", "Author", "Title"}
+var prSortLabels = []string{"Updated", "Repository", "Author", "Title", "Attention"}
 
 func (m Model) selectedPRKey() string {
 	prs := m.visiblePRs()

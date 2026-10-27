@@ -64,7 +64,7 @@ func TestPRMineModalStagesSearchesCancelsAndClears(t *testing.T) {
 	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("staging Mine mutated applied filters")
 	}
-	m = keyboardContractPress(t, m, "/", "review", "enter")
+	m = keyboardContractPress(t, m, "/", "requested", "enter")
 	if options := m.filterOptions(); len(options) != 1 || options[0].value != prMineReview {
 		t.Fatalf("Mine options search: %+v", options)
 	}
