@@ -114,8 +114,10 @@ normalization retain their existing meanings.
 ## Related evidence
 
 On the Contributors list, `m` opens the identity merge modal over all collected
-identities. Space stages emails, `k` chooses the primary, `n` edits an optional
-name, and `/` searches. Enter reviews, then Enter explicitly saves; Esc edits or
+identities. With only the preselected contributor, `n` sets a display name
+without merging; blank restores automatic naming and existing aliases remain
+unchanged. Space stages additional emails to merge, `k` chooses the primary,
+`n` edits the resulting name, and `/` searches. Enter reviews, then Enter explicitly saves; Esc edits or
 cancels. Saving preserves unrelated config fields and rejects external changes.
 Failure retains the draft and original mappings. Success remaps contributor
 selections and starts a generation-isolated offline local rescan; existing PR

@@ -18,6 +18,7 @@ type identityChoice struct {
 
 type identityMergeState struct {
 	open, review, saving       bool
+	nameEdited                 bool
 	choices                    []identityChoice
 	selected                   map[string]bool
 	primary, name, query       string
@@ -62,6 +63,16 @@ func (m *Model) openIdentityMerge() {
 		}
 	}
 	m.identityMerge = f
+}
+
+func (f identityMergeState) selectedCount() int {
+	count := 0
+	for _, selected := range f.selected {
+		if selected {
+			count++
+		}
+	}
+	return count
 }
 
 func (f identityMergeState) visibleChoices() []identityChoice {
@@ -113,7 +124,7 @@ func (m Model) handleIdentityMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			if f.edit == "name" {
-				f.name = strings.TrimSpace(f.input)
+				f.name, f.nameEdited = strings.TrimSpace(f.input), true
 			}
 			f.edit = ""
 		case "esc":
@@ -166,7 +177,13 @@ func (m Model) handleIdentityMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			slices.Sort(emails)
-			pending, err := git.MergeIdentities(m.options.Identities, f.primary, emails, f.name)
+			var pending map[string]git.Identity
+			var err error
+			if len(emails) == 1 && emails[0] == f.primary {
+				pending, err = git.SetIdentityDisplayName(m.options.Identities, f.primary, f.name)
+			} else {
+				pending, err = git.MergeIdentities(m.options.Identities, f.primary, emails, f.name)
+			}
 			if err != nil {
 				f.error = displayText(err.Error())
 				return m, nil
@@ -201,12 +218,15 @@ func (m Model) handleIdentityMergeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		choice := choices[f.cursor]
 		if choice.email == "" {
-			f.error = "This contributor has no valid email and cannot be merged."
+			f.error = "This contributor has no valid email for saved identity changes."
 			return m, nil
 		}
 		f.selected = maps.Clone(f.selected)
 		if msg.String() == "k" || f.primary == "" {
 			f.primary, f.selected[choice.email] = choice.email, true
+			if !f.nameEdited {
+				f.name = m.options.Identities[choice.email].Name
+			}
 		} else if choice.email == f.primary {
 			f.error = "Choose another primary with k before removing this identity."
 			return m, nil
@@ -278,21 +298,30 @@ func (m *Model) remapContributorSelections(identities map[string]git.Identity) {
 func (m Model) renderIdentityMerge(background string, width, height int) string {
 	f := m.identityMerge
 	if width < 36 || height < 16 {
-		return renderCenteredModal(background, []string{"Merge contributors", "Resize terminal", "Esc cancel"}, max(6, width-2), width, height)
+		return renderCenteredModal(background, []string{"Contributor identities", "Resize terminal", "Esc cancel"}, max(6, width-2), width, height)
 	}
 	panel, page, rowHeight := identityMergeModalSize(width, height, f.review)
 	inner := panel - 4
-	title, description := "Merge contributors", "All collected identities · choose the same person's emails"
+	title, description := "Contributor identities", "Set a display name, or select the same person's emails to merge."
 	if f.review {
 		title, description = "Review contributor merge", "These emails will become one contributor across every board."
+		if f.selectedCount() == 1 {
+			title, description = "Review display name", "Name only · email mappings stay unchanged."
+		}
 	}
 	primary := f.primary
 	if primary == "" {
 		primary = "Choose with k"
 	}
 	name := f.name
+	if f.review {
+		name = f.pending[f.primary].Name
+	}
 	if name == "" {
-		name = "Automatic (keep primary's configured name, otherwise most frequent)"
+		name = "Automatic (most frequent)"
+		if !f.review && f.selectedCount() > 1 {
+			name = "Keep primary's name, otherwise automatic"
+		}
 	}
 	lines := []string{
 		StyleTitle.Render(title),
@@ -350,9 +379,17 @@ func (m Model) renderIdentityMerge(background string, width, height int) string 
 		position = "Find: " + displayText(f.query) + " · " + position
 	}
 	lines = append(lines, StyleDimWhite.Render(position))
-	status := "Select at least two identities. Nothing is saved yet."
+	status := "n sets name · no merge selected"
+	if count := f.selectedCount(); count > 1 {
+		status = fmt.Sprintf("%d identities selected for merge", count)
+	} else if count == 0 {
+		status = "Choose a primary identity with k"
+	}
 	if f.review {
 		status = "Confirmation saves this merge for future sessions."
+		if f.selectedCount() == 1 {
+			status = "Saves this name for future sessions."
+		}
 	}
 	if f.error != "" {
 		status = f.error
@@ -361,6 +398,9 @@ func (m Model) renderIdentityMerge(background string, width, height int) string 
 	actions, navigation := "Space select · k primary · n name", "/ find · Enter review · Esc cancel · ? help"
 	if f.review {
 		actions, navigation = "Enter merge and save", "Esc edit choices · ↑↓ scroll · ? help"
+		if f.selectedCount() == 1 {
+			actions = "Enter save name"
+		}
 	}
 	if f.edit != "" {
 		label := "Find"
@@ -372,6 +412,9 @@ func (m Model) renderIdentityMerge(background string, width, height int) string 
 	}
 	if f.saving {
 		actions, navigation = "Saving contributor merge…", ""
+		if f.selectedCount() == 1 {
+			actions = "Saving display name…"
+		}
 	}
 	lines = append(lines, StyleTitle.Render(actions), StyleDimWhite.Render(navigation))
 	for i, line := range lines {

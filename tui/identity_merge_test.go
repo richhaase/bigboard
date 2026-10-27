@@ -105,7 +105,7 @@ func TestIdentityMergeTextHelpAndBoardCancellation(t *testing.T) {
 		t.Fatal("name editor interpreted shortcut letters")
 	}
 	m = keyboardContractPress(t, m, "f1")
-	if !m.showHelp || m.currentHelp().title != "Contributor merge text" {
+	if !m.showHelp || m.currentHelp().title != "Contributor identity text" {
 		t.Fatal("merge text help unavailable")
 	}
 	m = keyboardContractPress(t, m, "esc", "enter")
@@ -190,7 +190,7 @@ func TestIdentityMergeModalFitsAndReviewShowsFullEmails(t *testing.T) {
 			}
 			view := ansi.Strip(next.View())
 			lines := strings.Split(view, "\n")
-			if len(lines) != m.height || !strings.Contains(view, "Merge") && !strings.Contains(view, "merge") {
+			if len(lines) != m.height || !strings.Contains(view, "Contributor") && !strings.Contains(view, "contributor") {
 				t.Fatalf("%v %s modal lost frame: %s", size, phase, view)
 			}
 			for _, line := range lines {

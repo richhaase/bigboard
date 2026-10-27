@@ -82,18 +82,22 @@ func (m Model) currentHelp() screenHelp {
 func (m Model) screenHelp() screenHelp {
 	if m.identityMerge.open {
 		if m.identityMerge.edit != "" {
-			return screenHelp{"Contributor merge text", []helpSection{{"Edit", []helpBinding{
+			return screenHelp{"Contributor identity text", []helpSection{{"Edit", []helpBinding{
 				{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Keep edit; return to choices"}, {"Esc", "Cancel edit"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 			}}}}
 		}
 		if m.identityMerge.review {
-			return screenHelp{"Review contributor merge", []helpSection{{"Confirm", []helpBinding{
-				{"Enter", "Merge the listed emails and save for future sessions"}, {"Esc / ←", "Return to choices without saving"}, {"↑ / ↓", "Review selected emails"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last email"}, {"q / Ctrl+C", "Quit without confirming"},
+			title, action := "Review contributor merge", "Merge the listed emails and save for future sessions"
+			if m.identityMerge.selectedCount() == 1 {
+				title, action = "Review display name", "Save the display name; keep email mappings unchanged"
+			}
+			return screenHelp{title, []helpSection{{"Confirm", []helpBinding{
+				{"Enter", action}, {"Esc / ←", "Return to choices without saving"}, {"↑ / ↓", "Review selected emails"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last email"}, {"q / Ctrl+C", "Quit without confirming"},
 			}}}}
 		}
-		return screenHelp{"Merge contributors", []helpSection{{"Choose identities", []helpBinding{
-			{"↑ / ↓", "Select a contributor identity"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last identity"}, {"Space", "Stage identity for merging"}, {"k", "Keep highlighted email as the primary identity"}, {"n", "Edit optional display name"}, {"/", "Find by name or email"}, {"Enter", "Review the merge before saving"}, {"Esc / ←", "Cancel without saving"}, {"q / Ctrl+C", "Quit BigBoard"},
-		}}, {"Identity", []helpBinding{{"Scope", "All collected identities are available, independently of date and board filters"}, {"[P]", "Primary email retained by the merged contributor"}, {"[—]", "Missing or invalid email; cannot be merged"}, {"Saving", "Updates future sessions and rescans cached local history without fetching"}}}}}
+		return screenHelp{"Contributor identities", []helpSection{{"Choose identities", []helpBinding{
+			{"↑ / ↓", "Select a contributor identity"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last identity"}, {"Space", "Stage identity for merging"}, {"k", "Keep highlighted email as the primary identity"}, {"n", "Set display name for one identity or a merge; blank restores automatic naming for one identity"}, {"/", "Find by name or email"}, {"Enter", "Review the name or merge before saving"}, {"Esc / ←", "Cancel without saving"}, {"q / Ctrl+C", "Quit BigBoard"},
+		}}, {"Identity", []helpBinding{{"Scope", "All collected identities are available, independently of date and board filters"}, {"[P]", "Primary email retained by the merged contributor"}, {"[—]", "Missing or invalid email; cannot save identity changes"}, {"Saving", "Updates future sessions and rescans cached local history without fetching"}}}}}
 	}
 	if m.filters.open {
 		if m.filtersTextEditing() {
@@ -181,7 +185,7 @@ func (m Model) screenHelp() screenHelp {
 			{"↑ / ↓", "Select a contributor"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last contributor"}, {"Enter / →", "Read contributor details"}, {"← / Esc", back},
 		}}, {"Actions", []helpBinding{
 			{"/", "Find contributors"}, {"s / S", "Change sort / reverse order"},
-			{"b", "Show / hide bots"}, {"m", "Merge contributor identities; review before saving"}, {"i", "Repository controls: choose tracked repositories"},
+			{"b", "Show / hide bots"}, {"m", "Set contributor display names or merge identities; review before saving"}, {"i", "Repository controls: choose tracked repositories"},
 			{"r", "Refresh Git and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
