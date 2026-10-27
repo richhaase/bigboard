@@ -34,6 +34,7 @@ type Model struct {
 	directory          directoryState
 	contributorPane    activityContributorPane
 	filters            sharedFilterState
+	identityMerge      identityMergeState
 	sharedRepos        filterValues
 	activityPeople     filterValues
 	activityHideBots   bool
@@ -104,6 +105,9 @@ type Model struct {
 	options          Options
 	scanContext      context.Context
 	cancelScans      context.CancelFunc
+	localScanContext context.Context
+	cancelLocalScans context.CancelFunc
+	identityReselect string
 	commands         *commandGroup
 
 	bootLines []string
@@ -132,6 +136,8 @@ type Options struct {
 	IncludeGenerated bool
 	AIIdentities     []string
 	BotIdentities    []string
+	Identities       map[string]git.Identity
+	SaveIdentities   func(map[string]git.Identity) error
 	WorkAreas        map[string][]stats.WorkAreaRule
 }
 
@@ -209,6 +215,7 @@ func loadRepoCmd(ctx context.Context, repository git.Repository, options Options
 		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
 			IncludeGenerated: options.IncludeGenerated,
 			AIIdentities:     options.AIIdentities,
+			Identities:       options.Identities,
 		})
 		return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err, FetchErr: fetchErr}
 	}
@@ -226,6 +233,14 @@ func (m Model) loadCmds() tea.Cmd {
 }
 
 func (m *Model) resetPending() {
+	if m.cancelLocalScans != nil {
+		m.cancelLocalScans()
+	}
+	parent := m.scanContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	m.localScanContext, m.cancelLocalScans = context.WithCancel(parent)
 	m.scan = newScanBatch(m.repositories, m.scan.generation+1, m.loading)
 	m.bootLines = nil
 }
@@ -239,7 +254,11 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 }
 
 func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
-	return m.commands.wrap(loadRepoCmd(m.scanContext, repository, m.options, m.scan.generation, !m.excludedRepos[repository.ID]))
+	ctx := m.localScanContext
+	if ctx == nil {
+		ctx = m.scanContext
+	}
+	return m.commands.wrap(loadRepoCmd(ctx, repository, m.options, m.scan.generation, !m.scan.localOnly && !m.excludedRepos[repository.ID]))
 }
 
 func (m *Model) finalizeLoad() {
@@ -255,6 +274,10 @@ func (m *Model) finalizeLoad() {
 	personID := m.personID
 	showPaths, pathOffset := m.showPaths, m.pathOffset
 	m.recomputeAuthors()
+	if m.identityReselect != "" {
+		m.selectContributor(m.identityReselect)
+		m.identityReselect = ""
+	}
 	m.normalizeContributorDetail()
 	if !initial {
 		// A refresh is not a navigation action. Retain vanished-person/commit
@@ -306,6 +329,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg := msg.(type) {
+	case identitySavedMsg:
+		return m.applyIdentitySave(msg)
 	case prsLoadedMsg:
 		if msg.generation == m.prGeneration {
 			m.applyPRResult(msg)
@@ -327,7 +352,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bootLines = append(slices.Clip(m.bootLines), bootLine(msg.Repository.Name, msg.Err == nil))
 		}
 		if m.scan.remaining == 0 {
+			localOnly := m.scan.localOnly
 			m.finalizeLoad()
+			if localOnly {
+				return m, nil
+			}
 			return m, m.startPRRefresh()
 		}
 		return m, m.nextLoadCmd()
@@ -346,6 +375,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.identityMerge.saving {
+		if msg.String() == "ctrl+c" {
+			return m.quit()
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "c", "l", "a", "w", "p":
 		if m.helpSearchActive() && !m.showHelp {
@@ -362,6 +397,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.showScanErrors {
 		return m.handleScanErrorKey(msg)
+	}
+	if m.identityMerge.open {
+		return m.handleIdentityMergeKey(msg)
 	}
 	if m.err != nil && !m.loading {
 		m.filters = sharedFilterState{}
@@ -404,6 +442,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg.String() {
+	case "m":
+		if m.viewMode == ViewAggregate && !m.showPRs && !m.loading {
+			m.openIdentityMerge()
+			return m, nil
+		}
 	case "q", "ctrl+c":
 		return m.quit()
 	case "r", "R":
@@ -687,6 +730,9 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 	if m.cancelScans != nil {
 		m.cancelScans()
 	}
+	if m.cancelLocalScans != nil {
+		m.cancelLocalScans()
+	}
 	return m, tea.Quit
 }
 
@@ -702,6 +748,9 @@ func (m Model) View() string {
 	}
 	if m.filters.open && m.err == nil && !m.loading {
 		content = m.renderFiltersModal(content, max(1, width), max(1, height))
+	}
+	if m.identityMerge.open {
+		content = m.renderIdentityMerge(content, max(1, width), max(1, height))
 	}
 	if m.showScanErrors {
 		content = m.renderScanErrors(content, max(1, width), max(1, height))

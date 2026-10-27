@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/richhaase/bigboard/git"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
 )
@@ -27,7 +28,9 @@ type Config struct {
 	Groups        map[string][]string             `json:"groups"`
 	AIIdentities  []string                        `json:"ai_identities"`
 	BotIdentities []string                        `json:"bot_identities"`
+	Identities    map[string]git.Identity         `json:"identities"`
 	WorkAreas     map[string][]stats.WorkAreaRule `json:"work_areas"`
+	source        []byte
 }
 
 func defaultConfigPath() string {
@@ -77,6 +80,11 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 			return nil, fmt.Errorf("work_areas %q: %w", repository, err)
 		}
 	}
+	cfg.Identities, err = git.NormalizeIdentities(cfg.Identities)
+	if err != nil {
+		return nil, fmt.Errorf("identities: %w", err)
+	}
+	cfg.source = data
 	return &cfg, nil
 }
 

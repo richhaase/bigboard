@@ -218,7 +218,7 @@ origins are reported in the PR board without suppressing local history.
 
 ## Accuracy notes
 
-- **Author identity** is resolved by Git's native `.mailmap`, then grouped by canonical email. Shared or similar names do not merge people. Use `.mailmap` to combine aliases with different emails. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
+- **Author identity** is resolved by Git's native `.mailmap`, then the configured `identities` email aliases, and grouped by canonical email. Press `m` on the Contributors list to merge a person's email identities and save the mapping. Shared or similar names do not merge people. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on Contributors with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
@@ -389,6 +389,19 @@ global inclusion and returns to the same PR view.
 
 ### Contributors
 
+Press `m` on the Contributors list to merge identities across repositories. The
+modal shows all collected names and emails, including contributors outside the
+current date range. Space selects identities, `k` chooses the primary email,
+`n` sets an optional display name, and `/` searches. Enter reviews the full email
+mapping; a second Enter confirms and saves it. Esc returns to editing or cancels.
+Identities without a valid email cannot be merged.
+
+Confirmed merges persist in the active config file and apply to every board and
+JSON export. BigBoard rescans cached local history without fetching Git or PR
+data, preserving your scope and contributor selections. Unrelated settings stay
+intact; if the config changed externally or saving fails, the original mapping
+and your staged choices remain available.
+
 Contributors aggregates included repositories in the selected local history
 range. Bars always show added and removed lines, including when sorted by commit
 count. `/` filters contributor names; `s` selects a sort field and `S` reverses it.
@@ -420,7 +433,8 @@ Optional, at `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CONFIG_HOME` is s
 otherwise `~/.config/bigboard/config.json`. Override either with `--config`.
 Malformed JSON, unknown fields, and unsupported `sort`, `since`, or `theme` values
 report an error. Settings are read at startup;
-interactive filters and inclusion changes do not rewrite the file.
+interactive filters and inclusion changes do not rewrite the file. Confirming a
+contributor merge explicitly saves its identity mapping to this file.
 
 ```json
 {
@@ -437,7 +451,13 @@ interactive filters and inclusion changes do not rewrite the file.
     "frontend": ["~/src/web"]
   },
   "ai_identities": ["my-agent@example.com", "@agents.example.com"],
-  "bot_identities": ["my-agent@example.com"]
+  "bot_identities": ["my-agent@example.com"],
+  "identities": {
+    "dev@example.com": {
+      "aliases": ["dev@personal.example", "12345+dev@users.noreply.github.com"],
+      "name": "Example Developer"
+    }
+  }
 }
 ```
 
@@ -448,10 +468,11 @@ interactive filters and inclusion changes do not rewrite the file.
 - `all_files` includes generated/vendored paths in line totals; it defaults to `false`.
 - `work_areas` defines optional cross-directory groups using the [rules above](#work-relationships).
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
-- `fuzzy` is retained for config compatibility; use `.mailmap` for identity aliases.
+- `fuzzy` is retained for config compatibility; use `.mailmap` or `identities` for identity aliases.
 - `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
 - `bot_identities` tags contributors as bots; entries are exact emails, `@domain` suffixes, or exact author names.
+- `identities` maps each canonical email to `aliases` and an optional display `name`. Keys and aliases are trimmed and lowercased; each email may appear only once across the map, and self-aliases are rejected. Names alone never merge people. Mappings apply after Git's `.mailmap`, before author AI/bot classification, to all boards and JSON export. Co-author AI evidence is preserved. Without a display override, the most frequent name remains the display name. An incorrect alias assigns someone else's commits to the canonical identity; check the People lens after editing the map.
 - Select a group with `--group backend`. Author identities can also be canonicalized with a standard git `.mailmap` in each repo.
 
 ## Features

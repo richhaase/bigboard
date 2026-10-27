@@ -25,7 +25,7 @@ func TestRetainedChangesLiteralPaths(t *testing.T) {
 	for _, includeGenerated := range []bool{false, true} {
 		scanner := bufio.NewScanner(strings.NewReader(out))
 		scanner.Split(splitNUL)
-		records, err := parseLog(scanner, Repository{ID: "repo", Name: "repo"}, defaultPathFilter(CollectOptions{IncludeGenerated: includeGenerated}), newAIMatcher(nil))
+		records, err := parseLog(scanner, Repository{ID: "repo", Name: "repo"}, defaultPathFilter(CollectOptions{IncludeGenerated: includeGenerated}), newAIMatcher(nil), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestRetainedLineCountsStayWithEachFile(t *testing.T) {
 		"90\t80\tvendor/generated.go\x00"
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	scanner.Split(splitNUL)
-	records, err := parseLog(scanner, Repository{ID: "repo", Name: "repo"}, defaultPathFilter(CollectOptions{}), newAIMatcher(nil))
+	records, err := parseLog(scanner, Repository{ID: "repo", Name: "repo"}, defaultPathFilter(CollectOptions{}), newAIMatcher(nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

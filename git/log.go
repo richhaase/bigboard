@@ -84,7 +84,7 @@ func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
 
 // Git terminates each metadata field and each numstat path with NUL. Rename/copy
 // records have an empty path followed by the literal old and new paths.
-func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
+func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiMatcher, identities identityResolver) ([]CommitRecord, error) {
 	read := func() (string, error) {
 		if scanner.Scan() {
 			return scanner.Text(), nil
@@ -116,8 +116,9 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 			if err != nil {
 				return nil, fmt.Errorf("invalid author date: %w", err)
 			}
-			records = append(records, CommitRecord{CommitID: token, Subject: fields[4], Author: strings.TrimSpace(fields[0]), Email: strings.TrimSpace(fields[1]), Date: time.Unix(seconds, 0).UTC(),
-				RepoID: repo.ID, RepoName: repo.Name, AIAssisted: ai.isAI(fields[1]) || ai.isAICoAuthor(fields[3])})
+			name, email := identities.resolve(fields[0], fields[1])
+			records = append(records, CommitRecord{CommitID: token, Subject: fields[4], Author: name, Email: email, Date: time.Unix(seconds, 0).UTC(),
+				RepoID: repo.ID, RepoName: repo.Name, AIAssisted: ai.isAI(email) || ai.isAICoAuthor(fields[3])})
 			continue
 		}
 		fields := strings.SplitN(token, "\t", 3)
