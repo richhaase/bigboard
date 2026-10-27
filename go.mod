@@ -1,6 +1,6 @@
 module github.com/richhaase/bigboard
 
-go 1.26.3
+go 1.26.9
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
