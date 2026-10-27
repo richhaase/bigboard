@@ -159,6 +159,9 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key == "q" || key == "ctrl+c" {
 		return m.quit()
 	}
+	if key == "o" && (m.showPaths || m.glance.detailOpen && m.glance.frame.tab == glanceActivity) {
+		return m.openSelectedCommit()
+	}
 	if m.showPaths {
 		switch key {
 		case "esc", "left":
