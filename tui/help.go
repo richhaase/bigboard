@@ -24,6 +24,9 @@ type screenHelp struct {
 }
 
 func (m Model) helpSearchActive() bool {
+	if m.identityMerge.open {
+		return m.identityMerge.edit != ""
+	}
 	if m.loading || m.err != nil || m.showScanErrors || m.viewMode == ViewRepoOverlay {
 		return false
 	}
@@ -38,14 +41,14 @@ func (m Model) helpSearchActive() bool {
 
 func (m Model) currentHelp() screenHelp {
 	help := m.screenHelp()
-	if !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
+	if !m.identityMerge.open && !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
 		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: shared scope and this board's filters"}, {"t", "Date range: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
 	}
-	if !m.filters.open && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
+	if !m.identityMerge.open && !m.filters.open && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
 		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Data status: Git/PR freshness, coverage and diagnostics"}}})
 	}
 	boards := "Boards"
-	if m.filters.open || m.viewMode == ViewRepoOverlay {
+	if m.identityMerge.open || m.filters.open || m.viewMode == ViewRepoOverlay {
 		boards = "Boards · cancel pending choices"
 	} else if m.helpSearchActive() {
 		boards = "Boards · from help"
@@ -57,6 +60,21 @@ func (m Model) currentHelp() screenHelp {
 }
 
 func (m Model) screenHelp() screenHelp {
+	if m.identityMerge.open {
+		if m.identityMerge.edit != "" {
+			return screenHelp{"Contributor merge text", []helpSection{{"Edit", []helpBinding{
+				{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Keep edit; return to choices"}, {"Esc", "Cancel edit"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
+			}}}}
+		}
+		if m.identityMerge.review {
+			return screenHelp{"Review contributor merge", []helpSection{{"Confirm", []helpBinding{
+				{"Enter", "Merge the listed emails and save for future sessions"}, {"Esc / ←", "Return to choices without saving"}, {"↑ / ↓", "Review selected emails"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last email"}, {"q / Ctrl+C", "Quit without confirming"},
+			}}}}
+		}
+		return screenHelp{"Merge contributors", []helpSection{{"Choose identities", []helpBinding{
+			{"↑ / ↓", "Select a contributor identity"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last identity"}, {"Space", "Stage identity for merging"}, {"k", "Keep highlighted email as the primary identity"}, {"n", "Edit optional display name"}, {"/", "Find by name or email"}, {"Enter", "Review the merge before saving"}, {"Esc / ←", "Cancel without saving"}, {"q / Ctrl+C", "Quit BigBoard"},
+		}}, {"Identity", []helpBinding{{"Scope", "All collected identities are available, independently of date and board filters"}, {"[P]", "Primary email retained by the merged contributor"}, {"[—]", "Missing or invalid email; cannot be merged"}, {"Saving", "Updates future sessions and rescans cached local history without fetching"}}}}}
+	}
 	if m.filters.open {
 		if m.filtersTextEditing() {
 			return screenHelp{"Filter text", []helpSection{{"Edit", []helpBinding{
@@ -132,7 +150,7 @@ func (m Model) screenHelp() screenHelp {
 			{"↑ / ↓", "Select a contributor"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last contributor"}, {"Enter / →", "Read contributor details"}, {"← / Esc", back},
 		}}, {"Actions", []helpBinding{
 			{"/", "Find contributors"}, {"s / S", "Change sort / reverse order"},
-			{"b", "Show / hide bots"}, {"i", "Repository controls: choose tracked repositories"},
+			{"b", "Show / hide bots"}, {"m", "Merge contributor identities; review before saving"}, {"i", "Repository controls: choose tracked repositories"},
 			{"r", "Refresh Git and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
