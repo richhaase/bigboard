@@ -16,9 +16,9 @@ read the counts. [Controls](#controls) · [Configuration](#config-file) ·
 ## Install
 
 Big Board requires Git 2.31 or newer on `PATH`. Interactive use also requires
-an installed and signed-in `gh` CLI with access to your configured GitHub
-organizations. Big Board uses those existing credentials for discovery and its
-own repository cache.
+an installed and signed-in `gh` CLI with access to your selected personal and
+organization repositories. Big Board uses those existing credentials for
+discovery and its own repository cache.
 
 ### Homebrew
 
@@ -35,14 +35,14 @@ go install github.com/richhaase/bigboard/cmd/bigboard@latest
 ## Usage
 
 Big Board is TUI-first: preferences live in the config file, and the CLI has exactly four flags.
-Configure `organizations` in your [config file](#config-file) before launching:
-
-```json
-{"organizations": ["example-org"]}
-```
+Launch `bigboard` to choose your personal GitHub repositories, organizations, or
+both in first-run setup. It reads your existing `gh` account, lets you review
+the selection, and creates your [config file](#config-file) only when you save. You can also start
+with an existing configuration such as `{"personal_account": "example-user"}`
+or `{"organizations": ["example-org"]}`.
 
 ```bash
-# Discover organization repositories and refresh Big Board's cache
+# Discover selected repositories and refresh Big Board's cache
 bigboard
 
 # Use a named group from your config
@@ -58,11 +58,23 @@ bigboard --config ./bigboard.json
 bigboard --version
 ```
 
-Repository groups use `owner/name` identities within configured organizations.
+Repository groups use `owner/name` identities within the configured personal
+account and organizations.
 Positional repository paths, the old `paths` and `depth` settings, and path-based
 groups are rejected; there is no current-directory or developer-checkout fallback.
 `--export` selects only existing cached repositories and performs no discovery,
-clone, or fetch. Launch online first to populate the cache.
+clone, or fetch. It requires an existing valid configuration and populated cache;
+launch online first to set up Big Board.
+
+Press `,` on any board to open Settings and change the saved personal account,
+organizations, and repository exclusions. Choose sources, review the repository
+checklist, then review and save. The checklist sorts by GitHub's last push,
+newest first, and shows that recency in `LAST PUSH`; unknown dates appear last.
+Last push includes activity across branches and comes from repository discovery,
+without extra requests or scans. You can add an organization by name if it is
+not listed for your account. Saving reloads the selected repositories; canceling leaves the
+configuration and active board unchanged. If startup discovery fails, setup
+shows the error and lets you retry after correcting `gh` access.
 
 The shared scope row shows the active range. Press `t` to open Date range in the
 filter modal. Space stages a preset or opens custom entry for 1–3650 days;
@@ -146,9 +158,11 @@ repository-relative files or directories, not globs. The longest matching prefix
 wins; unmatched paths keep automatic groups. Names must be unique within a
 repository, and one prefix cannot name two areas.
 
-On launch, Big Board discovers accessible, non-archived repositories in the
-configured GitHub organizations. It owns full bare clones containing only each
-repository's default-branch history at
+On launch, Big Board discovers accessible, non-archived repositories owned by
+the selected personal account and configured GitHub organizations. Personal
+repositories include public and private repositories owned by the signed-in
+account; repositories owned by collaborators are not included. Big Board owns
+full bare clones containing only each repository's default-branch history at
 `$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git`, with `~/.cache` as the
 default cache home. Developer checkouts are never scanned or changed.
 
@@ -189,7 +203,7 @@ narrow terminal cannot fit the whole range.
 Read-only open pull request context loads automatically for the discovered
 GitHub repositories using the existing `gh` session. No additional PR setting is
 needed. PR authentication or request failures leave loaded cached history usable;
-interactive startup still requires successful organization discovery. Bigboard
+startup discovery failures open setup with a retry action. Bigboard
 never signs in, requests access, creates credentials, or changes pull requests.
 Headless `--export` stays offline and includes no PR data.
 Only a supported GitHub `origin` is used, with no upstream guessing.
@@ -300,7 +314,8 @@ authors remain separate. Viewing filters do not change repository tracking or
 refresh coverage; `i` opens repository controls in a centered modal over the
 current board. Space stages inclusion choices, Enter applies, and Esc cancels.
 Arrows, Page Up/Down, and Home/End navigate the list. Inclusion choices keep
-their existing session-only behavior.
+their existing session-only behavior. Use Settings (`,`) to save personal account,
+organization, and repository choices across launches.
 
 In the filter modal, left/right or Tab changes categories, up/down selects an option,
 and Space stages a choice. Multiple values within a category match any selected
@@ -339,6 +354,7 @@ location. Applied filters are cleared explicitly, never by Back.
 | `f` / `t` | Open Filters / open its shared Date range category directly |
 | `x` | Clear this board’s filters and search; preserve shared scope and location |
 | `i` | Open Repository controls to choose tracked repositories or remove unlisted cached clones |
+| `,` | Open Settings to save personal repositories, organizations, and repository exclusions |
 | `r` | Clone/fetch included cache entries and request PR context, subject to PR cooldown; preserve location |
 | `e` | Open Data status for cache location/size, unlisted repositories, Git/PR freshness and diagnostics |
 | `?` / `F1` | Open contextual help |
@@ -479,14 +495,20 @@ Activity and Contributors each keep their own bot visibility.
 
 Required for repository selection, at `$XDG_CONFIG_HOME/bigboard/config.json`
 when `XDG_CONFIG_HOME` is set, otherwise `~/.config/bigboard/config.json`. Override
-either with `--config`. `organizations` must contain at least one GitHub organization.
+either with `--config`. Set `personal_account`, at least one `organizations` entry,
+or both. Personal-only configurations do not need an organization.
 Malformed JSON, unknown fields, and unsupported `sort`, `since`, or `theme` values
 report an error. Settings are read at startup;
-interactive filters and inclusion changes do not rewrite the file. Confirming a
-contributor merge explicitly saves its identity mapping to this file.
+interactive filters and Repository controls inclusion changes do not rewrite
+the file. Confirming a contributor merge explicitly saves its identity mapping
+to this file. Settings (`,`) saves the personal account, organizations, and
+repository exclusions after review, preserving other fields and named groups. Both saves reject changes made to the file outside Big
+Board during the session. An explicit missing `--config` path can be created by
+first-run setup; `--export` reports a missing configuration as an error.
 
 ```json
 {
+  "personal_account": "example-user",
   "organizations": ["example-org"],
   "exclude": ["vendor-*", "example-org/legacy-api"],
   "sort": "net",
@@ -510,8 +532,9 @@ contributor merge explicitly saves its identity mapping to this file.
 }
 ```
 
-- `organizations` supplies the GitHub organizations to discover through the existing authenticated `gh` session. Archived repositories are omitted.
-- `groups` maps names to `owner/name` repository identities within those organizations. `--group` limits the selection to its members; an unavailable or archived member reports an error.
+- `personal_account` optionally selects repositories owned by that personal GitHub account. It must match the signed-in `gh` account; public and private owned repositories are discovered, with archived repositories omitted.
+- `organizations` supplies the GitHub organizations to discover through the existing authenticated `gh` session. It can be empty when `personal_account` is set. Archived repositories are omitted.
+- `groups` maps names to `owner/name` repository identities within the personal account and organizations. `--group` limits the selection to its members; an unavailable or archived member reports an error.
 - Legacy `paths`, `depth`, and path-based `groups` are rejected with migration guidance. Positional paths are also rejected; there is no legacy fallback.
 - `sort` sets the Contributors sort: `commits`, `added`, `removed`, `net`, `ai`, or `total` (`impact` is an alias for `total`). The default is `total`. This setting changes contributor ordering; bars still show lines changed. Activity starts ranked by lines changed and can independently sort by commits, recency, or name.
 - `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Activity canvas uses its fixed high-contrast palette.
@@ -520,7 +543,7 @@ contributor merge explicitly saves its identity mapping to this file.
 - `pr_request_budget` is the positive maximum number of GitHub requests per refresh (default `128`). It does not change rate-limit cooldowns, timeouts, or the PR/file count limits.
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
 - `fuzzy` is retained for config compatibility; use `.mailmap` or `identities` for identity aliases.
-- `exclude` entries match a repository basename, its `owner/name` identity, or a glob of either. A basename matches that name across all configured organizations.
+- `exclude` entries match a repository basename, its `owner/name` identity, or a glob of either. A basename matches that name across the personal account and configured organizations. Saving the Settings checklist replaces these patterns with the exact `owner/name` identities of unchecked repositories.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
 - `bot_identities` tags contributors as bots; entries are exact emails, `@domain` suffixes, or exact author names.
 - `identities` maps each canonical email to `aliases` and an optional display `name`. Keys and aliases are trimmed and lowercased; each email may appear only once across the map, and self-aliases are rejected. Names alone never merge people. Mappings apply after Git's `.mailmap`, before author AI/bot classification, to all boards and JSON export. Co-author AI evidence is preserved. Without a display override, the most frequent name remains the display name. An incorrect alias assigns someone else's commits to the canonical identity; check the People lens after editing the map.
@@ -529,7 +552,7 @@ contributor merge explicitly saves its identity mapping to this file.
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Organization discovery and owned full bare caches, refreshed on launch or `r`, with separate local/PR freshness and retained last-good data on refresh failures
+- Personal and organization repository discovery and owned full bare caches, refreshed on launch or `r`, with separate local/PR freshness and retained last-good data on refresh failures
 - High-contrast Activity with responsive full-width evidence and compact list-to-detail navigation
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling

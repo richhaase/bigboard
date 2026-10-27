@@ -162,3 +162,37 @@ func TestDiscoverRepositoriesEnforcesRequestBudget(t *testing.T) {
 		t.Fatalf("unbounded inventory = %+v, %v; requests = %d", got, err, len(runner.calls))
 	}
 }
+
+func TestRepositoryDiscoveryPreservesPushTimeWithoutMetadataFallback(t *testing.T) {
+	pushed := time.Date(2025, 4, 8, 9, 10, 11, 0, time.UTC)
+	page := discoveryPage(t, []map[string]any{
+		{"full_name": "example/null", "default_branch": "main", "archived": false, "pushed_at": nil, "updated_at": "2026-10-27T12:00:00Z"},
+		{"full_name": "example/known", "default_branch": "trunk", "archived": false, "pushed_at": pushed.Format(time.RFC3339), "updated_at": "2026-10-27T12:00:00Z"},
+		{"full_name": "example/missing", "default_branch": "main", "archived": false, "updated_at": "2026-10-27T12:00:00Z"},
+	})
+	want := []DiscoveredRepository{
+		{Name: "example/known", DefaultBranch: "trunk", PushedAt: pushed},
+		{Name: "example/missing", DefaultBranch: "main"},
+		{Name: "example/null", DefaultBranch: "main"},
+	}
+	for _, personal := range []bool{false, true} {
+		t.Run(fmt.Sprintf("personal=%v", personal), func(t *testing.T) {
+			steps := []fakeStep{page}
+			if personal {
+				steps = append([]fakeStep{{data: []byte(`{"login":"example"}`)}}, steps...)
+			}
+			runner := &discoveryRunner{t: t, steps: steps}
+			provider := NewProvider(runner)
+			var got []DiscoveredRepository
+			var err error
+			if personal {
+				got, err = provider.DiscoverPersonalRepositories(t.Context(), "example")
+			} else {
+				got, err = provider.DiscoverRepositories(t.Context(), []string{"example"})
+			}
+			if err != nil || !reflect.DeepEqual(got, want) || len(runner.calls) != len(steps) {
+				t.Fatalf("repositories=%+v err=%v calls=%d; want=%+v calls=%d", got, err, len(runner.calls), want, len(steps))
+			}
+		})
+	}
+}

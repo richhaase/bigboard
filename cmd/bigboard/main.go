@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/richhaase/bigboard/git"
+	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
 )
@@ -56,11 +57,10 @@ func main() {
 	}
 
 	cfgPath := *configFlag
-	explicitCfg := cfgPath != ""
 	if cfgPath == "" {
 		cfgPath = defaultConfigPath()
 	}
-	cfg, err := loadConfig(cfgPath, explicitCfg)
+	cfg, err := loadConfig(cfgPath, *exportFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: reading config %s: %v\n", cfgPath, err)
 		os.Exit(1)
@@ -94,44 +94,45 @@ func main() {
 	}
 
 	if len(flag.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "Error: positional repository paths are no longer supported; configure organizations and select a --group")
+		fmt.Fprintln(os.Stderr, "Error: positional repository paths are no longer supported; configure a personal account or organizations and select a --group")
 		os.Exit(1)
 	}
-	if err := validateRepositoryConfig(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	setupRequired := len(cfg.Organizations) == 0 && cfg.PersonalAccount == "" && !*exportFlag
+	if !setupRequired {
+		if err := validateRepositoryConfig(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	cache, err := git.NewRepositoryCache()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if !*exportFlag {
-		fmt.Fprintln(os.Stderr, "Discovering GitHub organization repositories…")
-	}
-	listed, err := discoverCachedRepositories(context.Background(), cfg, cache, *exportFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: repository discovery: %v\n", err)
-		os.Exit(1)
-	}
-	repositories, err := selectRepositories(cfg, *groupFlag, listed)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	excludedRepos, err := buildExcludeSet(repositories, cfg.Exclude)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid exclusion: %v\n", err)
-		os.Exit(1)
-	}
-	selected := repositories[:0]
-	for _, repo := range repositories {
-		if !excludedRepos[repo.ID] {
-			selected = append(selected, repo)
+	provider := gh.NewProvider(nil)
+	var listed, repositories []git.Repository
+	var excludedRepos map[string]bool
+	var setupError string
+	if !setupRequired {
+		if !*exportFlag {
+			fmt.Fprintln(os.Stderr, "Discovering GitHub repositories…")
+		}
+		listed, err = discoverCachedRepositories(context.Background(), cfg, cache, provider, *exportFlag)
+		if err != nil {
+			if *exportFlag {
+				fmt.Fprintf(os.Stderr, "Error: repository discovery: %v\n", err)
+				os.Exit(1)
+			}
+			setupRequired = true
+			setupError = fmt.Sprintf("Repository discovery failed: %v", err)
+		} else {
+			repositories, excludedRepos, err = selectIncludedRepositories(cfg, *groupFlag, listed)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
-	repositories = selected
 
 	if *exportFlag {
 		if len(repositories) == 0 {
@@ -151,10 +152,17 @@ func main() {
 		return
 	}
 
+	store := newConfigStore(cfgPath, cfg)
+	inventory := &repositoryInventory{}
+	inventory.replace(listed)
+	settings := newSettingsOptions(cfgPath, cfg, *groupFlag, provider, cache, store, inventory)
+	settings.Required = setupRequired
+	settings.InitialError = setupError
+
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
 		PrepareRepository:      cache.Refresh,
 		ScanRepository:         cache.ScanRepository,
-		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(listed) },
+		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(inventory.snapshot()) },
 		RemoveCachedRepository: cache.Remove,
 		PRRequestBudget:        cfg.PRRequestBudget,
 		FuzzyMatching:          cfg.Fuzzy,
@@ -162,7 +170,8 @@ func main() {
 		AIIdentities:           cfg.AIIdentities,
 		BotIdentities:          cfg.BotIdentities,
 		Identities:             cfg.Identities,
-		SaveIdentities:         newIdentitySaver(cfgPath, cfg),
+		SaveIdentities:         store.saveIdentities,
+		Settings:               settings,
 		WorkAreas:              cfg.WorkAreas,
 	})
 
@@ -177,7 +186,10 @@ func main() {
 func runTUI(model tui.Model, options ...tea.ProgramOption) error {
 	defer model.Close()
 	p := tea.NewProgram(model, options...)
-	_, err := p.Run()
+	final, err := p.Run()
+	if current, ok := final.(tui.Model); ok {
+		current.Close()
+	}
 	return err
 }
 

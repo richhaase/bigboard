@@ -18,6 +18,7 @@ import (
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
+	PersonalAccount string                          `json:"personal_account,omitempty"`
 	Organizations   []string                        `json:"organizations"`
 	Exclude         []string                        `json:"exclude"`
 	Sort            string                          `json:"sort"`
