@@ -166,8 +166,14 @@ full bare clones containing only each repository's default-branch history at
 `$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git`, with `~/.cache` as the
 default cache home. Developer checkouts are never scanned or changed.
 
-Startup and `r` clone or fetch included cache entries, then scan their history
-offline and request GitHub PR context subject to the PR cooldown described below.
+Startup first scans existing cached history offline and shows that snapshot,
+then fetches included repositories in the background. Only repositories whose
+default-branch revision changed, or which have no usable cached scan, are scanned
+after fetching. Each pass publishes one complete snapshot; the cached board stays
+usable with a cyan `cached · fetching…` status until the second pass finishes.
+With no usable cached history, startup clones with progress on the boot screen.
+`r` keeps fetch-then-scan behavior and requests GitHub PR context subject to the
+PR cooldown described below.
 Clone/fetch and scan work shares eight repository slots; clone/fetch operations
 have a two-minute timeout per repository. Credentials come from the existing
 `gh` session, interactive prompts are disabled, and tags, other branches, and
@@ -175,9 +181,10 @@ submodules are not fetched. Export only scans existing cached history.
 
 The board refreshes only on launch or `r`; there is no periodic auto-refresh.
 “Local” shows the last successful scan for the selected repository; “Updating…”
-keeps the existing view usable during a refresh. A failed clone/fetch still
-attempts the offline scan, with a STALE marker and diagnostics under `e`; a failed
-scan retains that repository's last successful data. A successful fetch and scan,
+keeps the existing view usable during a refresh. A failed startup fetch retains
+the offline snapshot; a failed manual clone/fetch still attempts the offline scan.
+Failures show a STALE marker and diagnostics under `e`, with each repository's
+last successful data retained when available. A successful fetch and scan,
 including an empty one, clears the stale state. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
 surface with the same controls. In area lists, two-line rows at 80 columns keep
@@ -266,7 +273,7 @@ origins are reported in the PR board without suppressing local history.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on Contributors with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, excluding merge commits. Big Board caches its full history without other branches or tags. Startup and `r` refresh included cache entries before scanning; export uses cached history. Developer-checkout commits are outside this scope. Branches are resolved to commit IDs. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
+- **Scope** is each repo's default branch, excluding merge commits. Big Board caches its full history without other branches or tags. Startup shows cached history before fetching and rescanning changed repositories; `r` refreshes before scanning, and export uses cached history. Developer-checkout commits are outside this scope. Branches are resolved to commit IDs. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
 - **Calendar dates** use your local timezone for active days, monthly totals, first/last dates, and heatmaps. Future-dated commits remain counted; ALL includes every collected commit and recent windows retain their existing lower-bound filtering. Churn remains removals/additions, with `0.00` when additions are zero.
 - **Cache integrity** requires complete, independent bare repositories. Shallow and partial clones are not accepted as cache entries; scans never download missing objects. Failed refreshes and scans remain visibly qualified, with the last successful in-memory data retained when available.
@@ -377,8 +384,11 @@ in the help modal. Filter editors show `F1` for help while typing.
 `e` opens Data status in a centered modal over the current board, even when
 there are no errors. It shows cache location and size, cached repositories no
 longer listed by organization discovery, Git/PR freshness, and tracked-repository
-coverage; `d` shows repository diagnostics. Arrows, paging, and Home/End scroll
+coverage, startup phase progress, and cached/fetched snapshot commit times;
+`d` shows repository diagnostics. Arrows, paging, and Home/End scroll
 the modal, `r` refreshes, and Esc closes it without changing selection or filters.
+The status row animates while Git or PR refreshes are working. Git also shows
+completed/total repositories when space permits; PR progress is indeterminate.
 
 ### Activity
 

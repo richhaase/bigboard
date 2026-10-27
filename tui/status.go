@@ -15,6 +15,7 @@ import (
 type dataStatus struct {
 	label, compact      string
 	warning, refreshing bool
+	fetching            bool
 }
 
 func (m Model) statusRepositories() []git.Repository {
@@ -36,6 +37,9 @@ func (m Model) localRepositoryFailed(repo git.Repository) bool {
 }
 
 func (m Model) gitDataStatus() dataStatus {
+	if m.startup.pending && !m.startup.cachedAt.IsZero() {
+		return dataStatus{label: "cached", compact: "cached", refreshing: m.scan.running, fetching: m.scan.phase == scanStartupFetch}
+	}
 	repos := m.statusRepositories()
 	scanned, failed := 0, 0
 	for _, repo := range repos {
@@ -109,6 +113,8 @@ func statusText(status dataStatus, compact bool) string {
 	if status.refreshing {
 		if compact {
 			label += "↻"
+		} else if status.fetching {
+			label += " · fetching…"
 		} else {
 			label += " · refreshing"
 		}
@@ -119,10 +125,19 @@ func statusText(status dataStatus, compact bool) string {
 func (m Model) compactDataStatus(width int) string {
 	git, prs := m.gitDataStatus(), m.prDataStatus()
 	inner := max(1, width-4)
-	compact := ansi.StringWidth("Git: "+statusText(git, false)+"   PRs: "+statusText(prs, false)+"   e status") > inner
+	progress := ""
+	if git.refreshing && len(m.repositories) > 0 {
+		progress = fmt.Sprintf(" %d/%d", len(m.repositories)-m.scan.remaining, len(m.repositories))
+	}
+	gitText, prText := m.statusProgressText(git, false)+progress, m.statusProgressText(prs, false)
+	compact := ansi.StringWidth("Git: "+gitText+" · PRs: "+prText+" · e status") > inner
 	gitLabel, prLabel, hint := "Git: ", "PRs: ", "e status"
 	if compact {
 		gitLabel, prLabel, hint = "Git ", "PR ", "e info"
+		gitText, prText = m.statusProgressText(git, true)+progress, m.statusProgressText(prs, true)
+		if ansi.StringWidth(gitLabel+gitText+" · "+prLabel+prText+" · "+hint) > inner {
+			gitText = m.statusProgressText(git, true)
+		}
 	}
 	style := func(status dataStatus, label string) string {
 		if status.warning {
@@ -133,8 +148,22 @@ func (m Model) compactDataStatus(width int) string {
 		}
 		return StyleDimWhite.Render(label)
 	}
-	line := style(git, gitLabel+statusText(git, compact)) + StyleDimWhite.Render(" · ") + style(prs, prLabel+statusText(prs, compact)) + StyleDimWhite.Render(" · ") + StyleCyan.Render(hint)
+	line := style(git, gitLabel+gitText) + StyleDimWhite.Render(" · ") + style(prs, prLabel+prText) + StyleDimWhite.Render(" · ") + StyleCyan.Render(hint)
 	return ansi.Truncate(line, inner, "…")
+}
+
+func (m Model) statusProgressText(status dataStatus, compact bool) string {
+	if !status.refreshing {
+		return statusText(status, compact)
+	}
+	if compact {
+		return status.compact + m.refreshGlyph()
+	}
+	action := "refreshing"
+	if status.fetching {
+		action = "fetching"
+	}
+	return status.label + " · " + m.refreshGlyph() + " " + action
 }
 
 func (m Model) dataStatusLines(width int) []string {
@@ -174,11 +203,33 @@ func (m Model) dataStatusLines(width int) []string {
 		}
 	}
 	add(fmt.Sprintf("%d/%d tracked repositories have scanned history.", scanned, len(repos)))
+	if !m.startup.cachedAt.IsZero() {
+		add("Cached snapshot committed: " + m.startup.cachedAt.Local().Format("Jan 02 15:04:05 MST"))
+	}
+	if !m.startup.fetchedAt.IsZero() {
+		add("Fetched snapshot committed: " + m.startup.fetchedAt.Local().Format("Jan 02 15:04:05 MST"))
+	}
 	if !oldest.IsZero() {
 		add("Oldest retained scan: " + oldest.Local().Format("Jan 02 15:04:05 MST"))
 	}
 	if m.scan.running {
-		add(StyleCyan.Render("Refreshing Git. The previous snapshot stays visible."))
+		progress := fmt.Sprintf("%d/%d repositories checked", len(m.repositories)-m.scan.remaining, len(m.repositories))
+		switch m.scan.phase {
+		case scanCached:
+			add(StyleCyan.Render("Startup phase 1/2: reading cached history · " + progress))
+		case scanStartupFetch:
+			if m.startup.cachedAt.IsZero() {
+				add(StyleCyan.Render("Startup: cloning/fetching cache · " + progress))
+			} else {
+				add(StyleCyan.Render("Startup phase 2/2: fetching; rescanning changed repositories · " + progress))
+				add("The cached snapshot stays visible until this pass finishes.")
+			}
+		default:
+			add(StyleCyan.Render("Refreshing Git. The previous snapshot stays visible."))
+			if m.startup.pending {
+				add("Startup fetch will resume after the local rescan.")
+			}
+		}
 	}
 	if failed > 0 {
 		add(StyleAmber.Render(fmt.Sprintf("%d repository updates failed. Retained history may be stale.", failed)))

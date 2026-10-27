@@ -161,6 +161,7 @@ func main() {
 
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
 		PrepareRepository:      cache.Refresh,
+		RepositoryRevision:     cache.Revision,
 		ScanRepository:         cache.ScanRepository,
 		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(inventory.snapshot()) },
 		RemoveCachedRepository: cache.Remove,

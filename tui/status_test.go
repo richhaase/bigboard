@@ -24,7 +24,7 @@ func TestDataStatusUsesTrackingScopeAndKeepsWarningsDuringRefresh(t *testing.T) 
 		if strings.Count(line, "STALE") != 2 || !strings.Contains(line, "e ") || ansi.StringWidth(line) > width-4 {
 			t.Fatalf("width %d hides retained-state warnings or details: %s", width, line)
 		}
-		if !strings.Contains(line, "refreshing") && !strings.Contains(line, "↻") {
+		if !strings.Contains(line, m.refreshGlyph()) {
 			t.Fatal("refresh state disappeared")
 		}
 	}

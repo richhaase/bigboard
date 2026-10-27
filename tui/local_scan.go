@@ -18,6 +18,7 @@ type localSnapshot struct {
 	errors       map[string]string
 	scannedAt    map[string]time.Time
 	staleRepos   map[string]bool
+	revisions    map[string]string
 }
 
 func (s localSnapshot) loadError() error {
@@ -48,6 +49,7 @@ type scanOutcome struct {
 }
 
 type scanBatch struct {
+	phase      scanPhase
 	generation uint64
 	running    bool
 	initial    bool
@@ -106,9 +108,11 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 		errors:     make(map[string]string),
 		scannedAt:  make(map[string]time.Time),
 		staleRepos: make(map[string]bool),
+		revisions:  make(map[string]string),
 	}
 	maps.Copy(next.scannedAt, previous.scannedAt)
 	maps.Copy(next.staleRepos, previous.staleRepos)
+	maps.Copy(next.revisions, previous.revisions)
 	if b.localOnly {
 		next.failed = slices.Clone(previous.failed)
 		maps.Copy(next.errors, previous.errors)
@@ -116,6 +120,9 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 	for _, outcome := range b.outcomes {
 		result := outcome.result
 		id := result.Repository.ID
+		if result.Skipped {
+			continue
+		}
 		if result.Err != nil || result.FetchErr != nil {
 			next.failed = append(next.failed, result.Repository.Name)
 			next.errors[id] = displayText(errors.Join(result.FetchErr, result.Err).Error())
@@ -123,6 +130,13 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 		}
 		if result.Err != nil {
 			next.retainRepository(previous, id)
+			continue
+		}
+		if result.Retained {
+			next.retainRepository(previous, id)
+			if result.FetchErr == nil && !b.localOnly {
+				delete(next.staleRepos, id)
+			}
 			continue
 		}
 		if !b.localOnly && (result.FetchErr == nil || b.initial) {
@@ -133,6 +147,11 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 		}
 		next.records = append(next.records, result.Records...)
 		next.repositories = append(next.repositories, result.Repository)
+		if result.Revision != "" {
+			next.revisions[id] = result.Revision
+		} else {
+			delete(next.revisions, id)
+		}
 	}
 	sort.Slice(next.repositories, func(i, j int) bool {
 		return next.repositories[i].Name < next.repositories[j].Name
