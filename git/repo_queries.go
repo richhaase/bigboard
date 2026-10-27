@@ -35,8 +35,13 @@ func repositoryStamp(path string) (repoStamp, error) {
 		_, _ = fmt.Fprintf(h, "%d:", len(value))
 		_, _ = io.WriteString(h, value)
 	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return stamp, err
+	}
+	defer func() { _ = root.Close() }()
 	objects := filepath.Join(path, "objects") + string(filepath.Separator)
-	err := filepath.WalkDir(path, func(name string, entry fs.DirEntry, err error) error {
+	err = filepath.WalkDir(path, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -59,7 +64,7 @@ func repositoryStamp(path string) (repoStamp, error) {
 		if strings.HasPrefix(name, objects) {
 			return nil
 		}
-		contents, err := os.ReadFile(name)
+		contents, err := readStampFile(root, strings.TrimPrefix(name, path+string(filepath.Separator)), info)
 		if err != nil {
 			return err
 		}
@@ -68,6 +73,22 @@ func repositoryStamp(path string) (repoStamp, error) {
 	})
 	copy(stamp[:], h.Sum(nil))
 	return stamp, err
+}
+
+func readStampFile(root *os.Root, name string, expected fs.FileInfo) ([]byte, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(info, expected) {
+		return nil, fmt.Errorf("cache file changed while reading: %s", name)
+	}
+	return io.ReadAll(file)
 }
 
 func (c *RepositoryCache) memoized(stamp repoStamp, tag string, run gitRunner) gitRunner {

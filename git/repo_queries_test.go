@@ -178,3 +178,56 @@ func TestFetchSkipsUnchangedCacheWrites(t *testing.T) {
 		t.Fatalf("refs after fetch: %s", got)
 	}
 }
+
+func TestRepositoryStampDoesNotFollowSwappedSymlinks(t *testing.T) {
+	for _, kind := range []string{"file", "ancestor"} {
+		t.Run(kind, func(t *testing.T) {
+			repo := t.TempDir()
+			outside := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(repo, "refs", "heads"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(outside, "heads"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			name := filepath.Join("refs", "heads", "main")
+			if err := os.WriteFile(filepath.Join(repo, name), []byte("inside\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "heads", "main"), []byte("outside\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			checked, err := os.Lstat(filepath.Join(repo, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "file":
+				if err := os.Remove(filepath.Join(repo, name)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(outside, "heads", "main"), filepath.Join(repo, name)); err != nil {
+					t.Fatal(err)
+				}
+			case "ancestor":
+				if err := os.RemoveAll(filepath.Join(repo, "refs")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, filepath.Join(repo, "refs")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, err := os.OpenRoot(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			if contents, err := readStampFile(root, name, checked); err == nil || strings.Contains(string(contents), "outside") {
+				t.Fatalf("followed swapped %s symlink: %q, %v", kind, contents, err)
+			}
+			if _, err := repositoryStamp(repo); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("stamp accepted %s symlink: %v", kind, err)
+			}
+		})
+	}
+}
