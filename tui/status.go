@@ -143,6 +143,21 @@ func (m Model) dataStatusLines(width int) []string {
 	add := func(value string) {
 		lines = append(lines, strings.Split(ansi.Wrap(value, inner, ""), "\n")...)
 	}
+	if m.options.CacheInfo != nil {
+		add(StyleTitle.Render("REPOSITORY CACHE"))
+		add("Location: " + displayText(m.cacheInfo.Root))
+		add(fmt.Sprintf("Size: %.1f MiB · %d repositories no longer listed", float64(m.cacheInfo.Bytes)/(1024*1024), len(m.cacheInfo.Orphans)))
+		for _, repo := range m.cacheInfo.Orphans {
+			add("  " + displayText(repo.Name) + " · removal available in Repository controls")
+		}
+		for _, problem := range m.cacheInfo.Problems {
+			add(StyleAmber.Render(displayText(problem)))
+		}
+		if m.cacheError != "" {
+			add(StyleAmber.Render(m.cacheError))
+		}
+		add("")
+	}
 	add(StyleTitle.Render("GIT HISTORY · " + statusText(m.gitDataStatus(), false)))
 	repos := m.statusRepositories()
 	scanned, failed := 0, 0

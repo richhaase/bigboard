@@ -13,6 +13,7 @@ import (
 )
 
 type analysisOptions struct {
+	ScanRepository   func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
 	IncludeGenerated bool
 	AIIdentities     []string
 	BotIdentities    []string
@@ -36,6 +37,10 @@ func runExportJSON(w, errw io.Writer, repositories []git.Repository, excluded ma
 		err     error
 	}
 	results := make([]scanResult, len(repositories))
+	scan := options.ScanRepository
+	if scan == nil {
+		scan = git.ScanRepository
+	}
 	sem := make(chan struct{}, maxConcurrentExportScans)
 	var wg sync.WaitGroup
 	for i, repo := range repositories {
@@ -44,7 +49,7 @@ func runExportJSON(w, errw io.Writer, repositories []git.Repository, excluded ma
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			records, err := git.ScanRepository(context.Background(), repo, git.CollectOptions{
+			records, err := scan(context.Background(), repo, git.CollectOptions{
 				IncludeGenerated: options.IncludeGenerated,
 				AIIdentities:     options.AIIdentities,
 				Identities:       options.Identities,

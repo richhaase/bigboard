@@ -7,6 +7,7 @@ import (
 )
 
 func (m *Model) openRepositoryControls() {
+	m.cacheRemoveConfirm, m.cacheError = "", ""
 	m.overlayExcluded = maps.Clone(m.excludedRepos)
 	if m.overlayExcluded == nil {
 		m.overlayExcluded = make(map[string]bool)
@@ -32,6 +33,24 @@ func (m *Model) closeRepositoryControls(apply bool) {
 }
 
 func (m Model) handleRepositoryControls(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.cacheRemoving {
+		if msg.String() == "ctrl+c" {
+			return m.quit()
+		}
+		return m, nil
+	}
+	if m.cacheRemoveConfirm != "" {
+		switch msg.String() {
+		case "enter":
+			return m.removeCachedRepository()
+		case "esc", "left":
+			m.cacheRemoveConfirm = ""
+		case "q", "ctrl+c":
+			return m.quit()
+		}
+		return m, nil
+	}
+	rows := m.repositoryControlRows()
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m.quit()
@@ -40,14 +59,21 @@ func (m Model) handleRepositoryControls(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "left":
 		m.closeRepositoryControls(false)
 	case " ":
-		if m.overlayCursor >= 0 && m.overlayCursor < len(m.local.repositories) {
-			id := m.local.repositories[m.overlayCursor].ID
+		if m.overlayCursor >= 0 && m.overlayCursor < len(rows) {
+			id := rows[m.overlayCursor].ID
+			if m.orphanedRepository(id) {
+				return m, nil
+			}
 			m.overlayExcluded = maps.Clone(m.overlayExcluded)
 			m.overlayExcluded[id] = !m.overlayExcluded[id]
 		}
+	case "d":
+		if m.overlayCursor >= 0 && m.overlayCursor < len(rows) && m.orphanedRepository(rows[m.overlayCursor].ID) && m.options.RemoveCachedRepository != nil {
+			m.cacheRemoveConfirm = rows[m.overlayCursor].ID
+		}
 	default:
 		_, page := repositoryModalSize(m.width, m.height)
-		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(m.local.repositories), page); ok {
+		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(rows), page); ok {
 			m.overlayCursor = row
 		}
 	}

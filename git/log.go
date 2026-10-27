@@ -16,7 +16,7 @@ import (
 // Every Git invocation uses the requested repository, independent of a hook's
 // environment. Diff settings are explicit so user preferences do not alter totals.
 func gitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	pinned := []string{"-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c", "color.ui=false"}
+	pinned := []string{"-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull}
 	cmd := exec.CommandContext(ctx, "git", append(pinned, args...)...)
 	cmd.Dir = dir
 	for _, entry := range os.Environ() {

@@ -26,7 +26,11 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	copyStatus string
+	cacheInfo          git.CacheInfo
+	cacheError         string
+	cacheRemoveConfirm string
+	cacheRemoving      bool
+	copyStatus         string
 	// Glance navigation is separate from the aggregate statistics view.
 	glance             glanceState
 	overviewSort       int
@@ -132,8 +136,12 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
-	PRProvider      PRProvider
-	PRRequestBudget int
+	PrepareRepository      func(context.Context, git.Repository) error
+	ScanRepository         func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
+	CacheInfo              func() (git.CacheInfo, error)
+	RemoveCachedRepository func(string) error
+	PRProvider             PRProvider
+	PRRequestBudget        int
 
 	FuzzyMatching    bool
 	IncludeGenerated bool
@@ -213,9 +221,17 @@ func loadRepoCmd(ctx context.Context, repository git.Repository, options Options
 	return func() tea.Msg {
 		var fetchErr error
 		if fetch {
-			fetchErr = git.FetchRepository(ctx, repository)
+			if options.PrepareRepository != nil {
+				fetchErr = options.PrepareRepository(ctx, repository)
+			} else {
+				fetchErr = git.FetchRepository(ctx, repository)
+			}
 		}
-		records, err := git.ScanRepository(ctx, repository, git.CollectOptions{
+		scan := options.ScanRepository
+		if scan == nil {
+			scan = git.ScanRepository
+		}
+		records, err := scan(ctx, repository, git.CollectOptions{
 			IncludeGenerated: options.IncludeGenerated,
 			AIIdentities:     options.AIIdentities,
 			Identities:       options.Identities,
@@ -306,9 +322,9 @@ func bootLine(repo string, ok bool) string {
 // Init kicks off the initial concurrent load.
 func (m Model) Init() tea.Cmd {
 	if len(m.repositories) == 0 {
-		return nil
+		return m.cacheInfoCmd()
 	}
-	return m.loadCmds()
+	return tea.Batch(m.loadCmds(), m.cacheInfoCmd())
 }
 
 func (m *Model) startLocalRefresh() tea.Cmd {
@@ -332,6 +348,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg := msg.(type) {
+	case cacheInfoMsg:
+		if m.cacheRemoving && !msg.removal {
+			return m, nil
+		}
+		m.cacheInfo = msg.info
+		m.cacheError = ""
+		if msg.err != nil {
+			m.cacheError = displayText(msg.err.Error())
+		}
+		if msg.removal {
+			m.cacheRemoving, m.cacheRemoveConfirm = false, ""
+			m.overlayCursor = max(0, min(m.overlayCursor, len(m.repositoryControlRows())-1))
+		}
+		return m, nil
 	case clipboardResult:
 		m.copyStatus = fmt.Sprintf("Clipboard request sent: %d rows as Markdown · terminal support required", msg.rows)
 		if msg.err != nil {
@@ -366,7 +396,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if localOnly {
 				return m, nil
 			}
-			return m, m.startPRRefresh()
+			return m, tea.Batch(m.startPRRefresh(), m.cacheInfoCmd())
 		}
 		return m, m.nextLoadCmd()
 
@@ -820,7 +850,11 @@ func (m Model) viewContent() string {
 
 func (m Model) renderBootSequence() string {
 	lines := renderBanner(m.width)
-	lines = append(lines, "", StyleSubtitle.Render("  ◈ SCANNING REPOSITORIES"), "")
+	label := "SCANNING REPOSITORIES"
+	if m.options.PrepareRepository != nil {
+		label = "PREPARING CACHE · CLONING / FETCHING / SCANNING"
+	}
+	lines = append(lines, "", StyleSubtitle.Render("  ◈ "+label), "")
 
 	done := len(m.bootLines)
 	total := done + m.scan.remaining

@@ -17,7 +17,7 @@ func testIdentityMapping() map[string]git.Identity {
 
 func TestIdentitySaverPreservesConfigAndSupportsRepeatedMerges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	source := []byte(`{"paths":["/repositories"],"exclude":["archive"],"sort":"commits","since":"90d","groups":{"team":["/repositories/api"]},"github":{"enabled":false},"fuzzy":true,"ai_identities":["agent@example.com"],"bot_identities":["bot@example.com"],"work_areas":{}}`)
+	source := []byte(`{"organizations":["example"],"exclude":["archive"],"sort":"commits","since":"90d","groups":{"team":["example/api"]},"github":{"enabled":false},"fuzzy":true,"ai_identities":["agent@example.com"],"bot_identities":["bot@example.com"],"work_areas":{}}`)
 	if err := os.WriteFile(path, source, 0o640); err != nil {
 		t.Fatal(err)
 	}
