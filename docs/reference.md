@@ -194,9 +194,13 @@ publishes a complete snapshot. There is no periodic refresh; use `r`.
 
 Before the startup network pass and each `r`, a bounded GitHub probe checks the
 default branch name/revision and open-PR count for up to 100 repositories per
-request. A matching branch/revision skips Git fetch only after the owned cache
-passes its full integrity checks. Missing or damaged caches still use the normal
-clone/repair path. Unknown probe results fall back to normal refresh behavior.
+request. A matching branch/revision skips Git fetch only when the owned cache
+passes its ownership and layout checks and holds exactly the expected
+default-branch refs at that revision; any other refs force a normal refresh.
+Missing caches and caches that fail these checks still use the normal
+clone/repair path. Git fetch checks the objects it receives; a Git scan that
+reads objects later lost or corrupted fails and is reported as stale.
+Unknown probe results fall back to normal refresh behavior.
 Parsed Git scans retain their existing fingerprint checks, including on `r`.
 When a PR refresh is admitted, an explicit zero count clears retained PRs without
 an inventory request. Positive counts still refresh PR checks and reviews even

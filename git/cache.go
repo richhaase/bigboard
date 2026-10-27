@@ -67,7 +67,7 @@ func (c *RepositoryCache) ScanRepository(ctx context.Context, repo Repository, o
 	if repo.Path != expected.Path {
 		return nil, fmt.Errorf("repository path is outside its owned cache location")
 	}
-	if err := c.verify(ctx, repo, false); err != nil {
+	if err := c.verify(ctx, repo); err != nil {
 		return nil, err
 	}
 	return c.scanCached(ctx, repo, options)
@@ -91,7 +91,7 @@ func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string
 	} else if err != nil {
 		return "", err
 	}
-	if err := c.verify(ctx, repo, false); err != nil {
+	if err := c.verify(ctx, repo); err != nil {
 		return "", err
 	}
 	ref := detectDefaultBranch(ctx, repo.Path)
@@ -119,21 +119,34 @@ func (c *RepositoryCache) RefreshIfChanged(ctx context.Context, repo Repository,
 	if repo.Path != expected.Path {
 		return fmt.Errorf("repository path is outside its owned cache location")
 	}
-	if err := c.verify(ctx, repo, true); err != nil {
+	if err := c.verify(ctx, repo); err != nil {
 		return c.Refresh(ctx, repo)
 	}
-	for _, ref := range []struct{ name, target string }{
-		{"refs/remotes/origin/HEAD", "refs/remotes/origin/" + branch},
-		{"HEAD", "refs/heads/" + branch},
-	} {
-		target, err := c.git(ctx, repo.Path, "symbolic-ref", ref.name)
-		if err != nil || strings.TrimSpace(target) != ref.target {
+	head := "refs/heads/" + branch
+	remote := "refs/remotes/origin/" + branch
+	target, err := c.git(ctx, repo.Path, "symbolic-ref", "HEAD")
+	if err != nil || strings.TrimSpace(target) != head {
+		return c.Refresh(ctx, repo)
+	}
+	refs, err := c.git(ctx, repo.Path, "for-each-ref", "--format=%(refname) %(symref) %(objecttype) %(objectname)")
+	if err != nil {
+		return c.Refresh(ctx, repo)
+	}
+	want := map[string]string{
+		head:                       " commit " + oid,
+		remote:                     " commit " + oid,
+		"refs/remotes/origin/HEAD": remote + " commit " + oid,
+	}
+	lines := strings.Split(strings.TrimSpace(refs), "\n")
+	if len(lines) != len(want) {
+		return c.Refresh(ctx, repo)
+	}
+	for _, line := range lines {
+		name, rest, _ := strings.Cut(line, " ")
+		if expected, ok := want[name]; !ok || rest != expected {
 			return c.Refresh(ctx, repo)
 		}
-		current, err := c.git(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", ref.target+"^{commit}")
-		if err != nil || strings.TrimSpace(current) != oid {
-			return c.Refresh(ctx, repo)
-		}
+		delete(want, name)
 	}
 	return ctx.Err()
 }
@@ -154,7 +167,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	if _, err := c.git(ctx, "", "check-ref-format", "refs/heads/"+repo.DefaultBranch); err != nil {
 		return fmt.Errorf("invalid default branch: %w", err)
 	}
-	if err := c.verify(ctx, repo, true); err == nil {
+	if err := c.verify(ctx, repo); err == nil {
 		return c.fetch(ctx, repo)
 	}
 	if err := ctx.Err(); err != nil {
@@ -185,7 +198,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	if err := c.fetch(ctx, replacement); err != nil {
 		return err
 	}
-	if err := c.verify(ctx, replacement, true); err != nil {
+	if err := c.verify(ctx, replacement); err != nil {
 		return fmt.Errorf("verify replacement cache: %w", err)
 	}
 	if err := c.safePath(repo.Path); err != nil {
@@ -251,7 +264,7 @@ func (c *RepositoryCache) fetch(ctx context.Context, repo Repository) error {
 	return nil
 }
 
-func (c *RepositoryCache) verify(ctx context.Context, repo Repository, full bool) error {
+func (c *RepositoryCache) verify(ctx context.Context, repo Repository) error {
 	if err := c.safePath(repo.Path); err != nil {
 		return err
 	}
@@ -303,11 +316,6 @@ func (c *RepositoryCache) verify(ctx context.Context, repo Repository, full bool
 	bare, err := c.git(ctx, repo.Path, "rev-parse", "--is-bare-repository")
 	if err != nil || strings.TrimSpace(bare) != "true" {
 		return fmt.Errorf("cache is not a bare repository")
-	}
-	if full {
-		if _, err := c.git(ctx, repo.Path, "fsck", "--connectivity-only", "--no-reflogs"); err != nil {
-			return fmt.Errorf("cache history is incomplete: %w", err)
-		}
 	}
 	return nil
 }
@@ -389,7 +397,7 @@ func (c *RepositoryCache) inventory() ([]Repository, []string) {
 				problems = append(problems, "unrecognized cache entry: "+filepath.Join(ownerPath, entry.Name()))
 				continue
 			}
-			if err := c.verify(ctx, repo, false); err != nil {
+			if err := c.verify(ctx, repo); err != nil {
 				problems = append(problems, repo.ID+": "+err.Error())
 				continue
 			}
@@ -413,7 +421,7 @@ func (c *RepositoryCache) Remove(id string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	if err := c.verify(ctx, repo, false); err != nil {
+	if err := c.verify(ctx, repo); err != nil {
 		return fmt.Errorf("refusing to remove unverified cache: %w", err)
 	}
 	root, err := os.OpenRoot(c.Root)

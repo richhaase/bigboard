@@ -142,7 +142,7 @@ func TestRepositoryCacheFullHistoryRefreshAndDefaultBranch(t *testing.T) {
 }
 
 func TestRepositoryCacheRefreshIfChanged(t *testing.T) {
-	for _, kind := range []string{"unchanged", "changed", "renamed", "head-mismatch", "origin-head-mismatch", "missing-branch", "missing-oid"} {
+	for _, kind := range []string{"unchanged", "changed", "renamed", "head-mismatch", "origin-head-mismatch", "missing-branch", "missing-oid", "extra-branch", "extra-remote", "extra-tag", "missing-tip"} {
 		t.Run(kind, func(t *testing.T) {
 			cache, repo, source := cacheFixture(t)
 			if err := cache.Refresh(context.Background(), repo); err != nil {
@@ -167,6 +167,16 @@ func TestRepositoryCacheRefreshIfChanged(t *testing.T) {
 				branch = ""
 			case "missing-oid":
 				oid = ""
+			case "extra-branch":
+				cacheFixtureGit(t, repo.Path, "update-ref", "refs/heads/production", oid)
+			case "extra-remote":
+				cacheFixtureGit(t, repo.Path, "update-ref", "refs/remotes/origin/production", oid)
+			case "extra-tag":
+				cacheFixtureGit(t, repo.Path, "update-ref", "refs/tags/v1", oid)
+			case "missing-tip":
+				if err := os.Remove(filepath.Join(repo.Path, "objects", oid[:2], oid[2:])); err != nil {
+					t.Fatal(err)
+				}
 			}
 			originalRun := cache.run
 			fetches, checks := 0, 0
@@ -186,8 +196,8 @@ func TestRepositoryCacheRefreshIfChanged(t *testing.T) {
 			if kind == "unchanged" {
 				wantFetches = 0
 			}
-			if fetches != wantFetches || checks == 0 {
-				t.Fatalf("fetches=%d, want %d; full integrity checks=%d", fetches, wantFetches, checks)
+			if fetches != wantFetches || checks != 0 {
+				t.Fatalf("fetches=%d, want %d; fsck runs=%d", fetches, wantFetches, checks)
 			}
 			if branch == "" {
 				branch = repo.DefaultBranch
@@ -198,12 +208,16 @@ func TestRepositoryCacheRefreshIfChanged(t *testing.T) {
 			if got, want := cacheFixtureGit(t, repo.Path, "rev-parse", "HEAD"), cacheFixtureGit(t, source, "rev-parse", "HEAD"); got != want {
 				t.Fatalf("revision=%s, want %s", got, want)
 			}
+			refs := cacheFixtureGit(t, repo.Path, "for-each-ref", "--format=%(refname)")
+			if want := "refs/heads/" + branch + "\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/" + branch; refs != want {
+				t.Fatalf("refs=%q, want %q", refs, want)
+			}
 		})
 	}
 }
 
 func TestRepositoryCacheRefreshIfChangedRepairsUnusableCache(t *testing.T) {
-	for _, kind := range []string{"missing", "unowned", "incomplete", "corrupt", "shallow"} {
+	for _, kind := range []string{"missing", "unowned", "shallow"} {
 		t.Run(kind, func(t *testing.T) {
 			cache, repo, source := cacheFixture(t)
 			oid := cacheFixtureGit(t, source, "rev-parse", "HEAD")
@@ -216,24 +230,6 @@ func TestRepositoryCacheRefreshIfChangedRepairsUnusableCache(t *testing.T) {
 			case "unowned":
 				if err := os.Remove(filepath.Join(repo.Path, "bigboard-cache")); err != nil {
 					t.Fatal(err)
-				}
-			case "incomplete", "corrupt":
-				object := "HEAD:file.txt"
-				if kind == "corrupt" {
-					object = "HEAD^{tree}"
-				}
-				objectID := cacheFixtureGit(t, source, "rev-parse", object)
-				path := filepath.Join(repo.Path, "objects", objectID[:2], objectID[2:])
-				if err := os.Remove(path); err != nil {
-					t.Fatal(err)
-				}
-				if kind == "corrupt" {
-					if err := os.WriteFile(path, []byte("invalid object"), 0600); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if current, err := cache.Revision(context.Background(), repo); err != nil || current != oid {
-					t.Fatalf("fixture should still resolve HEAD: %s, %v", current, err)
 				}
 			case "shallow":
 				if err := os.WriteFile(filepath.Join(repo.Path, "shallow"), []byte(oid+"\n"), 0600); err != nil {
@@ -257,8 +253,51 @@ func TestRepositoryCacheRefreshIfChangedRepairsUnusableCache(t *testing.T) {
 			if fetches != 1 || replacements != 1 {
 				t.Fatalf("unusable cache not replaced: fetches=%d, replacements=%d", fetches, replacements)
 			}
-			if err := cache.verify(context.Background(), repo, true); err != nil {
+			if err := cache.verify(context.Background(), repo); err != nil {
 				t.Fatalf("replacement unusable: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryCacheMissingObjectsFailScan(t *testing.T) {
+	for _, kind := range []string{"incomplete", "corrupt"} {
+		t.Run(kind, func(t *testing.T) {
+			cache, repo, source := cacheFixture(t)
+			if err := cache.Refresh(context.Background(), repo); err != nil {
+				t.Fatal(err)
+			}
+			oid := cacheFixtureGit(t, source, "rev-parse", "HEAD")
+			object := "HEAD:file.txt"
+			if kind == "corrupt" {
+				object = "HEAD^{tree}"
+			}
+			objectID := cacheFixtureGit(t, source, "rev-parse", object)
+			path := filepath.Join(repo.Path, "objects", objectID[:2], objectID[2:])
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "corrupt" {
+				if err := os.WriteFile(path, []byte("invalid object"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			originalRun := cache.run
+			fetches := 0
+			cache.run = func(ctx context.Context, dir string, args ...string) (string, error) {
+				if args[0] == "fetch" {
+					fetches++
+				}
+				return originalRun(ctx, dir, args...)
+			}
+			if err := cache.RefreshIfChanged(context.Background(), repo, "main", oid); err != nil {
+				t.Fatal(err)
+			}
+			if fetches != 0 {
+				t.Fatalf("unchanged remote fetched: %d", fetches)
+			}
+			if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{}); err == nil {
+				t.Fatal("scan succeeded with missing history objects")
 			}
 		})
 	}
