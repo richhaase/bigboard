@@ -8,6 +8,7 @@ import (
 	"github.com/richhaase/bigboard/git"
 	gh "github.com/richhaase/bigboard/github"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -82,7 +83,7 @@ func TestPRExcludedRemotesNeverResolveOrFetch(t *testing.T) {
 }
 
 // This runner returns real provider envelopes but never executes gh or git.
-type budgetRunner struct{ calls int }
+type budgetRunner struct{ calls atomic.Int32 }
 
 func (r *budgetRunner) Run(_ context.Context, cmd string, args ...string) ([]byte, error) {
 	if cmd == "git" {
@@ -92,7 +93,7 @@ func (r *budgetRunner) Run(_ context.Context, cmd string, args ...string) ([]byt
 			}
 		}
 	}
-	r.calls++
+	r.calls.Add(1)
 	for _, arg := range args {
 		if strings.Contains(arg, "BigBoardCurrentAccount") {
 			return []byte(`{"data":{"viewer":{"login":"viewer"},"rateLimit":{"remaining":5000}}}`), nil
@@ -116,8 +117,8 @@ func TestPRGlobalBudgetWithRealProvider(t *testing.T) {
 		m.local.repositories = append(m.local.repositories, git.Repository{ID: path, Path: path})
 	}
 	msg := m.startPRRefresh()().(prsLoadedMsg)
-	if r.calls != gh.MaxRefreshRequests {
-		t.Fatal(r.calls)
+	if r.calls.Load() != gh.MaxRefreshRequests {
+		t.Fatal(r.calls.Load())
 	}
 	partial := 0
 	for _, result := range msg.results {

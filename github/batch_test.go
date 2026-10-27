@@ -7,20 +7,21 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func repoSummaries(t *testing.T, repo string, rows []*rawPR, total int, more bool, cursor string) fakeStep {
 	t.Helper()
-	return fakeStep{data: payload(t, &rawRepository{NameWithOwner: repo, PullRequests: conn(rows, total, more, cursor)}, 100)}
+	return fakeStep{repo: repo, query: summaryQuery, data: payload(t, &rawRepository{NameWithOwner: repo, PullRequests: conn(rows, total, more, cursor)}, 100)}
 }
 
 func repoFiles(t *testing.T, repo string, source *rawPR, nodes []*rawFile, total int, more bool, cursor string) fakeStep {
 	t.Helper()
 	raw := &rawPR{Number: source.Number, UpdatedAt: source.UpdatedAt, HeadRefOid: source.HeadRefOid, BaseRefOid: source.BaseRefOid,
 		Files: conn(nodes, total, more, cursor)}
-	return fakeStep{data: payload(t, &rawRepository{NameWithOwner: repo, PullRequest: raw}, 100)}
+	return fakeStep{repo: repo, query: filesQuery, data: payload(t, &rawRepository{NameWithOwner: repo, PullRequest: raw}, 100)}
 }
 
 func pendingPR(number int) *rawPR {
@@ -163,23 +164,30 @@ func TestFetchAllSharesRepositoryLimitAcrossPhases(t *testing.T) {
 }
 
 func TestFetchAllSharedCooldownStopsLaterInventories(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{err: ErrRateLimited}}}
-	p := NewProvider(runner)
-	results := p.FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/one"}, {Repo: "acme/two"}})
+	var calls atomic.Int32
+	p := NewProvider(batchRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
+		calls.Add(1)
+		return nil, ErrRateLimited
+	}))
+	var requests []RepositoryRequest
+	for i := range 12 {
+		requests = append(requests, RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)})
+	}
+	results := p.FetchAll(context.Background(), requests)
 	for _, result := range results {
 		if !errors.Is(result.InventoryErr, ErrRateLimited) || result.Complete || !result.RetryAt.After(time.Now()) {
 			t.Fatalf("cooldown missing: %+v", result)
 		}
 	}
-	if len(runner.calls) != 1 {
-		t.Fatal("quota failure did not stop later repositories")
+	if got := calls.Load(); got < 1 || got > inventoryConcurrency {
+		t.Fatalf("quota failure did not stop queued repositories: %d calls", got)
 	}
 }
 
 func TestFetchAllDeduplicatesCanonicalAliases(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(7)}, 1, false, "")}}
+	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(7)}, 1, false, ""), summaries(t, []*rawPR{pr(7)}, 1, false, "")}}
 	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old"}, {Repo: "acme/repo"}, {Repo: "ACME/OLD"}})
-	if len(runner.calls) != 1 || len(results) != 3 {
+	if len(runner.calls) < 1 || len(runner.calls) > 2 || len(results) != 3 {
 		t.Fatalf("canonical aliases fetched repeatedly: calls=%d results=%d", len(runner.calls), len(results))
 	}
 	requests := 0
@@ -189,7 +197,7 @@ func TestFetchAllDeduplicatesCanonicalAliases(t *testing.T) {
 			t.Fatalf("alias result missing: %+v", result)
 		}
 	}
-	if requests != 1 {
+	if requests != len(runner.calls) {
 		t.Fatal("canonical aliases counted a request more than once")
 	}
 }
@@ -203,18 +211,31 @@ func (f batchRunnerFunc) Run(ctx context.Context, command string, args ...string
 func TestFetchAllCancellationPreservesCollectedInventory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	calls := 0
-	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		calls++
+	var calls atomic.Int32
+	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls.Add(1)
 		cancel()
-		return summaries(t, []*rawPR{pendingPR(7)}, 1, false, "").data, nil
+		return repoSummaries(t, requestRepository(args), []*rawPR{pendingPR(7)}, 1, false, "").data, nil
 	}))
-	results := p.FetchAll(ctx, []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/other"}})
-	if calls != 1 || len(results[0].PRs) != 1 || !errors.Is(results[1].InventoryErr, context.Canceled) || results[1].Complete {
-		t.Fatalf("cancellation was ignored or lost returned evidence: %+v calls=%d", results, calls)
+	var requests []RepositoryRequest
+	for i := range 12 {
+		requests = append(requests, RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)})
 	}
-	if results[0].PRs[0].FilesComplete || !errors.Is(results[0].FilesErr, context.Canceled) {
-		t.Fatalf("canceled file phase looked complete: %+v", results[0])
+	results := p.FetchAll(ctx, requests)
+	retained := 0
+	for _, result := range results {
+		if result.Complete || !errors.Is(result.InventoryErr, context.Canceled) {
+			t.Fatalf("cancellation ignored: %+v", result)
+		}
+		if len(result.PRs) != 0 {
+			retained++
+			if result.PRs[0].FilesComplete || !errors.Is(result.FilesErr, context.Canceled) {
+				t.Fatalf("canceled file phase looked complete: %+v", result)
+			}
+		}
+	}
+	if got := calls.Load(); got < 1 || got > inventoryConcurrency || retained != int(got) {
+		t.Fatalf("cancellation lost returned evidence: calls=%d retained=%d", got, retained)
 	}
 }
 
@@ -239,13 +260,14 @@ func TestFetchAllCountsRequestsForNewlyDiscoveredAliases(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{
 		summaries(t, []*rawPR{pr(7)}, 1, false, ""),
 		summaries(t, []*rawPR{pr(7)}, 1, false, ""),
+		summaries(t, []*rawPR{pr(7)}, 1, false, ""),
 	}}
 	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old-one"}, {Repo: "acme/old-two"}, {Repo: "acme/repo"}})
 	requests := 0
 	for _, result := range results {
 		requests += result.InventoryRequests
 	}
-	if len(runner.calls) != 2 || requests != 2 {
+	if len(runner.calls) < 2 || len(runner.calls) > 3 || requests != len(runner.calls) {
 		t.Fatalf("actual redirect lookups were not counted: calls=%d requests=%d", len(runner.calls), requests)
 	}
 }

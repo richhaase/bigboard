@@ -8,13 +8,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	prPageSize      = 50
-	filePageSize    = 100
-	contextPageSize = 50
+	prPageSize           = 50
+	filePageSize         = 100
+	contextPageSize      = 50
+	inventoryConcurrency = 4
 )
 
 // Provider is safe for concurrent independent repository fetches. It retains no
@@ -131,11 +133,13 @@ type fetchedPR struct {
 }
 
 type fetchSession struct {
-	provider *Provider
-	ctx      context.Context
-	requests int
-	blocked  error
-	limit    int
+	provider  *Provider
+	ctx       context.Context
+	requests  int
+	blocked   error
+	limit     int
+	allowance *repositoryAllowance
+	registry  *inventoryRegistry
 }
 
 // Fetch reads open PR summaries and current changed paths from github.com only.
@@ -147,67 +151,88 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 }
 
 type repositoryFetch struct {
-	result  Result
-	session fetchSession
-	rows    map[int]*fetchedPR
+	result    Result
+	session   fetchSession
+	rows      map[int]*fetchedPR
+	canonical *repositoryFetch
 }
 
 func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryRequest) []Result {
 	if _, ok := ctx.Value(budgetKey{}).(*requestBudget); !ok {
 		ctx = WithRequestBudget(ctx, MaxRefreshRequests)
 	}
-	batches := make([]*repositoryFetch, 0, len(repositories))
+	registry := &inventoryRegistry{known: make(map[string]*repositoryFetch)}
+	batches := make([]*repositoryFetch, len(repositories))
 	unique := make(map[string]*repositoryFetch)
-	var unavailable error
-	for _, request := range repositories {
+	var jobs []*repositoryFetch
+	for i, request := range repositories {
 		repo, err := CanonicalRepo(request.Repo)
-		if existing, ok := unique[repo]; ok && err == nil {
-			batches = append(batches, existing)
+		if existing := unique[repo]; existing != nil && err == nil {
+			batches[i] = existing
 			continue
 		}
-		repoContext, cancel := context.WithTimeout(ctx, FetchTimeout)
-		defer cancel()
 		batch := &repositoryFetch{
-			result:  Result{Repo: repo, PRs: []PullRequest{}},
-			session: fetchSession{provider: p, ctx: repoContext, limit: repositoryRequestLimit(ctx, p.limits.requests)},
-			rows:    make(map[int]*fetchedPR),
+			result: Result{Repo: repo, PRs: []PullRequest{}, Err: err, InventoryErr: err},
+			session: fetchSession{provider: p, ctx: ctx, registry: registry,
+				allowance: &repositoryAllowance{limit: repositoryRequestLimit(ctx, p.limits.requests)}},
+			rows: make(map[int]*fetchedPR),
 		}
-		batches = append(batches, batch)
+		batch.canonical = batch
+		batches[i] = batch
 		if err == nil {
-			err = unavailable
+			unique[repo] = batch
+			jobs = append(jobs, batch)
 		}
-		if err == nil && p.cooldown().After(p.now()) {
-			err = ErrRateLimited
-		}
-		if err != nil {
-			batch.result.Err, batch.result.InventoryErr = err, err
-			continue
-		}
-		if existing := p.fetchInventory(batch, unique); existing != nil {
-			existing.session.requests += batch.session.requests
-			existing.result.InventoryRequests += batch.session.requests
-			unique[repo] = existing
-			batches[len(batches)-1] = existing
-			if sharedFailure(batch.session.blocked) {
-				unavailable = batch.session.blocked
+	}
+	queue := make(chan *repositoryFetch)
+	var workers sync.WaitGroup
+	for range min(inventoryConcurrency, len(jobs)) {
+		workers.Go(func() {
+			for batch := range queue {
+				if existing := registry.lookup(batch.result.Repo); existing != nil {
+					batch.canonical = existing
+					continue
+				}
+				p.fetchInventory(batch)
+				batch.result.InventoryErr = batch.result.Err
 			}
-			cancel()
+		})
+	}
+	for _, batch := range jobs {
+		queue <- batch
+	}
+	close(queue)
+	workers.Wait()
+	winners := make(map[*repositoryFetch]*repositoryFetch)
+	requests := make(map[*repositoryFetch]int)
+	counted := make(map[*repositoryFetch]bool)
+	for _, batch := range batches {
+		if counted[batch] {
 			continue
 		}
-		batch.result.InventoryErr = batch.result.Err
-		batch.result.InventoryRequests = batch.session.requests
-		unique[repo], unique[batch.result.Repo] = batch, batch
-		if sharedFailure(batch.result.Err) {
-			unavailable = batch.result.Err
+		counted[batch] = true
+		owner := batch.canonical
+		requests[owner] += batch.session.requests
+		if batch != owner && batch.session.requests == 0 {
+			continue
 		}
-		previous := make(map[string]PullRequest, len(request.Previous))
-		for _, pr := range request.Previous {
-			previous[pr.Key()] = pr
+		if winner := winners[owner]; winner == nil || batch.result.Complete && !winner.result.Complete ||
+			!winner.result.Complete && !batch.result.Complete && len(batch.rows) > len(winner.rows) {
+			winners[owner] = batch
 		}
-		for _, row := range batch.rows {
-			if old, ok := previous[row.pr.Key()]; ok && reusableFiles(row.pr, old) {
-				row.pr.Files = slices.Clone(old.Files)
-				row.pr.FilesComplete, row.pr.PreviousPathsComplete = old.FilesComplete, old.PreviousPathsComplete
+	}
+	for _, winner := range winners {
+		winner.session.requests = requests[winner.canonical]
+		winner.result.InventoryRequests = winner.session.requests
+		winner.session.allowance = winner.canonical.session.allowance
+	}
+	for i, batch := range batches {
+		batch = winners[batch.canonical]
+		batches[i] = batch
+		for _, previous := range repositories[i].Previous {
+			if row := batch.rows[previous.Number]; row != nil && reusableFiles(row.pr, previous) {
+				row.pr.Files = slices.Clone(previous.Files)
+				row.pr.FilesComplete, row.pr.PreviousPathsComplete = previous.FilesComplete, previous.PreviousPathsComplete
 				row.needsFiles = false
 			}
 		}
@@ -237,17 +262,11 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 		return a.Key() < b.Key()
 	})
 	for _, task := range pending {
-		err := unavailable
-		if err == nil {
-			err = task.batch.session.fetchFiles(task.batch.result.Repo, task.row)
-		}
+		err := task.batch.session.fetchFiles(task.batch.result.Repo, task.row)
 		task.batch.result.FilesErr = joinError(task.batch.result.FilesErr, err)
-		if sharedFailure(err) {
-			unavailable = err
-		}
 	}
 	results := make([]Result, len(batches))
-	counted := make(map[*repositoryFetch]bool)
+	counted = make(map[*repositoryFetch]bool)
 	for i, batch := range batches {
 		if len(batch.result.PRs) == 0 {
 			for _, row := range batch.rows {
@@ -287,7 +306,7 @@ func reusableFiles(current, previous PullRequest) bool {
 		current.FileCount == previous.FileCount && len(previous.Files) == current.FileCount
 }
 
-func (p *Provider) fetchInventory(batch *repositoryFetch, known map[string]*repositoryFetch) *repositoryFetch {
+func (p *Provider) fetchInventory(batch *repositoryFetch) {
 	result := &batch.result
 	repo := result.Repo
 	rows := batch.rows
@@ -320,9 +339,7 @@ func (p *Provider) fetchInventory(batch *repositoryFetch, known map[string]*repo
 		}
 		result.Repo, repo = canonical, canonical
 		if page == 0 {
-			if existing := known[canonical]; existing != nil {
-				return existing
-			}
+			batch.canonical = batch.session.registry.claim(repo, batch)
 		}
 		conn := data.PullRequests
 		if conn == nil || conn.PageInfo == nil || conn.TotalCount == nil || *conn.TotalCount < 0 {
@@ -365,6 +382,10 @@ func (p *Provider) fetchInventory(batch *repositoryFetch, known map[string]*repo
 			}
 			break
 		}
+		if batch.canonical != batch {
+			result.Err = joinError(result.Err, ErrIncomplete)
+			break
+		}
 		next := conn.PageInfo.EndCursor
 		if !validCursor(next) || seenCursors[next] || len(conn.Nodes) == 0 {
 			result.Err = joinError(result.Err, ErrResponse)
@@ -372,7 +393,6 @@ func (p *Provider) fetchInventory(batch *repositoryFetch, known map[string]*repo
 		}
 		seenCursors[next], cursor = true, next
 	}
-	return nil
 }
 
 func fileFieldErrors(response apiResponse, err error) bool {
@@ -601,10 +621,22 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	if s.blocked != nil {
 		return response, s.blocked
 	}
+	if s.registry != nil {
+		if err := s.registry.failure(); err != nil {
+			return response, err
+		}
+	}
 	if s.provider.cooldown().After(s.provider.now()) {
 		return response, ErrRateLimited
 	}
-	if s.requests >= s.limit || !takeRequest(s.ctx) {
+	timeout := RequestTimeout
+	if s.allowance != nil {
+		var err error
+		timeout, err = s.allowance.take(s.ctx)
+		if err != nil {
+			return response, err
+		}
+	} else if s.requests >= s.limit || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
 	args := []string{"api", "graphql", "--hostname", "github.com", "--method", "POST", "--include",
@@ -620,9 +652,13 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 		args = append(args, "-F", "number="+strconv.Itoa(number))
 	}
 	s.requests++
-	ctx, cancel := context.WithTimeout(s.ctx, RequestTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
+	started := time.Now()
 	data, err := s.provider.runner.Run(ctx, "gh", args...)
+	if s.allowance != nil {
+		s.allowance.charge(time.Since(started))
+	}
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}
@@ -651,6 +687,9 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 			s.blocked = err
 		} else if err == nil {
 			s.provider.quotaSuccess()
+		}
+		if s.registry != nil {
+			s.registry.fail(s.blocked)
 		}
 	}()
 	if limited && len(data) == 0 {

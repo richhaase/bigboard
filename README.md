@@ -244,8 +244,9 @@ The initial remote refresh runs after the local scan without blocking navigation
 board. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
 join an in-flight remote refresh rather than canceling and restarting it. Excluded
 repositories are not fetched. The entire remote refresh shares a request cap
-(`pr_request_budget`, default 128). All repository inventories are requested before
-additional file pages, which are fetched newest-PR-first across repositories.
+(`pr_request_budget`, default 128). Up to four repository inventories are fetched
+concurrently; all inventories finish before additional file pages, which are
+fetched newest-PR-first across repositories. Results retain repository order.
 Inventory queries retain the first 100 files per PR to avoid extra calls for
 ordinary PRs. Data status separates inventory coverage from file/reviewer details
 and shows request use for account lookup, inventory and additional-file phases;
@@ -260,8 +261,10 @@ status means the inventory is incomplete; missing files are qualified as unknown
 areas on the affected PRs and directory counts. Prior file lists are reusable only
 when the PR's update time and head/base revisions still match. Each repository refresh is bounded to 200 open PRs,
 1,000 file paths per PR, half the configured request budget (at least one request),
-and 90 seconds, within a two-minute overall
-refresh. Reviewer lists are also bounded and visibly partial when truncated.
+and 90 seconds of active request time, within a two-minute overall
+refresh. Time queued behind other repositories does not consume that repository
+allowance. Newly discovered aliases share their remaining allowance and retain
+the best complete inventory; already-started alias lookups are counted. Reviewer lists are also bounded and visibly partial when truncated.
 No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
 file list does not expose rename origins, so that limitation is labelled rather
 than guessed. Authentication, rate limits, unavailable repositories and unsupported
