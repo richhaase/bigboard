@@ -255,7 +255,7 @@ func TestRepositoryCacheRefreshIfChangedRepairsUnusableCache(t *testing.T) {
 			if fetches != 1 || replacements != 1 {
 				t.Fatalf("unusable cache not replaced: fetches=%d, replacements=%d", fetches, replacements)
 			}
-			if err := cache.verify(context.Background(), repo); err != nil {
+			if _, err := cache.verify(context.Background(), repo); err != nil {
 				t.Fatalf("replacement unusable: %v", err)
 			}
 		})

@@ -205,14 +205,18 @@ func DetectDefaultBranch(dir string) string {
 }
 
 func detectDefaultBranch(ctx context.Context, dir string) string {
-	out, err := runGitContext(ctx, dir, "symbolic-ref", "refs/remotes/origin/HEAD")
+	return detectDefaultBranchWith(ctx, dir, runGitContext)
+}
+
+func detectDefaultBranchWith(ctx context.Context, dir string, run gitRunner) string {
+	out, err := run(ctx, dir, "symbolic-ref", "refs/remotes/origin/HEAD")
 	if err == nil {
-		if oid := resolveCommit(ctx, dir, strings.TrimSpace(out)); oid != "" {
+		if oid := resolveCommitWith(ctx, dir, strings.TrimSpace(out), run); oid != "" {
 			return oid
 		}
 	}
 	for _, ref := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master", "HEAD"} {
-		if oid := resolveCommit(ctx, dir, ref); oid != "" {
+		if oid := resolveCommitWith(ctx, dir, ref, run); oid != "" {
 			return oid
 		}
 	}
@@ -220,7 +224,11 @@ func detectDefaultBranch(ctx context.Context, dir string) string {
 }
 
 func resolveCommit(ctx context.Context, dir, ref string) string {
-	out, err := runGitContext(ctx, dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	return resolveCommitWith(ctx, dir, ref, runGitContext)
+}
+
+func resolveCommitWith(ctx context.Context, dir, ref string, run gitRunner) string {
+	out, err := run(ctx, dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		return ""
 	}
