@@ -55,7 +55,7 @@ func BenchmarkRepositoryScanCache(b *testing.B) {
 				var records []CommitRecord
 				var err error
 				if mode == "full" {
-					if err = cache.verify(b.Context(), repo, false); err == nil {
+					if err = cache.verify(b.Context(), repo); err == nil {
 						records, err = ScanRepository(b.Context(), repo, CollectOptions{})
 					}
 				} else {

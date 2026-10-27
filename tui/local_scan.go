@@ -134,6 +134,11 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 		}
 		if result.Retained {
 			next.retainRepository(previous, id)
+			for i := range next.repositories {
+				if next.repositories[i].ID == id && result.FetchErr == nil {
+					next.repositories[i] = result.Repository
+				}
+			}
 			if result.FetchErr == nil && !b.localOnly {
 				delete(next.staleRepos, id)
 			}

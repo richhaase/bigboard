@@ -162,6 +162,7 @@ func main() {
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
 		Bookmark:               newBookmarkOptions(*groupFlag),
 		PrepareRepository:      cache.Refresh,
+		PrepareIfChanged:       cache.RefreshIfChanged,
 		RepositoryRevision:     cache.Revision,
 		ScanRepository:         cache.ScanRepository,
 		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(inventory.snapshot()) },

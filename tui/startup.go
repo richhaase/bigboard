@@ -60,7 +60,7 @@ func (m Model) startupRepoCmd(ctx context.Context, repo git.Repository) tea.Cmd 
 func (m *Model) startStartupFetch() tea.Cmd {
 	m.resetPending()
 	m.scan.phase = scanStartupFetch
-	return m.loadCmds()
+	return m.startRemotePass()
 }
 
 func (m Model) finishCachedStartup() (tea.Model, tea.Cmd) {
@@ -70,6 +70,6 @@ func (m Model) finishCachedStartup() (tea.Model, tea.Cmd) {
 			break
 		}
 	}
-	cmd := tea.Batch(m.startStartupFetch(), m.startPRRefresh(), m.cacheInfoCmd())
+	cmd := tea.Batch(m.startStartupFetch(), m.cacheInfoCmd())
 	return m, cmd
 }
