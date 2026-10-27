@@ -22,6 +22,7 @@ type sharedFilterState struct {
 	priorRow                      int
 	replace, overflow             bool
 	timeIdx, customDays           int
+	sinceLastLook                 bool
 	repos, people                 filterValues
 	activityBots, contributorBots bool
 	prs                           prFilters
@@ -62,7 +63,8 @@ func (m *Model) openFilters(category string) {
 		m.filters = sharedFilterState{
 			open: true, board: board, rows: map[string]int{}, queries: map[string]string{},
 			timeIdx: m.timeIdx, customDays: m.customRangeDays, repos: m.sharedRepos.clone(),
-			people: m.activityPeople.clone(), activityBots: m.activityHideBots, contributorBots: m.hideBots,
+			sinceLastLook: m.sinceLastLookRange,
+			people:        m.activityPeople.clone(), activityBots: m.activityHideBots, contributorBots: m.hideBots,
 			prs: m.prFilters.clone(), query: query,
 		}
 	}
@@ -87,6 +89,9 @@ func (m *Model) openFilters(category string) {
 		if m.filters.customDays > 0 {
 			m.filters.rows["range"] = len(TimePresets)
 		}
+		if m.filters.sinceLastLook && m.bookmarkRangeAvailable() {
+			m.filters.rows["range"] = len(TimePresets) + 1
+		}
 	}
 }
 
@@ -95,6 +100,7 @@ func (m Model) filterDraftModel() Model {
 	m.activityPeople = m.filters.people.clone()
 	m.activityHideBots, m.hideBots = m.filters.activityBots, m.filters.contributorBots
 	m.timeIdx, m.customRangeDays = m.filters.timeIdx, m.filters.customDays
+	m.sinceLastLookRange = m.filters.sinceLastLook
 	m.prFilters = m.filters.prs.clone()
 	return m
 }
@@ -112,6 +118,9 @@ func (m Model) filterOptions() []prFilterOption {
 			label = "Custom: " + daysRangeLabel(m.filters.customDays)
 		}
 		options = append(options, prFilterOption{"custom", label})
+		if m.bookmarkRangeAvailable() {
+			options = append(options, prFilterOption{"since-last-look", "Since last look"})
+		}
 	case "repos":
 		labels := map[string]string{}
 		for _, repo := range append(slices.Clone(m.repositories), m.local.repositories...) {
@@ -167,10 +176,13 @@ func (m Model) filterOptionSelected(value string) bool {
 	var values filterValues
 	switch f.category {
 	case "range":
-		if value == "custom" {
-			return f.customDays > 0
+		if value == "since-last-look" {
+			return f.sinceLastLook
 		}
-		return f.customDays == 0 && value == strconv.Itoa(f.timeIdx)
+		if value == "custom" {
+			return !f.sinceLastLook && f.customDays > 0
+		}
+		return !f.sinceLastLook && f.customDays == 0 && value == strconv.Itoa(f.timeIdx)
 	case "repos":
 		values = f.repos
 	case "people":
@@ -218,8 +230,11 @@ func (m *Model) stageFilterOption(value string) {
 	case "range":
 		if value == "custom" {
 			m.beginFilterEdit("custom")
+		} else if value == "since-last-look" && m.bookmarkRangeAvailable() {
+			f.sinceLastLook, f.customDays = true, 0
 		} else if index, err := strconv.Atoi(value); err == nil {
 			f.timeIdx, f.customDays = index, 0
+			f.sinceLastLook = false
 		}
 	case "repos":
 		f.repos = f.repos.toggle(value)
@@ -241,6 +256,7 @@ func (m *Model) stageFilterOption(value string) {
 		}
 	case "shared-reset":
 		f.timeIdx, f.customDays, f.repos, f.resetShared = len(TimePresets)-1, 0, nil, true
+		f.sinceLastLook = false
 	case "board-reset":
 		f.query, f.resetBoard = "", true
 		switch f.board {
@@ -276,6 +292,7 @@ func (m Model) handleFilterText(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			f.customDays = days
+			f.sinceLastLook = false
 		case "query":
 			f.query = f.input
 		}
@@ -333,6 +350,7 @@ func (m *Model) applyFilters() {
 		m.clearBoardFilters()
 	}
 	m.timeIdx, m.customRangeDays, m.sharedRepos = f.timeIdx, f.customDays, f.repos.clone()
+	m.sinceLastLookRange = f.sinceLastLook
 	switch f.board {
 	case "activity":
 		m.activityPeople, m.activityHideBots = f.people.clone(), f.activityBots

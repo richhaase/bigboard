@@ -173,6 +173,9 @@ func (m Model) screenCoverage() string {
 	if m.width >= 100 {
 		coverage += " · ages at local scan · fetch on launch and r"
 	}
+	if m.viewMode == ViewAwareness && m.bookmarkMarkerLegend() != "" {
+		coverage = m.bookmarkMarkerLegend() + " · " + coverage
+	}
 	return coverage
 }
 

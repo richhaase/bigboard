@@ -74,54 +74,56 @@ type Model struct {
 	commitBrowserError string
 	prBrowserOpener    func(string) error
 
-	showPaths        bool
-	showHelp         bool
-	helpOffset       int
-	pathOffset       int
-	areaDefinitions  map[string]stats.WorkAreaDefinition
-	areaRepoID       string
-	selectedAreaID   string
-	selectedRepoID   string
-	personID         string
-	returnView       ViewMode
-	local            localSnapshot
-	scan             scanBatch
-	startup          startupProgress
-	refreshAnimation refreshAnimation
-	authors          []stats.AuthorStats
-	repositories     []git.Repository
-	showScanErrors   bool
-	scanErrorOffset  int
-	scanErrorDetails bool
-	excludedRepos    map[string]bool
-	overlayExcluded  map[string]bool
-	overlayCursor    int
-	viewMode         ViewMode
-	selectedRow      int
-	scrollOffset     int
-	filterQuery      string
-	searching        bool
-	sortAsc          bool
-	hideBots         bool
-	activeOperative  string
-	activeAuthorID   string
-	statDetailOffset int
-	sortField        stats.SortField
-	timeIdx          int
-	customRangeDays  int
-	version          string
-	width            int
-	height           int
-	loading          bool
-	quitting         bool
-	err              error
-	options          Options
-	scanContext      context.Context
-	cancelScans      context.CancelFunc
-	localScanContext context.Context
-	cancelLocalScans context.CancelFunc
-	identityReselect string
-	commands         *commandGroup
+	showPaths          bool
+	showHelp           bool
+	helpOffset         int
+	pathOffset         int
+	areaDefinitions    map[string]stats.WorkAreaDefinition
+	areaRepoID         string
+	selectedAreaID     string
+	selectedRepoID     string
+	personID           string
+	returnView         ViewMode
+	local              localSnapshot
+	scan               scanBatch
+	startup            startupProgress
+	bookmarkSeenAt     time.Time
+	refreshAnimation   refreshAnimation
+	authors            []stats.AuthorStats
+	repositories       []git.Repository
+	showScanErrors     bool
+	scanErrorOffset    int
+	scanErrorDetails   bool
+	excludedRepos      map[string]bool
+	overlayExcluded    map[string]bool
+	overlayCursor      int
+	viewMode           ViewMode
+	selectedRow        int
+	scrollOffset       int
+	filterQuery        string
+	searching          bool
+	sortAsc            bool
+	hideBots           bool
+	activeOperative    string
+	activeAuthorID     string
+	statDetailOffset   int
+	sortField          stats.SortField
+	timeIdx            int
+	customRangeDays    int
+	sinceLastLookRange bool
+	version            string
+	width              int
+	height             int
+	loading            bool
+	quitting           bool
+	err                error
+	options            Options
+	scanContext        context.Context
+	cancelScans        context.CancelFunc
+	localScanContext   context.Context
+	cancelLocalScans   context.CancelFunc
+	identityReselect   string
+	commands           *commandGroup
 
 	bootLines []string
 }
@@ -146,6 +148,7 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
+	Bookmark               *BookmarkOptions
 	Settings               *SettingsOptions
 	PrepareRepository      func(context.Context, git.Repository) error
 	RepositoryRevision     func(context.Context, git.Repository) (string, error)
@@ -309,12 +312,16 @@ func (m *Model) finalizeLoad() {
 	}
 	initial := m.loading
 	m.local = snapshot
+	committedAt := time.Now()
 	if m.scan.phase == scanCached {
-		m.startup.cachedAt = time.Now()
+		m.startup.cachedAt = committedAt
 	}
 	if m.scan.phase == scanStartupFetch {
-		m.startup.fetchedAt = time.Now()
+		m.startup.fetchedAt = committedAt
 		m.startup.pending = false
+	}
+	if m.scan.phase != scanCached && !m.scan.localOnly && len(snapshot.repositories) > 0 {
+		m.bookmarkSeenAt = committedAt
 	}
 	m.err = m.local.loadError()
 	m.loading = false
@@ -723,7 +730,7 @@ func (m *Model) filteredRecordsAt(now time.Time) []git.CommitRecord {
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
 	}
-	return stats.FilterByTimeAt(filtered, m.rangeDuration(), now)
+	return m.filterRangeRecordsAt(filtered, now)
 }
 
 func (m *Model) recomputeAuthors() {
@@ -1018,7 +1025,7 @@ func (m Model) operativeDetailContentAt(now time.Time) string {
 		as,
 		filtered,
 		m.width,
-		activityChartWindow{now: now, duration: m.rangeDuration()},
+		m.activityWindowAt(now),
 	)
 	return detail
 }

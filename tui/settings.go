@@ -313,6 +313,7 @@ func (m Model) applySavedSettings(msg settingsSavedMsg) (tea.Model, tea.Cmd) {
 	next := NewModelWithOptions(msg.repositories, m.sortField, nil, m.version, m.timeIdx, options)
 	next.width, next.height = m.width, m.height
 	next.customRangeDays = m.customRangeDays
+	next.sinceLastLookRange = m.sinceLastLookRange
 	next.scan.generation = m.scan.generation + 1
 	next.prGeneration = m.prGeneration + 1
 	next.cacheGeneration = m.cacheGeneration + 1

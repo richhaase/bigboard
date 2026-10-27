@@ -390,6 +390,20 @@ the modal, `r` refreshes, and Esc closes it without changing selection or filter
 The status row animates while Git or PR refreshes are working. Git also shows
 completed/total repositories when space permits; PR progress is indeterminate.
 
+BigBoard remembers the last fetched snapshot you saw, separately for the full
+view and each `--group`. A `+` beside Activity's LATEST or a PR's UPDATED age means
+it changed after that bookmark. In Date range (`t`), choose **Since last look**
+to use the same saved time across all boards. Commit comparisons use author time;
+PR comparisons use last-updated time.
+
+The bookmark advances on normal exit after a fetch pass has committed usable
+history, using that snapshot's time. Closing before fetching finishes leaves it
+unchanged. The first visit has no markers or bookmark preset; Data status (`e`)
+shows the saved time, state-file problems, and when it will advance. State lives
+in `$XDG_STATE_HOME/bigboard/last-seen.json` (default
+`~/.local/state/bigboard/last-seen.json`) and contains only timestamps, not PR data.
+Export ignores bookmarks.
+
 ### Activity
 
 Activity shows included repositories and their default-branch history in the

@@ -147,6 +147,18 @@ titles first, then author/time/hash and affected areas. No extra scans or reques
 
 ## Shared command contract
 
+`last-seen.json` under `$XDG_STATE_HOME/bigboard` (default `~/.local/state/bigboard`)
+stores only bookmark timestamps for the full selection and each `--group`.
+Interactive startup loads an immutable bookmark for the session; missing or
+invalid state is explained in Data status and does not block the board. Normal
+exit advances it to the latest committed fetch-pass snapshot time only when
+usable history was published. Offline-only scans, canceled startup, abnormal
+termination, and export never advance it. Settings reload requires its own
+fetched snapshot. Activity LATEST and PR UPDATED use `+` for timestamps strictly
+after the bookmark; Since last look in Date range applies that exact lower bound
+across boards using Git author time and PR updated time. This is timestamp-only
+state, not a persistent PR cache.
+
 All boards use one shared Git/PR status line beneath Shared and Filters.
 Healthy states stay quiet; stale, partial and unavailable states remain visible
 during manual refresh. Startup's cached snapshot uses cyan `cached · fetching…`

@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"time"
+
+	"github.com/richhaase/bigboard/git"
 )
 
 // Custom ranges are session-only and bounded well below time.Duration overflow.
@@ -29,6 +31,9 @@ func daysRangeLabel(days int) string {
 }
 
 func (m Model) rangeLabel() string {
+	if m.sinceLastLookRange && m.bookmarkRangeAvailable() {
+		return "Since last look"
+	}
 	if m.customRangeDays > 0 {
 		return daysRangeLabel(m.customRangeDays)
 	}
@@ -44,6 +49,32 @@ func (m Model) rangeDuration() time.Duration {
 		index = DefaultTimeIndex
 	}
 	return TimePresets[index].Duration
+}
+
+func (m Model) bookmarkRangeAvailable() bool {
+	return m.options.Bookmark != nil && !m.options.Bookmark.Time.IsZero()
+}
+
+func (m Model) rangeCutoffAt(now time.Time) (time.Time, bool) {
+	if m.sinceLastLookRange && m.bookmarkRangeAvailable() {
+		return m.options.Bookmark.Time, true
+	}
+	duration := m.rangeDuration()
+	return now.Add(-duration), duration != 0
+}
+
+func (m Model) filterRangeRecordsAt(records []git.CommitRecord, now time.Time) []git.CommitRecord {
+	cutoff, bounded := m.rangeCutoffAt(now)
+	if !bounded {
+		return records
+	}
+	filtered := make([]git.CommitRecord, 0, len(records))
+	for _, record := range records {
+		if record.Date.After(cutoff) {
+			filtered = append(filtered, record)
+		}
+	}
+	return filtered
 }
 
 func rangeControl(label string) string {

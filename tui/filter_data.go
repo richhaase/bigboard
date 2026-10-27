@@ -107,11 +107,10 @@ func (m Model) prsInViewForRepository(id string) []gh.PullRequest {
 	if !m.repoInView(id) {
 		return nil
 	}
-	duration := m.rangeDuration()
-	cutoff := time.Now().Add(-duration)
+	cutoff, bounded := m.rangeCutoffAt(time.Now())
 	var result []gh.PullRequest
 	for _, pr := range m.prsForRepository(id) {
-		if duration == 0 || pr.UpdatedAt.After(cutoff) {
+		if !bounded || pr.UpdatedAt.After(cutoff) {
 			result = append(result, pr)
 		}
 	}

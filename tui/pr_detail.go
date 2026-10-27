@@ -45,6 +45,9 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	}
 	lines = append(lines, StyleDimWhite.Render(padCells("Conflicts", 10))+conflictStyle.Render(conflicts))
 	add("Updated   "+prDetailTime(pr.UpdatedAt)+" (PR activity)", StyleDimWhite)
+	if m.sinceLastLook(pr.UpdatedAt) {
+		add("+ updated since last look", StyleCyan)
+	}
 	snapshot := m.prState.snapshots[pr.Repo]
 	add("Checked   "+prDetailTime(snapshot.checked), StyleDimWhite)
 	add("Checks and conflicts do not establish merge readiness.", StyleDimWhite)

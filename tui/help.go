@@ -47,6 +47,12 @@ func (m Model) currentHelp() screenHelp {
 		return m.settingsHelp()
 	}
 	help := m.screenHelp()
+	if m.options.Bookmark != nil && !m.options.Bookmark.Time.IsZero() && !m.helpSearchActive() {
+		help.sections = append(help.sections, helpSection{"Since last look", []helpBinding{
+			{"+", "Activity or PR updated after this selection's saved bookmark"},
+			{"Bookmark", "Choose Since last look in Date range; Data status shows its time and when it advances"},
+		}})
+	}
 	if m.options.Settings != nil && !m.helpSearchActive() && !m.identityMerge.saving && !m.cacheRemoving {
 		help.sections = append(help.sections, helpSection{"Settings", []helpBinding{{",", "Configure personal and organization repositories; save for future sessions"}}})
 	}

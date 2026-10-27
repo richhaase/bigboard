@@ -10,6 +10,23 @@ import (
 type activityChartWindow struct {
 	now      time.Time
 	duration time.Duration
+	start    time.Time
+}
+
+func (m Model) activityWindowAt(now time.Time) activityChartWindow {
+	window := activityChartWindow{now: now, duration: m.rangeDuration()}
+	if m.sinceLastLookRange && m.bookmarkRangeAvailable() {
+		window.start = m.options.Bookmark.Time
+		window.duration = max(time.Nanosecond, now.Sub(window.start))
+	}
+	return window
+}
+
+func (w activityChartWindow) startsAt() time.Time {
+	if !w.start.IsZero() {
+		return w.start
+	}
+	return w.now.Add(-w.duration)
 }
 
 func (w activityChartWindow) shortRange() bool {
@@ -43,7 +60,7 @@ func (w activityChartWindow) timeline(records []git.CommitRecord) []stats.Timeli
 		if w.timelineLabel() == "weekly" {
 			interval = stats.TimelineWeekly
 		}
-		return stats.ActivityTimeline(records, time.Local, w.now.Add(-w.duration), w.now, interval)
+		return stats.ActivityTimeline(records, time.Local, w.startsAt(), w.now, interval)
 	}
 	months := stats.ActivityByMonth(records, time.Local)
 	if len(months) > 12 {
@@ -71,7 +88,7 @@ func (w activityChartWindow) heatmapDates(width int) (startSunday, firstDay, las
 	startSunday = lastSunday.AddDate(0, 0, -7*(weeks-1))
 	firstDay = startSunday
 	if w.shortRange() {
-		firstDay = chartCalendarDay(w.now.Add(-w.duration))
+		firstDay = chartCalendarDay(w.startsAt())
 		startSunday = firstDay.AddDate(0, 0, -int(firstDay.Weekday()))
 		weeks = int(lastSunday.Sub(startSunday)/(7*24*time.Hour)) + 1
 		capacity := max(1, width-chromeInset-6)
