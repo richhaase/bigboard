@@ -66,6 +66,8 @@ func (m Model) sharedScopeLabel(width int) string {
 		basis := "commit author date"
 		if m.showPRs {
 			basis = "PR last updated"
+		} else if m.viewMode == ViewAwareness {
+			basis = "Git author date · PR updated"
 		}
 		label += " · " + basis
 	}

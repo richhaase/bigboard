@@ -30,22 +30,29 @@ type prSnapshot struct {
 	lastGood time.Time
 	partial  bool
 	err      error
+	filesErr error
 }
 type prState struct {
-	aliases      map[string]string
-	repositories map[string]string
-	errors       map[string]error
-	snapshots    map[string]prSnapshot
-	loading      bool
-	nextRefresh  time.Time
+	aliases           map[string]string
+	repositories      map[string]string
+	errors            map[string]error
+	snapshots         map[string]prSnapshot
+	loading           bool
+	nextRefresh       time.Time
+	inventoryRequests int
+	fileRequests      int
+	requestBudget     int
 }
 type prsLoadedMsg struct {
-	aliases      map[string]string
-	generation   uint64
-	repositories map[string]string
-	errors       map[string]error
-	results      map[string]gh.Result
-	checked      time.Time
+	aliases           map[string]string
+	generation        uint64
+	repositories      map[string]string
+	errors            map[string]error
+	results           map[string]gh.Result
+	checked           time.Time
+	inventoryRequests int
+	fileRequests      int
+	requestBudget     int
 }
 
 func (m *Model) cancelPRRefresh() {
@@ -67,7 +74,11 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
-	ctx = gh.WithRequestBudget(ctx, gh.MaxRefreshRequests)
+	budget := m.options.PRRequestBudget
+	if budget <= 0 {
+		budget = gh.MaxRefreshRequests
+	}
+	ctx = gh.WithRequestBudget(ctx, budget)
 	m.cancelPRs = cancel
 	m.prState.loading = true
 	generation := m.prGeneration
@@ -78,6 +89,7 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		}
 	}
 	provider := m.prProvider
+	snapshots := maps.Clone(m.prState.snapshots)
 	aliases := maps.Clone(m.prState.aliases)
 	if aliases == nil {
 		aliases = make(map[string]string)
@@ -86,8 +98,9 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		defer cancel()
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
 		msg.aliases = aliases
-		var unavailable error
-		// Serial bounded requests avoid multiplying API budgets across duplicates.
+		msg.requestBudget = budget
+		var requests []gh.RepositoryRequest
+		seen := make(map[string]bool)
 		for _, repo := range repos {
 			if ctx.Err() != nil {
 				msg.errors[repo.ID] = ctx.Err()
@@ -102,32 +115,65 @@ func (m *Model) startPRRefresh() tea.Cmd {
 			for i := 0; i < len(aliases) && aliases[remote] != "" && aliases[remote] != remote; i++ {
 				remote = aliases[remote]
 			}
-			if _, exists := msg.results[remote]; !exists {
-				result := gh.Result{Repo: remote, Err: unavailable}
-				if unavailable == nil {
-					result = provider.Fetch(ctx, remote)
-					if errors.Is(result.Err, gh.ErrAuthentication) || errors.Is(result.Err, gh.ErrUnavailable) || errors.Is(result.Err, gh.ErrRateLimited) {
-						unavailable = result.Err
-					}
-					if result.RetryAt.After(time.Now()) {
-						unavailable = gh.ErrRateLimited
-					}
-				}
-				canonical, err := gh.CanonicalRepo(result.Repo)
-				if err != nil {
-					canonical = remote
-				}
-				aliases[remote] = canonical
-				aliases[origin] = canonical
-				remote = canonical
-				msg.results[remote] = result
-			}
+			aliases[origin] = remote
 			msg.repositories[repo.ID] = remote
+			if !seen[remote] {
+				seen[remote] = true
+				requests = append(requests, gh.RepositoryRequest{Repo: remote, Previous: snapshots[remote].prs})
+			}
+		}
+		results := fetchPRRepositories(ctx, provider, requests)
+		for i, result := range results {
+			remote := requests[i].Repo
+			canonical, err := gh.CanonicalRepo(result.Repo)
+			if err != nil {
+				canonical = remote
+			}
+			aliases[remote] = canonical
+			msg.results[canonical] = result
+			msg.inventoryRequests += result.InventoryRequests
+			msg.fileRequests += result.FileRequests
+		}
+		for id, remote := range msg.repositories {
+			if canonical := aliases[remote]; canonical != "" {
+				msg.repositories[id] = canonical
+			}
 		}
 		msg.checked = time.Now()
 		return msg
 	})
 }
+func fetchPRRepositories(ctx context.Context, provider PRProvider, requests []gh.RepositoryRequest) []gh.Result {
+	if batch, ok := provider.(interface {
+		FetchAll(context.Context, []gh.RepositoryRequest) []gh.Result
+	}); ok {
+		return batch.FetchAll(ctx, requests)
+	}
+	results := make([]gh.Result, 0, len(requests))
+	known := make(map[string]gh.Result)
+	var unavailable error
+	for _, request := range requests {
+		if previous, ok := known[request.Repo]; ok {
+			previous.InventoryRequests, previous.FileRequests = 0, 0
+			results = append(results, previous)
+			continue
+		}
+		result := gh.Result{Repo: request.Repo, Err: unavailable}
+		if unavailable == nil {
+			result = provider.Fetch(ctx, request.Repo)
+			if errors.Is(result.Err, gh.ErrAuthentication) || errors.Is(result.Err, gh.ErrUnavailable) || errors.Is(result.Err, gh.ErrRateLimited) {
+				unavailable = result.Err
+			}
+			if result.RetryAt.After(time.Now()) {
+				unavailable = gh.ErrRateLimited
+			}
+		}
+		known[request.Repo], known[result.Repo] = result, result
+		results = append(results, result)
+	}
+	return results
+}
+
 func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	selectedKey := ""
 	oldVisible := m.visiblePRs()
@@ -135,6 +181,9 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		selectedKey = oldVisible[m.prRow].Key()
 	}
 	m.prState.loading = false
+	m.prState.inventoryRequests = msg.inventoryRequests
+	m.prState.fileRequests = msg.fileRequests
+	m.prState.requestBudget = msg.requestBudget
 	if len(msg.results) > 0 {
 		if next := msg.checked.Add(time.Minute); next.After(m.prState.nextRefresh) {
 			m.prState.nextRefresh = next
@@ -164,14 +213,13 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 			m.prState.nextRefresh = result.RetryAt
 		}
 		old := m.prState.snapshots[repo]
-		next := prSnapshot{checked: msg.checked, lastGood: old.lastGood, partial: !result.Complete, err: result.Err}
-		for _, pr := range result.PRs {
-			next.partial = next.partial || !pr.FilesComplete || !pr.ContextComplete
+		inventoryErr := result.InventoryErr
+		if inventoryErr == nil && result.FilesErr == nil {
+			inventoryErr = result.Err
 		}
-		prior := make(map[string]gh.PullRequest)
+		next := prSnapshot{checked: msg.checked, lastGood: old.lastGood, partial: !result.Complete, err: inventoryErr, filesErr: result.FilesErr}
 		kept := make(map[string]gh.PullRequest)
 		for _, pr := range old.prs {
-			prior[pr.Key()] = pr
 			if !result.Complete {
 				kept[pr.Key()] = pr
 			}
@@ -179,23 +227,12 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		// Inventory completeness is independent of supporting context. A
 		// complete open inventory removes closed PRs even if files are partial.
 		for _, pr := range result.PRs {
-			if oldPR, ok := prior[pr.Key()]; ok && !pr.FilesComplete {
-				paths := make(map[string]bool)
-				for _, f := range pr.Files {
-					paths[f.Path] = true
-				}
-				for _, f := range oldPR.Files {
-					if !paths[f.Path] {
-						pr.Files = append(pr.Files, f)
-					}
-				}
-			}
 			kept[pr.Key()] = pr
 		}
 		for _, pr := range kept {
 			next.prs = append(next.prs, pr)
 		}
-		if result.Complete && result.Err == nil && !next.partial {
+		if result.Complete && inventoryErr == nil {
 			next.lastGood = msg.checked
 		}
 

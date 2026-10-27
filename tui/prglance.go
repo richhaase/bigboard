@@ -18,6 +18,12 @@ func (m Model) prGlanceSignal(scope string) string {
 	}
 	prs := m.scopePRs(scope)
 	incomplete := snapshot.partial || snapshot.err != nil || m.prState.errors[id] != nil
+	areasUnknown := false
+	if scope != id {
+		for _, pr := range m.prsInViewForRepository(id) {
+			areasUnknown = areasUnknown || !pr.FilesComplete
+		}
+	}
 	if incomplete && len(snapshot.prs) == 0 && snapshot.lastGood.IsZero() {
 		return "PRs unknown · unavailable/partial"
 	}
@@ -43,10 +49,13 @@ func (m Model) prGlanceSignal(scope string) string {
 		}
 	}
 	count := fmt.Sprintf("%d open", len(prs))
-	if incomplete {
+	if incomplete || areasUnknown {
 		count = fmt.Sprintf("%d known open", len(prs))
 	}
 	parts := []string{count}
+	if areasUnknown {
+		parts = append(parts, "areas unknown")
+	}
 	if failing > 0 {
 		parts = append(parts, fmt.Sprintf("%d failing", failing))
 	}

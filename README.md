@@ -180,7 +180,14 @@ never signs in, requests access, creates credentials, or changes pull requests.
 Headless `--export` stays local and unchanged.
 Only a supported GitHub `origin` is used, with no upstream guessing.
 
-PR summaries appear beside repositories and work areas when width permits.
+PR counts appear beside existing Activity repository and directory/file rows
+when width permits. Wide rows show open, failing-check, and changes-requested
+counts separately; smaller rows show only open counts. These signals do not
+change the line bars, ranking, or contributor pane. A `?` marks incomplete or
+stale evidence; directory counts also need complete current-file lists for the
+repository's in-range PRs. Failing checks and changes requested can overlap.
+Labels appear once in the column header. A muted dash means no open PRs;
+blank failing/changes cells mean zero, keeping attention on nonzero counts.
 Press lowercase `p` for all included repositories, `f` within PRs to choose one
 repository, or `v` from Activity for its selected repository. Enter opens a
 scrollable detail modal over the retained PR list; left / Esc closes it. Details show the canonical link, GitHub author and reviewers,
@@ -193,23 +200,32 @@ as local history, including new PR-only areas. Generated files follow `all_files
 A PR touching multiple areas appears in each; the overall count deduplicates it,
 including across duplicate local clones. The PR board follows the global range
 using PR last-updated time; local contributor and bot filters do not apply.
-Work-area PR summaries and fetch coverage retain all open PRs. PRs never enter
+Activity PR counts and work-area summaries follow that shared scope, independently
+of saved PR-board filters. Fetch coverage retains all open PRs. PRs never enter
 commit totals or the JSON export.
 
 The initial remote refresh runs after the local scan without blocking navigation.
 `r` fetches repository history and refreshes PR context, including inside the PR
 board. Repeated PR refreshes reuse in-memory snapshots for at least one minute and
 join an in-flight remote refresh rather than canceling and restarting it. Excluded
-repositories are not fetched. The entire remote refresh shares a 128-request cap;
+repositories are not fetched. The entire remote refresh shares a request cap
+(`pr_request_budget`, default 128). All repository inventories are requested before
+additional file pages, which are fetched newest-PR-first across repositories.
+Inventory queries retain the first 100 files per PR to avoid extra calls for
+ordinary PRs. Data status separates inventory coverage from file/reviewer details
+and shows request use for the inventory and additional-file phases;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
 exponential cooldowns when no retry time is available. The PR board status shows when `r`
 can request data again; no background retry runs. There is no polling or disk cache,
 so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
-clears missing PRs even when supporting context is partial. Matching PRs retain
-old path evidence when their new file list is incomplete. Each repository refresh is bounded to 200 open PRs,
-1,000 file paths per PR, 64 requests and 90 seconds, within a two-minute overall
+clears missing PRs even when supporting context is partial. `PARTIAL` repository
+status means the inventory is incomplete; missing files are qualified as unknown
+areas on the affected PRs and directory counts. Prior file lists are reusable only
+when the PR's update time and head/base revisions still match. Each repository refresh is bounded to 200 open PRs,
+1,000 file paths per PR, half the configured request budget (at least one request),
+and 90 seconds, within a two-minute overall
 refresh. Reviewer lists are also bounded and visibly partial when truncated.
 No PR descriptions, comments, diffs or check logs are requested. GitHub's GraphQL
 file list does not expose rename origins, so that limitation is labelled rather
@@ -446,6 +462,7 @@ contributor merge explicitly saves its identity mapping to this file.
   "fuzzy": false,
   "all_files": false,
   "depth": 2,
+  "pr_request_budget": 128,
   "groups": {
     "backend": ["~/src/api", "~/src/workers"],
     "frontend": ["~/src/web"]
@@ -467,6 +484,7 @@ contributor merge explicitly saves its identity mapping to this file.
 - `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Activity canvas uses its fixed high-contrast palette.
 - `all_files` includes generated/vendored paths in line totals; it defaults to `false`.
 - `work_areas` defines optional cross-directory groups using the [rules above](#work-relationships).
+- `pr_request_budget` is the positive maximum number of GitHub requests per refresh (default `128`). It does not change rate-limit cooldowns, timeouts, or the PR/file count limits.
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
 - `fuzzy` is retained for config compatibility; use `.mailmap` or `identities` for identity aliases.
 - `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.

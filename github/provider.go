@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,7 +110,10 @@ type apiResponse struct {
 			ResetAt   string
 		}
 	}
-	Errors []struct{ Message, Type string }
+	Errors []struct {
+		Message, Type string
+		Path          []any
+	}
 }
 
 type fetchedPR struct {
@@ -129,6 +133,7 @@ type fetchSession struct {
 	ctx      context.Context
 	requests int
 	blocked  error
+	limit    int
 }
 
 // Fetch reads open PR summaries and current changed paths from github.com only.
@@ -136,19 +141,154 @@ type fetchSession struct {
 // check logs, or file contents. Limits never silently turn partial data into a
 // complete result, and a failed refresh can be kept separate from stale data.
 func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
-	repo, err := CanonicalRepo(ownerRepo)
-	if err != nil {
-		return Result{Err: err}
+	return p.FetchAll(ctx, []RepositoryRequest{{Repo: ownerRepo}})[0]
+}
+
+type repositoryFetch struct {
+	result  Result
+	session fetchSession
+	rows    map[int]*fetchedPR
+}
+
+func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryRequest) []Result {
+	if _, ok := ctx.Value(budgetKey{}).(*requestBudget); !ok {
+		ctx = WithRequestBudget(ctx, MaxRefreshRequests)
 	}
-	result := Result{Repo: repo, PRs: []PullRequest{}}
-	if until := p.cooldown(); until.After(p.now()) {
-		result.Err, result.RetryAt = ErrRateLimited, until
-		return result
+	batches := make([]*repositoryFetch, 0, len(repositories))
+	unique := make(map[string]*repositoryFetch)
+	var unavailable error
+	for _, request := range repositories {
+		repo, err := CanonicalRepo(request.Repo)
+		if existing, ok := unique[repo]; ok && err == nil {
+			batches = append(batches, existing)
+			continue
+		}
+		repoContext, cancel := context.WithTimeout(ctx, FetchTimeout)
+		defer cancel()
+		batch := &repositoryFetch{
+			result:  Result{Repo: repo, PRs: []PullRequest{}},
+			session: fetchSession{provider: p, ctx: repoContext, limit: repositoryRequestLimit(ctx, p.limits.requests)},
+			rows:    make(map[int]*fetchedPR),
+		}
+		batches = append(batches, batch)
+		if err == nil {
+			err = unavailable
+		}
+		if err == nil && p.cooldown().After(p.now()) {
+			err = ErrRateLimited
+		}
+		if err != nil {
+			batch.result.Err, batch.result.InventoryErr = err, err
+			continue
+		}
+		if existing := p.fetchInventory(batch, unique); existing != nil {
+			existing.session.requests += batch.session.requests
+			existing.result.InventoryRequests += batch.session.requests
+			unique[repo] = existing
+			batches[len(batches)-1] = existing
+			if sharedFailure(batch.session.blocked) {
+				unavailable = batch.session.blocked
+			}
+			cancel()
+			continue
+		}
+		batch.result.InventoryErr = batch.result.Err
+		batch.result.InventoryRequests = batch.session.requests
+		unique[repo], unique[batch.result.Repo] = batch, batch
+		if sharedFailure(batch.result.Err) {
+			unavailable = batch.result.Err
+		}
+		previous := make(map[string]PullRequest, len(request.Previous))
+		for _, pr := range request.Previous {
+			previous[pr.Key()] = pr
+		}
+		for _, row := range batch.rows {
+			if old, ok := previous[row.pr.Key()]; ok && reusableFiles(row.pr, old) {
+				row.pr.Files = slices.Clone(old.Files)
+				row.pr.FilesComplete, row.pr.PreviousPathsComplete = old.FilesComplete, old.PreviousPathsComplete
+				row.needsFiles = false
+			}
+		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
-	defer cancel()
-	s := fetchSession{provider: p, ctx: ctx}
-	rows := make(map[int]*fetchedPR)
+	type pendingFiles struct {
+		batch *repositoryFetch
+		row   *fetchedPR
+	}
+	var pending []pendingFiles
+	seen := make(map[*repositoryFetch]bool)
+	for _, batch := range batches {
+		if seen[batch] {
+			continue
+		}
+		seen[batch] = true
+		for _, row := range batch.rows {
+			if row.needsFiles {
+				pending = append(pending, pendingFiles{batch: batch, row: row})
+			}
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		a, b := pending[i].row.pr, pending[j].row.pr
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		return a.Key() < b.Key()
+	})
+	for _, task := range pending {
+		err := unavailable
+		if err == nil {
+			err = task.batch.session.fetchFiles(task.batch.result.Repo, task.row)
+		}
+		task.batch.result.FilesErr = joinError(task.batch.result.FilesErr, err)
+		if sharedFailure(err) {
+			unavailable = err
+		}
+	}
+	results := make([]Result, len(batches))
+	counted := make(map[*repositoryFetch]bool)
+	for i, batch := range batches {
+		if len(batch.result.PRs) == 0 {
+			for _, row := range batch.rows {
+				row.pr.ContextComplete = row.metadataValid && row.pr.FilesComplete && row.pr.PreviousPathsComplete &&
+					row.pr.RequestedReviewersComplete && row.pr.ReviewsComplete
+				batch.result.PRs = append(batch.result.PRs, row.pr)
+			}
+			sort.Slice(batch.result.PRs, func(i, j int) bool {
+				a, b := batch.result.PRs[i], batch.result.PRs[j]
+				if !a.UpdatedAt.Equal(b.UpdatedAt) {
+					return a.UpdatedAt.After(b.UpdatedAt)
+				}
+				return a.Number < b.Number
+			})
+		}
+		batch.result.FileRequests = batch.session.requests - batch.result.InventoryRequests
+		batch.result.Err = joinError(batch.result.InventoryErr, batch.result.FilesErr)
+		batch.result.RetryAt = p.cooldown()
+		results[i] = batch.result
+		if counted[batch] {
+			results[i].InventoryRequests, results[i].FileRequests = 0, 0
+		}
+		counted[batch] = true
+	}
+	return results
+}
+
+func sharedFailure(err error) bool {
+	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrUnavailable) || errors.Is(err, ErrRateLimited)
+}
+
+func reusableFiles(current, previous PullRequest) bool {
+	return !current.FilesComplete && previous.FilesComplete && current.Key() == previous.Key() &&
+		!current.UpdatedAt.IsZero() && current.UpdatedAt.Equal(previous.UpdatedAt) &&
+		validOID(current.HeadOID) && current.HeadOID == previous.HeadOID &&
+		validOID(current.BaseOID) && current.BaseOID == previous.BaseOID &&
+		current.FileCount == previous.FileCount && len(previous.Files) == current.FileCount
+}
+
+func (p *Provider) fetchInventory(batch *repositoryFetch, known map[string]*repositoryFetch) *repositoryFetch {
+	result := &batch.result
+	repo := result.Repo
+	rows := batch.rows
 	cursor := ""
 	seenCursors := make(map[string]bool)
 	inventoryValid := true
@@ -158,7 +298,11 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 			result.Err = joinError(result.Err, ErrBudgetExceeded)
 			break
 		}
-		response, requestErr := s.request(summaryQuery, repo, cursor, 0)
+		response, requestErr := batch.session.request(summaryQuery, repo, cursor, 0)
+		if fileFieldErrors(response, requestErr) {
+			result.FilesErr = joinError(result.FilesErr, requestErr)
+			requestErr = nil
+		}
 		if response.Data == nil || response.Data.Repository == nil {
 			if requestErr == nil {
 				requestErr = ErrRepository
@@ -173,6 +317,11 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 			break
 		}
 		result.Repo, repo = canonical, canonical
+		if page == 0 {
+			if existing := known[canonical]; existing != nil {
+				return existing
+			}
+		}
 		conn := data.PullRequests
 		if conn == nil || conn.PageInfo == nil || conn.TotalCount == nil || *conn.TotalCount < 0 {
 			result.Err = joinError(result.Err, joinError(requestErr, ErrResponse))
@@ -221,29 +370,36 @@ func (p *Provider) Fetch(ctx context.Context, ownerRepo string) Result {
 		}
 		seenCursors[next], cursor = true, next
 	}
+	return nil
+}
 
-	// Deterministic order also gives the most recently updated PRs priority
-	// when the total request budget prevents collecting every file page.
-	ordered := make([]*fetchedPR, 0, len(rows))
-	for _, row := range rows {
-		ordered = append(ordered, row)
+func fileFieldErrors(response apiResponse, err error) bool {
+	if len(response.Errors) == 0 || !onlyIncompleteErrors(err) || response.Data == nil || response.Data.Repository == nil || response.Data.Repository.PullRequests == nil {
+		return false
 	}
-	sort.Slice(ordered, func(i, j int) bool {
-		if !ordered[i].pr.UpdatedAt.Equal(ordered[j].pr.UpdatedAt) {
-			return ordered[i].pr.UpdatedAt.After(ordered[j].pr.UpdatedAt)
+	for _, problem := range response.Errors {
+		path := problem.Path
+		if len(path) < 5 || path[0] != "repository" || path[1] != "pullRequests" || path[2] != "nodes" || path[4] != "files" {
+			return false
 		}
-		return ordered[i].pr.Number < ordered[j].pr.Number
-	})
-	for _, row := range ordered {
-		if row.needsFiles {
-			result.Err = joinError(result.Err, s.fetchFiles(result.Repo, row))
+		index, ok := path[3].(float64)
+		if !ok || index < 0 || index >= float64(len(response.Data.Repository.PullRequests.Nodes)) || index != float64(int(index)) {
+			return false
 		}
-		row.pr.ContextComplete = row.metadataValid && row.pr.FilesComplete && row.pr.PreviousPathsComplete &&
-			row.pr.RequestedReviewersComplete && row.pr.ReviewsComplete
-		result.PRs = append(result.PRs, row.pr)
 	}
-	result.RetryAt = p.cooldown()
-	return result
+	return true
+}
+
+func onlyIncompleteErrors(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			if !onlyIncompleteErrors(child) {
+				return false
+			}
+		}
+		return true
+	}
+	return err == ErrRequest || err == ErrIncomplete
 }
 
 func (p *Provider) convertPR(repo string, raw *rawPR) *fetchedPR {
@@ -252,6 +408,7 @@ func (p *Provider) convertPR(repo string, raw *rawPR) *fetchedPR {
 		pr: PullRequest{
 			Repo: repo, Number: raw.Number, URL: "https://github.com/" + repo + "/pull/" + strconv.Itoa(raw.Number),
 			Title: raw.Title, Draft: raw.IsDraft, UpdatedAt: updated,
+			HeadOID: raw.HeadRefOid, BaseOID: raw.BaseRefOid, FileCount: -1,
 			ReviewDecision: normalizeState(raw.ReviewDecision, "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"),
 			Mergeable:      normalizeState(raw.Mergeable, "MERGEABLE", "CONFLICTING"), CheckState: Unknown,
 			PreviousPathsComplete: true,
@@ -276,6 +433,7 @@ func (p *Provider) convertPR(repo string, raw *rawPR) *fetchedPR {
 		return row
 	}
 	row.fileTotal = *raw.Files.TotalCount
+	row.pr.FileCount = row.fileTotal
 	row.consumeFiles(raw.Files, p.limits.files)
 	return row
 }
@@ -443,7 +601,7 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	if s.provider.cooldown().After(s.provider.now()) {
 		return response, ErrRateLimited
 	}
-	if s.requests >= s.provider.limits.requests || !takeRequest(s.ctx) {
+	if s.requests >= s.limit || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
 	owner, name, _ := strings.Cut(repo, "/")

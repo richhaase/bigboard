@@ -148,6 +148,7 @@ func main() {
 	}
 
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
+		PRRequestBudget:  cfg.PRRequestBudget,
 		FuzzyMatching:    cfg.Fuzzy,
 		IncludeGenerated: cfg.AllFiles,
 		AIIdentities:     cfg.AIIdentities,

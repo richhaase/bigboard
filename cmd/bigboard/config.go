@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/richhaase/bigboard/git"
+	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
 )
@@ -17,20 +18,21 @@ import (
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
-	Paths         []string                        `json:"paths"`
-	Exclude       []string                        `json:"exclude"`
-	Sort          string                          `json:"sort"`
-	Since         string                          `json:"since"`
-	Theme         string                          `json:"theme"`
-	Fuzzy         bool                            `json:"fuzzy"`
-	AllFiles      bool                            `json:"all_files"`
-	Depth         int                             `json:"depth"`
-	Groups        map[string][]string             `json:"groups"`
-	AIIdentities  []string                        `json:"ai_identities"`
-	BotIdentities []string                        `json:"bot_identities"`
-	Identities    map[string]git.Identity         `json:"identities"`
-	WorkAreas     map[string][]stats.WorkAreaRule `json:"work_areas"`
-	source        []byte
+	Paths           []string                        `json:"paths"`
+	Exclude         []string                        `json:"exclude"`
+	Sort            string                          `json:"sort"`
+	Since           string                          `json:"since"`
+	Theme           string                          `json:"theme"`
+	Fuzzy           bool                            `json:"fuzzy"`
+	AllFiles        bool                            `json:"all_files"`
+	Depth           int                             `json:"depth"`
+	Groups          map[string][]string             `json:"groups"`
+	AIIdentities    []string                        `json:"ai_identities"`
+	BotIdentities   []string                        `json:"bot_identities"`
+	Identities      map[string]git.Identity         `json:"identities"`
+	WorkAreas       map[string][]stats.WorkAreaRule `json:"work_areas"`
+	PRRequestBudget int                             `json:"pr_request_budget"`
+	source          []byte
 }
 
 func defaultConfigPath() string {
@@ -45,7 +47,7 @@ func defaultConfigPath() string {
 }
 
 func loadConfig(path string, explicit bool) (*Config, error) {
-	var cfg Config
+	cfg := Config{PRRequestBudget: gh.MaxRefreshRequests}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) && !explicit {
@@ -83,6 +85,9 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 	cfg.Identities, err = git.NormalizeIdentities(cfg.Identities)
 	if err != nil {
 		return nil, fmt.Errorf("identities: %w", err)
+	}
+	if cfg.PRRequestBudget < 1 {
+		return nil, fmt.Errorf("pr_request_budget must be a positive integer")
 	}
 	cfg.source = data
 	return &cfg, nil

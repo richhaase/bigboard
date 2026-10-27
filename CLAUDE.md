@@ -81,9 +81,17 @@ go test ./...
 
 ## Automatic PR context
 
-GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped, each refresh shares a 128-call cap, and provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No polling, automatic retries, persistent cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
+GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped. `pr_request_budget` defaults to 128 calls per refresh, with a per-repository cap of half that budget (minimum one). All repository inventories precede additional file pages; efficient inline file evidence is retained, then remaining pages run newest-PR-first. File reuse requires matching updated time, head/base revisions, and file count. Inventory completeness drives repository PARTIAL status independently of current-file and reviewer coverage; Data status reports coverage and requests by phase. Provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No polling, automatic retries, persistent cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial inventories retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
 
 ## Progressive disclosure
+
+Activity repository and literal directory/file rankings include PR counts when
+space permits: open/failing-check/changes-requested on wide rows, open only on
+smaller rows, omitted on the narrowest. Counts use shared repository/date scope
+and PR update time, independently of Git contributor/bot filters or saved PR
+board facets. Unknown/stale inventory qualifies repository counts; directory
+counts also require current file coverage across all in-range PRs. PRs annotate
+existing rows without changing Git ranking, line bars, or contributor totals.
 
 Contributor detail uses daily timeline buckets through 30 days, Sunday-aligned
 weekly buckets through 180 days, and the existing latest-12-month timeline for
