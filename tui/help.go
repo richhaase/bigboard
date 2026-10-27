@@ -43,6 +43,13 @@ func (m Model) helpSearchActive() bool {
 }
 
 func (m Model) currentHelp() screenHelp {
+	if !m.modalMinimum().fits(m.width, m.height) {
+		help := screenHelp{"Resize dialog", []helpSection{{"Paused", []helpBinding{{"Resize", "Enlarge the terminal to resume editing or confirmation"}, {"Esc", "Return to the dialog; Escape there cancels or goes back"}, {"Ctrl+C", "Quit BigBoard"}}}}}
+		if !m.settings.required && m.settings.busy != "saving" && !m.identityMerge.saving && !m.cacheRemoving {
+			help.sections = append(help.sections, helpSection{"Boards · cancel pending choices", []helpBinding{{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume PRs"}}})
+		}
+		return help
+	}
 	if m.settings.open {
 		return m.settingsHelp()
 	}

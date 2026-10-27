@@ -233,7 +233,7 @@ func (m Model) filterOptionRows(width, body int) []string {
 		case "custom":
 			prefix = "Days: "
 		}
-		field = prefix + ansi.Truncate(displayText(m.filters.input), max(1, width-ansi.StringWidth(prefix)-1), "…") + "▌"
+		field = inputLine(prefix, m.filters.input, width)
 	}
 	rows = append(rows, lipgloss.NewStyle().Foreground(ColorBrightWht).Background(ColorRowEven).Render(padCells(field, width)))
 	options := m.filterOptions()
@@ -274,7 +274,7 @@ func (m Model) filterOptionRows(width, body int) []string {
 }
 
 func (m Model) renderFiltersModal(background string, width, height int) string {
-	if width < 40 || height < 18 {
+	if !filterMinimum.fits(width, height) {
 		return renderCenteredModal(background, []string{"Filters", "Resize to 40×18", "Esc cancels"}, max(6, min(30, width)), width, height)
 	}
 	panel, body := filterModalSize(width, height)

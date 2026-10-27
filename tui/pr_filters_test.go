@@ -154,15 +154,24 @@ func TestPRFilterModalPreservesBoardAndPagesItsOwnViewport(t *testing.T) {
 		if m.width >= 80 && !strings.Contains(view, "BIGBOARD / Pull requests") {
 			t.Fatal("filter picker replaced the board")
 		}
-		page := filterOptionPageSize(m.width, m.height)
-		m = keyboardContractPress(t, m, "pgdown")
-		if m.filters.rows["repos"] != page {
-			t.Fatal("filter paging did not use modal viewport")
-		}
-		m = keyboardContractPress(t, m, "end")
-		options := m.filterOptions()
-		if m.filters.rows["repos"] != len(options)-1 || m.height >= 18 && !strings.Contains(ansi.Strip(m.View()), options[len(options)-1].label) {
-			t.Fatal("last option is not visible")
+		if !filterMinimum.fits(m.width, m.height) {
+			category, focus := m.filters.category, m.filters.categoryFocus
+			row := m.filters.rows[category]
+			m = keyboardContractPress(t, m, "pgdown", "end")
+			if m.filters.category != category || m.filters.categoryFocus != focus || m.filters.rows[category] != row {
+				t.Fatal("hidden filter choices accepted navigation")
+			}
+		} else {
+			page := filterOptionPageSize(m.width, m.height)
+			m = keyboardContractPress(t, m, "pgdown")
+			if m.filters.rows["repos"] != page {
+				t.Fatal("filter paging did not use modal viewport")
+			}
+			m = keyboardContractPress(t, m, "end")
+			options := m.filterOptions()
+			if m.filters.rows["repos"] != len(options)-1 || m.height >= 18 && !strings.Contains(ansi.Strip(m.View()), options[len(options)-1].label) {
+				t.Fatal("last option is not visible")
+			}
 		}
 		m = keyboardContractPress(t, m, "?", "esc", "esc")
 		if m.filters.open || ansi.Strip(m.View()) != before {
