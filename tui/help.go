@@ -38,6 +38,11 @@ func (m Model) helpSearchActive() bool {
 
 func (m Model) currentHelp() screenHelp {
 	help := m.screenHelp()
+	copyView := m
+	copyView.showHelp = false
+	if copyView.canCopyMarkdown() {
+		help.sections = append(help.sections, helpSection{"Copy", []helpBinding{{"y", "Copy the entire filtered list as Markdown (OSC 52 terminal clipboard support required)"}}})
+	}
 	if !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
 		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: shared scope and this board's filters"}, {"t", "Date range: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
 	}

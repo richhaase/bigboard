@@ -191,5 +191,5 @@ func (m Model) renderDirectoryBoard(width, height int) string {
 		footer = searchFooter()
 	}
 	coverage := "Lines belong to files here · commits can touch multiple entries"
-	return screenFinish(lines, footer, coverage, width, height)
+	return screenFinish(lines, footer, m.copyCoverage(coverage), width, height)
 }

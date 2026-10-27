@@ -26,6 +26,7 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	copyStatus string
 	// Glance navigation is separate from the aggregate statistics view.
 	glance             glanceState
 	overviewSort       int
@@ -307,6 +308,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg := msg.(type) {
+	case clipboardResult:
+		m.copyStatus = fmt.Sprintf("Clipboard request sent: %d rows as Markdown · terminal support required", msg.rows)
+		if msg.err != nil {
+			m.copyStatus = "Clipboard request failed: " + displayText(msg.err.Error())
+		}
+		return m, nil
 	case prsLoadedMsg:
 		if msg.generation == m.prGeneration {
 			m.applyPRResult(msg)
@@ -347,6 +354,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.copyStatus = ""
+	if msg.String() == "y" && m.canCopyMarkdown() {
+		return m.copyMarkdown()
+	}
 	switch msg.String() {
 	case "c", "l", "a", "w", "p":
 		if m.helpSearchActive() && !m.showHelp {
@@ -786,7 +797,7 @@ func (m Model) renderAggregateView() string {
 		Width: m.width, Searching: m.searching, Query: m.filterQuery,
 	})
 	lines = append(lines, strings.Split(wrapStatistics(table, m.width), "\n")...)
-	return screenFinish(lines, m.statisticsFooter(), m.screenCoverage(), m.width, m.height)
+	return screenFinish(lines, m.statisticsFooter(), m.copyCoverage(m.screenCoverage()), m.width, m.height)
 }
 
 func (m Model) operativeDetailContent() string {
@@ -838,7 +849,7 @@ func (m Model) renderOperativeView() string {
 	if len(body) > budget {
 		coverage = fmt.Sprintf("lines %d–%d/%d · %s", offset+1, end, len(body), coverage)
 	}
-	return screenFinish(lines, m.statisticsFooter(), coverage, m.width, m.height)
+	return screenFinish(lines, m.statisticsFooter(), m.copyCoverage(coverage), m.width, m.height)
 }
 
 func (m Model) aggregateTotals() (commits, added, removed, ai int) {

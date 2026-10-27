@@ -246,7 +246,7 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	return screenFinish(lines, m.worklistFooter(width, height, detail), m.screenCoverage(), width, height)
+	return screenFinish(lines, m.worklistFooter(width, height, detail), m.copyCoverage(m.screenCoverage()), width, height)
 }
 
 func (m Model) worklistFooter(width, height int, detail bool) footerHints {
