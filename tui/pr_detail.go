@@ -108,7 +108,7 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	}
 	section("Affected areas")
 	mapped := false
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.excludedRepos[repo.ID] && m.prState.repositories[repo.ID] == pr.Repo {
 			var names []string
 			for _, area := range m.prAreas(repo, pr) {

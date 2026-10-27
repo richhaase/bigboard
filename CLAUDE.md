@@ -12,11 +12,15 @@ cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): paths, exc
 cmd/bigboard/export.go  Headless --export (JSON only, ALL window, concurrent scans)
 git/git.go              Git ops: recursive discovery (follows symlinks), branch detection, streaming commit collection, path filtering, AI detection
 stats/stats.go          Aggregation, identity merging, bot tagging, time/repo filtering, sorting, derived metrics
-tui/app.go              Root Bubbletea model, view routing, keyboard handling, streaming loader, scroll/search state, bot toggle
+stats/selection.go      Canonical commit selection with original repository membership and identity filtering
+stats/calendar.go       Pure daily/monthly activity projections with explicit timezone inputs
+tui/app.go              Root Bubbletea model, command orchestration, view routing, keyboard handling, scroll/search state
+tui/local_scan.go       Committed local snapshots and bounded scan batches: admission, retention, atomic publication
 tui/styles.go           Color palette and lipgloss style definitions
 tui/worklist*.go        Responsive Activity rows, selected evidence, and compact list→detail
 tui/canvas.go         Shared high-contrast canvas for retained views
 tui/frame.go            Shared title band, scope/freshness rows, pinned contextual footer
+tui/board_layout.go     Shared headings and width-aware fitting of explicit footer hints
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/help.go             Shared contextual help modal, keyboard capture, and terminal-sized overlay
 tui/aggregate.go        Contributors table (scrollable, AI% column, BOT tag)
@@ -28,7 +32,7 @@ tui/repooverlay.go      Centered repo inclusion/exclusion modal
 
 1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags), picks scan paths (`--group` / args / config), then `git.DiscoverReposDepth(paths, depth)` (skips worktrees, follows symlinked dirs, dedupes on resolved path).
 2. `--export` runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans) and exits; otherwise the TUI launches.
-3. `Model.Init` streams bounded fetch-and-scan commands once on launch. Only explicit `r` requests start subsequent refreshes; there is no periodic refresh timer. Generation-tagged `RepoLoadedMsg` results accumulate into a pending snapshot, committed atomically when the batch finishes. Background updates preserve the visible last-good data and navigation; startup and `r` fetch included repositories from `origin` before scanning. Export uses cached history.
+3. `Model.Init` streams bounded fetch-and-scan commands once on launch. Only explicit `r` requests start subsequent refreshes; there is no periodic refresh timer. `scanBatch` admits generation-tagged `RepoLoadedMsg` results and publishes one `localSnapshot` when the batch finishes. The batch owns result admission and retention rules; the model owns commands, lifecycle, and navigation reconciliation. Background updates preserve the visible last-good data and navigation; startup and `r` fetch included repositories from `origin` before scanning. Export uses cached history.
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
 5. Activity renders ranked repositories and literal directories/files through `worklist*.go`; scoped Commits/People/Related lenses share identity-preserving navigation in `glance*.go`. Statistics renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
 

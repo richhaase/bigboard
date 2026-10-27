@@ -97,48 +97,6 @@ func (m Model) worklistHeader(width int) []string {
 	return m.screenHeader(strings.TrimPrefix(title, "BIGBOARD / "), width)
 }
 
-// checked is an attempt time, not freshness of retained evidence. Explicitly
-// distinguish it from lastGood and keep unavailable/partial ahead of timestamps.
-func (m Model) worklistPRFreshness(id string) string {
-	s, ok := m.prState.snapshots[m.prState.repositories[id]]
-	if !ok {
-		if err := m.prState.errors[id]; err != nil {
-			return "PRs: unavailable · all dates · " + prFailureReason(err) + " · p details"
-		}
-		if m.prState.loading {
-			return "PRs: refreshing · all dates · no snapshot yet"
-		}
-		return "PRs: unknown · all dates · p details"
-	}
-	state := "complete"
-	if s.partial {
-		state = "PARTIAL"
-	}
-	if s.err != nil || m.prState.errors[id] != nil {
-		state = "STALE"
-		if s.partial {
-			state += "/PARTIAL"
-		}
-		if len(s.prs) == 0 && s.lastGood.IsZero() {
-			state = "unavailable"
-		}
-	}
-	line := "PRs: " + state + " · all dates"
-	if s.err != nil {
-		line += " · " + prFailureReason(s.err)
-	}
-	if !s.checked.IsZero() {
-		line += " · checked " + s.checked.Local().Format("15:04 MST")
-	}
-	if (s.partial || s.err != nil || m.prState.errors[id] != nil) && !s.lastGood.IsZero() {
-		line += " · last complete " + s.lastGood.Local().Format("Jan 02 15:04")
-	}
-	if m.prState.loading {
-		line += " · refreshing"
-	}
-	return line
-}
-
 func (m Model) worklistColumnWidths(width int) (area, author, subject, prs, age int) {
 	area = max(18, width/5)
 	author = max(18, width/6)
@@ -161,7 +119,7 @@ func (m Model) worklistColumns(width int) string {
 	}
 	return StyleDimWhite.Render(columns + " " + padCells("AGE", t))
 }
-func worklistLastAuthor(r repositoryActivity) string {
+func worklistLastAuthor(r activityRow) string {
 	if len(r.people) == 0 {
 		return "—"
 	}
@@ -176,7 +134,7 @@ func worklistLastAuthor(r repositoryActivity) string {
 	}
 	return "—"
 }
-func worklistAuthorCell(r repositoryActivity, width int) string {
+func worklistAuthorCell(r activityRow, width int) string {
 	suffix := ""
 	if len(r.people) > 1 {
 		suffix = fmt.Sprintf(" +%d", len(r.people)-1)
@@ -184,7 +142,7 @@ func worklistAuthorCell(r repositoryActivity, width int) string {
 	return padCells(ansi.Truncate(worklistLastAuthor(r), max(1, width-ansi.StringWidth(suffix)), "…")+suffix, width)
 }
 func (m Model) worklistAge(at time.Time, repoID string) string {
-	return activityAge(at, m.scannedAt[repoID])
+	return activityAge(at, m.local.scannedAt[repoID])
 }
 
 func activityAge(at, ref time.Time) string {
@@ -224,13 +182,9 @@ func worklistSignalStyle(text string) lipgloss.Style {
 func (m Model) worklistSignal(text string) string {
 	return worklistSignalStyle(text).Render(text)
 }
-func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide bool) []string {
-	name := displayText(r.repo.Name)
-	id := r.repo.ID
-	if m.areaRepoID != "" {
-		id = m.areaRepoID
-	}
-	if m.staleRepos[id] {
+func (m Model) worklistRow(r activityRow, selected bool, width int, wide bool) []string {
+	name := displayText(r.label)
+	if m.local.staleRepos[r.repositoryID] {
 		name = "[STALE] " + name
 	}
 	subject := displayText(r.subject)
@@ -248,23 +202,23 @@ func (m Model) worklistRow(r repositoryActivity, selected bool, width int, wide 
 	if wide {
 		a, p, s, pr, t := m.worklistColumnWidths(width)
 		signal := ""
-		if len(m.scopePRs(r.repo.ID)) > 0 {
-			signal = m.worklistSignal(m.worklistPRSignal(r.repo.ID))
+		if len(m.scopePRs(r.scopeID)) > 0 {
+			signal = m.worklistSignal(m.worklistPRSignal(r.scopeID))
 		}
 		line := cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + padCells(subject, s)
 		if pr > 0 {
 			line += " " + padCells(signal, pr)
 		}
-		lines = []string{line + " " + padCells(m.worklistAge(r.latest, id), t)}
+		lines = []string{line + " " + padCells(m.worklistAge(r.latest, r.repositoryID), t)}
 	} else if width >= 66 {
 		a := (width - 11) / 2
 		p := width - a - 10
-		if len(m.scopePRs(r.repo.ID)) > 0 {
-			subject = padCells(subject, width-33) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.repo.ID)), 30)
+		if len(m.scopePRs(r.scopeID)) > 0 {
+			subject = padCells(subject, width-33) + " " + padCells(m.worklistSignal(m.worklistPRSignal(r.scopeID)), 30)
 		}
-		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + padCells(subject, width-2)}
+		lines = []string{cursor + padCells(name, a) + " " + worklistAuthorCell(r, p) + " " + rightCells(m.worklistAge(r.latest, r.repositoryID), 6), "  " + padCells(subject, width-2)}
 	} else {
-		lines = []string{cursor + padCells(name, width-9) + " " + rightCells(m.worklistAge(r.latest, id), 6), "  " + worklistAuthorCell(r, width-2), "  " + padCells(subject, width-2)}
+		lines = []string{cursor + padCells(name, width-9) + " " + rightCells(m.worklistAge(r.latest, r.repositoryID), 6), "  " + worklistAuthorCell(r, width-2), "  " + padCells(subject, width-2)}
 	}
 	for i, line := range lines {
 		style := lipgloss.NewStyle()
@@ -292,35 +246,44 @@ func (m Model) worklistPRSignal(scope string) string {
 }
 
 func (m Model) worklistFinish(lines []string, width, height int, detail bool) string {
-	footer := "↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · v repo PRs · r refresh · q quit"
-	if detail {
-		footer = "↑↓ select · →/Enter evidence · Tab/1–4 lens · ←/Esc back · t range · b bots · v repo PRs · r refresh"
+	return screenFinish(lines, m.worklistFooter(width, height, detail), m.screenCoverage(), width, height)
+}
+
+func (m Model) worklistFooter(width, height int, detail bool) footerHints {
+	if m.glance.searching {
+		return searchFooter()
 	}
-	if width >= 70 && width < 110 {
-		footer = "v repo PRs · / find · s sort · ↑↓ select · → open · r refresh"
-		if detail {
-			footer = "←/Esc back · v repo PRs · Tab lens · → evidence"
-		}
+	pane := !detail && m.areaRepoID == "" && activityContributorsHeight(width, height) > 0
+	if pane && m.contributorPane.focused {
+		return focusedContributorsFooter()
+	}
+	var local []footerHint
+	if detail || width < 70 && m.areaRepoID != "" {
+		local = append(local, footerHint{"Esc", "back"})
+	}
+	local = append(local, footerHint{"f", "filters"})
+	if pane {
+		local = append(local, footerHint{"Tab", "contributors"})
 	}
 	if width < 70 {
-		footer = "↑↓ select · → open"
-		if detail || m.areaRepoID != "" {
-			footer = "←/Esc back · ↑↓ select"
+		if !detail && m.areaRepoID == "" {
+			local = append(local, footerHint{"Enter", "open"})
 		}
-	}
-	if !detail && m.areaRepoID == "" && activityContributorsHeight(width, height) > 0 {
-		footer += " · Tab contributors"
-		if m.contributorPane.focused {
-			footer = "Tab ranking · ↑↓ scroll · ←/Esc back · r refresh"
+	} else if detail {
+		local = append(local, footerHint{"Enter", "open"})
+		if width < 110 {
+			local = append(local, footerHint{"v", "PRs"})
+		} else {
+			local = append(local, footerHint{"t", "date range"})
 		}
-	}
-	if m.glance.searching {
-		footer = "F1 help · Enter accept · Esc cancel"
 	} else {
-		footer = "? help · " + footer
+		local = append(local, footerHint{"/", "find"}, footerHint{"Enter", "open"})
+		if width >= 110 {
+			local = append(local, footerHint{"t", "date range"})
+		}
+		local = append(local, footerHint{"s", "sort"})
 	}
-
-	return screenFinish(lines, footer, m.screenCoverage(), width, height)
+	return footerHints{local: local}
 }
 
 func (m Model) worklistPageSize() int {
@@ -356,7 +319,7 @@ func activityContributorsHeight(width, height int) int {
 	return panel
 }
 
-func (m Model) appendActivityContributors(lines []string, row repositoryActivity, width, height int) []string {
+func (m Model) appendActivityContributors(lines []string, row activityRow, width, height int) []string {
 	budget := activityContributorsHeight(width, height)
 	if budget == 0 {
 		return lines

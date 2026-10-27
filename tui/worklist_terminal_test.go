@@ -20,10 +20,10 @@ func TestWorklistTerminalCapture(t *testing.T) {
 		t.Skip("interactive terminal capture")
 	}
 	m := glanceBusyFixture()
-	m.scannedAt["/mono"] = time.Now().Add(-2 * time.Hour)
-	m.staleRepos["/mono"] = true
-	for i := range m.allRecords {
-		r := &m.allRecords[i]
+	m.local.scannedAt["/mono"] = time.Now().Add(-2 * time.Hour)
+	m.local.staleRepos["/mono"] = true
+	for i := range m.local.records {
+		r := &m.local.records[i]
 		r.Date = r.Date.Add(-3 * time.Hour)
 		if i%120 == 0 {
 			r.Author = "Alexandria 長い名前 García \u0301"

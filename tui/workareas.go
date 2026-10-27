@@ -8,7 +8,7 @@ import (
 )
 
 func (m Model) areaRepository() (git.Repository, bool) {
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if repo.ID == m.areaRepoID && m.repoInView(repo.ID) {
 			return repo, true
 		}
@@ -35,7 +35,7 @@ func (m *Model) openSingleRepositoryAreas() {
 		return
 	}
 	var included []git.Repository
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if m.repoInView(repo.ID) {
 			included = append(included, repo)
 		}
@@ -62,24 +62,9 @@ func (m *Model) setSelectedScopeID(id string) {
 // Keep the selected repository association while taking canonical identity and
 // complete path evidence from the same preferred copy used for board totals.
 func (m Model) recordsInRepository(repo git.Repository, records []git.CommitRecord) []git.CommitRecord {
-	members := make(map[string]bool)
-	var result []git.CommitRecord
-	for _, r := range records {
-		if r.RepoID != repo.ID && (r.RepoID != "" || r.RepoName != repo.Name) {
-			continue
-		}
-		if r.CommitID == "" {
-			result = append(result, r)
-		} else {
-			members[r.CommitID] = true
-		}
-	}
-	for _, r := range stats.UniqueRecords(records) {
-		if r.CommitID != "" && members[r.CommitID] {
-			result = append(result, r)
-		}
-	}
-	return result
+	return stats.UniqueRecordsWithMatchingCopy(records, func(record git.CommitRecord) bool {
+		return record.RepoID == repo.ID || record.RepoID == "" && record.RepoName == repo.Name
+	})
 }
 
 func (m Model) rulesForRepository(repo git.Repository) []stats.WorkAreaRule {
@@ -96,7 +81,7 @@ func (m Model) currentWorkAreas() []stats.WorkArea {
 	}
 	definition, ok := m.areaDefinitions[repo.ID]
 	if !ok {
-		definition = stats.DefineWorkAreas(m.recordsInRepository(repo, m.allRecords), m.rulesForRepository(repo))
+		definition = stats.DefineWorkAreas(m.recordsInRepository(repo, m.local.records), m.rulesForRepository(repo))
 	}
 	records := m.recordsInRepository(repo, m.activityRecords())
 	areas := definition.Build(records)
@@ -117,15 +102,15 @@ func (m Model) currentWorkAreas() []stats.WorkArea {
 
 func (m *Model) rebuildAreaDefinitions() {
 	m.areaDefinitions = make(map[string]stats.WorkAreaDefinition)
-	for _, repo := range m.loadedRepos {
-		m.areaDefinitions[repo.ID] = stats.DefineWorkAreas(m.recordsInRepository(repo, m.allRecords), m.rulesForRepository(repo))
+	for _, repo := range m.local.repositories {
+		m.areaDefinitions[repo.ID] = stats.DefineWorkAreas(m.recordsInRepository(repo, m.local.records), m.rulesForRepository(repo))
 	}
 }
 
-func (m Model) activityAreas() []repositoryActivity {
-	var result []repositoryActivity
+func (m Model) activityAreas() []activityRow {
+	var result []activityRow
 	for _, area := range m.currentWorkAreas() {
-		activity := repositoryActivity{repo: git.Repository{ID: area.ID, Name: area.Name}, commits: len(stats.UniqueRecords(area.Records))}
+		activity := activityRow{scopeID: area.ID, label: area.Name, repositoryID: m.areaRepoID, commits: len(stats.UniqueRecords(area.Records))}
 		activity.people = stats.AggregateWithOptions(area.Records, stats.AggregateOptions{BotIdentities: m.options.BotIdentities})
 		sort.Slice(activity.people, func(i, j int) bool {
 			if activity.people[i].Name != activity.people[j].Name {
@@ -142,11 +127,11 @@ func (m Model) activityAreas() []repositoryActivity {
 	return result
 }
 
-func (m Model) scopeEvidenceKey(scope repositoryActivity) string {
+func (m Model) scopeEvidenceKey(scope activityRow) string {
 	if m.areaRepoID != "" {
-		return scope.repo.ID
+		return scope.scopeID
 	}
-	return scope.repo.Name
+	return scope.label
 }
 
 // Wrap every literal path so long filenames and rename/copy origins remain

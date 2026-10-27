@@ -32,10 +32,10 @@ func keyboardContractKey(s string) tea.KeyMsg {
 func keyboardContractPress(t *testing.T, m Model, keys ...string) Model {
 	t.Helper()
 	for _, k := range keys {
-		scanGeneration, prGeneration := m.scanGeneration, m.prGeneration
+		scanGeneration, prGeneration := m.scan.generation, m.prGeneration
 		next, cmd := m.Update(keyboardContractKey(k))
 		m = next.(Model)
-		if cmd != nil || m.scanGeneration != scanGeneration || m.prGeneration != prGeneration {
+		if cmd != nil || m.scan.generation != scanGeneration || m.prGeneration != prGeneration {
 			t.Fatalf("navigation key %q scheduled work or changed refresh generation", k)
 		}
 	}
@@ -45,10 +45,10 @@ func keyboardContractPress(t *testing.T, m Model, keys ...string) Model {
 func keyboardContractFixture() Model {
 	m := monorepoFixture()
 	m.width, m.height = 80, 18
-	m.allRecords = nil
+	m.local.records = nil
 	now := time.Now()
 	for i := 0; i < 60; i++ {
-		m.allRecords = append(m.allRecords, git.CommitRecord{
+		m.local.records = append(m.local.records, git.CommitRecord{
 			CommitID: fmt.Sprintf("key-%03d", i), Author: fmt.Sprintf("Person %02d", i%12),
 			Email: fmt.Sprintf("person%02d@example.com", i%12), Date: now.Add(-time.Duration(i) * time.Minute),
 			RepoID: "/mono", RepoName: "mono", Subject: fmt.Sprintf("Change %03d", i),
@@ -102,7 +102,7 @@ func keyboardContractOwnedContexts() []keyboardContractContext {
 	return []keyboardContractContext{
 		{"commit inspector", func(t *testing.T) Model {
 			m := keyboardContractFixture()
-			m.allRecords[0].Subject = strings.Repeat("Long commit evidence ", 120)
+			m.local.records[0].Subject = strings.Repeat("Long commit evidence ", 120)
 			return keyboardContractPress(t, m, "right", "enter", "down")
 		}},
 		{"PR list", func(t *testing.T) Model {
@@ -124,7 +124,7 @@ func keyboardContractOwnedContexts() []keyboardContractContext {
 		{"scan errors", func(t *testing.T) Model {
 			m := awarenessFixture()
 			m.width, m.height = 40, 18
-			m.scanErrors = map[string]string{"/api": strings.Repeat("Long diagnostic ", 120)}
+			m.local.errors = map[string]string{"/api": strings.Repeat("Long diagnostic ", 120)}
 			m.scanErrorDetails = true
 			return keyboardContractPress(t, m, "e", "down")
 		}},
@@ -145,7 +145,7 @@ func keyboardContractState(m Model) string {
 		m.prBrowserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
 		m.filterQuery, m.searching, m.filters, m.timeIdx, m.customRangeDays, m.overviewSort,
 		m.showHelp, m.helpOffset,
-		m.sortField, m.sortAsc, m.hideBots, m.loading, m.refreshing, m.quitting, m.scanGeneration, m.prGeneration,
+		m.sortField, m.sortAsc, m.hideBots, m.loading, m.scan.running, m.quitting, m.scan.generation, m.prGeneration,
 	})
 }
 
@@ -199,8 +199,8 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 	}}, keyboardContractContext{"load error", func(t *testing.T) Model {
 		m := awarenessFixture()
 		m.err = errors.New("all repositories failed")
-		m.scanErrors = map[string]string{"/api": "unavailable"}
-		m.failedRepos = []string{"api"}
+		m.local.errors = map[string]string{"/api": "unavailable"}
+		m.local.failed = []string{"api"}
 		return m
 	}})
 	for _, tc := range contexts {
@@ -216,7 +216,7 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 				if m.err != nil {
 					t.Fatal("load error still covers the destination board")
 				}
-				if tc.name == "load error" && (len(m.scanErrors) == 0 || len(m.failedRepos) == 0) {
+				if tc.name == "load error" && (len(m.local.errors) == 0 || len(m.local.failed) == 0) {
 					t.Fatal("board navigation discarded repository diagnostics")
 				}
 				if shortcut == "p" {
@@ -251,7 +251,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 		}
 		t.Run(tc.name, func(t *testing.T) {
 			m := keyboardContractPress(t, tc.setup(t), "/")
-			view, scan, prs := m.viewMode, m.scanGeneration, m.prGeneration
+			view, scan, prs := m.viewMode, m.scan.generation, m.prGeneration
 			const typed = "hjklcmwaugGvLpPoRré"
 			for _, r := range typed {
 				m = keyboardContractPress(t, m, string(r))
@@ -263,7 +263,7 @@ func TestKeyboardContractSearchOwnsAllLetterShortcuts(t *testing.T) {
 			if view == ViewAggregate {
 				query = m.filterQuery
 			}
-			if query != typed || m.viewMode != view || m.scanGeneration != scan || m.prGeneration != prs ||
+			if query != typed || m.viewMode != view || m.scan.generation != scan || m.prGeneration != prs ||
 				m.showPaths || m.showPRs || m.filters.open || m.showScanErrors {
 				t.Fatalf("search lost text or leaked shortcut: query=%q, view=%v", query, m.viewMode)
 			}
@@ -423,23 +423,23 @@ func TestKeyboardContractOverviewRetainsArrowsAndPaging(t *testing.T) {
 			m := tc.setup(t)
 			rows := m.glanceRepositories()
 			m = keyboardContractPress(t, m, "home")
-			if m.selectedScopeID() != rows[0].repo.ID {
+			if m.selectedScopeID() != rows[0].scopeID {
 				t.Fatal("Home did not select first row")
 			}
 			m = keyboardContractPress(t, m, "down")
-			if m.selectedScopeID() != rows[1].repo.ID {
+			if m.selectedScopeID() != rows[1].scopeID {
 				t.Fatal("down did not select next row")
 			}
 			m = keyboardContractPress(t, m, "up", "pgdown")
-			if m.selectedScopeID() != rows[min(len(rows)-1, m.worklistPageSize())].repo.ID {
+			if m.selectedScopeID() != rows[min(len(rows)-1, m.worklistPageSize())].scopeID {
 				t.Fatal("PageDown did not select a page of rows")
 			}
 			m = keyboardContractPress(t, m, "pgup")
-			if m.selectedScopeID() != rows[0].repo.ID {
+			if m.selectedScopeID() != rows[0].scopeID {
 				t.Fatal("PageUp did not return to first row")
 			}
 			m = keyboardContractPress(t, m, "end")
-			if m.selectedScopeID() != rows[len(rows)-1].repo.ID {
+			if m.selectedScopeID() != rows[len(rows)-1].scopeID {
 				t.Fatal("End did not reach final row")
 			}
 		})
@@ -497,11 +497,11 @@ func TestKeyboardContractLeaderboardAndContributorRetainNavigation(t *testing.T)
 func TestKeyboardContractRepositoryAndRangePickersRetainNavigation(t *testing.T) {
 	for _, closeKey := range []string{"enter", "esc"} {
 		m := keyboardContractPress(t, awarenessFixture(), "i", "down", "up", "down", " ")
-		if m.overlayCursor != 1 || !m.overlayExcluded[m.loadedRepos[1].ID] {
+		if m.overlayCursor != 1 || !m.overlayExcluded[m.local.repositories[1].ID] {
 			t.Fatal("repository arrows/space no longer select and toggle the target row")
 		}
 		m = keyboardContractPress(t, m, closeKey)
-		if m.viewMode != ViewAwareness || m.excludedRepos[m.loadedRepos[1].ID] != (closeKey == "enter") {
+		if m.viewMode != ViewAwareness || m.excludedRepos[m.local.repositories[1].ID] != (closeKey == "enter") {
 			t.Fatalf("repository %s did not apply/cancel choices and return", closeKey)
 		}
 	}

@@ -90,7 +90,7 @@ func TestPRStatusEmptyInventoryEvidence(t *testing.T) {
 		loading, checked, failed, partial bool
 		want                              string
 	}{
-		{name: "initial_unknown", want: "unknown"},
+		{name: "initial_unknown", want: "not checked"},
 		{name: "initial_loading", loading: true, want: "refresh"},
 		{name: "partial_empty", checked: true, partial: true, want: "partial"},
 		{name: "partial_empty_refresh", checked: true, partial: true, loading: true, want: "partial"},
@@ -111,7 +111,7 @@ func TestPRStatusEmptyInventoryEvidence(t *testing.T) {
 				}
 				m.prState.snapshots["org/repo"] = snapshot
 			}
-			status := m.prStatus()
+			status := ansi.Strip(strings.Join(m.dataStatusLines(160), "\n"))
 			if !strings.Contains(strings.ToLower(status), tc.want) {
 				t.Fatalf("missing %q: %s", tc.want, status)
 			}

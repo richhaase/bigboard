@@ -89,7 +89,7 @@ func (m *Model) setGlanceQuery(q string) {
 	}
 	m.glance.overviewQueries[i] = q
 }
-func (m Model) glanceRepositories() []repositoryActivity {
+func (m Model) glanceRepositories() []activityRow {
 	rows := m.activityRepositories()
 	q := strings.ToLower(m.glanceQuery())
 	if m.overviewReverse {
@@ -98,18 +98,18 @@ func (m Model) glanceRepositories() []repositoryActivity {
 	if q == "" {
 		return rows
 	}
-	var out []repositoryActivity
+	var out []activityRow
 	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.repo.Name), q) {
+		if strings.Contains(strings.ToLower(r.label), q) {
 			out = append(out, r)
 		}
 	}
 	return out
 }
-func (m *Model) openGlanceArea(r repositoryActivity) {
+func (m *Model) openGlanceArea(r activityRow) {
 	m.glance.detailOpen = true
-	m.glance.overviewAreaID = r.repo.ID
-	m.glance.frame = glanceFrame{areaID: r.repo.ID, name: r.repo.Name}
+	m.glance.overviewAreaID = r.scopeID
+	m.glance.frame = glanceFrame{areaID: r.scopeID, name: r.label}
 	m.glance.stack = nil
 	m.personID = ""
 }
@@ -151,7 +151,7 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(rows) == 0 {
 				return m, nil
 			}
-			id = rows[m.selectedRepository(rows)].repo.ID
+			id = rows[m.selectedRepository(rows)].scopeID
 		}
 		m.openContextPRs(id)
 		return m, nil
@@ -266,14 +266,14 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(rows) > 0 {
 			if m.areaRepoID == "" {
-				m.openDirectoryRepository(rows[selected].repo.ID)
+				m.openDirectoryRepository(rows[selected].scopeID)
 			} else {
 				m.openGlanceArea(rows[selected])
 			}
 		}
 	default:
 		if next, ok := glanceMove(key, selected, len(rows), m.worklistPageSize()); ok && len(rows) > 0 {
-			m.setSelectedScopeID(rows[next].repo.ID)
+			m.setSelectedScopeID(rows[next].scopeID)
 		}
 	}
 	return m, nil

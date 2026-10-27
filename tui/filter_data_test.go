@@ -26,7 +26,7 @@ func TestSharedRepositoryFilterScopesBoardsWithoutChangingTracking(t *testing.T)
 		t.Fatal("shared selection changed contributor counts or tracking")
 	}
 	m.resetPending()
-	if m.pendingRemaining != 16 {
+	if m.scan.remaining != 16 {
 		t.Fatal("view selection stopped background repository scans")
 	}
 	p := &fakePRProvider{result: gh.Result{Complete: true}}
@@ -48,9 +48,9 @@ func TestSharedRepositoryFilterScopesBoardsWithoutChangingTracking(t *testing.T)
 
 func TestActivityPersonAndBotFiltersAreIndependentOfContributors(t *testing.T) {
 	m := awarenessFixture()
-	bot := m.allRecords[0]
+	bot := m.local.records[0]
 	bot.CommitID, bot.Author, bot.Email = "bot", "automation[bot]", "automation[bot]@example.test"
-	m.allRecords = append(m.allRecords, bot)
+	m.local.records = append(m.local.records, bot)
 	m.sharedRepos = filterValues{"/api"}
 	m.hideBots = true
 	m.recomputeAuthors()
@@ -91,7 +91,7 @@ func TestActivityPersonAndBotFiltersAreIndependentOfContributors(t *testing.T) {
 
 func TestActivityFilteringKeepsCanonicalIdentityAndRepositoryAssociation(t *testing.T) {
 	m := awarenessFixture()
-	m.allRecords = []git.CommitRecord{
+	m.local.records = []git.CommitRecord{
 		{CommitID: "shared", RepoID: "/api", RepoName: "api", Author: "Canonical", Email: "canonical@example.test", Date: time.Now()},
 		{CommitID: "shared", RepoID: "/web", RepoName: "web", Author: "Alias", Email: "alias@example.test", Date: time.Now()},
 	}
@@ -99,7 +99,7 @@ func TestActivityFilteringKeepsCanonicalIdentityAndRepositoryAssociation(t *test
 	m.recomputeAuthors()
 	rows := m.activityRepositories()
 	for _, row := range rows {
-		if row.repo.ID != "/empty" && (row.commits != 1 || len(row.people) != 1 || row.people[0].ID != "email:canonical@example.test") {
+		if row.scopeID != "/empty" && (row.commits != 1 || len(row.people) != 1 || row.people[0].ID != "email:canonical@example.test") {
 			t.Fatal("canonical person filtering lost an associated repository")
 		}
 	}

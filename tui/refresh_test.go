@@ -67,7 +67,7 @@ func TestInitSchedulesOnlyBoundedRepositoryLoads(t *testing.T) {
 				t.Fatalf("initial scan count = %d", len(results))
 			}
 			for i, result := range results {
-				if result.Generation != m.scanGeneration || result.Repository != m.repositories[i] {
+				if result.Generation != m.scan.generation || result.Repository != m.repositories[i] {
 					t.Fatal("initial scan lost repository or generation")
 				}
 			}
@@ -89,8 +89,8 @@ func TestCompletedRefreshSchedulesNoFurtherWork(t *testing.T) {
 			}
 			m.prState.nextRefresh = time.Time{}
 		}
-		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0]})
-		if cmd == nil || m.refreshing || m.loading || len(m.loadedRepos) != 1 {
+		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[0]})
+		if cmd == nil || m.scan.running || m.loading || len(m.local.repositories) != 1 {
 			t.Fatalf("%s did not finish local scan and schedule PR context", phase)
 		}
 		msg, ok := cmd().(prsLoadedMsg)
@@ -98,14 +98,14 @@ func TestCompletedRefreshSchedulesNoFurtherWork(t *testing.T) {
 			t.Fatalf("%s scheduled unexpected work after local scan", phase)
 		}
 		m, cmd = applyLocal(t, m, msg)
-		if cmd != nil || m.refreshing || m.prState.loading {
+		if cmd != nil || m.scan.running || m.prState.loading {
 			t.Fatalf("%s completion scheduled more work", phase)
 		}
 		// Time-shaped messages and ordinary redraws cannot restart a scan.
-		generation := m.scanGeneration
+		generation := m.scan.generation
 		for _, msg := range []tea.Msg{time.Now().Add(time.Minute), time.Now().Add(time.Hour), tea.WindowSizeMsg{Width: 160, Height: 48}} {
 			m, cmd = applyLocal(t, m, msg)
-			if cmd != nil || m.refreshing || m.scanGeneration != generation {
+			if cmd != nil || m.scan.running || m.scan.generation != generation {
 				t.Fatalf("%s started a refresh without R", phase)
 			}
 		}
@@ -122,27 +122,27 @@ func TestLocalRefreshRejectsLateDuplicateAndUnscheduledResults(t *testing.T) {
 	}
 	m := NewModel(paths, stats.SortByTotal, nil, "", DefaultTimeIndex)
 	t.Cleanup(m.cancelScans)
-	original := m.pendingRemaining
+	original := m.scan.remaining
 	for _, msg := range []RepoLoadedMsg{
-		{Generation: m.scanGeneration - 1, Repository: m.repositories[0]},
-		{Generation: m.scanGeneration + 1, Repository: m.repositories[0]},
-		{Generation: m.scanGeneration, Repository: m.repositories[19]},
-		{Generation: m.scanGeneration, Repository: git.Repository{ID: "unknown"}},
+		{Generation: m.scan.generation - 1, Repository: m.repositories[0]},
+		{Generation: m.scan.generation + 1, Repository: m.repositories[0]},
+		{Generation: m.scan.generation, Repository: m.repositories[19]},
+		{Generation: m.scan.generation, Repository: git.Repository{ID: "unknown"}},
 	} {
 		var cmd tea.Cmd
 		m, cmd = applyLocal(t, m, msg)
-		if cmd != nil || m.pendingRemaining != original || m.activeScans != maxConcurrentRepoScans {
+		if cmd != nil || m.scan.remaining != original || m.scan.active != maxConcurrentRepoScans {
 			t.Fatal("invalid result changed scan state")
 		}
 	}
 	// Complete out of dispatch order, admitting exactly one replacement each time.
-	msg := RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[7]}
+	msg := RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[7]}
 	m, cmd := applyLocal(t, m, msg)
-	if cmd == nil || m.nextRepo != 9 || m.activeScans != maxConcurrentRepoScans {
+	if cmd == nil || m.scan.next != 9 || m.scan.active != maxConcurrentRepoScans {
 		t.Fatal("out-of-order result lost scan slot")
 	}
 	m, cmd = applyLocal(t, m, msg)
-	if cmd != nil || m.pendingRemaining != original-1 || m.nextRepo != 9 {
+	if cmd != nil || m.scan.remaining != original-1 || m.scan.next != 9 {
 		t.Fatal("duplicate result admitted more scans")
 	}
 	// Finish the remaining scheduled repositories, continually testing the bound.
@@ -150,44 +150,44 @@ func TestLocalRefreshRejectsLateDuplicateAndUnscheduledResults(t *testing.T) {
 		if i == 7 {
 			continue
 		}
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
-		if m.activeScans > maxConcurrentRepoScans || m.activeScans < 0 {
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
+		if m.scan.active > maxConcurrentRepoScans || m.scan.active < 0 {
 			t.Fatal("scan concurrency exceeded bound")
 		}
 	}
-	if m.refreshing || m.pendingRemaining != 0 || len(m.loadedRepos) != 20 {
+	if m.scan.running || m.scan.remaining != 0 || len(m.local.repositories) != 20 {
 		t.Fatal("generation failed to complete exactly once")
 	}
 	m, cmd = applyLocal(t, m, msg)
-	if cmd != nil || m.pendingRemaining != 0 {
+	if cmd != nil || m.scan.remaining != 0 {
 		t.Fatal("late result reopened completed generation")
 	}
 	_ = m.startLocalRefresh()
 	m, cmd = applyLocal(t, m, msg)
-	if cmd != nil || m.pendingRemaining != 20 {
+	if cmd != nil || m.scan.remaining != 20 {
 		t.Fatal("old generation interfered with new scan")
 	}
 }
 
 func TestLocalRefreshFailureRetainsLastGoodAndEmptySuccessReplaces(t *testing.T) {
 	m := refreshFixture(t)
-	before := append([]git.CommitRecord(nil), m.allRecords...)
-	scanned := m.scannedAt["/api"]
+	before := append([]git.CommitRecord(nil), m.local.records...)
+	scanned := m.local.scannedAt["/api"]
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Err: errors.New("unreadable")})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Err: errors.New("unreadable")})
 	}
-	if !reflect.DeepEqual(m.allRecords, []git.CommitRecord{before[0], before[2], before[1]}) || len(m.loadedRepos) != 3 || len(m.failedRepos) != 3 || m.err != nil {
+	if !reflect.DeepEqual(m.local.records, []git.CommitRecord{before[0], before[2], before[1]}) || len(m.local.repositories) != 3 || len(m.local.failed) != 3 || m.err != nil {
 		t.Fatal("failure discarded last-good snapshot")
 	}
-	if !m.staleRepos["/api"] || !m.scannedAt["/api"].Equal(scanned) {
+	if !m.local.staleRepos["/api"] || !m.local.scannedAt["/api"].Equal(scanned) {
 		t.Fatal("failure did not preserve freshness evidence")
 	}
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
-	if len(m.allRecords) != 0 || len(m.loadedRepos) != 3 || len(m.failedRepos) != 0 || m.staleRepos["/api"] || !m.scannedAt["/api"].After(scanned) {
+	if len(m.local.records) != 0 || len(m.local.repositories) != 3 || len(m.local.failed) != 0 || m.local.staleRepos["/api"] || !m.local.scannedAt["/api"].After(scanned) {
 		t.Fatal("successful empty snapshot did not clear last-good records/stale state")
 	}
 }
@@ -208,7 +208,7 @@ func TestLocalRefreshPreservesNavigationAndInFlightGitHub(t *testing.T) {
 	m.cancelPRs = cancel
 	m.prGeneration = 42
 	m.prState.loading = true
-	records := append([]git.CommitRecord(nil), m.allRecords...)
+	records := append([]git.CommitRecord(nil), m.local.records...)
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
 		var recs []git.CommitRecord
@@ -218,15 +218,15 @@ func TestLocalRefreshPreservesNavigationAndInFlightGitHub(t *testing.T) {
 			}
 		}
 		var cmd tea.Cmd
-		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Records: recs})
-		if m.pendingRemaining == 0 && cmd != nil {
+		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Records: recs})
+		if m.scan.remaining == 0 && cmd != nil {
 			t.Fatal("local completion duplicated in-flight GitHub work")
 		}
 	}
 	if m.prGeneration != 42 || !m.prState.loading || prCtx.Err() != nil {
 		t.Fatal("local refresh interrupted GitHub")
 	}
-	if m.loading || m.refreshing || !m.glance.searching || !m.glance.detailOpen || m.glance.frame != frame || m.selectedAreaID != "missing-area" || m.areaRepoID != "/api" || m.filterQuery != "Ada" || m.overviewSort != 2 {
+	if m.loading || m.scan.running || !m.glance.searching || !m.glance.detailOpen || m.glance.frame != frame || m.selectedAreaID != "missing-area" || m.areaRepoID != "/api" || m.filterQuery != "Ada" || m.overviewSort != 2 {
 		t.Fatal("refresh changed navigation/search identity")
 	}
 }
@@ -235,17 +235,17 @@ func TestManualLocalRefreshBackgroundAndGitHubSchedule(t *testing.T) {
 	for _, view := range []ViewMode{ViewAwareness, ViewAggregate} {
 		m := refreshFixture(t)
 		m.viewMode = view
-		before := append([]git.CommitRecord(nil), m.allRecords...)
+		before := append([]git.CommitRecord(nil), m.local.records...)
 		generation := m.prGeneration
 		m, cmd := applyLocal(t, m, key("R"))
-		if cmd == nil || m.loading || !m.refreshing || m.prGeneration != generation {
+		if cmd == nil || m.loading || !m.scan.running || m.prGeneration != generation {
 			t.Fatal("manual refresh must update locally without canceling remote work")
 		}
-		if !reflect.DeepEqual(before, m.allRecords) {
+		if !reflect.DeepEqual(before, m.local.records) {
 			t.Fatal("manual refresh cleared displayed records")
 		}
 		for _, repo := range m.repositories {
-			m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+			m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 		}
 		if cmd == nil || !m.prState.loading {
 			t.Fatal("manual refresh completion must refresh PR context")
@@ -256,7 +256,7 @@ func TestManualLocalRefreshBackgroundAndGitHubSchedule(t *testing.T) {
 func TestLocalRefreshQuitCancelsScansAndIgnoresLateMessages(t *testing.T) {
 	m := refreshFixture(t)
 	_ = m.startLocalRefresh()
-	generation := m.scanGeneration
+	generation := m.scan.generation
 	next, _ := m.quit()
 	m = next.(Model)
 	if m.scanContext.Err() == nil {
@@ -265,7 +265,7 @@ func TestLocalRefreshQuitCancelsScansAndIgnoresLateMessages(t *testing.T) {
 	for _, msg := range []tea.Msg{RepoLoadedMsg{Generation: generation, Repository: m.repositories[0]}, key("R")} {
 		var cmd tea.Cmd
 		m, cmd = applyLocal(t, m, msg)
-		if cmd != nil || m.refreshing {
+		if cmd != nil || m.scan.running {
 			t.Fatal("late event restarted work after quit")
 		}
 	}
@@ -273,24 +273,24 @@ func TestLocalRefreshQuitCancelsScansAndIgnoresLateMessages(t *testing.T) {
 
 func TestLocalRefreshCommitsFreshnessAtomically(t *testing.T) {
 	m := refreshFixture(t)
-	m.staleRepos["/api"] = true
+	m.local.staleRepos["/api"] = true
 	_ = m.startLocalRefresh()
 	before := m
 	first := m.repositories[0]
-	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: first})
-	if !m.scannedAt[first.ID].Equal(before.scannedAt[first.ID]) || !m.staleRepos[first.ID] || len(m.allRecords) != len(before.allRecords) {
+	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: first})
+	if !m.local.scannedAt[first.ID].Equal(before.local.scannedAt[first.ID]) || !m.local.staleRepos[first.ID] || len(m.local.records) != len(before.local.records) {
 		t.Fatal("partial result changed visible snapshot freshness")
 	}
-	if !before.inFlight[first.ID] || len(before.pendingScannedAt) != 0 || len(before.pendingStaleRepos) != 0 {
+	if !before.scan.inFlight[first.ID] || len(before.scan.outcomes) != 0 {
 		t.Fatal("result mutated previous model maps")
 	}
 	for _, repo := range m.repositories[1:] {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Err: errors.New("failed")})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Err: errors.New("failed")})
 	}
-	if !m.scannedAt[first.ID].After(before.scannedAt[first.ID]) || m.staleRepos[first.ID] || !m.staleRepos["/web"] {
+	if !m.local.scannedAt[first.ID].After(before.local.scannedAt[first.ID]) || m.local.staleRepos[first.ID] || !m.local.staleRepos["/web"] {
 		t.Fatal("completed snapshot did not commit freshness")
 	}
-	if !before.staleRepos[first.ID] || before.staleRepos["/web"] {
+	if !before.local.staleRepos[first.ID] || before.local.staleRepos["/web"] {
 		t.Fatal("commit mutated previous visible maps")
 	}
 }
@@ -298,9 +298,9 @@ func TestLocalRefreshCommitsFreshnessAtomically(t *testing.T) {
 func TestManualRefreshCoalescesWithActiveScan(t *testing.T) {
 	m := refreshFixture(t)
 	_ = m.startLocalRefresh()
-	generation, remaining := m.scanGeneration, m.pendingRemaining
+	generation, remaining := m.scan.generation, m.scan.remaining
 	m, cmd := applyLocal(t, m, key("R"))
-	if cmd != nil || m.scanGeneration != generation || m.pendingRemaining != remaining {
+	if cmd != nil || m.scan.generation != generation || m.scan.remaining != remaining {
 		t.Fatal("manual request did not join ongoing scan")
 	}
 	prGeneration := m.prGeneration
@@ -309,7 +309,7 @@ func TestManualRefreshCoalescesWithActiveScan(t *testing.T) {
 		t.Fatal("repeated manual request did not coalesce")
 	}
 	for _, repo := range m.repositories {
-		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
 	if cmd == nil || !m.prState.loading {
 		t.Fatal("joined explicit request lost GitHub refresh")
@@ -320,13 +320,13 @@ func TestManualRefreshDuringStartupCoalescesWithFetch(t *testing.T) {
 	m := NewModel([]string{"/repo"}, stats.SortByTotal, nil, "", DefaultTimeIndex)
 	t.Cleanup(m.Close)
 	m.prProvider = &fakePRProvider{}
-	generation := m.scanGeneration
+	generation := m.scan.generation
 	m, cmd := applyLocal(t, m, key("R"))
-	if cmd != nil || m.scanGeneration != generation {
+	if cmd != nil || m.scan.generation != generation {
 		t.Fatal("R interrupted the startup fetch")
 	}
 	m, cmd = applyLocal(t, m, RepoLoadedMsg{Generation: generation, Repository: m.repositories[0]})
-	if cmd == nil || m.loading || m.refreshing || m.scanGeneration != generation || !m.prState.loading {
+	if cmd == nil || m.loading || m.scan.running || m.scan.generation != generation || !m.prState.loading {
 		t.Fatal("startup did not complete with PR refresh or repeated the fetch")
 	}
 }
@@ -336,13 +336,13 @@ func TestManualRefreshRecoversInitialFailure(t *testing.T) {
 	t.Cleanup(m.cancelScans)
 	m.prProvider = &fakePRProvider{}
 	repo := m.repositories[0]
-	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Err: errors.New("failed")})
+	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Err: errors.New("failed")})
 	if m.err == nil || m.loading {
 		t.Fatal("initial failure not surfaced")
 	}
 	m, _ = applyLocal(t, m, key("R"))
-	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
-	if m.err != nil || m.refreshing || len(m.loadedRepos) != 1 || m.areaRepoID != "" {
+	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
+	if m.err != nil || m.scan.running || len(m.local.repositories) != 1 || m.areaRepoID != "" {
 		t.Fatal("manual retry failed or unexpectedly changed navigation")
 	}
 }
@@ -352,14 +352,14 @@ func TestManualRefreshPreservesVanishedPersonAndInspector(t *testing.T) {
 	m.areaRepoID = "/api"
 	m.rebuildAreaDefinitions()
 	m.glance.detailOpen = true
-	m.personID = stats.IdentityID(m.allRecords[0])
+	m.personID = stats.IdentityID(m.local.records[0])
 	m.glance.frame = glanceFrame{areaID: "removed-area", tab: glanceActivity, ids: [4]string{"aaa11111"}}
 	m.showPaths = true
 	m.pathOffset = 3
 	person := m.personID
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
 	if m.personID != person || !m.showPaths || m.pathOffset != 3 || m.glance.frame.ids[glanceActivity] != "aaa11111" {
 		t.Fatal("refresh silently broadened vanished person or closed inspector")
@@ -427,10 +427,10 @@ func TestStartupAndManualRefreshFetchIncludedReposAndScanAfterFailure(t *testing
 	t.Cleanup(m.Close)
 	m.prProvider = &fakePRProvider{}
 	m = runRefreshCommands(t, m, m.Init())
-	if len(m.allRecords) != 3 || len(m.scanErrors) != 0 {
-		t.Fatalf("startup did not fetch only included repository: %d records, %v", len(m.allRecords), m.scanErrors)
+	if len(m.local.records) != 3 || len(m.local.errors) != 0 {
+		t.Fatalf("startup did not fetch only included repository: %d records, %v", len(m.local.records), m.local.errors)
 	}
-	for _, record := range m.allRecords {
+	for _, record := range m.local.records {
 		if record.RepoID == excluded && record.Subject != "first" {
 			t.Fatal("startup fetched excluded repository")
 		}
@@ -438,30 +438,30 @@ func TestStartupAndManualRefreshFetchIncludedReposAndScanAfterFailure(t *testing
 	commit("third\n")
 	m, cmd := applyLocal(t, m, key("R"))
 	m = runRefreshCommands(t, m, cmd)
-	if len(m.allRecords) != 4 || len(m.scanErrors) != 0 {
-		t.Fatalf("manual refresh did not fetch only included repository: %d records, %v", len(m.allRecords), m.scanErrors)
+	if len(m.local.records) != 4 || len(m.local.errors) != 0 {
+		t.Fatalf("manual refresh did not fetch only included repository: %d records, %v", len(m.local.records), m.local.errors)
 	}
 	runGit(included, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing"))
 	offline := NewModel([]string{included}, stats.SortByTotal, nil, "", DefaultTimeIndex)
 	t.Cleanup(offline.Close)
 	offline.prProvider = &fakePRProvider{}
 	offline = runRefreshCommands(t, offline, offline.Init())
-	if len(offline.allRecords) != 3 || !offline.staleRepos[included] || offline.scannedAt[included].IsZero() || offline.err != nil || !strings.Contains(offline.scanErrors[included], "fetch failed") {
-		t.Fatalf("startup fetch failure lost cached history or freshness evidence: %v", offline.scanErrors)
+	if len(offline.local.records) != 3 || !offline.local.staleRepos[included] || offline.local.scannedAt[included].IsZero() || offline.err != nil || !strings.Contains(offline.local.errors[included], "fetch failed") {
+		t.Fatalf("startup fetch failure lost cached history or freshness evidence: %v", offline.local.errors)
 	}
 	m, cmd = applyLocal(t, m, key("R"))
-	msg := loadRepoCmd(m.scanContext, m.repositories[0], m.options, m.scanGeneration, true)().(RepoLoadedMsg)
+	msg := loadRepoCmd(m.scanContext, m.repositories[0], m.options, m.scan.generation, true)().(RepoLoadedMsg)
 	if msg.FetchErr == nil || msg.Err != nil || len(msg.Records) != 3 {
 		t.Fatalf("fetch failure blocked cached scan: %+v", msg)
 	}
 	m = runRefreshCommands(t, m, cmd)
-	if !m.staleRepos[included] || len(m.allRecords) != 4 || !strings.Contains(m.scanErrors[included], "fetch failed") || m.err != nil {
-		t.Fatalf("failed fetch lost history or freshness evidence: %v", m.scanErrors)
+	if !m.local.staleRepos[included] || len(m.local.records) != 4 || !strings.Contains(m.local.errors[included], "fetch failed") || m.err != nil {
+		t.Fatalf("failed fetch lost history or freshness evidence: %v", m.local.errors)
 	}
 	runGit(included, "remote", "set-url", "origin", "file://"+source)
 	m, cmd = applyLocal(t, m, key("R"))
 	m = runRefreshCommands(t, m, cmd)
-	if m.staleRepos[included] || len(m.scanErrors) != 0 {
+	if m.local.staleRepos[included] || len(m.local.errors) != 0 {
 		t.Fatal("successful fetch did not clear stale failure")
 	}
 }

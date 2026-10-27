@@ -18,10 +18,10 @@ func TestPRQuotaStopsWholeQueueAndRetainsSnapshot(t *testing.T) {
 		retry := time.Now().Add(time.Hour)
 		p := &fakePRProvider{repoByPath: map[string]string{}, result: gh.Result{Complete: err == nil, Err: err, RetryAt: retry}}
 		m.prProvider = p
-		m.loadedRepos = nil
+		m.local.repositories = nil
 		for i := 0; i < 30; i++ {
 			path := fmt.Sprintf("/repo%d", i)
-			m.loadedRepos = append(m.loadedRepos, git.Repository{ID: path, Path: path})
+			m.local.repositories = append(m.local.repositories, git.Repository{ID: path, Path: path})
 			p.repoByPath[path] = fmt.Sprintf("org/repo%d", i)
 		}
 		msg := m.startPRRefresh()().(prsLoadedMsg)
@@ -35,7 +35,7 @@ func TestPRQuotaStopsWholeQueueAndRetainsSnapshot(t *testing.T) {
 		if cmd := m.startPRRefresh(); cmd != nil {
 			t.Fatal("cooldown ignored")
 		}
-		if !strings.Contains(m.prStatus(), "r after") {
+		if !strings.Contains(strings.Join(m.dataStatusLines(160), "\n"), "PR refresh available after") {
 			t.Fatal("cooldown hidden")
 		}
 		for _, result := range msg.results {
@@ -72,7 +72,7 @@ func TestPRExcludedRemotesNeverResolveOrFetch(t *testing.T) {
 	m := prFixture()
 	p := &fakePRProvider{result: gh.Result{Complete: true}}
 	m.prProvider = p
-	for _, r := range m.loadedRepos {
+	for _, r := range m.local.repositories {
 		m.excludedRepos[r.ID] = true
 	}
 	m.startPRRefresh()()
@@ -105,10 +105,10 @@ func TestPRGlobalBudgetWithRealProvider(t *testing.T) {
 	m := awarenessFixture()
 	r := &budgetRunner{}
 	m.prProvider = gh.NewProvider(r)
-	m.loadedRepos = nil
+	m.local.repositories = nil
 	for i := 0; i < gh.MaxRefreshRequests+5; i++ {
 		path := fmt.Sprintf("/repo%d", i)
-		m.loadedRepos = append(m.loadedRepos, git.Repository{ID: path, Path: path})
+		m.local.repositories = append(m.local.repositories, git.Repository{ID: path, Path: path})
 	}
 	msg := m.startPRRefresh()().(prsLoadedMsg)
 	if r.calls != gh.MaxRefreshRequests {
@@ -150,9 +150,9 @@ func TestManualLocalRefreshPreservesFirstRemoteFetch(t *testing.T) {
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 		m = next.(Model)
 		for _, repo := range m.repositories {
-			next, cmd := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+			next, cmd := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 			m = next.(Model)
-			if m.pendingRemaining == 0 && cmd != nil {
+			if m.scan.remaining == 0 && cmd != nil {
 				t.Fatal("first remote fetch replaced")
 			}
 		}

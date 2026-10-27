@@ -15,7 +15,7 @@ func (m Model) screenHeader(title string, width int) []string {
 	left := "  BIGBOARD / " + displayText(title)
 	repos := m.repositories
 	if len(repos) == 0 {
-		repos = m.loadedRepos
+		repos = m.local.repositories
 	}
 	included, loaded := 0, 0
 	for _, repo := range repos {
@@ -23,7 +23,7 @@ func (m Model) screenHeader(title string, width int) []string {
 			included++
 		}
 	}
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.excludedRepos[repo.ID] {
 			loaded++
 		}
@@ -48,16 +48,16 @@ func (m Model) screenLocalFreshness(repoID string) string {
 	local := "Local: not scanned yet"
 	stale := false
 	if repoID != "" {
-		if at := m.scannedAt[repoID]; !at.IsZero() {
+		if at := m.local.scannedAt[repoID]; !at.IsZero() {
 			local = "Local: " + at.Local().Format("Jan 02 15:04 MST")
 		}
-		stale = m.staleRepos[repoID]
+		stale = m.local.staleRepos[repoID]
 	} else {
 		repos := m.repositories
 		if len(repos) == 0 {
-			repos = m.loadedRepos
+			repos = m.local.repositories
 		}
-		stale = len(m.failedRepos) > 0
+		stale = len(m.local.failed) > 0
 		var oldest time.Time
 		scanned, included := 0, 0
 		for _, repo := range repos {
@@ -65,8 +65,8 @@ func (m Model) screenLocalFreshness(repoID string) string {
 				continue
 			}
 			included++
-			stale = stale || m.staleRepos[repo.ID]
-			if at := m.scannedAt[repo.ID]; !at.IsZero() {
+			stale = stale || m.local.staleRepos[repo.ID]
+			if at := m.local.scannedAt[repo.ID]; !at.IsZero() {
 				scanned++
 				if oldest.IsZero() || at.Before(oldest) {
 					oldest = at
@@ -86,16 +86,16 @@ func (m Model) screenLocalFreshness(repoID string) string {
 	if stale {
 		local = "Local: STALE · " + strings.TrimPrefix(local, "Local: ")
 	}
-	if m.refreshing {
+	if m.scan.running {
 		local += " · Updating…"
 	}
-	if repoID == "" && len(m.failedRepos) > 0 {
-		local += fmt.Sprintf(" · Update errors: %d · e details", len(m.failedRepos))
+	if repoID == "" && len(m.local.failed) > 0 {
+		local += fmt.Sprintf(" · Update errors: %d · e details", len(m.local.failed))
 	}
 	return local
 }
 
-func screenFinish(lines []string, footer, coverage string, width, height int) string {
+func screenFinish(lines []string, footer footerHints, coverage string, width, height int) string {
 	if height <= 0 {
 		height = len(lines) + screenFooterRows
 	}
@@ -121,30 +121,37 @@ func boardShortcuts(width int) string {
 	return "c contributors · a activity · p PRs"
 }
 
-func screenFooter(footer string, width int) string {
+func screenFooter(footer footerHints, width int) string {
 	return fitFooter(footer, width)
 }
 
-func (m Model) statisticsFooter() string {
+func (m Model) statisticsFooter() footerHints {
 	if m.viewMode == ViewOperative {
-		if m.width < 60 {
-			return "? help · ←/Esc back · PgUp/PgDn"
+		local := []footerHint{{"Esc", "back"}}
+		if m.width >= 60 {
+			local = append(local, footerHint{"↑↓", "scroll"})
 		}
-		if m.width < 110 {
-			return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn"
+		local = append(local, footerHint{"f", "filters"})
+		if m.width >= 110 {
+			local = append(local, footerHint{"t", "date range"})
 		}
-		return "? help · ←/Esc back · ↑↓ scroll · PgUp/PgDn · t range · r refresh · q quit"
+		return footerHints{local: local}
 	}
 	if m.searching {
-		return "F1 help · Enter accept · Esc cancel"
+		return searchFooter()
 	}
-	if m.width < 70 {
-		return "? help · ↑↓ · → open"
+	local := []footerHint{{"f", "filters"}}
+	if m.width >= 70 {
+		local = append(local, footerHint{"/", "find"})
 	}
-	if m.width < 110 {
-		return "? help · ↑↓ select · →/Enter open · / find · s sort"
+	local = append(local, footerHint{"Enter", "open"})
+	if m.width >= 110 {
+		local = append(local, footerHint{"t", "date range"})
 	}
-	return "? help · ↑↓ select · →/Enter open · / find · s/S sort · t range · b bots · r refresh · q quit"
+	if m.width >= 70 {
+		local = append(local, footerHint{"s", "sort"})
+	}
+	return footerHints{local: local}
 }
 
 func (m Model) screenCoverage() string {

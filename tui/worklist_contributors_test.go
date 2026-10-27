@@ -59,11 +59,11 @@ func TestWorklistContributorPreviewFollowsSelection(t *testing.T) {
 func TestWorklistContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 120
-	m.allRecords = nil
+	m.local.records = nil
 	now := time.Now()
 	add := func(name, email, repo, path string, count int, date time.Time) {
 		for i := 0; i < count; i++ {
-			m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: fmt.Sprintf("%s-%s-%s-%d", email, repo, path, i), Author: name, Email: email, Date: date, RepoID: repo, RepoName: strings.TrimPrefix(repo, "/"), Subject: "Change", Changes: []git.PathChange{{Path: path}}})
+			m.local.records = append(m.local.records, git.CommitRecord{CommitID: fmt.Sprintf("%s-%s-%s-%d", email, repo, path, i), Author: name, Email: email, Date: date, RepoID: repo, RepoName: strings.TrimPrefix(repo, "/"), Subject: "Change", Changes: []git.PathChange{{Path: path}}})
 		}
 	}
 	add("Zoe", "zoe@x", "/mono", "feature/file.go", 3, now)
@@ -71,7 +71,7 @@ func TestWorklistContributorPreviewOrdersByScopedCommitCount(t *testing.T) {
 	add("Ada", "ada@x", "/mono", "other/file.go", 10, now)
 	add("Zoe", "zoe@x", "/copy", "elsewhere/file.go", 30, now)
 	add("Ada", "ada@x", "/mono", "feature/old.go", 5, now.Add(-48*time.Hour))
-	m.loadedRepos = append(m.loadedRepos, git.Repository{ID: "/copy", Name: "copy"})
+	m.local.repositories = append(m.local.repositories, git.Repository{ID: "/copy", Name: "copy"})
 	m.timeIdx = 0
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
@@ -134,11 +134,11 @@ func TestWorklistContributorPreviewBoundsIdentityAndTies(t *testing.T) {
 func TestWorklistContributorPreviewFiltersAndEmptyPRScope(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 120
-	bot := m.allRecords[0]
+	bot := m.local.records[0]
 	bot.CommitID, bot.Author, bot.Email = "bot", "robot[bot]", "robot[bot]@x"
-	m.allRecords = append(m.allRecords, bot)
-	m.allRecords[1].Changes = []git.PathChange{{Path: "services/auth/old.go"}}
-	m.allRecords[1].Date = time.Now().Add(-48 * time.Hour)
+	m.local.records = append(m.local.records, bot)
+	m.local.records[1].Changes = []git.PathChange{{Path: "services/auth/old.go"}}
+	m.local.records[1].Date = time.Now().Add(-48 * time.Hour)
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
 	m.selectedAreaID = "auto:services/auth"

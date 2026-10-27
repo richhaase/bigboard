@@ -13,14 +13,14 @@ func TestScanErrorsCommitAtomicallyAndClearOnRecovery(t *testing.T) {
 	m := refreshFixture(t)
 	_ = m.startLocalRefresh()
 	first := m.repositories[0]
-	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: first, Err: errors.New("permission denied\x1b[2J\ncheck permissions")})
-	if len(m.scanErrors) != 0 {
+	m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: first, Err: errors.New("permission denied\x1b[2J\ncheck permissions")})
+	if len(m.local.errors) != 0 {
 		t.Fatal("partial generation published diagnostics")
 	}
 	for _, repo := range m.repositories[1:] {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
-	if got := m.scanErrors[first.ID]; got != "permission denied check permissions" {
+	if got := m.local.errors[first.ID]; got != "permission denied check permissions" {
 		t.Fatalf("unsafe or lost diagnosis: %q", got)
 	}
 	next, _ := m.Update(key("e"))
@@ -28,12 +28,12 @@ func TestScanErrorsCommitAtomicallyAndClearOnRecovery(t *testing.T) {
 	if !m.showScanErrors || !strings.Contains(ansi.Strip(m.View()), "permission denied") {
 		t.Fatal("diagnostics unavailable")
 	}
-	before := m.scanErrors
+	before := m.local.errors
 	_ = m.startLocalRefresh()
 	for _, repo := range m.repositories {
-		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		m, _ = applyLocal(t, m, RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 	}
-	if len(m.scanErrors) != 0 || len(before) != 1 {
+	if len(m.local.errors) != 0 || len(before) != 1 {
 		t.Fatal("recovery did not clear errors or mutated previous snapshot")
 	}
 	details := strings.Join(m.dataStatusLines(m.width), "\n")
@@ -63,7 +63,7 @@ func TestScanErrorViewScrollsLongDiagnosticAndPreservesNavigation(t *testing.T) 
 	m := refreshFixture(t)
 	m.width = 40
 	m.height = 12
-	m.scanErrors = map[string]string{"/api": strings.Repeat("explanation ", 100) + "FINAL CAUSE"}
+	m.local.errors = map[string]string{"/api": strings.Repeat("explanation ", 100) + "FINAL CAUSE"}
 	selected := m.selectedRepoID
 	m, _ = applyLocal(t, m, key("e"))
 	m, _ = applyLocal(t, m, key("d"))
@@ -80,7 +80,7 @@ func TestScanErrorViewScrollsLongDiagnosticAndPreservesNavigation(t *testing.T) 
 
 func TestSearchTypingDoesNotOpenScanErrors(t *testing.T) {
 	m := refreshFixture(t)
-	m.scanErrors = map[string]string{"/api": "failed"}
+	m.local.errors = map[string]string{"/api": "failed"}
 	m.glance.searching = true
 	m, _ = applyLocal(t, m, key("e"))
 	if m.showScanErrors {
@@ -95,7 +95,7 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 			m.width, m.height = size[0], size[1]
 			m = keyboardContractPress(t, m, board, "down")
 			before := ansi.Strip(m.View())
-			m.scanErrors = map[string]string{m.repositories[0].ID: "partial clone /example/cache/project could not be scanned with automatic fetching disabled: exit status 128: fatal: missing object END-OF-DIAGNOSTIC"}
+			m.local.errors = map[string]string{m.repositories[0].ID: "partial clone /example/cache/project could not be scanned with automatic fetching disabled: exit status 128: fatal: missing object END-OF-DIAGNOSTIC"}
 			m = keyboardContractPress(t, m, "e")
 			view := ansi.Strip(m.View())
 			if !strings.Contains(view, "Data status") || !strings.Contains(view, "╭") || strings.Contains(view, "/example/cache") {
@@ -124,7 +124,7 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 				t.Fatal("contextual help lost diagnostic state")
 			}
 			m = keyboardContractPress(t, m, "esc")
-			m.scanErrors = nil
+			m.local.errors = nil
 			if ansi.Strip(m.View()) != before {
 				t.Fatal("closing modal changed board state")
 			}
@@ -135,12 +135,12 @@ func TestScanErrorsModalKeepsBoardAndSeparatesTechnicalDetails(t *testing.T) {
 func TestScanErrorRefreshRetainsModal(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 80, 24
-	m.scanErrors = map[string]string{m.repositories[0].ID: "fetch failed"}
+	m.local.errors = map[string]string{m.repositories[0].ID: "fetch failed"}
 	m = keyboardContractPress(t, m, "p", "down", "e")
 	next, cmd := m.Update(keyboardContractKey("r"))
 	refreshed := next.(Model)
 	defer refreshed.Close()
-	if cmd == nil || !refreshed.refreshing || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "refreshing") {
+	if cmd == nil || !refreshed.scan.running || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "refreshing") {
 		t.Fatal("refresh lost the modal or its board selection")
 	}
 }

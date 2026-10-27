@@ -40,14 +40,14 @@ func (m Model) handleRepositoryControls(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "left":
 		m.closeRepositoryControls(false)
 	case " ":
-		if m.overlayCursor >= 0 && m.overlayCursor < len(m.loadedRepos) {
-			id := m.loadedRepos[m.overlayCursor].ID
+		if m.overlayCursor >= 0 && m.overlayCursor < len(m.local.repositories) {
+			id := m.local.repositories[m.overlayCursor].ID
 			m.overlayExcluded = maps.Clone(m.overlayExcluded)
 			m.overlayExcluded[id] = !m.overlayExcluded[id]
 		}
 	default:
 		_, page := repositoryModalSize(m.width, m.height)
-		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(m.loadedRepos), page); ok {
+		if row, ok := glanceMove(msg.String(), m.overlayCursor, len(m.local.repositories), page); ok {
 			m.overlayCursor = row
 		}
 	}

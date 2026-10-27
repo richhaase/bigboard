@@ -110,23 +110,8 @@ func heatmapRamp() []struct {
 
 func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now time.Time) string {
 	now = now.In(time.Local)
-	unknown := make(map[string]bool)
-	totals := make(map[string]int)
-	maxV := 0
-	for _, r := range records {
-		k := r.Date.In(time.Local).Format("2006-01-02")
-		if r.LinesUnknown {
-			unknown[k] = true
-		} else {
-			totals[k] += r.Added + r.Removed
-		}
-		if totals[k] > maxV {
-			maxV = totals[k]
-		}
-	}
-	if maxV == 0 {
-		maxV = 1
-	}
+	days, maxV := stats.ActivityByDay(records, time.Local)
+	maxV = max(1, maxV)
 
 	weeks := width - chromeInset - 6
 	if weeks < 12 {
@@ -153,12 +138,13 @@ func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now 
 				b.WriteString(" ")
 				continue
 			}
-			if unknown[cellDate.Format("2006-01-02")] {
+			day := days[cellDate.Format("2006-01-02")]
+			if day.LinesUnknown {
 				b.WriteString(StyleAmber.Render("?"))
 				continue
 			}
 			level := 0
-			if val := totals[cellDate.Format("2006-01-02")]; val > 0 {
+			if val := day.TotalChange; val > 0 {
 				level = 1 + (val*3)/maxV
 				if level > 4 {
 					level = 4
@@ -362,56 +348,10 @@ func filterRecordsByAuthor(records []git.CommitRecord, as *stats.AuthorStats, au
 }
 
 func aggregateByMonth(records []git.CommitRecord) []MonthActivity {
-	byMonth := make(map[string]*MonthActivity)
-
-	for _, r := range records {
-		date := r.Date.In(time.Local)
-		key := date.Format("2006-01")
-		ma, ok := byMonth[key]
-		if !ok {
-			y, m, _ := date.Date()
-			ma = &MonthActivity{
-				// Use UTC as a marker for the local calendar month: local midnight
-				// may fall in a DST gap and normalize into the previous month.
-				Month: time.Date(y, m, 1, 0, 0, 0, 0, time.UTC),
-			}
-			byMonth[key] = ma
-		}
-		ma.Commits++
-		if r.LinesUnknown {
-			ma.UnknownLineCommits++
-		} else {
-			ma.Added += r.Added
-			ma.Removed += r.Removed
-		}
-		if r.AIAssisted {
-			ma.AI++
-		}
+	months := stats.ActivityByMonth(records, time.Local)
+	result := make([]MonthActivity, len(months))
+	for index, month := range months {
+		result[index] = MonthActivity(month)
 	}
-
-	result := make([]MonthActivity, 0, len(byMonth))
-	for _, ma := range byMonth {
-		result = append(result, *ma)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Month.Before(result[j].Month)
-	})
-
-	return fillMonthGaps(result)
-}
-
-func fillMonthGaps(months []MonthActivity) []MonthActivity {
-	if len(months) < 2 {
-		return months
-	}
-	filled := make([]MonthActivity, 0, len(months))
-	filled = append(filled, months[0])
-	for _, ma := range months[1:] {
-		prev := filled[len(filled)-1].Month
-		for cur := prev.AddDate(0, 1, 0); cur.Before(ma.Month); cur = cur.AddDate(0, 1, 0) {
-			filled = append(filled, MonthActivity{Month: cur})
-		}
-		filled = append(filled, ma)
-	}
-	return filled
+	return result
 }

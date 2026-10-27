@@ -48,7 +48,7 @@ func (m Model) sharedRepositoryLabel() string {
 	repos := "all repos"
 	if len(m.sharedRepos) == 1 {
 		repos = "1 repo"
-		for _, repo := range m.loadedRepos {
+		for _, repo := range m.local.repositories {
 			if repo.ID == m.sharedRepos[0] {
 				repos = displayText(repo.Name)
 				break

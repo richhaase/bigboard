@@ -114,7 +114,7 @@ func (m Model) filterOptions() []prFilterOption {
 		options = append(options, prFilterOption{"custom", label})
 	case "repos":
 		labels := map[string]string{}
-		for _, repo := range append(slices.Clone(m.repositories), m.loadedRepos...) {
+		for _, repo := range append(slices.Clone(m.repositories), m.local.repositories...) {
 			if !m.excludedRepos[repo.ID] {
 				labels[repo.ID] = displayText(repo.Name)
 			}

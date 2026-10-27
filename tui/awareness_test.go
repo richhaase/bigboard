@@ -16,8 +16,8 @@ import (
 func awarenessFixture() Model {
 	now := time.Now()
 	repos := []git.Repository{{ID: "/api", Name: "api"}, {ID: "/web", Name: "web"}, {ID: "/empty", Name: "empty"}}
-	m := Model{viewMode: ViewAwareness, loadedRepos: repos, repositories: repos, timeIdx: len(TimePresets) - 1, width: 100, height: 30, excludedRepos: map[string]bool{}, selectedRepoID: "/api", scannedAt: map[string]time.Time{"/api": now}, staleRepos: map[string]bool{}}
-	m.allRecords = []git.CommitRecord{
+	m := Model{viewMode: ViewAwareness, local: localSnapshot{repositories: repos, scannedAt: map[string]time.Time{"/api": now}, staleRepos: map[string]bool{}}, repositories: repos, timeIdx: len(TimePresets) - 1, width: 100, height: 30, excludedRepos: map[string]bool{}, selectedRepoID: "/api"}
+	m.local.records = []git.CommitRecord{
 		{CommitID: "aaa11111", Author: "Ada", Email: "ada@x", Date: now, RepoID: "/api", RepoName: "api", Subject: "Fix login"},
 		{CommitID: "bbb22222", Author: "Ada", Email: "ada@x", Date: now.Add(-time.Hour), RepoID: "/web", RepoName: "web", Subject: "Connect UI"},
 		{CommitID: "ccc33333", Author: "Grace", Email: "grace@x", Date: now.Add(-2 * time.Hour), RepoID: "/api", RepoName: "api", Subject: "Add endpoint"},
@@ -89,12 +89,12 @@ func TestAwarenessFocusAndEvidence(t *testing.T) {
 }
 func TestAwarenessSharedCommitAttribution(t *testing.T) {
 	m := awarenessFixture()
-	copy := m.allRecords[0]
+	copy := m.local.records[0]
 	copy.RepoID = "/web"
 	copy.RepoName = "web"
 	copy.Author = "Other"
 	copy.Email = "other@x"
-	m.allRecords = append(m.allRecords, copy)
+	m.local.records = append(m.local.records, copy)
 	m.recomputeAuthors()
 	evidence := m.evidence("web", "email:ada@x")
 	if len(evidence) != 2 {
@@ -111,17 +111,17 @@ func TestAwarenessSharedCommitAttribution(t *testing.T) {
 }
 func TestAwarenessFailureRetainsLastGood(t *testing.T) {
 	m := awarenessFixture()
-	original := m.scannedAt["/api"]
+	original := m.local.scannedAt["/api"]
 	m.loading = true
 	m.resetPending()
 	for _, repo := range m.repositories {
-		next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo, Err: errors.New("unreadable")})
+		next, _ := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo, Err: errors.New("unreadable")})
 		m = next.(Model)
 	}
-	if len(m.allRecords) != 3 || m.err != nil {
+	if len(m.local.records) != 3 || m.err != nil {
 		t.Fatal("failed refresh discarded last-good history")
 	}
-	if !m.scannedAt["/api"].Equal(original) || !m.staleRepos["/api"] {
+	if !m.local.scannedAt["/api"].Equal(original) || !m.local.staleRepos["/api"] {
 		t.Fatal("failed scan changed freshness")
 	}
 	if !strings.Contains(m.View(), "STALE") {
@@ -130,10 +130,10 @@ func TestAwarenessFailureRetainsLastGood(t *testing.T) {
 	m.loading = true
 	m.resetPending()
 	for _, repo := range m.repositories {
-		next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: repo})
+		next, _ := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: repo})
 		m = next.(Model)
 	}
-	if len(m.allRecords) != 0 || len(m.failedRepos) != 0 || len(m.staleRepos) != 0 {
+	if len(m.local.records) != 0 || len(m.local.failed) != 0 || len(m.local.staleRepos) != 0 {
 		t.Fatal("successful empty refresh must replace old data")
 	}
 }
@@ -143,7 +143,7 @@ func TestAwarenessBoundsAndSanitization(t *testing.T) {
 			m := awarenessFixture()
 			m.width = size[0]
 			m.height = size[1]
-			m.allRecords[0].Subject = "Unsafe\x1b[2J\nsubject"
+			m.local.records[0].Subject = "Unsafe\x1b[2J\nsubject"
 			out := m.View()
 			if lipgloss.Height(out) > m.height {
 				t.Fatalf("height overflow: %d", lipgloss.Height(out))
@@ -162,10 +162,10 @@ func TestAwarenessBoundsAndSanitization(t *testing.T) {
 func TestAwarenessEvidenceScrollAndFiltering(t *testing.T) {
 	m := awarenessFixture()
 	for i := 0; i < 50; i++ {
-		r := m.allRecords[0]
+		r := m.local.records[0]
 		r.CommitID = fmt.Sprintf("%08d", i)
 		r.Subject = fmt.Sprintf("Evidence %d", i)
-		m.allRecords = append(m.allRecords, r)
+		m.local.records = append(m.local.records, r)
 	}
 	m.recomputeAuthors()
 	m = pressAwareness(m, "enter")
@@ -202,9 +202,9 @@ func TestAwarenessFocusRetainedWhenFiltersHidePerson(t *testing.T) {
 }
 func TestAwarenessDuplicateNamesAndHostileFailure(t *testing.T) {
 	m := awarenessFixture()
-	m.allRecords[2].Author = "Ada"
+	m.local.records[2].Author = "Ada"
 	m.recomputeAuthors()
-	m.failedRepos = []string{"bad\x1b[2J\x1b]0;hostile\x07"}
+	m.local.failed = []string{"bad\x1b[2J\x1b]0;hostile\x07"}
 	m = pressAwareness(m, "enter")
 	m = pressAwareness(m, "enter")
 	m = pressAwareness(m, "tab")
@@ -222,9 +222,9 @@ func TestAwarenessCompactEvidenceStaysVisible(t *testing.T) {
 	m.width = 40
 	m = pressAwareness(m, "enter")
 	m = pressAwareness(m, "enter")
-	m.allRecords[0].Author = "A very long contributor display name"
-	m.failedRepos = []string{"unreadable"}
-	m.allRecords[0].LinesUnknown = true
+	m.local.records[0].Author = "A very long contributor display name"
+	m.local.failed = []string{"unreadable"}
+	m.local.records[0].LinesUnknown = true
 	m.recomputeAuthors()
 	out := m.View()
 	if !strings.Contains(out, "Fix login") {
@@ -233,18 +233,18 @@ func TestAwarenessCompactEvidenceStaysVisible(t *testing.T) {
 }
 func TestAwarenessHiddenBotsDoNotSetRecency(t *testing.T) {
 	m := awarenessFixture()
-	r := m.allRecords[0]
+	r := m.local.records[0]
 	r.Author = "dependabot[bot]"
 	r.Email = "dependabot[bot]@users.noreply.github.com"
 	r.RepoName = "empty"
 	r.RepoID = "/empty"
 	r.CommitID = "bot"
 	r.Date = time.Now().Add(time.Hour)
-	m.allRecords = append(m.allRecords, r)
+	m.local.records = append(m.local.records, r)
 	m.activityHideBots = true
 	m.recomputeAuthors()
 	for _, repository := range m.activityRepositories() {
-		if repository.repo.ID == "/empty" && (!repository.latest.IsZero() || len(repository.people) != 0) {
+		if repository.scopeID == "/empty" && (!repository.latest.IsZero() || len(repository.people) != 0) {
 			t.Fatal("hidden bot leaked into repository activity")
 		}
 	}

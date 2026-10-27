@@ -14,7 +14,7 @@ import (
 	"github.com/richhaase/bigboard/stats"
 )
 
-func activityContributorText(m Model, row repositoryActivity, width, height int) string {
+func activityContributorText(m Model, row activityRow, width, height int) string {
 	return ansi.Strip(strings.Join(m.activityContributors(row, width, height), "\n"))
 }
 
@@ -49,10 +49,10 @@ func TestActivityContributorSummaryUsesSelectedScopeLines(t *testing.T) {
 func TestActivityContributorSummaryFollowsActivityFilters(t *testing.T) {
 	m := directoryFixture()
 	m.timeIdx = 0
-	m.allRecords[1].Date = time.Now().Add(-48 * time.Hour)
-	m.allRecords[0].Author = "automation[bot]"
-	m.allRecords[0].Email = "automation[bot]@example.test"
-	m.activityPeople = filterValues{stats.IdentityID(m.allRecords[0])}
+	m.local.records[1].Date = time.Now().Add(-48 * time.Hour)
+	m.local.records[0].Author = "automation[bot]"
+	m.local.records[0].Email = "automation[bot]@example.test"
+	m.activityPeople = filterValues{stats.IdentityID(m.local.records[0])}
 	m.hideBots = true
 	m.recomputeAuthors()
 	m.openDirectoryRepository("/mono")
@@ -67,9 +67,9 @@ func TestActivityContributorSummaryFollowsActivityFilters(t *testing.T) {
 	}
 }
 
-func activityContributorSummaryFixture() (Model, repositoryActivity) {
+func activityContributorSummaryFixture() (Model, activityRow) {
 	m := awarenessFixture()
-	row := repositoryActivity{repo: git.Repository{ID: "/repo", Name: "repo"}, people: []stats.AuthorStats{
+	row := activityRow{scopeID: "/repo", label: "repo", repositoryID: "/repo", people: []stats.AuthorStats{
 		{ID: "email:alex-two@example.test", Name: "Alex", Commits: 10, Added: 1, TotalChange: 1},
 		{ID: "email:unknown@example.test", Name: "Unknown lines", Commits: 2, Added: 5000, TotalChange: 5000, UnknownLineCommits: 1},
 		{ID: "email:alex-one@example.test", Name: "Alex", Commits: 3, Added: 900, Removed: 100, TotalChange: 1000},
@@ -105,7 +105,7 @@ func TestActivityContributorSummaryPreservesIdentityUnknownsAndInput(t *testing.
 
 func TestActivityContributorSummaryFitsAllocatedSpace(t *testing.T) {
 	m, row := activityContributorSummaryFixture()
-	row.repo.Name = "repository-with-a-long-name-and-an-untrusted-escape-\x1b[2J"
+	row.label = "repository-with-a-long-name-and-an-untrusted-escape-\x1b[2J"
 	for _, width := range []int{40, 69, 70, 100, 180} {
 		for _, height := range []int{4, 5, 7, 9} {
 			lines := m.activityContributors(row, width, height)
@@ -139,11 +139,11 @@ func TestActivityContributorSummaryFitsAllocatedSpace(t *testing.T) {
 func activityContributorScrollFixture() Model {
 	m := awarenessFixture()
 	m.width, m.height = 120, 36
-	m.allRecords = nil
+	m.local.records = nil
 	for i := 0; i < 31; i++ {
-		m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: fmt.Sprintf("person-%02d", i), Author: fmt.Sprintf("Person %02d", i), Email: fmt.Sprintf("person%02d@example.test", i), Date: time.Now(), RepoID: "/api", RepoName: "api", Added: 1000 - i, Changes: []git.PathChange{{Path: "src/file.go", Added: 1000 - i, LinesKnown: true}}})
+		m.local.records = append(m.local.records, git.CommitRecord{CommitID: fmt.Sprintf("person-%02d", i), Author: fmt.Sprintf("Person %02d", i), Email: fmt.Sprintf("person%02d@example.test", i), Date: time.Now(), RepoID: "/api", RepoName: "api", Added: 1000 - i, Changes: []git.PathChange{{Path: "src/file.go", Added: 1000 - i, LinesKnown: true}}})
 	}
-	m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: "web", Author: "Web person", Email: "web@example.test", Date: time.Now(), RepoID: "/web", RepoName: "web", Added: 1})
+	m.local.records = append(m.local.records, git.CommitRecord{CommitID: "web", Author: "Web person", Email: "web@example.test", Date: time.Now(), RepoID: "/web", RepoName: "web", Added: 1})
 	m.recomputeAuthors()
 	return m
 }
@@ -244,8 +244,8 @@ func TestActivityContributorPaneClampsAfterResizeFilterAndRefresh(t *testing.T) 
 	m.activityPeople = nil
 	m = keyboardContractPress(t, m, "end")
 	m.resetPending()
-	m.pendingRemaining = 1
-	next, _ = m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Records: m.allRecords[:2]})
+	m.scan.remaining = 1
+	next, _ = m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[0], Records: m.local.records[:2]})
 	m = next.(Model)
 	if m.contributorPane.offset != 0 || !strings.Contains(ansi.Strip(m.View()), "1–2 of 2") {
 		t.Fatal("refresh left the contributor viewport beyond retained evidence")

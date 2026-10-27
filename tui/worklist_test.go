@@ -11,14 +11,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"github.com/richhaase/bigboard/git"
-	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 )
 
 func TestWorklistLatestAuthorSubjectTie(t *testing.T) {
 	m := monorepoFixture()
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	m.allRecords = []git.CommitRecord{
+	m.local.records = []git.CommitRecord{
 		{CommitID: "z", Author: "Zed", Email: "zed@x", RepoID: "/mono", RepoName: "mono", Date: at, Subject: "Second tied subject", Changes: []git.PathChange{{Path: "feature/z.go"}}},
 		{CommitID: "a", Author: "Ada", Email: "ada@x", RepoID: "/mono", RepoName: "mono", Date: at, Subject: "First tied subject", Changes: []git.PathChange{{Path: "feature/a.go"}}},
 	}
@@ -44,7 +43,7 @@ func TestWorklistLatestAuthorSubjectTie(t *testing.T) {
 
 func TestWorklistAgeUsesOwnScanAndHandlesFuture(t *testing.T) {
 	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	m := Model{scannedAt: map[string]time.Time{"a": at, "b": at.Add(2 * time.Hour)}}
+	m := Model{local: localSnapshot{scannedAt: map[string]time.Time{"a": at, "b": at.Add(2 * time.Hour)}}}
 	for _, tc := range []struct {
 		repo   string
 		commit time.Time
@@ -58,30 +57,10 @@ func TestWorklistAgeUsesOwnScanAndHandlesFuture(t *testing.T) {
 	}
 }
 
-func TestWorklistFreshnessHonestAndScoped(t *testing.T) {
-	m := prFixture()
-	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	m.prState.snapshots["org/repo"] = prSnapshot{prs: []gh.PullRequest{{Repo: "org/repo", Number: 7}}, checked: at.Add(2 * time.Hour), lastGood: at, partial: true, err: errors.New("offline")}
-	got := m.worklistPRFreshness("/api")
-	for _, want := range []string{"STALE/PARTIAL", "all dates", "checked", "last complete"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %s: %s", want, got)
-		}
-	}
-	m.prState.snapshots["org/repo"] = prSnapshot{checked: at, partial: true, err: errors.New("offline")}
-	if got = m.worklistPRFreshness("/api"); !strings.Contains(got, "unavailable") || strings.Contains(got, "complete") {
-		t.Fatal(got)
-	}
-	m.prState.snapshots = map[string]prSnapshot{}
-	if got = m.worklistPRFreshness("/api"); !strings.Contains(got, "unknown") {
-		t.Fatal(got)
-	}
-}
-
 func TestWorklistLongStaleNamesReserveWarningAndCount(t *testing.T) {
 	m := monorepoFixture()
-	m.staleRepos["/mono"] = true
-	r := repositoryActivity{repo: git.Repository{ID: "auto:feature", Name: strings.Repeat("界a", 40)}, authorID: "email:0@x", subject: strings.Repeat("subject ", 30), commits: 120}
+	m.local.staleRepos["/mono"] = true
+	r := activityRow{scopeID: "auto:feature", label: strings.Repeat("界a", 40), repositoryID: "/mono", authorID: "email:0@x", subject: strings.Repeat("subject ", 30), commits: 120}
 	for i := 0; i < 120; i++ {
 		r.people = append(r.people, stats.AuthorStats{ID: fmt.Sprintf("email:%d@x", i), Name: strings.Repeat("界a", 30), Commits: 1})
 	}
@@ -167,7 +146,7 @@ func TestWorklistFailureColorSurvivesTruncation(t *testing.T) {
 		snapshot.prs[i].CheckState = "FAILURE"
 	}
 	m.prState.snapshots["org/repo"] = snapshot
-	r := repositoryActivity{repo: git.Repository{ID: "auto:feature", Name: "Feature"}}
+	r := activityRow{scopeID: "auto:feature", label: "Feature", repositoryID: "/api"}
 	for _, width := range []int{76, 116, 136} {
 		rendered := strings.Join(m.worklistRow(r, true, width, width >= 106), "\n")
 		if red == "" || !strings.Contains(rendered, red) {

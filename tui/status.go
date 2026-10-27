@@ -20,7 +20,7 @@ type dataStatus struct {
 func (m Model) statusRepositories() []git.Repository {
 	repos := m.repositories
 	if len(repos) == 0 {
-		repos = m.loadedRepos
+		repos = m.local.repositories
 	}
 	var included []git.Repository
 	for _, repo := range repos {
@@ -32,21 +32,21 @@ func (m Model) statusRepositories() []git.Repository {
 }
 
 func (m Model) localRepositoryFailed(repo git.Repository) bool {
-	return m.staleRepos[repo.ID] || m.scanErrors[repo.ID] != "" || slices.Contains(m.failedRepos, repo.Name)
+	return m.local.staleRepos[repo.ID] || m.local.errors[repo.ID] != "" || slices.Contains(m.local.failed, repo.Name)
 }
 
 func (m Model) gitDataStatus() dataStatus {
 	repos := m.statusRepositories()
 	scanned, failed := 0, 0
 	for _, repo := range repos {
-		if !m.scannedAt[repo.ID].IsZero() {
+		if !m.local.scannedAt[repo.ID].IsZero() {
 			scanned++
 		}
 		if m.localRepositoryFailed(repo) {
 			failed++
 		}
 	}
-	status := dataStatus{label: "scanned", compact: "scanned", refreshing: m.refreshing}
+	status := dataStatus{label: "scanned", compact: "scanned", refreshing: m.scan.running}
 	switch {
 	case len(repos) == 0:
 		status.label, status.compact = "none tracked", "none"
@@ -148,7 +148,7 @@ func (m Model) dataStatusLines(width int) []string {
 	scanned, failed := 0, 0
 	var oldest time.Time
 	for _, repo := range repos {
-		if at := m.scannedAt[repo.ID]; !at.IsZero() {
+		if at := m.local.scannedAt[repo.ID]; !at.IsZero() {
 			scanned++
 			if oldest.IsZero() || at.Before(oldest) {
 				oldest = at
@@ -162,14 +162,14 @@ func (m Model) dataStatusLines(width int) []string {
 	if !oldest.IsZero() {
 		add("Oldest retained scan: " + oldest.Local().Format("Jan 02 15:04:05 MST"))
 	}
-	if m.refreshing {
+	if m.scan.running {
 		add(StyleCyan.Render("Refreshing Git. The previous snapshot stays visible."))
 	}
 	if failed > 0 {
 		add(StyleAmber.Render(fmt.Sprintf("%d repository updates failed. Retained history may be stale.", failed)))
 	}
 	for _, repo := range repos {
-		detail := displayText(m.scanErrors[repo.ID])
+		detail := displayText(m.local.errors[repo.ID])
 		if !m.localRepositoryFailed(repo) && !m.scanErrorDetails {
 			continue
 		}
@@ -180,7 +180,7 @@ func (m Model) dataStatusLines(width int) []string {
 			add(StyleAmber.Render("  Update failed; retained history is stale."))
 		}
 		if m.scanErrorDetails {
-			at := m.scannedAt[repo.ID]
+			at := m.local.scannedAt[repo.ID]
 			if at.IsZero() {
 				add("  No retained scan.")
 			} else {

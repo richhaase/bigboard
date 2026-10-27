@@ -35,7 +35,7 @@ func TestNarrowStatisticsPreserveDetailAndPaging(t *testing.T) {
 				date := time.Date(2026, 9, 1, 12, 0, 0, 0, time.Local)
 				as := stats.AuthorStats{Name: "Ada", Commits: 22345678901, Added: 323456789012, Removed: 423456789013, Net: -100000000001, AICommits: 2234567890, UnknownLineCommits: 1, ActiveDays: 31, FirstCommit: date, LastCommit: date.AddDate(0, 0, 2), PerRepo: map[string]*stats.RepoContribution{name: {Commits: 12345678901, Added: 123456789012, Removed: 223456789013, Net: -100000000001, AICommits: 1234567890, UnknownLineCommits: 1, TotalChange: 346913578025}, "second-repository": {Commits: 10000000000, Added: 200000000000, Removed: 200000000000, AICommits: 1000000000, TotalChange: 400000000000}}}
 				records := []git.CommitRecord{{Author: "Ada", Date: date, RepoName: name, LinesUnknown: true, AIAssisted: true}}
-				m := Model{viewMode: ViewOperative, activeOperative: "Ada", authors: []stats.AuthorStats{as}, allRecords: records, timeIdx: len(TimePresets) - 1, width: width, height: 16}
+				m := Model{viewMode: ViewOperative, activeOperative: "Ada", authors: []stats.AuthorStats{as}, local: localSnapshot{records: records}, timeIdx: len(TimePresets) - 1, width: width, height: 16}
 				raw := m.operativeDetailContent()
 				for _, line := range strings.Split(raw, "\n") {
 					if ansi.StringWidth(line) > width {

@@ -10,35 +10,37 @@ import (
 
 // Repository associations describe Git history, not live presence. Counts and
 // identities use the same canonical records as the statistics pipeline.
-type repositoryActivity struct {
-	repo     git.Repository
-	people   []stats.AuthorStats
-	commits  int
-	latest   time.Time
-	subject  string
-	authorID string
-	latestID string
+type activityRow struct {
+	scopeID      string
+	label        string
+	repositoryID string
+	people       []stats.AuthorStats
+	commits      int
+	latest       time.Time
+	subject      string
+	authorID     string
+	latestID     string
 }
 
 // Latest author and subject always describe the same canonical commit. Stable
 // object-ID ties keep the row and evidence pane in agreement.
-func (a *repositoryActivity) observe(r git.CommitRecord) {
+func (a *activityRow) observe(r git.CommitRecord) {
 	if a.latest.IsZero() || r.Date.After(a.latest) || (r.Date.Equal(a.latest) && r.CommitID < a.latestID) {
 		a.latest, a.subject, a.authorID, a.latestID = r.Date, r.Subject, stats.IdentityID(r), r.CommitID
 	}
 }
 
-func (m Model) activityRepositories() []repositoryActivity {
+func (m Model) activityRepositories() []activityRow {
 	if m.areaRepoID != "" {
 		return m.activityAreas()
 	}
-	var result []repositoryActivity
+	var result []activityRow
 	records := m.activityRecords()
-	for _, repo := range m.loadedRepos {
+	for _, repo := range m.local.repositories {
 		if !m.repoInView(repo.ID) {
 			continue
 		}
-		activity := repositoryActivity{repo: repo}
+		activity := activityRow{scopeID: repo.ID, label: repo.Name, repositoryID: repo.ID}
 		var kept []git.CommitRecord
 		for _, r := range m.recordsInRepository(repo, records) {
 			kept = append(kept, r)
@@ -53,7 +55,7 @@ func (m Model) activityRepositories() []repositoryActivity {
 	return result
 }
 
-func sortChangeActivities(rows []repositoryActivity, mode int) {
+func sortChangeActivities(rows []activityRow, mode int) {
 	if mode == 0 {
 		sort.Slice(rows, func(i, j int) bool {
 			a, b := rows[i], rows[j]
@@ -65,10 +67,10 @@ func sortChangeActivities(rows []repositoryActivity, mode int) {
 			if a.commits != b.commits {
 				return a.commits > b.commits
 			}
-			if a.repo.Name != b.repo.Name {
-				return a.repo.Name < b.repo.Name
+			if a.label != b.label {
+				return a.label < b.label
 			}
-			return a.repo.ID < b.repo.ID
+			return a.scopeID < b.scopeID
 		})
 	} else {
 		sortRepositoryActivities(rows, mode-1)
@@ -76,7 +78,7 @@ func sortChangeActivities(rows []repositoryActivity, mode int) {
 }
 
 // Activity is volume, not priority or a ranking of people. Ties are stable.
-func sortRepositoryActivities(rows []repositoryActivity, mode int) {
+func sortRepositoryActivities(rows []activityRow, mode int) {
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
 		switch mode {
@@ -89,10 +91,10 @@ func sortRepositoryActivities(rows []repositoryActivity, mode int) {
 				return a.latest.After(b.latest)
 			}
 		}
-		if a.repo.Name != b.repo.Name {
-			return a.repo.Name < b.repo.Name
+		if a.label != b.label {
+			return a.label < b.label
 		}
-		return a.repo.ID < b.repo.ID
+		return a.scopeID < b.scopeID
 	})
 }
 
@@ -105,14 +107,14 @@ func sortPeople(people []stats.AuthorStats) {
 	})
 }
 
-func (m *Model) selectedRepository(rows []repositoryActivity) int {
+func (m *Model) selectedRepository(rows []activityRow) int {
 	for i, row := range rows {
-		if row.repo.ID == m.selectedScopeID() {
+		if row.scopeID == m.selectedScopeID() {
 			return i
 		}
 	}
 	if len(rows) > 0 {
-		m.setSelectedScopeID(rows[0].repo.ID)
+		m.setSelectedScopeID(rows[0].scopeID)
 	}
 	return 0
 }
@@ -131,18 +133,16 @@ func (m Model) evidence(repoName, personID string) []git.CommitRecord {
 		}
 		repoName = ""
 	}
-	inRepository := make(map[string]bool)
-	for _, r := range records {
-		if r.RepoName == repoName && r.CommitID != "" {
-			inRepository[r.CommitID] = true
-		}
+	if repoName == "" {
+		records = stats.UniqueRecords(records)
+	} else {
+		records = stats.UniqueRecordsWithMatchingCopy(records, func(record git.CommitRecord) bool {
+			return record.RepoName == repoName
+		})
 	}
 	var out []git.CommitRecord
-	for _, r := range stats.UniqueRecords(records) {
+	for _, r := range records {
 		if personID != "" && stats.IdentityID(r) != personID {
-			continue
-		}
-		if repoName != "" && !inRepository[r.CommitID] && (r.CommitID != "" || r.RepoName != repoName) {
 			continue
 		}
 		out = append(out, r)

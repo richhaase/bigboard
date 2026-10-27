@@ -35,9 +35,9 @@ func (m *Model) leaveDirectory() {
 	}
 }
 
-func (m Model) directoryRows() []repositoryActivity {
+func (m Model) directoryRows() []activityRow {
 	entries := stats.DirectoryChildren(m.glanceScopeRecords(), m.directory.frame.path)
-	var rows []repositoryActivity
+	var rows []activityRow
 	query := strings.ToLower(m.directory.frame.query)
 	for _, entry := range entries {
 		name := entry.Name
@@ -47,7 +47,7 @@ func (m Model) directoryRows() []repositoryActivity {
 		if query != "" && !strings.Contains(strings.ToLower(name), query) {
 			continue
 		}
-		row := repositoryActivity{repo: git.Repository{ID: entry.ID, Name: name}, commits: len(entry.Records)}
+		row := activityRow{scopeID: entry.ID, label: name, repositoryID: m.areaRepoID, commits: len(entry.Records)}
 		row.people = stats.AggregateWithOptions(entry.Records, stats.AggregateOptions{BotIdentities: m.options.BotIdentities})
 		for _, record := range entry.Records {
 			row.observe(record)
@@ -94,14 +94,14 @@ func (m Model) relatedScopeAreas() []stats.WorkArea {
 	return areas
 }
 
-func (m *Model) selectedDirectory(rows []repositoryActivity) int {
+func (m *Model) selectedDirectory(rows []activityRow) int {
 	for i, row := range rows {
-		if row.repo.ID == m.directory.frame.selectedID {
+		if row.scopeID == m.directory.frame.selectedID {
 			return i
 		}
 	}
 	if len(rows) > 0 {
-		m.directory.frame.selectedID = rows[0].repo.ID
+		m.directory.frame.selectedID = rows[0].scopeID
 	}
 	return 0
 }
@@ -126,15 +126,15 @@ func (m Model) handleDirectoryKey(key string) Model {
 			return m
 		}
 		row := rows[selected]
-		if path, ok := strings.CutPrefix(row.repo.ID, "dir:"); ok {
+		if path, ok := strings.CutPrefix(row.scopeID, "dir:"); ok {
 			m.directory.stack = append(append([]directoryFrame(nil), m.directory.stack...), m.directory.frame)
 			m.directory.frame = directoryFrame{path: path}
 		} else {
-			name := row.repo.Name
-			if path, ok := strings.CutPrefix(row.repo.ID, "file:"); ok {
+			name := row.label
+			if path, ok := strings.CutPrefix(row.scopeID, "file:"); ok {
 				name = path
 			}
-			m.openDirectoryDetails(row.repo.ID, name, glanceActivity)
+			m.openDirectoryDetails(row.scopeID, name, glanceActivity)
 		}
 	case "1", "2", "3":
 		tab := int(key[0] - '1')
@@ -145,7 +145,7 @@ func (m Model) handleDirectoryKey(key string) Model {
 		m.openDirectoryDetails("dir:"+m.directory.frame.path, name, tab)
 	default:
 		if next, ok := glanceMove(key, selected, len(rows), m.worklistPageSize()); ok && len(rows) > 0 {
-			m.directory.frame.selectedID = rows[next].repo.ID
+			m.directory.frame.selectedID = rows[next].scopeID
 		}
 	}
 	return m
@@ -178,15 +178,17 @@ func (m Model) renderDirectoryBoard(width, height int) string {
 	} else {
 		lines = m.appendActivityContributors(lines, rows[selected], width, height)
 	}
-	footer := "? help · ←/Esc back · →/Enter open · / find · s/S sort · t range · 2 people · r refresh"
+	local := []footerHint{{"Esc", "back"}, {"f", "filters"}}
 	if activityContributorsHeight(width, height) > 0 {
-		footer += " · Tab contributors"
+		local = append(local, footerHint{"Tab", "contributors"})
 	}
+	local = append(local, footerHint{"2", "people"}, footerHint{"/", "find"}, footerHint{"Enter", "open"}, footerHint{"t", "date range"}, footerHint{"s", "sort"})
+	footer := footerHints{local: local}
 	if m.contributorPane.focused {
-		footer = "? help · Tab ranking · ↑↓ scroll · ←/Esc back · r refresh"
+		footer = focusedContributorsFooter()
 	}
 	if m.glance.searching {
-		footer = "F1 help · Enter accept · Esc cancel"
+		footer = searchFooter()
 	}
 	coverage := "Lines belong to files here · commits can touch multiple entries"
 	return screenFinish(lines, footer, coverage, width, height)

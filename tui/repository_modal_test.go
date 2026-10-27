@@ -40,7 +40,7 @@ func TestRepositoryModalPreservesBoardAndDetailOnCancel(t *testing.T) {
 			if m.viewMode == ViewRepoOverlay || m.View() != before {
 				t.Fatal("canceling repository controls changed the underlying board or detail")
 			}
-			if m.excludedRepos[m.loadedRepos[1].ID] {
+			if m.excludedRepos[m.local.repositories[1].ID] {
 				t.Fatal("canceling the modal applied a pending repository choice")
 			}
 		})
@@ -49,9 +49,9 @@ func TestRepositoryModalPreservesBoardAndDetailOnCancel(t *testing.T) {
 
 func TestRepositoryModalPagingAndResizeMatchVisibleOptions(t *testing.T) {
 	m := boardLayoutFixture()
-	m.loadedRepos = nil
+	m.local.repositories = nil
 	for i := 0; i < 45; i++ {
-		m.loadedRepos = append(m.loadedRepos, git.Repository{ID: fmt.Sprintf("/r%02d", i), Name: fmt.Sprintf("repo-%02d", i)})
+		m.local.repositories = append(m.local.repositories, git.Repository{ID: fmt.Sprintf("/r%02d", i), Name: fmt.Sprintf("repo-%02d", i)})
 	}
 	m.width, m.height = 120, 36
 	m = keyboardContractPress(t, m, "i")

@@ -15,14 +15,14 @@ import (
 
 func glanceBusyFixture() Model {
 	m := monorepoFixture()
-	m.allRecords = nil
+	m.local.records = nil
 	now := time.Now()
 	for i := 0; i < 1200; i++ {
 		area := fmt.Sprintf("area%02d", i%40)
 		if i < 1100 {
 			area = fmt.Sprintf("feature/child%02d", i%41)
 		}
-		m.allRecords = append(m.allRecords, git.CommitRecord{CommitID: fmt.Sprintf("oid-%04d", i), Author: fmt.Sprintf("Person %03d", i%120), Email: fmt.Sprintf("person%03d@example.com", i%120), Date: now.Add(-time.Duration(i) * time.Minute), RepoID: "/mono", RepoName: "mono", Subject: fmt.Sprintf("Exact subject %04d", i), Changes: []git.PathChange{{Path: area + "/file.go"}}})
+		m.local.records = append(m.local.records, git.CommitRecord{CommitID: fmt.Sprintf("oid-%04d", i), Author: fmt.Sprintf("Person %03d", i%120), Email: fmt.Sprintf("person%03d@example.com", i%120), Date: now.Add(-time.Duration(i) * time.Minute), RepoID: "/mono", RepoName: "mono", Subject: fmt.Sprintf("Exact subject %04d", i), Changes: []git.PathChange{{Path: area + "/file.go"}}})
 	}
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
@@ -155,7 +155,7 @@ func TestGlanceDetailAndInspectorKeepStaleWarning(t *testing.T) {
 	m = pressAwareness(m, "enter")
 	m.loading = true
 	m.resetPending()
-	next, _ := m.Update(RepoLoadedMsg{Generation: m.scanGeneration, Repository: m.repositories[0], Err: errors.New("unreadable")})
+	next, _ := m.Update(RepoLoadedMsg{Generation: m.scan.generation, Repository: m.repositories[0], Err: errors.New("unreadable")})
 	m = next.(Model)
 	if !strings.Contains(m.View(), "STALE") {
 		t.Fatal("detail disguises stale scan")
@@ -170,7 +170,7 @@ func TestGlanceFullInspectorWrapsSubjectsAndAllPaths(t *testing.T) {
 	m.width = 40
 	m.height = 18
 	subject := strings.Repeat("長い件名 ", 25) + "FINAL SUBJECT TOKEN"
-	m.allRecords[0].Subject = subject
+	m.local.records[0].Subject = subject
 	m.rebuildAreaDefinitions()
 	m.selectedAreaID = "auto:services/auth"
 	m = pressAwareness(m, "enter")
@@ -211,7 +211,7 @@ func TestGlanceSearchUnicodeAndFilterEmptyScope(t *testing.T) {
 	}
 	m = pressAwareness(m, "esc")
 	m = pressAwareness(m, "1")
-	m.allRecords = nil
+	m.local.records = nil
 	m.recomputeAuthors()
 	if !m.glance.detailOpen || !strings.Contains(m.View(), "No matching commits") {
 		t.Fatal("empty detail silently switched area")
@@ -236,9 +236,9 @@ func TestGlanceNarrowActiveFiltersAndDuplicateNamesStayVisible(t *testing.T) {
 	m := monorepoFixture()
 	m.width = 40
 	m.height = 18
-	m.allRecords[0].Author = strings.Repeat("Long identical display name ", 3)
-	m.allRecords[1].Author = m.allRecords[0].Author
-	m.allRecords[1].Changes = []git.PathChange{{Path: "services/auth/second.go"}}
+	m.local.records[0].Author = strings.Repeat("Long identical display name ", 3)
+	m.local.records[1].Author = m.local.records[0].Author
+	m.local.records[1].Changes = []git.PathChange{{Path: "services/auth/second.go"}}
 	m.recomputeAuthors()
 	m.rebuildAreaDefinitions()
 	m.activityHideBots = true

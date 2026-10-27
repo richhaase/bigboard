@@ -85,8 +85,8 @@ func TestWorklistSmallSnapshotAndPRTitle(t *testing.T) {
 	m.width, m.height = 120, 36
 	m.areaRepoID, m.selectedAreaID = "/api", "auto:feature"
 	at := time.Date(2026, 9, 30, 15, 12, 0, 0, time.Local)
-	m.scannedAt["/api"] = at
-	m.failedRepos = []string{"web"}
+	m.local.scannedAt["/api"] = at
+	m.local.failed = []string{"web"}
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"Git: STALE", "#7 Add feature", "shared range · Git person/bot filters do not apply"} {
 		if !strings.Contains(view, want) {
@@ -143,13 +143,13 @@ func TestWorklistMissingScopeHasNoUnrelatedSidebarFocus(t *testing.T) {
 	m.width, m.height = 160, 48
 	m.selectedAreaID = "auto:services/auth"
 	m = pressAwareness(m, "enter")
-	kept := m.allRecords[:0]
-	for _, r := range m.allRecords {
+	kept := m.local.records[:0]
+	for _, r := range m.local.records {
 		if r.CommitID != "auth" {
 			kept = append(kept, r)
 		}
 	}
-	m.allRecords = kept
+	m.local.records = kept
 	m.rebuildAreaDefinitions()
 	m.recomputeAuthors()
 	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
@@ -191,7 +191,7 @@ func TestWorklistIdentityAndPlainRefreshStatus(t *testing.T) {
 	if strings.Contains(view, "NIGHT OPS") || strings.Contains(view, "Updates every minute") {
 		t.Fatal("obsolete theme or timer hint")
 	}
-	m.refreshing = true
+	m.scan.running = true
 	if !strings.Contains(m.View(), "refreshing") {
 		t.Fatal("refresh status hidden")
 	}

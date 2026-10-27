@@ -16,7 +16,7 @@ func TestLeaderboardPreservesContributorAcrossFilterAndSort(t *testing.T) {
 	for _, key := range []string{"q", "esc", "left", "/", "s", "S", "b", "enter", "backspace"} {
 		t.Run(key, func(t *testing.T) {
 			m := modelWithData()
-			m.allRecords = append(m.allRecords, git.CommitRecord{Author: "Linus", Email: "linus@example.com", Date: time.Now(), Added: 25, RepoName: "engine"})
+			m.local.records = append(m.local.records, git.CommitRecord{Author: "Linus", Email: "linus@example.com", Date: time.Now(), Added: 25, RepoName: "engine"})
 			m.sortField = stats.SortByTotal
 			m.recomputeAuthors()
 			if key == "s" || key == "S" || key == "b" {
@@ -74,9 +74,9 @@ func TestLeaderboardResizeKeepsSelectedContributorVisible(t *testing.T) {
 
 func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 	m := awarenessFixture()
-	m.loadedRepos = nil
+	m.local.repositories = nil
 	for i := 0; i < 45; i++ {
-		m.loadedRepos = append(m.loadedRepos, git.Repository{ID: fmt.Sprintf("/r%d", i), Name: fmt.Sprintf("repo-%02d", i)})
+		m.local.repositories = append(m.local.repositories, git.Repository{ID: fmt.Sprintf("/r%d", i), Name: fmt.Sprintf("repo-%02d", i)})
 	}
 	m = pressAwareness(m, "i")
 	check := func() {
@@ -85,7 +85,7 @@ func TestRepoOverlayScrollsWithSelectionAndResize(t *testing.T) {
 		if len(strings.Split(out, "\n")) > m.height {
 			t.Fatalf("overlay exceeds height %d", m.height)
 		}
-		name := m.loadedRepos[m.overlayCursor].Name
+		name := m.local.repositories[m.overlayCursor].Name
 		selected := false
 		for _, line := range strings.Split(out, "\n") {
 			if ansi.StringWidth(line) > m.width {
@@ -127,14 +127,14 @@ func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 				m := awarenessFixture()
 				m.viewMode = view
 				m.err = errors.New("all repositories failed")
-				m.loadedRepos = nil
+				m.local.repositories = nil
 				m = pressAwareness(m, key)
 				if m.showHelp || m.glance.searching || m.searching || m.showPRs || m.filters.open || m.viewMode != view {
 					t.Fatal("error screen changed hidden navigation")
 				}
 				next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 				m = next.(Model)
-				if cmd == nil || !m.refreshing {
+				if cmd == nil || !m.scan.running {
 					t.Fatal("retry was swallowed")
 				}
 			})
@@ -142,7 +142,7 @@ func TestErrorScreenOwnsKeysAndRetry(t *testing.T) {
 	}
 	m := awarenessFixture()
 	m.err = errors.New("all repositories failed")
-	m.scanErrors = map[string]string{"/api": "unreadable"}
+	m.local.errors = map[string]string{"/api": "unreadable"}
 	m.glance.searching, m.searching, m.showPRs = true, true, true
 	m.filters.open = true
 	m = pressAwareness(m, "e")

@@ -10,20 +10,20 @@ import (
 
 func TestGlanceScopedDuplicateNames(t *testing.T) {
 	m := monorepoFixture()
-	base := m.allRecords[0]
-	m.allRecords = nil
+	base := m.local.records[0]
+	m.local.records = nil
 	for _, email := range []string{"alice@example.com", "bob@example.com"} {
 		r := base
 		r.CommitID = email
 		r.Email = email
 		r.Author = "Same area-local display name"
 		r.Changes = []git.PathChange{{Path: "feature/file.go"}}
-		m.allRecords = append(m.allRecords, r)
+		m.local.records = append(m.local.records, r)
 		for i := 0; i < 3; i++ {
 			r.CommitID = fmt.Sprintf("%s-%d", email, i)
 			r.Author = email
 			r.Changes = []git.PathChange{{Path: "other/file.go"}}
-			m.allRecords = append(m.allRecords, r)
+			m.local.records = append(m.local.records, r)
 		}
 	}
 	m.recomputeAuthors()
