@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/richhaase/bigboard/github"
@@ -29,8 +30,10 @@ var ErrCacheDamaged = errors.New("repository cache is damaged and will be rebuil
 var objectDamagePattern = regexp.MustCompile(`(?i)(unable to|could not|cannot) read( (object|tree|blob|commit|tag))? '?\(?[0-9a-f]{40,64}|(could not|cannot) parse (object|tree|commit|tag) '?\(?[0-9a-f]{40,64}|missing (blob|tree|commit|tag) [0-9a-f]{40,64}|bad( (tree|blob|commit|tag))? object [0-9a-f]{40,64}|inflate: |loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
 
 type RepositoryCache struct {
-	Root string
-	run  func(context.Context, string, ...string) (string, error)
+	Root    string
+	run     func(context.Context, string, ...string) (string, error)
+	mu      sync.Mutex
+	queries map[string]*repoQueries
 }
 
 type CacheInfo struct {
@@ -80,10 +83,11 @@ func (c *RepositoryCache) ScanRepository(ctx context.Context, repo Repository, o
 	if repo.Path != expected.Path {
 		return nil, fmt.Errorf("repository path is outside its owned cache location")
 	}
-	if err := c.verify(ctx, repo); err != nil {
+	stamp, err := c.verify(ctx, repo)
+	if err != nil {
 		return nil, err
 	}
-	records, err := c.scanCached(ctx, repo, options)
+	records, err := c.scanCached(ctx, repo, options, stamp)
 	if err == nil || ctx.Err() != nil || !isObjectDamage(err) {
 		return records, err
 	}
@@ -158,11 +162,12 @@ func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string
 	} else if err != nil {
 		return "", err
 	}
-	if err := c.verify(ctx, repo); err != nil {
+	stamp, err := c.verify(ctx, repo)
+	if err != nil {
 		return "", err
 	}
-	ref := detectDefaultBranch(ctx, repo.Path)
-	oid, err := c.git(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	ref := detectDefaultBranchWith(ctx, repo.Path, c.scanQuery(stamp))
+	oid, err := c.cacheQuery(stamp)(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		return "", err
 	}
@@ -186,16 +191,18 @@ func (c *RepositoryCache) RefreshIfChanged(ctx context.Context, repo Repository,
 	if repo.Path != expected.Path {
 		return fmt.Errorf("repository path is outside its owned cache location")
 	}
-	if err := c.verify(ctx, repo); err != nil {
+	stamp, err := c.verify(ctx, repo)
+	if err != nil {
 		return c.Refresh(ctx, repo)
 	}
+	query := c.cacheQuery(stamp)
 	head := "refs/heads/" + branch
 	remote := "refs/remotes/origin/" + branch
-	target, err := c.git(ctx, repo.Path, "symbolic-ref", "HEAD")
+	target, err := query(ctx, repo.Path, "symbolic-ref", "HEAD")
 	if err != nil || strings.TrimSpace(target) != head {
 		return c.Refresh(ctx, repo)
 	}
-	refs, err := c.git(ctx, repo.Path, "for-each-ref", "--format=%(refname) %(symref) %(objecttype) %(objectname)")
+	refs, err := query(ctx, repo.Path, "for-each-ref", "--format=%(refname) %(symref) %(objecttype) %(objectname)")
 	if err != nil {
 		return c.Refresh(ctx, repo)
 	}
@@ -234,7 +241,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	if _, err := c.git(ctx, "", "check-ref-format", "refs/heads/"+repo.DefaultBranch); err != nil {
 		return fmt.Errorf("invalid default branch: %w", err)
 	}
-	if err := c.verify(ctx, repo); err == nil {
+	if _, err := c.verify(ctx, repo); err == nil {
 		return c.fetch(ctx, repo)
 	}
 	if err := ctx.Err(); err != nil {
@@ -251,6 +258,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(temporary) }()
+	defer c.forget(temporary)
 	replacement := repo
 	replacement.Path = temporary
 	if _, err := c.git(ctx, temporary, "init", "--bare", "--quiet", "--template=", "--object-format=sha1"); err != nil {
@@ -265,7 +273,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	if err := c.fetch(ctx, replacement); err != nil {
 		return err
 	}
-	if err := c.verify(ctx, replacement); err != nil {
+	if _, err := c.verify(ctx, replacement); err != nil {
 		return fmt.Errorf("verify replacement cache: %w", err)
 	}
 	if err := c.safePath(repo.Path); err != nil {
@@ -340,22 +348,58 @@ func (c *RepositoryCache) fetch(ctx context.Context, repo Repository) error {
 	if err != nil {
 		return err
 	}
-	for _, args := range [][]string{
-		{"config", "--replace-all", "remote.origin.fetch", refspec},
-		{"config", "remote.origin.tagOpt", "--no-tags"},
-		{"symbolic-ref", "refs/remotes/origin/HEAD", ref},
-		{"update-ref", head, strings.TrimSpace(oid)},
-		{"symbolic-ref", "HEAD", head},
-	} {
+	oid = strings.TrimSpace(oid)
+	settings, err := c.git(ctx, repo.Path, "config", "--local", "--no-includes", "--null", "--list")
+	if err != nil {
+		return err
+	}
+	values := make(map[string][]string)
+	for _, entry := range strings.Split(settings, "\x00") {
+		key, value, _ := strings.Cut(entry, "\n")
+		key = strings.ToLower(key)
+		values[key] = append(values[key], value)
+	}
+	refs, err := c.git(ctx, repo.Path, "for-each-ref", "--format=%(refname) %(symref) %(objectname)")
+	if err != nil {
+		return err
+	}
+	current := make(map[string]string)
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(refs), "\n") {
+		if name, rest, ok := strings.Cut(line, " "); ok {
+			current[name] = rest
+			names = append(names, name)
+		}
+	}
+	target, err := c.git(ctx, repo.Path, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		target = ""
+	}
+	same := func(key, value string) bool {
+		return len(values[key]) == 1 && values[key][0] == value
+	}
+	var writes [][]string
+	if !same("remote.origin.fetch", refspec) {
+		writes = append(writes, []string{"config", "--replace-all", "remote.origin.fetch", refspec})
+	}
+	if !same("remote.origin.tagopt", "--no-tags") {
+		writes = append(writes, []string{"config", "remote.origin.tagOpt", "--no-tags"})
+	}
+	if rest, ok := current["refs/remotes/origin/HEAD"]; !ok || !strings.HasPrefix(rest, ref+" ") {
+		writes = append(writes, []string{"symbolic-ref", "refs/remotes/origin/HEAD", ref})
+	}
+	if current[head] != " "+oid {
+		writes = append(writes, []string{"update-ref", head, oid})
+	}
+	if strings.TrimSpace(target) != head {
+		writes = append(writes, []string{"symbolic-ref", "HEAD", head})
+	}
+	for _, args := range writes {
 		if _, err := c.git(ctx, repo.Path, args...); err != nil {
 			return err
 		}
 	}
-	refs, err := c.git(ctx, repo.Path, "for-each-ref", "--format=%(refname)")
-	if err != nil {
-		return err
-	}
-	for _, old := range strings.Fields(refs) {
+	for _, old := range names {
 		if old != ref && old != head && old != "refs/remotes/origin/HEAD" {
 			if _, err := c.git(ctx, repo.Path, "update-ref", "--no-deref", "-d", old); err != nil {
 				return err
@@ -365,33 +409,28 @@ func (c *RepositoryCache) fetch(ctx context.Context, repo Repository) error {
 	return nil
 }
 
-func (c *RepositoryCache) verify(ctx context.Context, repo Repository) error {
+func (c *RepositoryCache) verify(ctx context.Context, repo Repository) (repoStamp, error) {
+	var none repoStamp
 	if err := c.safePath(repo.Path); err != nil {
-		return err
+		return none, err
 	}
-	if err := filepath.WalkDir(repo.Path, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("cache contains a symlink: %s", path)
-		}
-		return nil
-	}); err != nil {
-		return err
+	stamp, err := repositoryStamp(repo.Path)
+	if err != nil {
+		return none, err
 	}
 	marker, err := os.ReadFile(filepath.Join(repo.Path, "bigboard-cache"))
 	if err != nil || string(marker) != repo.ID+"\n" {
-		return fmt.Errorf("cache ownership is not verified for %s", repo.ID)
+		return none, fmt.Errorf("cache ownership is not verified for %s", repo.ID)
 	}
 	for _, path := range []string{"commondir", "gitdir", ".git", "config.worktree", "shallow", "objects/info/alternates", "objects/info/http-alternates"} {
 		if _, err := os.Lstat(filepath.Join(repo.Path, filepath.FromSlash(path))); !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("cache is not a complete independent clone")
+			return none, fmt.Errorf("cache is not a complete independent clone")
 		}
 	}
-	settings, err := c.git(ctx, repo.Path, "config", "--local", "--no-includes", "--null", "--list")
+	query := c.cacheQuery(stamp)
+	settings, err := query(ctx, repo.Path, "config", "--local", "--no-includes", "--null", "--list")
 	if err != nil {
-		return err
+		return none, err
 	}
 	origin := ""
 	for _, entry := range strings.Split(settings, "\x00") {
@@ -399,7 +438,7 @@ func (c *RepositoryCache) verify(ctx context.Context, repo Repository) error {
 		key = strings.ToLower(key)
 		if key == "remote.origin.url" {
 			if origin != "" {
-				return fmt.Errorf("cache has multiple origins")
+				return none, fmt.Errorf("cache has multiple origins")
 			}
 			origin = value
 		}
@@ -407,21 +446,21 @@ func (c *RepositoryCache) verify(ctx context.Context, repo Repository) error {
 			strings.HasPrefix(key, "credential.") || strings.HasPrefix(key, "http.") || strings.HasSuffix(key, ".proxy") ||
 			key == "core.worktree" || key == "core.sshcommand" || key == "core.gitproxy" ||
 			strings.HasPrefix(key, "extensions.") || strings.HasSuffix(key, ".promisor") || strings.HasSuffix(key, ".partialclonefilter") {
-			return fmt.Errorf("cache has unsupported configuration: %s", key)
+			return none, fmt.Errorf("cache has unsupported configuration: %s", key)
 		}
 	}
 	id, err := github.ParseOrigin(origin)
 	if err != nil || id != repo.ID {
-		return fmt.Errorf("cache origin does not match %s", repo.ID)
+		return none, fmt.Errorf("cache origin does not match %s", repo.ID)
 	}
-	bare, err := c.git(ctx, repo.Path, "rev-parse", "--is-bare-repository")
+	bare, err := query(ctx, repo.Path, "rev-parse", "--is-bare-repository")
 	if err != nil || strings.TrimSpace(bare) != "true" {
-		return fmt.Errorf("cache is not a bare repository")
+		return none, fmt.Errorf("cache is not a bare repository")
 	}
 	if _, err := os.Lstat(filepath.Join(repo.Path, damagedCacheFile)); !errors.Is(err, fs.ErrNotExist) {
-		return ErrCacheDamaged
+		return stamp, ErrCacheDamaged
 	}
-	return nil
+	return stamp, nil
 }
 
 func (c *RepositoryCache) CachedRepositories() ([]Repository, error) {
@@ -511,14 +550,16 @@ func (c *RepositoryCache) inventory() ([]Repository, []string) {
 				problems = append(problems, "unrecognized cache entry: "+filepath.Join(ownerPath, entry.Name()))
 				continue
 			}
-			if err := c.verify(ctx, repo); err != nil && !errors.Is(err, ErrCacheDamaged) {
+			stamp, err := c.verify(ctx, repo)
+			if err != nil && !errors.Is(err, ErrCacheDamaged) {
 				problems = append(problems, repo.ID+": "+err.Error())
 				continue
 			}
-			branch, err := c.git(ctx, repo.Path, "symbolic-ref", "refs/remotes/origin/HEAD")
+			query := c.cacheQuery(stamp)
+			branch, err := query(ctx, repo.Path, "symbolic-ref", "refs/remotes/origin/HEAD")
 			if err == nil {
 				repo.DefaultBranch = strings.TrimPrefix(strings.TrimSpace(branch), "refs/remotes/origin/")
-			} else if branch, err := c.git(ctx, repo.Path, "symbolic-ref", "HEAD"); err == nil {
+			} else if branch, err := query(ctx, repo.Path, "symbolic-ref", "HEAD"); err == nil {
 				repo.DefaultBranch = strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
 			}
 			repos = append(repos, repo)
@@ -535,9 +576,10 @@ func (c *RepositoryCache) Remove(id string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	if err := c.verify(ctx, repo); err != nil && !errors.Is(err, ErrCacheDamaged) {
+	if _, err := c.verify(ctx, repo); err != nil && !errors.Is(err, ErrCacheDamaged) {
 		return fmt.Errorf("refusing to remove unverified cache: %w", err)
 	}
+	defer c.forget(repo.Path)
 	root, err := os.OpenRoot(c.Root)
 	if err != nil {
 		return err

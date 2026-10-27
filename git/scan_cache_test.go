@@ -334,7 +334,7 @@ func TestScanCacheOptionalMaintenanceCancellationKeepsScan(t *testing.T) {
 	first := filepath.Join(dir, "first")
 	second := filepath.Join(dir, "second")
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-	program := fmt.Sprintf("#!/bin/sh\nfor arg do\nif [ \"$arg\" = --version ]; then\nif [ -f %s ]; then : > %s; exec sleep 30; fi\n: > %s\nfi\ndone\nexec %s \"$@\"\n", quote(first), quote(second), quote(first), quote(gitPath))
+	program := fmt.Sprintf("#!/bin/sh\nfor arg do\nif [ \"$arg\" = log ]; then : > %s; fi\nif [ \"$arg\" = config ] && [ -f %s ]; then : > %s; exec sleep 30; fi\ndone\nexec %s \"$@\"\n", quote(first), quote(first), quote(second), quote(gitPath))
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(program), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestScanCacheNonregularInputSkipsFingerprint(t *testing.T) {
 	}
 	cacheFixtureGit(t, repo.Path, "config", "mailmap.file", path)
 	ref := detectDefaultBranch(t.Context(), repo.Path)
-	if _, err := scanFingerprint(t.Context(), repo, ref, CollectOptions{}); err == nil {
+	if _, err := scanFingerprint(t.Context(), repo, ref, CollectOptions{}, runGitContext); err == nil {
 		t.Fatal("nonregular identity input accepted for cache fingerprinting")
 	}
 }

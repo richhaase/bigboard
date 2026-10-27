@@ -25,13 +25,14 @@ type scanCacheHeader struct {
 	Records int
 }
 
-func (c *RepositoryCache) scanCached(ctx context.Context, repo Repository, options CollectOptions) ([]CommitRecord, error) {
+func (c *RepositoryCache) scanCached(ctx context.Context, repo Repository, options CollectOptions, stamp repoStamp) ([]CommitRecord, error) {
 	identities, err := newIdentityResolver(options.Identities)
 	if err != nil {
 		return nil, err
 	}
-	ref := detectDefaultBranch(ctx, repo.Path)
-	key, keyErr := scanFingerprint(ctx, repo, ref, options)
+	query := c.scanQuery(stamp)
+	ref := detectDefaultBranchWith(ctx, repo.Path, query)
+	key, keyErr := scanFingerprint(ctx, repo, ref, options, query)
 	if keyErr == nil {
 		if records, err := readScanCache(repo.Path, key); err == nil {
 			return records, ctx.Err()
@@ -42,15 +43,18 @@ func (c *RepositoryCache) scanCached(ctx context.Context, repo Repository, optio
 		return nil, err
 	}
 	if keyErr == nil && ctx.Err() == nil {
-		current, err := scanFingerprint(ctx, repo, detectDefaultBranch(ctx, repo.Path), options)
-		if err == nil && current == key {
-			_ = writeScanCache(repo.Path, key, records)
+		if stamp, err := repositoryStamp(repo.Path); err == nil {
+			query = c.scanQuery(stamp)
+			current, err := scanFingerprint(ctx, repo, detectDefaultBranchWith(ctx, repo.Path, query), options, query)
+			if err == nil && current == key {
+				_ = writeScanCache(repo.Path, key, records)
+			}
 		}
 	}
 	return records, nil
 }
 
-func scanFingerprint(ctx context.Context, repo Repository, ref string, options CollectOptions) ([sha256.Size]byte, error) {
+func scanFingerprint(ctx context.Context, repo Repository, ref string, options CollectOptions, query gitRunner) ([sha256.Size]byte, error) {
 	var key [sha256.Size]byte
 	if !isCommitID(ref) {
 		return key, fmt.Errorf("scan revision is unresolved")
@@ -75,7 +79,7 @@ func scanFingerprint(ctx context.Context, repo Repository, ref string, options C
 	}
 	add(string(encoded))
 	add(ref)
-	version, err := runGitContext(ctx, repo.Path, "--version")
+	version, err := processQueries.run(ctx, repo.Path, "", "--version")
 	if err != nil {
 		return key, err
 	}
@@ -98,7 +102,7 @@ func scanFingerprint(ctx context.Context, repo Repository, ref string, options C
 		refs = append(refs, tree)
 	}
 	for _, input := range refs {
-		oid, err := runGitContext(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", input)
+		oid, err := query(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", input)
 		if err != nil {
 			return key, err
 		}
@@ -121,7 +125,11 @@ func scanFingerprint(ctx context.Context, repo Repository, ref string, options C
 		files = append(files, path)
 	}
 	for _, name := range []string{"GIT_ATTR_SYSTEM", "GIT_ATTR_GLOBAL"} {
-		path, err := runGitContext(ctx, repo.Path, "var", name)
+		scope := ""
+		if attributes, ok := settings["core.attributesfile"]; ok {
+			scope = repo.Path + "\x00" + attributes
+		}
+		path, err := processQueries.run(ctx, repo.Path, scope, "var", name)
 		if err != nil {
 			return key, err
 		}
