@@ -86,6 +86,8 @@ type Model struct {
 	returnView       ViewMode
 	local            localSnapshot
 	scan             scanBatch
+	startup          startupProgress
+	refreshAnimation refreshAnimation
 	authors          []stats.AuthorStats
 	repositories     []git.Repository
 	showScanErrors   bool
@@ -132,6 +134,9 @@ type RepoLoadedMsg struct {
 	Records    []git.CommitRecord
 	Err        error
 	FetchErr   error
+	Revision   string
+	Skipped    bool
+	Retained   bool
 }
 
 // DefaultTimeIndex is the TimePresets index used when no since config value is given.
@@ -143,6 +148,7 @@ const maxConcurrentRepoScans = 8
 type Options struct {
 	Settings               *SettingsOptions
 	PrepareRepository      func(context.Context, git.Repository) error
+	RepositoryRevision     func(context.Context, git.Repository) (string, error)
 	ScanRepository         func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
 	CacheInfo              func() (git.CacheInfo, error)
 	RemoveCachedRepository func(string) error
@@ -194,6 +200,10 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 		m.prProvider = defaultPRProvider()
 	}
 	m.resetPending()
+	if options.RepositoryRevision != nil && len(repositories) > 0 {
+		m.startup.pending = true
+		m.scan.phase = scanCached
+	}
 	if len(repositories) == 0 {
 		m.finalizeLoad()
 	}
@@ -286,6 +296,9 @@ func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
 	if ctx == nil {
 		ctx = m.scanContext
 	}
+	if m.scan.phase != scanDefault || (m.scan.localOnly && m.startup.pending) {
+		return m.commands.wrap(m.startupRepoCmd(ctx, repository))
+	}
 	return m.commands.wrap(loadRepoCmd(ctx, repository, m.options, m.scan.generation, !m.scan.localOnly && !m.excludedRepos[repository.ID]))
 }
 
@@ -296,6 +309,13 @@ func (m *Model) finalizeLoad() {
 	}
 	initial := m.loading
 	m.local = snapshot
+	if m.scan.phase == scanCached {
+		m.startup.cachedAt = time.Now()
+	}
+	if m.scan.phase == scanStartupFetch {
+		m.startup.fetchedAt = time.Now()
+		m.startup.pending = false
+	}
 	m.err = m.local.loadError()
 	m.loading = false
 	m.rebuildAreaDefinitions()
@@ -349,10 +369,18 @@ func (m *Model) startLocalRefresh() tea.Cmd {
 
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if tick, ok := msg.(refreshTickMsg); ok {
+		return m.updateRefreshTick(tick)
+	}
 	next, cmd := m.update(msg)
 	updated := next.(Model)
+	updated.refreshAnimation = m.refreshAnimation
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		updated.refreshAnimation.ready = true
+	}
 	updated.normalizeActivityContributors()
-	return updated, cmd
+	animation := updated.refreshTickCmd()
+	return updated, tea.Batch(cmd, animation)
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -414,13 +442,28 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.loading {
-			m.bootLines = append(slices.Clip(m.bootLines), bootLine(msg.Repository.Name, msg.Err == nil))
+			line := bootLine(msg.Repository.Name, msg.Err == nil && msg.FetchErr == nil)
+			if msg.Skipped {
+				line = StyleDimWhite.Render("  " + displayText(msg.Repository.Name) + " · not cached yet")
+			}
+			m.bootLines = append(slices.Clip(m.bootLines), line)
 		}
 		if m.scan.remaining == 0 {
+			if m.scan.phase == scanCached {
+				return m.finishCachedStartup()
+			}
 			localOnly := m.scan.localOnly
+			startupFetch := m.scan.phase == scanStartupFetch
 			m.finalizeLoad()
 			if localOnly {
+				if m.startup.pending {
+					cmd := m.startStartupFetch()
+					return m, cmd
+				}
 				return m, nil
+			}
+			if startupFetch {
+				return m, m.cacheInfoCmd()
 			}
 			return m, tea.Batch(m.startPRRefresh(), m.cacheInfoCmd())
 		}
@@ -905,6 +948,12 @@ func (m Model) renderBootSequence() string {
 	if m.options.PrepareRepository != nil {
 		label = "PREPARING CACHE · CLONING / FETCHING / SCANNING"
 	}
+	switch m.scan.phase {
+	case scanCached:
+		label = "READING CACHED HISTORY · OFFLINE"
+	case scanStartupFetch:
+		label = "PREPARING CACHE · CLONING / FETCHING / SCANNING"
+	}
 	lines = append(lines, "", StyleSubtitle.Render("  ◈ "+label), "")
 
 	done := len(m.bootLines)
@@ -917,7 +966,7 @@ func (m Model) renderBootSequence() string {
 		shown = shown[len(shown)-maxShown:]
 	}
 	lines = append(lines, shown...)
-	lines = append(lines, "", StyleDimCyan.Render(fmt.Sprintf("  ▐ %d/%d repos ▌", done, total)))
+	lines = append(lines, "", StyleDimCyan.Render(fmt.Sprintf("  %s ▐ %d/%d repos ▌", m.refreshGlyph(), done, total)))
 	lines = append(lines, StyleHelpKey.Render("  ? help · q quit"))
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }

@@ -73,6 +73,35 @@ func (c *RepositoryCache) ScanRepository(ctx context.Context, repo Repository, o
 	return ScanRepository(ctx, repo, options)
 }
 
+func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	expected, err := c.Repository(repo.ID, repo.DefaultBranch)
+	if err != nil {
+		return "", err
+	}
+	if repo.Path != expected.Path {
+		return "", fmt.Errorf("repository path is outside its owned cache location")
+	}
+	if _, err := os.Lstat(repo.Path); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if err := c.verify(ctx, repo, false); err != nil {
+		return "", err
+	}
+	ref := detectDefaultBranch(ctx, repo.Path)
+	oid, err := c.git(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(oid), nil
+}
+
 func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
