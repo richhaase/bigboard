@@ -76,8 +76,8 @@ not listed for your account. Saving reloads the selected repositories; canceling
 configuration and active board unchanged. If startup discovery fails, setup
 shows the error and lets you retry after correcting `gh` access.
 
-The shared scope row shows the active range. Press `t` to open Date range in the
-filter modal. Space stages a preset or opens custom entry for 1–3650 days;
+The shared scope row shows the active range. Press `t` to focus Date range options
+in the filter modal. Space stages a preset or opens custom entry for 1–3650 days;
 Enter applies pending choices and Esc cancels.
 Range changes filter the loaded history in memory, with no scan or fetch.
 The initial range defaults to 14 days. Set
@@ -313,7 +313,9 @@ Enter opens a deeper directory or a file's commit history. Commit evidence uses
 the available height and pages by visible commits.
 
 All three boards share an in-memory **date range and repository viewing scope**.
-`f` opens the same centered filter modal; `t` opens its Date range category directly.
+`f` opens the same centered filter modal at a vertical category overview, grouped
+under Shared scope and the current board. Each category shows its current selection; `*` marks
+pending changes. `t` opens Date range with its options focused.
 Shared choices apply to every board. Activity has Git contributor and bot filters;
 Contributors has its own bot setting; PRs has Mine, GitHub author, review, checks, and
 open/draft filters. Each board keeps its own search. Git identities and GitHub
@@ -324,15 +326,23 @@ Arrows, Page Up/Down, and Home/End navigate the list. Inclusion choices keep
 their existing session-only behavior. Use Settings (`,`) to save personal account,
 organization, and repository choices across launches.
 
-In the filter modal, left/right or Tab changes categories, up/down selects an option,
-and Space stages a choice. Multiple values within a category match any selected
-value; different categories must all match. Enter applies all staged choices;
-Esc cancels. `/` finds options, and the Search category edits the board search.
-Custom days are validated before being staged, then applied with the other choices.
-Reset shared selects All time and all tracked repositories. Reset this board
-clears its filters and searches while preserving shared scope and navigation.
-`x` performs that board reset directly. Active shared scope and board filters
-have separate rows beneath the title; cached inventory has a separate status row.
+The filter modal shows categories beside their options when space permits; narrow
+terminals show one pane at a time. Tab or Shift+Tab changes pane focus; left focuses
+categories and right focuses options. Up/down, Page Up/Down, and Home/End move
+within the focused pane. Space opens a category's options, then stages choices
+in the options pane. Multiple values within a category match any selected value;
+different categories must all match. Enter applies the entire draft from either
+pane; Esc cancels it. `/` finds options and focuses their pane. The Search category
+edits the board search. In a text editor, Enter keeps the edit in the draft and
+Esc cancels only that edit; a later Enter applies all pending changes. Custom days
+must be valid before they can be staged.
+
+Inside Filters, `x` stages Reset this board, clearing its filters and searches
+while preserving shared scope and navigation. `X` stages Reset shared, selecting
+All time and all tracked repositories. Both resets require Enter to apply; Esc
+discards them. Outside the modal, `x` clears board filters and searches directly.
+Active shared scope and board filters have separate rows beneath the title;
+cached inventory has a separate status row.
 
 The footer separates board navigation, a few contextual actions, and help/refresh
 into compact groups. Keys are brighter than labels. Extra shortcuts live in `?`
@@ -358,7 +368,7 @@ location. Applied filters are cleared explicitly, never by Back.
 | `←` / `Esc` | Close or return one level; preserve applied filters; stay at board roots |
 | `/` | Search the current board list or Activity lens; reopen the existing query for editing |
 | `s` / `S` | Change sort / reverse order in sortable lists |
-| `f` / `t` | Open Filters / open its shared Date range category directly |
+| `f` / `t` | Open Filters category overview / focus shared Date range options |
 | `x` | Clear this board’s filters and search; preserve shared scope and location |
 | `i` | Open Repository controls to choose tracked repositories or remove unlisted cached clones |
 | `,` | Open Settings to save personal repositories, organizations, and repository exclusions |
@@ -433,7 +443,7 @@ The PR board shows open PRs across included repositories updated within the
 global date range. `t` changes that range for all three boards; All time restores
 all open PRs. Missing update timestamps appear only in All time. Local person
 and bot filters do not apply. `f` edits shared repositories and PR filters in one
-modal. `u`, `v`, `k`, and `d` open its author, review, checks, and state categories.
+modal. `u`, `v`, `k`, and `d` open it with author, review, checks, and state options focused.
 The Mine category offers **Authored by me** and **Review requested from me**.
 It uses the current GitHub account from `gh`, resolved once per remote refresh
 within the same request budget and cooldown. Select both to include either kind
@@ -506,13 +516,15 @@ only that clone. Data status (`e`) shows these entries, total cache size, locati
 and any cache problems. Choosing a group or excluding a listed repository does
 not make its cache eligible for removal.
 
-`t` opens Date range in the shared filter modal on all three boards and their details.
+`t` focuses Date range options in the shared filter modal on all three boards and their details.
 It uses commit author time for local history and last-updated time for PRs.
-Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days. Home selects the first
-preset; End selects Custom. Space stages a preset or opens day entry.
+Choose 1d / 7d / 14d / 30d / 90d / 1y / all / Custom days, or Since last look when
+a bookmark is available. Home/End selects the first/last option. Space stages a
+preset or opens day entry.
 Custom entry accepts 1–3650 days; Backspace edits and Ctrl+U clears it. Enter
-stages a valid custom range; Enter from the options applies the whole draft.
-Esc cancels. Custom ranges are session-only. Range affects all three boards;
+stages a valid custom range; Enter from either pane applies the whole draft.
+Esc during entry cancels that edit; outside entry it cancels the draft.
+Custom ranges are session-only. Range affects all three boards;
 Activity and Contributors each keep their own bot visibility.
 
 ## Config file

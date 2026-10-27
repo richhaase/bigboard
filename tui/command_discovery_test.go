@@ -59,7 +59,7 @@ func TestCommandDiscoveryFilterHelpDescribesOwnedControls(t *testing.T) {
 					m = keyboardContractPress(t, m, "/")
 				}
 				bindings := commandDiscoveryBindings(t, m)
-				for _, key := range []string{"e", "r", "i", "f", "t", "x"} {
+				for _, key := range []string{"e", "r", "i", "f", "t"} {
 					if _, exists := bindings[key]; exists {
 						t.Fatalf("filter help advertises inactive board action %q", key)
 					}
@@ -71,8 +71,26 @@ func TestCommandDiscoveryFilterHelpDescribesOwnedControls(t *testing.T) {
 					if !strings.Contains(bindings["Enter"], "Keep this edit") || !strings.Contains(bindings["Esc"], "Cancel this edit") {
 						t.Fatalf("text editor help confuses editing with applying filters: %#v", bindings)
 					}
-				} else if bindings["Enter"] != "Apply all pending changes" || !strings.Contains(bindings["Esc"], "Cancel pending changes") || bindings["Space"] == "" {
-					t.Fatalf("filter help lost staging, Apply or Cancel: %#v", bindings)
+					if bindings["x"] != "" || bindings["X"] != "" {
+						t.Fatalf("text editor advertises reset shortcuts: %#v", bindings)
+					}
+				} else {
+					if bindings["Enter"] != "Apply all pending changes" || !strings.Contains(bindings["Esc"], "Cancel pending changes") || !strings.Contains(bindings["Space"], "stage a choice") {
+						t.Fatalf("filter help lost staging, Apply or Cancel: %#v", bindings)
+					}
+					for _, key := range []string{"Tab / Shift+Tab", "← / →", "↑ / ↓", "PgUp / PgDn", "Home / End", "/"} {
+						if !strings.Contains(strings.ToLower(bindings[key]), "focus") {
+							t.Fatalf("filter help does not explain pane focus for %q: %q", key, bindings[key])
+						}
+					}
+					for _, key := range []string{"x", "X"} {
+						if !strings.Contains(bindings[key], "Stage reset") || !strings.Contains(bindings[key], "Enter applies") {
+							t.Fatalf("filter reset %q is missing or bypasses Apply: %q", key, bindings[key])
+						}
+					}
+					if bindings["← / → / Tab"] != "" || bindings["Reset shared"] != "" || bindings["Reset this board"] != "" {
+						t.Fatalf("filter help still describes category tabs or reset categories: %#v", bindings)
+					}
 				}
 			})
 		}

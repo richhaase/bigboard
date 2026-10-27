@@ -86,7 +86,7 @@ func TestSharedFiltersDraftDoesNotAliasAppliedOrPriorModels(t *testing.T) {
 func TestSharedFilterNavigationDoesNotStageHighlightedRows(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 80, 24
-	m = keyboardContractPress(t, m, "p", "f", "right", "down")
+	m = keyboardContractPress(t, m, "p", "f", "down", "right", "down")
 	if !m.filterOptionSelected("") || m.filterOptionSelected(m.filterOptions()[1].value) {
 		t.Fatal("cursor was confused with a checked selection")
 	}
@@ -95,8 +95,8 @@ func TestSharedFilterNavigationDoesNotStageHighlightedRows(t *testing.T) {
 		t.Fatalf("cursor and checkbox are not visually distinct:\n%s", view)
 	}
 	m = keyboardContractPress(t, m, "left", "right", "tab")
-	if m.filters.category != "shared-reset" {
-		t.Fatal("arrows and Tab did not traverse the same categories")
+	if m.filters.category != "repos" || !m.filters.categoryFocus || m.filters.rows["repos"] != 1 {
+		t.Fatal("switching panes changed the selected category or option")
 	}
 	m = keyboardContractPress(t, m, "enter")
 	if len(m.sharedRepos) > 0 || m.timeIdx != DefaultTimeIndex {
@@ -160,7 +160,7 @@ func TestSharedFiltersResetScopeAndBoardIndependently(t *testing.T) {
 		m.setGlanceQuery("kept-activity-search")
 		m.personID, m.prRepoID = "context-person", "/sample/gateway"
 		beforeRange := m.timeIdx
-		m = chooseFilterOption(t, m, "board-reset", "reset")
+		m = keyboardContractPress(t, m, "f", "x")
 		m = keyboardContractPress(t, m, "enter")
 		if !reflect.DeepEqual(m.sharedRepos, filterValues{"/sample/gateway"}) || m.timeIdx != beforeRange || m.personID != "context-person" || m.prRepoID != "/sample/gateway" {
 			t.Fatalf("%s reset discarded shared scope or navigation", board)
@@ -179,7 +179,7 @@ func TestSharedFiltersResetScopeAndBoardIndependently(t *testing.T) {
 				t.Fatal("PR reset affected the wrong board")
 			}
 		}
-		m = chooseFilterOption(t, m, "shared-reset", "reset")
+		m = keyboardContractPress(t, m, "f", "X")
 		m = keyboardContractPress(t, m, "enter")
 		if len(m.sharedRepos) != 0 || m.timeIdx != len(TimePresets)-1 || m.customRangeDays != 0 || m.prRepoID != "/sample/gateway" || m.personID != "context-person" {
 			t.Fatal("shared reset changed navigation or failed to clear shared scope")
@@ -247,7 +247,7 @@ func TestSharedFilterModalFitsEveryBoardAndCategory(t *testing.T) {
 						t.Fatalf("%s/%s/%v modal overflowed", board, category.id, size)
 					}
 				}
-				for _, want := range []string{"Shared:", "This board:", "↑↓", "Enter apply", "Esc cancel", "? help"} {
+				for _, want := range []string{category.label, "↑↓", "Enter apply", "Esc cancel", "? help"} {
 					if !strings.Contains(view, want) {
 						t.Fatalf("%s/%s/%v missing %q:\n%s", board, category.id, size, want, view)
 					}

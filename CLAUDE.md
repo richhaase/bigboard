@@ -176,8 +176,11 @@ clears applied filters. At a normal board root it stays there. Search Enter
 accepts text; Escape restores the previous applied query. While typing, shortcut
 letters are literal; F1 opens help and Ctrl+C quits.
 
-`f` opens one shared filter modal; `t` opens its Date range category. Shared scope is
-date plus repository viewing selection, applied in memory across all boards.
+`f` opens one shared filter modal at a vertical category overview, grouped into
+Shared scope and the current board, with selection summaries and `*` for pending changes.
+`t` opens its Date range options directly. Wide layouts place categories beside
+options; narrow layouts show only the focused pane. Shared scope is date plus
+repository viewing selection, applied in memory across all boards.
 `i` separately manages repository tracking/refresh coverage and explicit removal
 of cached repositories no longer listed by organization discovery. Board-specific
 filters: Activity Git contributors/bots, Contributors bots/name search, PRs
@@ -188,14 +191,19 @@ team membership is never inferred. Missing login clears account evidence and
 leaves selected Mine filters empty with a visible reason. Git identities are not
 GitHub accounts.
 Multiple values within a facet are OR; facets combine with AND. Empty selections
-mean All. Left/right and Tab switch categories, arrows/page keys select options,
-Space stages choices, Enter applies the entire draft, Escape cancels. Custom-day
-and search editors accept into the draft before the final Apply. Reset shared
-means All time/all tracked repositories. Reset board and `x` clear board filters
-and searches without changing shared scope or navigation. Use copy-on-write for
-pending selections so canceled edits cannot mutate the source model.
+mean All. Tab/Shift+Tab changes pane focus; left focuses categories, right options.
+Arrows, page keys and Home/End move within the focused pane. Space from categories
+opens options; Space in options stages a choice. `/` finds options and focuses
+their pane. Enter applies the entire draft from either pane; Escape cancels.
+Custom-day and search editors keep an edit in the draft with Enter or cancel
+only that edit with Escape. Inside the modal, `x` stages Reset this board and `X`
+stages Reset shared; both require Enter to apply and are actions, not categories.
+Reset shared means All time/all tracked repositories. Reset this board clears
+board filters and searches without changing shared scope or navigation. Outside
+the modal, `x` applies that board reset directly. Use copy-on-write for pending
+selections so canceled edits cannot mutate the source model.
 
-PR shortcuts `u`/`v`/`k`/`d` open Authors/Review/Checks/State in the common modal.
+PR shortcuts `u`/`v`/`k`/`d` focus Authors/Review/Checks/State options in the common modal.
 Activity `v` opens a contextual repository PR list using shared scope and no
 unrelated saved PR filters. It snapshots only PR UI state, never fetched data.
 Back from the contextual list returns to Activity and restores the saved normal

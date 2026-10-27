@@ -234,7 +234,7 @@ func TestPRScopePickerFitsAndExplainsControls(t *testing.T) {
 	for _, size := range [][2]int{{40, 18}, {80, 24}, {120, 36}} {
 		m := normalizedPRFixture()
 		m.width, m.height = size[0], size[1]
-		m = keyboardContractPress(t, m, "p", "f", "right", "end")
+		m = keyboardContractPress(t, m, "p", "f", "down", "right", "end")
 		for _, line := range strings.Split(m.View(), "\n") {
 			if ansi.StringWidth(line) > m.width {
 				t.Fatal("scope picker overflowed")

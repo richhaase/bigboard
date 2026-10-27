@@ -62,7 +62,7 @@ func (m Model) currentHelp() screenHelp {
 		help.sections = append(help.sections, helpSection{"Copy", []helpBinding{{"y", "Copy the entire filtered list as Markdown (OSC 52 terminal clipboard support required)"}}})
 	}
 	if !m.identityMerge.open && !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
-		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: shared scope and this board's filters"}, {"t", "Date range: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
+		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: category overview with current selections"}, {"t", "Date range options: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
 	}
 	if !m.identityMerge.open && !m.filters.open && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
 		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Data status: Git/PR freshness, coverage and diagnostics"}}})
@@ -102,11 +102,13 @@ func (m Model) screenHelp() screenHelp {
 			}}}}
 		}
 		return screenHelp{"Filters", []helpSection{{"Choose", []helpBinding{
-			{"← / → / Tab", "Change category; Shift+Tab moves backward"}, {"↑ / ↓", "Select an option"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last option"},
-			{"Space", "Change pending selection"}, {"/", "Find options"}, {"Enter", "Apply all pending changes"}, {"Esc", "Cancel pending changes; return to the board"}, {"q / Ctrl+C", "Quit BigBoard"},
+			{"Tab / Shift+Tab", "Move focus between categories and options"}, {"← / →", "Focus categories / options"}, {"↑ / ↓", "Select a category or option in the focused pane"}, {"PgUp / PgDn", "Move a page in the focused pane"}, {"Home / End", "First / last category or option in the focused pane"},
+			{"Space", "Open category options; in options, stage a choice"}, {"/", "Find options; focus the options pane"}, {"Enter", "Apply all pending changes"}, {"Esc", "Cancel pending changes; return to the board"}, {"q / Ctrl+C", "Quit BigBoard"},
+		}}, {"Reset", []helpBinding{
+			{"x", "Stage reset of this board's filters and search; Enter applies"}, {"X", "Stage reset of shared scope to All time and all tracked repositories; Enter applies"},
 		}}, {"Scope", []helpBinding{
 			{"Shared", "Date range and viewed repositories affect every board; tracking is unchanged"}, {"This board", "Other filters stay on this board"}, {"Selections", "Any selected value; all categories must match"},
-			{"Reset shared", "All time and all tracked repositories"}, {"Reset this board", "Clear board filters and search; keep your location"},
+			{"*", "Category has pending changes"}, {"Panes", "Categories and options sit side by side when space permits; narrow terminals show the focused pane"},
 		}}}}
 	}
 	if m.showScanErrors {

@@ -13,11 +13,14 @@ import (
 func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 120, 36
-	m = keyboardContractPress(t, m, "p", "f", "right", "/", "gateway", "enter", " ", "enter")
+	m = keyboardContractPress(t, m, "p", "f", "down", "right", "/", "gateway", "enter", " ", "enter")
 	if len(m.visiblePRs()) != 3 || len(m.sharedRepos) != 1 || m.sharedRepos[0] != "/sample/gateway" || m.prRepoID != "" {
 		t.Fatal("repository search did not select the repository")
 	}
-	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", " ", "right", "home", "down", "down", "down", " ", "right", "home", "down", " ", "right", "end", " ", "enter")
+	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", " ")
+	m = keyboardContractPress(t, m, "left", "down", "right", "home", "down", "down", "down", " ")
+	m = keyboardContractPress(t, m, "left", "down", "right", "home", "down", " ")
+	m = keyboardContractPress(t, m, "left", "down", "right", "end", " ", "enter")
 	prs := m.visiblePRs()
 	if len(prs) != 1 || prs[0].Number != 102 || !prs[0].Draft {
 		t.Fatalf("combined filters returned wrong PRs: %+v", prs)
@@ -35,8 +38,7 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 	if len(m.visiblePRs()) != 3 || len(m.excludedRepos) != 0 || !m.prFilters.empty() || m.prRepoID != "" {
 		t.Fatal("board reset changed shared scope or failed to clear PR filters")
 	}
-	m.openFilters("shared-reset")
-	m = keyboardContractPress(t, m, " ", "enter")
+	m = keyboardContractPress(t, m, "f", "X", "enter")
 	if len(m.visiblePRs()) != 48 || len(m.sharedRepos) != 0 || len(m.excludedRepos) != 0 {
 		t.Fatal("shared reset did not restore the included repository scope")
 	}
@@ -57,9 +59,9 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 	if !m.prFilters.empty() || m.filters.open {
 		t.Fatal("cancel applied pending author")
 	}
-	m = keyboardContractPress(t, m, "f", "tab")
-	if m.filters.category != "repos" {
-		t.Fatal("Tab did not advance filter category")
+	m = keyboardContractPress(t, m, "f", "down", "tab")
+	if m.filters.category != "repos" || m.filters.categoryFocus {
+		t.Fatal("Tab did not focus the selected category's options")
 	}
 	m = keyboardContractPress(t, m, "end", "a")
 	if m.showPRs || m.filters.open || !m.prFilters.empty() {
@@ -129,9 +131,9 @@ func TestPRFilterModalPreservesBoardAndPagesItsOwnViewport(t *testing.T) {
 		m.width, m.height = size[0], size[1]
 		m = keyboardContractPress(t, m, "p", "down")
 		before := ansi.Strip(m.View())
-		m = keyboardContractPress(t, m, "f", "right")
+		m = keyboardContractPress(t, m, "f", "down", "right")
 		view := ansi.Strip(m.View())
-		wants := []string{"Filters · PRs", "[Repos]", "Find options", "staged choices", "Enter apply", "Esc cancel", "╭"}
+		wants := []string{"Filters · PRs", "Repositories · choices", "Find options", "No pending changes", "Enter apply", "Esc cancel", "╭"}
 		if m.height < 18 {
 			wants = []string{"Resize to 40×18", "Esc cancels"}
 		}
@@ -152,7 +154,7 @@ func TestPRFilterModalPreservesBoardAndPagesItsOwnViewport(t *testing.T) {
 		if m.width >= 80 && !strings.Contains(view, "BIGBOARD / Pull requests") {
 			t.Fatal("filter picker replaced the board")
 		}
-		_, page := filterModalSize(m.width, m.height)
+		page := filterOptionPageSize(m.width, m.height)
 		m = keyboardContractPress(t, m, "pgdown")
 		if m.filters.rows["repos"] != page {
 			t.Fatal("filter paging did not use modal viewport")
