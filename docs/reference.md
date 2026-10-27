@@ -262,6 +262,8 @@ its repository cache. Reuse does not certify remote freshness or advance the
 last-look bookmark; the remote verification/fetch pass still runs. Cached repositories
 no longer listed by discovery are retained. Select one in Repository controls,
 press `d`, then Enter to explicitly confirm removal after refresh has finished.
+A rebuilt cache deletes the previous copy once the replacement is published;
+leftover temporary copies from interrupted refreshes are removed automatically.
 A group selection or exclusion does not make a listed repository removable.
 
 Configuration defaults to `$XDG_CONFIG_HOME/bigboard/config.json`, or

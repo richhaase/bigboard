@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func cacheFixtureGit(t *testing.T, dir string, args ...string) string {
@@ -317,6 +318,7 @@ func TestRepositoryCacheScanDamageRebuildsOnRefresh(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(repo.Path, damagedCacheFile)); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("damage marker carried over: %v", err)
 			}
+			assertNoTemporaryCaches(t, cache, repo)
 			records, err := cache.ScanRepository(context.Background(), repo, CollectOptions{})
 			if err != nil || len(records) != 2 {
 				t.Fatalf("rebuilt scan: %d records, %v", len(records), err)
@@ -394,7 +396,21 @@ func TestRepositoryCacheRefreshIfChangedRejectsForeignPathAndCancellation(t *tes
 	}
 }
 
-func TestRepositoryCacheReplacementRetainsInvalidData(t *testing.T) {
+func assertNoTemporaryCaches(t *testing.T, cache *RepositoryCache, repo Repository) {
+	t.Helper()
+	for _, prefix := range []string{replacedCachePrefix, cloneCachePrefix} {
+		leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(repo.Path), prefix+"*"))
+		if err != nil || len(leftovers) != 0 {
+			t.Fatalf("temporary cache directories remain: %v, %v", leftovers, err)
+		}
+	}
+	repos, err := cache.CachedRepositories()
+	if err != nil || len(repos) != 1 || repos[0].ID != repo.ID {
+		t.Fatalf("inventory after replacement: %v, %v", repos, err)
+	}
+}
+
+func TestRepositoryCacheReplacementRetainsInvalidDataUntilPublished(t *testing.T) {
 	for _, kind := range []string{"wrong-origin", "shallow", "partial", "unowned", "redirect"} {
 		t.Run(kind, func(t *testing.T) {
 			cache, repo, _ := cacheFixture(t)
@@ -443,14 +459,111 @@ func TestRepositoryCacheReplacementRetainsInvalidData(t *testing.T) {
 			if err := cache.Refresh(context.Background(), repo); err != nil {
 				t.Fatal(err)
 			}
-			backups, err := filepath.Glob(filepath.Join(filepath.Dir(repo.Path), ".bigboard-replaced-*", "project.git", "retained-data"))
-			if err != nil || len(backups) != 1 {
-				t.Fatalf("invalid cache was not retained: %v, %v", backups, err)
-			}
+			assertNoTemporaryCaches(t, cache, repo)
 			if _, err := os.Stat(sentinel); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("replacement reused invalid cache contents")
 			}
 		})
+	}
+}
+
+func makeTemporaryCache(t *testing.T, path string, age time.Duration) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(path, "project.git", "objects"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "project.git", "objects", "pack"), []byte("old clone"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().Add(-age)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryCacheInventoryCleansStaleTemporaryDirectories(t *testing.T) {
+	cache, repo, _ := cacheFixture(t)
+	if err := cache.Refresh(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	owner := filepath.Dir(repo.Path)
+	staleReplaced := filepath.Join(owner, replacedCachePrefix+"stale")
+	staleClone := filepath.Join(owner, cloneCachePrefix+"stale")
+	active := filepath.Join(owner, replacedCachePrefix+"active")
+	makeTemporaryCache(t, staleReplaced, 2*staleTemporaryAge)
+	makeTemporaryCache(t, staleClone, 2*staleTemporaryAge)
+	makeTemporaryCache(t, active, time.Second)
+	info, err := cache.Info([]Repository{repo})
+	if err != nil || len(info.Problems) != 0 {
+		t.Fatalf("info: %v, %v", info.Problems, err)
+	}
+	for _, path := range []string{staleReplaced, staleClone} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale temporary directory retained: %s", path)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(active, "project.git", "objects", "pack")); err != nil {
+		t.Fatalf("active temporary directory removed: %v", err)
+	}
+	var size int64
+	if err := filepath.WalkDir(cache.Root, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.Type().IsRegular() {
+			stat, statErr := entry.Info()
+			if statErr != nil {
+				return statErr
+			}
+			size += stat.Size()
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info.Bytes != size {
+		t.Fatalf("cache size=%d, want %d after cleanup", info.Bytes, size)
+	}
+	if repos, err := cache.CachedRepositories(); err != nil || len(repos) != 1 {
+		t.Fatalf("inventory with active temporary directory: %v, %v", repos, err)
+	}
+}
+
+func TestRepositoryCacheTemporaryCleanupNeverFollowsLinks(t *testing.T) {
+	cache, repo, _ := cacheFixture(t)
+	if err := cache.Refresh(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	makeTemporaryCache(t, outside, 2*staleTemporaryAge)
+	link := filepath.Join(filepath.Dir(repo.Path), replacedCachePrefix+"link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.CachedRepositories(); err == nil {
+		t.Fatal("symlinked temporary entry was not reported")
+	}
+	if err := cache.removeTemporary(link); err == nil {
+		t.Fatal("removed a symlinked temporary entry")
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("symlink removed: %v", err)
+	}
+	misplaced := []string{
+		filepath.Join(cache.Root, replacedCachePrefix+"root"),
+		filepath.Join(cache.Root, "github.com", replacedCachePrefix+"host"),
+		filepath.Join(outside, replacedCachePrefix+"outside"),
+	}
+	for _, path := range misplaced {
+		makeTemporaryCache(t, path, 2*staleTemporaryAge)
+		if err := cache.removeTemporary(path); err == nil {
+			t.Fatalf("removed misplaced entry %s", path)
+		}
+	}
+	if _, err := cache.CachedRepositories(); err == nil {
+		t.Fatal("misplaced temporary entries were not reported")
+	}
+	for _, path := range append(misplaced, filepath.Join(outside, "project.git", "objects", "pack")) {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("misplaced or linked data removed: %s: %v", path, err)
+		}
 	}
 }
 

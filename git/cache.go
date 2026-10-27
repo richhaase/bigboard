@@ -18,6 +18,12 @@ import (
 
 const damagedCacheFile = "bigboard-damaged"
 
+const (
+	replacedCachePrefix = ".bigboard-replaced-"
+	cloneCachePrefix    = ".bigboard-clone-"
+	staleTemporaryAge   = 2 * gitTimeout
+)
+
 var ErrCacheDamaged = errors.New("repository cache is damaged and will be rebuilt on refresh")
 
 var objectDamagePattern = regexp.MustCompile(`(?i)(unable to read|could not read) [0-9a-f]{40,64}|missing (blob|tree|commit) [0-9a-f]{40,64}|bad object [0-9a-f]{40,64}|inflate: |could not parse object|loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
@@ -240,7 +246,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	if err := c.safePath(repo.Path); err != nil {
 		return err
 	}
-	temporary, err := os.MkdirTemp(filepath.Dir(repo.Path), ".bigboard-clone-")
+	temporary, err := os.MkdirTemp(filepath.Dir(repo.Path), cloneCachePrefix)
 	if err != nil {
 		return err
 	}
@@ -267,7 +273,7 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	}
 	backup := ""
 	if _, err := os.Lstat(repo.Path); err == nil {
-		backup, err = os.MkdirTemp(filepath.Dir(repo.Path), ".bigboard-replaced-")
+		backup, err = os.MkdirTemp(filepath.Dir(repo.Path), replacedCachePrefix)
 		if err != nil {
 			return err
 		}
@@ -286,7 +292,41 @@ func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 		}
 		return err
 	}
+	if backup != "" {
+		_ = c.removeTemporary(filepath.Dir(backup))
+	}
 	return nil
+}
+
+func (c *RepositoryCache) removeTemporary(path string) error {
+	name := filepath.Base(path)
+	owner := filepath.Dir(path)
+	if !strings.HasPrefix(name, replacedCachePrefix) && !strings.HasPrefix(name, cloneCachePrefix) {
+		return fmt.Errorf("not a temporary cache directory: %s", path)
+	}
+	if filepath.Dir(filepath.Dir(owner)) != filepath.Clean(c.Root) || filepath.Base(filepath.Dir(owner)) != "github.com" {
+		return fmt.Errorf("temporary cache directory is outside an owner directory: %s", path)
+	}
+	if err := c.safePath(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("temporary cache entry is not a directory: %s", path)
+	}
+	root, err := os.OpenRoot(c.Root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	rel, err := filepath.Rel(c.Root, path)
+	if err != nil {
+		return err
+	}
+	return root.RemoveAll(rel)
 }
 
 func (c *RepositoryCache) fetch(ctx context.Context, repo Repository) error {
@@ -455,6 +495,16 @@ func (c *RepositoryCache) inventory() ([]Repository, []string) {
 			continue
 		}
 		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), replacedCachePrefix) || strings.HasPrefix(entry.Name(), cloneCachePrefix) {
+				path := filepath.Join(ownerPath, entry.Name())
+				info, err := os.Lstat(path)
+				if err != nil || !info.IsDir() {
+					problems = append(problems, "unrecognized cache entry: "+path)
+				} else if time.Since(info.ModTime()) > staleTemporaryAge {
+					_ = c.removeTemporary(path)
+				}
+				continue
+			}
 			id := owner.Name() + "/" + strings.TrimSuffix(entry.Name(), ".git")
 			repo, err := c.Repository(id, "")
 			if err != nil || !strings.HasSuffix(entry.Name(), ".git") || !entry.IsDir() || repo.Path != filepath.Join(ownerPath, entry.Name()) {
