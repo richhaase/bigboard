@@ -82,3 +82,34 @@ func TestFilterByCanonicalIdentityRetainsOriginalCopiesAndOrder(t *testing.T) {
 		t.Fatal("filtering changed the input records")
 	}
 }
+
+func TestRecordSelectionReusesCanonicalCopiesAcrossMemberships(t *testing.T) {
+	missing := git.CommitRecord{RepoID: "a", Author: "Missing", Added: 2}
+	shallow := git.CommitRecord{CommitID: "shared", RepoID: "a", Author: "Alias", Email: "alias@test", LinesUnknown: true}
+	full := git.CommitRecord{CommitID: "shared", RepoID: "b", Author: "Canonical", Email: "canonical@test", Added: 7}
+	records := []git.CommitRecord{shallow, missing, full, missing}
+	selection := stats.NewRecordSelection(records)
+	for _, test := range []struct {
+		repo string
+		want []git.CommitRecord
+	}{
+		{"a", []git.CommitRecord{missing, missing, full}},
+		{"b", []git.CommitRecord{full}},
+		{"absent", nil},
+		{"a", []git.CommitRecord{missing, missing, full}},
+	} {
+		var inspected []git.CommitRecord
+		got := selection.MatchingCopy(func(record git.CommitRecord) bool {
+			inspected = append(inspected, record)
+			return record.RepoID == test.repo
+		})
+		if !reflect.DeepEqual(got, test.want) || !reflect.DeepEqual(inspected, records) {
+			t.Fatalf("selection for %s changed membership, ordering or attribution: %#v", test.repo, got)
+		}
+	}
+	filtered := stats.NewRecordSelection(stats.FilterByRepo(records, map[string]bool{"b": true}))
+	got := filtered.MatchingCopy(func(record git.CommitRecord) bool { return record.RepoID == "a" })
+	if !reflect.DeepEqual(got, []git.CommitRecord{missing, missing, shallow}) {
+		t.Fatalf("selection reused a filtered-out canonical copy: %#v", got)
+	}
+}

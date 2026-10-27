@@ -36,13 +36,16 @@ func (m Model) activityRepositories() []activityRow {
 	}
 	var result []activityRow
 	records := m.activityRecords()
+	selection := stats.NewRecordSelection(records)
 	for _, repo := range m.local.repositories {
 		if !m.repoInView(repo.ID) {
 			continue
 		}
 		activity := activityRow{scopeID: repo.ID, label: repo.Name, repositoryID: repo.ID}
 		var kept []git.CommitRecord
-		for _, r := range m.recordsInRepository(repo, records) {
+		for _, r := range selection.MatchingCopy(func(record git.CommitRecord) bool {
+			return record.RepoID == repo.ID || record.RepoID == "" && record.RepoName == repo.Name
+		}) {
 			kept = append(kept, r)
 			activity.commits++
 			activity.observe(r)

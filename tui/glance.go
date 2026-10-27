@@ -193,7 +193,8 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.handleActivityContributorKey(key) {
+	projection := m.prepareActivityProjection()
+	if m.handleActivityContributorKey(key, projection) {
 		return m, nil
 	}
 	switch key {
@@ -246,9 +247,9 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleGlanceDetailKey(key), nil
 	}
 	if m.directory.active {
-		return m.handleDirectoryKey(key), nil
+		return m.handleDirectoryKey(key, projection.rows), nil
 	}
-	rows := m.glanceRepositories()
+	rows := projection.rows
 	selected := m.selectedRepository(rows)
 	switch key {
 	case "s":

@@ -41,25 +41,25 @@ func (m *Model) activityContributorSelection() (activityRow, bool) {
 	if m.glance.detailOpen || m.showPaths || m.areaRepoID != "" && !m.directory.active {
 		return activityRow{}, false
 	}
-	if m.directory.active {
-		rows := m.directoryRows()
-		if len(rows) > 0 {
-			return rows[m.selectedDirectory(rows)], true
-		}
-	} else {
-		rows := m.glanceRepositories()
-		if len(rows) > 0 {
-			return rows[m.selectedRepository(rows)], true
-		}
-	}
-	return activityRow{}, false
+	return m.prepareActivityProjection().contributorSelection(m)
 }
 
 func (m *Model) normalizeActivityContributors() {
 	if m.viewMode != ViewAwareness || m.showPRs {
 		return
 	}
-	row, ok := m.activityContributorSelection()
+	if m.glance.detailOpen || m.showPaths || m.areaRepoID != "" && !m.directory.active {
+		m.contributorPane = activityContributorPane{}
+		return
+	}
+	m.normalizeProjectedContributors(m.prepareActivityProjection())
+}
+
+func (m *Model) normalizeProjectedContributors(projection activityProjection) {
+	if m.viewMode != ViewAwareness || m.showPRs {
+		return
+	}
+	row, ok := projection.contributorSelection(m)
 	if !ok {
 		m.contributorPane = activityContributorPane{}
 		return
@@ -76,9 +76,9 @@ func (m *Model) normalizeActivityContributors() {
 	m.contributorPane.offset = max(0, min(m.contributorPane.offset, len(row.people)-page))
 }
 
-func (m *Model) handleActivityContributorKey(key string) bool {
-	m.normalizeActivityContributors()
-	row, ok := m.activityContributorSelection()
+func (m *Model) handleActivityContributorKey(key string, projection activityProjection) bool {
+	m.normalizeProjectedContributors(projection)
+	row, ok := projection.contributorSelection(m)
 	if !ok {
 		return false
 	}

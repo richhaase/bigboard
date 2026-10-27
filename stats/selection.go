@@ -2,10 +2,23 @@ package stats
 
 import "github.com/richhaase/bigboard/git"
 
+type RecordSelection struct {
+	records []git.CommitRecord
+	unique  []git.CommitRecord
+}
+
+func NewRecordSelection(records []git.CommitRecord) RecordSelection {
+	return RecordSelection{records: records, unique: UniqueRecords(records)}
+}
+
 func UniqueRecordsWithMatchingCopy(records []git.CommitRecord, matches func(git.CommitRecord) bool) []git.CommitRecord {
+	return NewRecordSelection(records).MatchingCopy(matches)
+}
+
+func (s RecordSelection) MatchingCopy(matches func(git.CommitRecord) bool) []git.CommitRecord {
 	members := make(map[string]bool)
 	var result []git.CommitRecord
-	for _, record := range records {
+	for _, record := range s.records {
 		if !matches(record) {
 			continue
 		}
@@ -15,7 +28,7 @@ func UniqueRecordsWithMatchingCopy(records []git.CommitRecord, matches func(git.
 			members[record.CommitID] = true
 		}
 	}
-	for _, record := range UniqueRecords(records) {
+	for _, record := range s.unique {
 		if record.CommitID != "" && members[record.CommitID] {
 			result = append(result, record)
 		}
