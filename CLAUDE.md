@@ -24,7 +24,7 @@ tui/board_layout.go     Shared headings and width-aware fitting of explicit foot
 tui/components.go       Shared UI: banner, stat boxes, impact bars, help bar, footer, table state
 tui/help.go             Shared contextual help modal, keyboard capture, and terminal-sized overlay
 tui/aggregate.go        Contributors table (scrollable, AI% column, BOT tag)
-tui/operativeview.go    Per-contributor detail: repo breakdown, gap-aware monthly timeline, neon heatmap, derived metrics
+tui/operativeview.go    Per-contributor detail: repo breakdown, range-aware timeline, heatmap, derived metrics
 tui/repooverlay.go      Centered repo inclusion/exclusion modal
 ```
 
@@ -84,6 +84,16 @@ go test ./...
 GitHub PR context loads automatically with existing gh authentication for supported origins. There is no feature toggle. Missing gh/authentication leaves local history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped, each refresh shares a 128-call cap, and provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No polling, automatic retries, persistent cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial snapshots retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
 
 ## Progressive disclosure
+
+Contributor detail uses daily timeline buckets through 30 days, Sunday-aligned
+weekly buckets through 180 days, and the existing latest-12-month timeline for
+longer ranges and All time. Short-range timelines fill quiet dates across the
+selected rolling window, including partial boundary dates, while preserving
+future records. The daily-cell matrix trims to that window through 180 days,
+masks out-of-scope dates, and labels the visible interval when width limits it.
+Filtering and chart bounds share a reference time; calendar markers preserve
+local dates across DST. Line bars, unknown qualifiers, AI counts and heatmap
+normalization retain their existing meanings.
 
 `tui/worklist*.go` owns repository and directory rankings. Enter follows literal child directories, then files and commit evidence. `s` cycles lines changed, commits, recency, and name; bars always show added/removed lines. Tab/Shift+Tab moves focus between the ranking and its contributor pane; arrows, paging, Home/End scroll the focused pane, and Esc/left returns focus to the ranking before navigating back. The pane has no Enter action. `1`–`3` opens the current directory scope's Commits/People/Related evidence; `4` returns to its directory ranking. Detail lenses retain Tab cycling. Hidden panes cannot receive focus; changing the selected scope resets the pane offset. Esc navigates to the parent with applied searches and filters preserved; during text entry it restores the prior query. Directory line totals are computed from retained per-file counts. Commit counts can overlap across directories. Configured named areas remain secondary related evidence and never replace the literal directory hierarchy. `p` resumes the normal PR board; `v` opens a temporary repository PR context with a return to Activity.
 

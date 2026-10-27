@@ -34,8 +34,11 @@ func (v OperativeView) RenderOperativeDetail(
 	records []git.CommitRecord,
 	width int,
 ) string {
+	return v.renderOperativeDetail(authorName, authorStats, records, width, activityChartWindow{now: time.Now()})
+}
+
+func (v OperativeView) renderOperativeDetail(authorName string, authorStats *stats.AuthorStats, records []git.CommitRecord, width int, window activityChartWindow) string {
 	var sections []string
-	now := time.Now()
 
 	sections = append(sections, RenderSectionHeader(fmt.Sprintf("CONTRIBUTOR: %s", strings.ToUpper(authorName)), width))
 
@@ -65,14 +68,14 @@ func (v OperativeView) RenderOperativeDetail(
 
 	if len(authorRecords) > 0 {
 		sections = append(sections, "")
-		sections = append(sections, RenderSectionHeader("ACTIVITY TIMELINE", width))
+		sections = append(sections, RenderSectionHeader("ACTIVITY TIMELINE · "+window.timelineLabel(), width))
 		sections = append(sections, "")
-		sections = append(sections, v.renderTimeline(authorRecords, width))
+		sections = append(sections, v.renderTimelineWindow(authorRecords, width, window))
 
 		sections = append(sections, "")
 		sections = append(sections, RenderSectionHeader("ACTIVITY MATRIX", width))
 		sections = append(sections, "")
-		sections = append(sections, v.renderHeatmap(authorRecords, width, now))
+		sections = append(sections, v.renderHeatmapWindow(authorRecords, width, window))
 	}
 
 	return wrapStatistics(strings.Join(sections, "\n"), width)
@@ -109,32 +112,29 @@ func heatmapRamp() []struct {
 }
 
 func (v OperativeView) renderHeatmap(records []git.CommitRecord, width int, now time.Time) string {
-	now = now.In(time.Local)
+	return v.renderHeatmapWindow(records, width, activityChartWindow{now: now})
+}
+
+func (v OperativeView) renderHeatmapWindow(records []git.CommitRecord, width int, window activityChartWindow) string {
 	days, maxV := stats.ActivityByDay(records, time.Local)
 	maxV = max(1, maxV)
 
-	weeks := width - chromeInset - 6
-	if weeks < 12 {
-		weeks = 12
-	}
-	if weeks > 53 {
-		weeks = 53
-	}
-
-	firstCol := now.AddDate(0, 0, -7*(weeks-1))
-	startSunday := firstCol.AddDate(0, 0, -int(firstCol.Weekday()))
+	startSunday, firstDay, lastDay, weeks := window.heatmapDates(width)
 
 	ramp := heatmapRamp()
 	weekdays := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 
 	var rows []string
+	if window.shortRange() {
+		rows = append(rows, StyleDimWhite.Render("  "+firstDay.Format("Jan 02, 2006")+" – "+lastDay.Format("Jan 02, 2006")))
+	}
 	for wd := 0; wd < 7; wd++ {
 		var b strings.Builder
 		b.WriteString("  ")
 		b.WriteString(StyleDimWhite.Render(fmt.Sprintf("%-4s", weekdays[wd])))
 		for col := 0; col < weeks; col++ {
 			cellDate := startSunday.AddDate(0, 0, col*7+wd)
-			if cellDate.After(now) {
+			if cellDate.Before(firstDay) || cellDate.After(lastDay) {
 				b.WriteString(" ")
 				continue
 			}
@@ -256,17 +256,17 @@ func wrapStatistics(content string, width int) string {
 }
 
 func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) string {
-	months := aggregateByMonth(records)
-	if len(months) == 0 {
+	return v.renderTimelineWindow(records, width, activityChartWindow{})
+}
+
+func (v OperativeView) renderTimelineWindow(records []git.CommitRecord, width int, window activityChartWindow) string {
+	buckets := window.timeline(records)
+	if len(buckets) == 0 {
 		return StyleSubtitle.Render("  No activity data")
 	}
 
-	if len(months) > 12 {
-		months = months[len(months)-12:]
-	}
-
 	maxTotal := 0
-	for _, m := range months {
+	for _, m := range buckets {
 		total := m.Added + m.Removed
 		if total > maxTotal {
 			maxTotal = total
@@ -274,8 +274,9 @@ func (v OperativeView) renderTimeline(records []git.CommitRecord, width int) str
 	}
 
 	var rows []string
-	for _, m := range months {
-		label := StyleDimWhite.Render(fmt.Sprintf("%-10s", m.Month.Format("Jan 2006")))
+	for _, m := range buckets {
+		date := m.Start.Format(window.timelineDateFormat())
+		label := StyleDimWhite.Render(fmt.Sprintf("%-*s", max(10, len(date)+1), date))
 		count := StyleNumeric.Render(fmt.Sprintf("%4d ", m.Commits))
 		suffix := ""
 		if m.UnknownLineCommits > 0 {

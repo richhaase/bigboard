@@ -88,10 +88,14 @@ type RepoContribution struct {
 
 // FilterByTime returns records within d from now. d == 0 returns all records.
 func FilterByTime(records []git.CommitRecord, d time.Duration) []git.CommitRecord {
+	return FilterByTimeAt(records, d, time.Now())
+}
+
+func FilterByTimeAt(records []git.CommitRecord, d time.Duration, now time.Time) []git.CommitRecord {
 	if d == 0 {
 		return records
 	}
-	cutoff := time.Now().Add(-d)
+	cutoff := now.Add(-d)
 	out := make([]git.CommitRecord, 0, len(records))
 	for _, r := range records {
 		if r.Date.After(cutoff) {

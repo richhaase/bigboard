@@ -21,6 +21,77 @@ type DayActivity struct {
 	LinesUnknown bool
 }
 
+type TimelineInterval int
+
+const (
+	TimelineDaily TimelineInterval = iota
+	TimelineWeekly
+)
+
+type TimelineActivity struct {
+	Start              time.Time
+	Commits            int
+	Added              int
+	Removed            int
+	AI                 int
+	UnknownLineCommits int
+}
+
+func ActivityTimeline(records []git.CommitRecord, location *time.Location, start, end time.Time, interval TimelineInterval) []TimelineActivity {
+	days := 1
+	switch interval {
+	case TimelineDaily:
+	case TimelineWeekly:
+		days = 7
+	default:
+		return nil
+	}
+
+	byStart := make(map[time.Time]*TimelineActivity)
+	if !start.After(end) {
+		last := timelineStart(end, location, interval)
+		for current := timelineStart(start, location, interval); !current.After(last); current = current.AddDate(0, 0, days) {
+			byStart[current] = &TimelineActivity{Start: current}
+		}
+	}
+	for _, record := range records {
+		key := timelineStart(record.Date, location, interval)
+		bucket := byStart[key]
+		if bucket == nil {
+			bucket = &TimelineActivity{Start: key}
+			byStart[key] = bucket
+		}
+		bucket.Commits++
+		if record.LinesUnknown {
+			bucket.UnknownLineCommits++
+		} else {
+			bucket.Added += record.Added
+			bucket.Removed += record.Removed
+		}
+		if record.AIAssisted {
+			bucket.AI++
+		}
+	}
+
+	timeline := make([]TimelineActivity, 0, len(byStart))
+	for _, bucket := range byStart {
+		timeline = append(timeline, *bucket)
+	}
+	sort.Slice(timeline, func(i, j int) bool {
+		return timeline[i].Start.Before(timeline[j].Start)
+	})
+	return timeline
+}
+
+func timelineStart(date time.Time, location *time.Location, interval TimelineInterval) time.Time {
+	year, month, day := date.In(location).Date()
+	start := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	if interval == TimelineWeekly {
+		start = start.AddDate(0, 0, -int(start.Weekday()))
+	}
+	return start
+}
+
 func ActivityByMonth(records []git.CommitRecord, location *time.Location) []MonthActivity {
 	byMonth := make(map[string]*MonthActivity)
 	for _, record := range records {

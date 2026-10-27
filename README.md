@@ -162,6 +162,14 @@ uses `PgUp` / `PgDn` to scroll and `Home` / `End` for the first or last page;
 `↑` / `↓` still switches contributors. Its navigation remains visible while
 scrolling through the timeline and activity matrix.
 
+Contributor timelines use daily buckets for ranges up to 30 days, weekly buckets
+for 31–180 days, and monthly buckets for longer ranges or All time. Daily and
+weekly timelines include quiet dates within the selected range; their bars still
+show added and removed lines, alongside commit counts. For ranges up to 180 days,
+the activity matrix shows only the covered calendar dates, including partially
+covered boundary days. Its date caption identifies the visible interval when a
+narrow terminal cannot fit the whole range.
+
 ## Automatic GitHub PR awareness
 
 Read-only open pull request context loads automatically for supported GitHub
