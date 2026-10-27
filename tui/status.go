@@ -199,6 +199,30 @@ func (m Model) dataStatusLines(width int) []string {
 	} else {
 		add(fmt.Sprintf("%d known open PRs cached across all dates.", len(m.allPRs())))
 	}
+	missingFiles, missingReviews := 0, 0
+	prs := m.allPRs()
+	for _, pr := range prs {
+		if !pr.FilesComplete {
+			missingFiles++
+		}
+		if !pr.RequestedReviewersComplete || !pr.ReviewsComplete {
+			missingReviews++
+		}
+	}
+	if len(prs) > 0 {
+		add(fmt.Sprintf("%d/%d PRs have complete current-file lists.", len(prs)-missingFiles, len(prs)))
+	}
+	if missingFiles > 0 {
+		add(StyleAmber.Render(fmt.Sprintf("Areas unknown for %d PRs; directory counts may omit affected paths.", missingFiles)))
+	}
+	if missingReviews > 0 {
+		add(fmt.Sprintf("%d PRs have incomplete reviewer/review details.", missingReviews))
+	}
+	if m.prState.requestBudget > 0 {
+		add(fmt.Sprintf("Last refresh requests: %d/%d · inventory %d · additional files %d.",
+			m.prState.inventoryRequests+m.prState.fileRequests, m.prState.requestBudget,
+			m.prState.inventoryRequests, m.prState.fileRequests))
+	}
 	var first, last time.Time
 	supported, snapshots, unsupported := 0, 0, 0
 	for _, repo := range repos {
@@ -243,10 +267,16 @@ func (m Model) dataStatusLines(width int) []string {
 		if err == nil {
 			err = snapshot.err
 		}
-		if !m.scanErrorDetails && (errors.Is(err, gh.ErrUnsupportedOrigin) || exists && !snapshot.partial && err == nil) {
+		unknownAreas := 0
+		for _, pr := range snapshot.prs {
+			if !pr.FilesComplete {
+				unknownAreas++
+			}
+		}
+		if !m.scanErrorDetails && (errors.Is(err, gh.ErrUnsupportedOrigin) || exists && !snapshot.partial && err == nil && snapshot.filesErr == nil && unknownAreas == 0) {
 			continue
 		}
-		state := "complete"
+		state := "inventory complete"
 		switch {
 		case errors.Is(err, gh.ErrUnsupportedOrigin):
 			state = "not applicable"
@@ -258,6 +288,9 @@ func (m Model) dataStatusLines(width int) []string {
 			state = "PARTIAL"
 		}
 		add(StyleTitle.Render(displayText(repo.Name) + " · " + state))
+		if unknownAreas > 0 {
+			add(fmt.Sprintf("  Areas unknown for %d PRs; current-file lists incomplete.", unknownAreas))
+		}
 		if !snapshot.checked.IsZero() {
 			add("  Last checked: " + snapshot.checked.Local().Format("Jan 02 15:04:05 MST"))
 		}
@@ -266,6 +299,9 @@ func (m Model) dataStatusLines(width int) []string {
 		}
 		if m.scanErrorDetails && err != nil {
 			add("  " + displayText(err.Error()))
+		}
+		if m.scanErrorDetails && snapshot.filesErr != nil {
+			add("  File details: " + displayText(snapshot.filesErr.Error()))
 		}
 	}
 	if time.Now().Before(m.prState.nextRefresh) {

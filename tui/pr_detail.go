@@ -48,7 +48,7 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	snapshot := m.prState.snapshots[pr.Repo]
 	add("Checked   "+prDetailTime(snapshot.checked), StyleDimWhite)
 	add("Checks and conflicts do not establish merge readiness.", StyleDimWhite)
-	if snapshot.err != nil || snapshot.partial || !pr.FilesComplete || !pr.ContextComplete || !pr.PreviousPathsComplete {
+	if snapshot.err != nil || snapshot.partial || !pr.FilesComplete || !pr.RequestedReviewersComplete || !pr.ReviewsComplete || !pr.PreviousPathsComplete {
 		section("Coverage")
 		if snapshot.err != nil || snapshot.partial {
 			add("STALE/PARTIAL snapshot · retained evidence may no longer be current", StyleAmber)
@@ -60,10 +60,10 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 			}
 		}
 		if !pr.FilesComplete {
-			add("PARTIAL files · other areas may be affected", StyleAmber)
+			add("Areas unknown · changed-file coverage is incomplete", StyleAmber)
 		}
-		if !pr.ContextComplete {
-			add("PARTIAL review/context data · unknown is not approval", StyleAmber)
+		if !pr.RequestedReviewersComplete || !pr.ReviewsComplete {
+			add("PARTIAL reviewer/review details · unknown is not approval", StyleAmber)
 		}
 		if !pr.PreviousPathsComplete {
 			add("Rename origins unavailable · current paths shown", StyleDimWhite)
@@ -183,8 +183,11 @@ func (m Model) renderPRDetailModal(background string, pr gh.PullRequest, width, 
 	heading := fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
 	snapshot := m.prState.snapshots[pr.Repo]
 	status, style := "Range: "+m.rangeLabel()+" · PR updated time", StyleDimWhite
-	if !pr.ContextComplete || !pr.FilesComplete || !pr.RequestedReviewersComplete || !pr.ReviewsComplete {
-		status, style = "PARTIAL context · details below", StyleAmber
+	if !pr.RequestedReviewersComplete || !pr.ReviewsComplete {
+		status, style = "Review details incomplete · see below", StyleAmber
+	}
+	if !pr.FilesComplete {
+		status, style = "Areas unknown · files incomplete", StyleAmber
 	}
 	if snapshot.err != nil || snapshot.partial {
 		status, style = "STALE/PARTIAL · retained snapshot", StyleAmber

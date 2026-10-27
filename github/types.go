@@ -74,6 +74,9 @@ type PullRequest struct {
 	CheckState         string
 	Mergeable          string
 	UpdatedAt          time.Time
+	HeadOID            string
+	BaseOID            string
+	FileCount          int
 	Draft              bool
 	Files              []File
 
@@ -102,10 +105,19 @@ func (p PullRequest) Key() string {
 // PR's completeness flags for bounded supporting context. Err can accompany
 // useful partial data, including a complete inventory with incomplete files.
 type Result struct {
-	Repo     string
-	PRs      []PullRequest
-	Complete bool
+	Repo              string
+	PRs               []PullRequest
+	Complete          bool
+	InventoryErr      error
+	FilesErr          error
+	InventoryRequests int
+	FileRequests      int
 	// RetryAt is shared quota cooldown metadata, including exhausted successful responses.
 	RetryAt time.Time
 	Err     error
+}
+
+type RepositoryRequest struct {
+	Repo     string
+	Previous []PullRequest
 }

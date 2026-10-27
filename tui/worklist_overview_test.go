@@ -35,7 +35,8 @@ func TestRepositoryOverviewShowsScopedCountsAndRecency(t *testing.T) {
 	}
 	m.prState.snapshots = nil
 	withoutPRs := strings.Split(ansi.Strip(m.View()), "\n")
-	if withoutPRs[columns] != lines[columns] || withoutPRs[firstRow] != lines[firstRow] {
+	prStart := 7 + l.name + l.commits + l.people + l.added + l.removed + l.bar + 6
+	if withoutPRs[columns] != lines[columns] || ansi.Cut(withoutPRs[firstRow], 0, prStart) != ansi.Cut(lines[firstRow], 0, prStart) || ansi.Cut(withoutPRs[firstRow], prStart+l.prs, m.width) != ansi.Cut(lines[firstRow], prStart+l.prs, m.width) {
 		t.Fatal("PR availability shifted the activity comparison columns")
 	}
 }

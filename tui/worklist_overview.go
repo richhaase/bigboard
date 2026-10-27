@@ -9,16 +9,21 @@ import (
 )
 
 type repositoryOverviewLayout struct {
-	name, commits, people, added, removed, bar, age int
+	name, commits, people, added, removed, bar, prs, age int
 }
 
 func repositoryOverviewWidths(width int) repositoryOverviewLayout {
 	l := repositoryOverviewLayout{name: max(1, width-5), commits: 7, people: 6, added: 10, removed: 10, age: 7}
+	if width >= 150 {
+		l.prs = activityPRWideWidth
+	} else if width >= 66 {
+		l.prs = 9
+	}
 	if width >= 96 {
 		l.name = min(36, max(20, width/4))
-		l.bar = max(1, width-5-l.name-l.commits-l.people-l.added-l.removed-l.age-6)
+		l.bar = max(1, width-5-l.name-l.commits-l.people-l.added-l.removed-l.age-l.prs-7)
 	} else if width >= 66 {
-		l.name = width - 5 - l.commits - l.people - l.age - 3
+		l.name = width - 5 - l.commits - l.people - l.age - l.prs - 4
 	}
 	return l
 }
@@ -35,6 +40,11 @@ func (m Model) repositoryOverviewColumns(width int) string {
 		if width >= 96 {
 			cells = append(cells, StyleBarCyan.Render(rightCells("ADDED", l.added)), StyleBarMagenta.Render(rightCells("REMOVED", l.removed)), padCells("LINES +/-", l.bar))
 		}
+		prLabel := "OPEN PRs"
+		if l.prs > 9 {
+			prLabel = strings.Join([]string{rightCells("OPEN PRs", activityPROpenWidth), rightCells("FAIL", activityPRFailWidth), rightCells("CHANGES", activityPRChangesWidth)}, " ")
+		}
+		cells = append(cells, rightCells(prLabel, l.prs))
 		cells = append(cells, rightCells("LATEST", l.age))
 	}
 	return StyleDimWhite.Render(strings.Join(cells, " "))
@@ -107,6 +117,7 @@ func (m Model) worklistRepositoryRow(r activityRow, selected bool, width, rank, 
 		if width >= 96 {
 			cells = append(cells, rightCells(addedText, l.added), rightCells(removedText, l.removed), bar(l.bar))
 		}
+		cells = append(cells, rightCells(m.activityPRSignal(r).render(l.prs > 9), l.prs))
 		cells = append(cells, rightCells(age, l.age))
 		lines = append(lines, strings.Join(cells, " "))
 	} else {

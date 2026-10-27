@@ -95,8 +95,8 @@ func TestPRFailurePartialAndOriginFailureRetainEvidence(t *testing.T) {
 	old.FilesComplete = false
 	result.PRs = []gh.PullRequest{old}
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": result}, checked: now})
-	if len(m.allPRs()[0].Files) != 2 {
-		t.Fatal("partial files silently lost old mappings")
+	if len(m.allPRs()[0].Files) != 0 || m.allPRs()[0].FilesComplete {
+		t.Fatal("partial refresh retained unverified old file mappings")
 	}
 }
 func TestPRScopeDedupAndLocalFiltersIndependent(t *testing.T) {
@@ -200,8 +200,8 @@ func TestPRCompleteInventoryRemovesClosedEvenWithPartialContext(t *testing.T) {
 	incoming.FilesComplete = false
 	incoming.ContextComplete = false
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Repo: "org/repo", Complete: true, PRs: []gh.PullRequest{incoming}}}, checked: time.Now()})
-	if len(m.allPRs()) != 1 || m.allPRs()[0].Number != 8 || !m.prState.snapshots["org/repo"].partial {
-		t.Fatal("complete inventory retained closed PR")
+	if len(m.allPRs()) != 1 || m.allPRs()[0].Number != 8 || m.prState.snapshots["org/repo"].partial {
+		t.Fatal("complete inventory retained closed PR or became incomplete because of missing files")
 	}
 	m.areaRepoID = "/api"
 	if len(m.scopePRs("unknown")) != 1 {

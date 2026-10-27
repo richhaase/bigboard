@@ -16,12 +16,20 @@ type budgetKey struct{}
 type requestBudget struct {
 	mu        sync.Mutex
 	remaining int
+	limit     int
 }
 
 // WithRequestBudget shares a request allowance across repository fetches. Local
 // origin lookups do not consume it. Cancellation never refunds a started call.
 func WithRequestBudget(ctx context.Context, requests int) context.Context {
-	return context.WithValue(ctx, budgetKey{}, &requestBudget{remaining: max(0, requests)})
+	return context.WithValue(ctx, budgetKey{}, &requestBudget{remaining: max(0, requests), limit: max(0, requests)})
+}
+
+func repositoryRequestLimit(ctx context.Context, fallback int) int {
+	if budget, ok := ctx.Value(budgetKey{}).(*requestBudget); ok && fallback == MaxRequests {
+		return max(1, budget.limit/2)
+	}
+	return fallback
 }
 func takeRequest(ctx context.Context) bool {
 	budget, ok := ctx.Value(budgetKey{}).(*requestBudget)

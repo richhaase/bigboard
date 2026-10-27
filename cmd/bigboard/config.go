@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
 )
@@ -16,18 +17,19 @@ import (
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
-	Paths         []string                        `json:"paths"`
-	Exclude       []string                        `json:"exclude"`
-	Sort          string                          `json:"sort"`
-	Since         string                          `json:"since"`
-	Theme         string                          `json:"theme"`
-	Fuzzy         bool                            `json:"fuzzy"`
-	AllFiles      bool                            `json:"all_files"`
-	Depth         int                             `json:"depth"`
-	Groups        map[string][]string             `json:"groups"`
-	AIIdentities  []string                        `json:"ai_identities"`
-	BotIdentities []string                        `json:"bot_identities"`
-	WorkAreas     map[string][]stats.WorkAreaRule `json:"work_areas"`
+	Paths           []string                        `json:"paths"`
+	Exclude         []string                        `json:"exclude"`
+	Sort            string                          `json:"sort"`
+	Since           string                          `json:"since"`
+	Theme           string                          `json:"theme"`
+	Fuzzy           bool                            `json:"fuzzy"`
+	AllFiles        bool                            `json:"all_files"`
+	Depth           int                             `json:"depth"`
+	Groups          map[string][]string             `json:"groups"`
+	AIIdentities    []string                        `json:"ai_identities"`
+	BotIdentities   []string                        `json:"bot_identities"`
+	WorkAreas       map[string][]stats.WorkAreaRule `json:"work_areas"`
+	PRRequestBudget int                             `json:"pr_request_budget"`
 }
 
 func defaultConfigPath() string {
@@ -42,7 +44,7 @@ func defaultConfigPath() string {
 }
 
 func loadConfig(path string, explicit bool) (*Config, error) {
-	var cfg Config
+	cfg := Config{PRRequestBudget: gh.MaxRefreshRequests}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) && !explicit {
@@ -76,6 +78,9 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 		if err := stats.ValidateWorkAreaRules(rules); err != nil {
 			return nil, fmt.Errorf("work_areas %q: %w", repository, err)
 		}
+	}
+	if cfg.PRRequestBudget < 1 {
+		return nil, fmt.Errorf("pr_request_budget must be a positive integer")
 	}
 	return &cfg, nil
 }
