@@ -48,6 +48,9 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 	if m.sinceLastLook(pr.UpdatedAt) {
 		add("+ updated since last look", StyleCyan)
 	}
+	if prInactiveAt(pr.UpdatedAt, m.prUpdatedReference(pr)) {
+		add("! Inactive · no PR update for 14+ days", StyleAmber)
+	}
 	snapshot := m.prState.snapshots[pr.Repo]
 	add("Checked   "+prDetailTime(snapshot.checked), StyleDimWhite)
 	add("Checks and conflicts do not establish merge readiness.", StyleDimWhite)
@@ -104,7 +107,11 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 		case "PENDING":
 			label, style = "Pending", StyleAmber
 		}
-		add(githubIdentity(review.Author)+" · "+label, style)
+		text := githubIdentity(review.Author) + " · " + label
+		if !review.SubmittedAt.IsZero() {
+			text += " · " + prDetailTime(review.SubmittedAt)
+		}
+		add(text, style)
 	}
 	if len(pr.Reviews) > 0 && !pr.ReviewsComplete {
 		add("PARTIAL review history", StyleAmber)

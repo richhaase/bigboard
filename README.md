@@ -444,14 +444,19 @@ global date range. `t` changes that range for all three boards; All time restore
 all open PRs. Missing update timestamps appear only in All time. Local person
 and bot filters do not apply. `f` edits shared repositories and PR filters in one
 modal. `u`, `v`, `k`, and `d` open it with author, review, checks, and state options focused.
-The Mine category offers **Authored by me** and **Review requested from me**.
-It uses the current GitHub account from `gh`, resolved once per remote refresh
-within the same request budget and cooldown. Select both to include either kind
-of PR; other facets and search still narrow the results. Review requests match
-explicit user logins only; team membership is not inferred. Bounded reviewer
-coverage may omit requests, as reported in Data status and PR details. If the
-account cannot be resolved, Mine shows the reason and selected Mine filters show
-no results. Git contributor aliases do not affect these filters.
+The Mine category offers **Authored by me**, **Review requested from me**, and
+**Updated since my review**. It uses the current GitHub account from `gh`, resolved
+once per remote refresh within the same request budget and cooldown. Selected
+Mine values combine with OR; other facets and search still narrow the results.
+Review requests match explicit user logins only; team membership is not inferred.
+Updated since my review compares PR last-updated time with your latest known
+submitted review. It includes any later PR activity, not just code changes, and
+is independent of the Since last look bookmark. Missing review or update times
+do not match. Review timestamps appear in PR details and arrive in the existing
+request, with no extra API calls. Bounded reviewer coverage may omit requests or
+reviews, as reported in Data status and PR details. If the account cannot be
+resolved, Mine shows the reason and selected Mine filters show no results. Git
+contributor aliases do not affect these filters.
 Activity's `v` opens a contextual repository PR view with the shared range and
 repository scope, temporarily omitting unrelated saved PR filters. Back from its
 list returns to Activity. Leaving this context restores the normal PR board's
@@ -464,12 +469,22 @@ warnings, and close/browser controls stay visible while scrolling. Esc restores
 the same list selection and filters.
 
 `/` searches repository, title, author, or `#number`. `s` cycles Updated,
-Repository, Author, and Title; `S` reverses the order. Updated defaults newest
-first. The heading shows the active scope and sort; accepted search text stays
+Repository, Author, Title, and Attention; `S` reverses the order. Updated defaults
+newest first. Attention groups review requests addressed to you, failing checks,
+changes requested, approved open PRs, then everything else, with oldest updates
+first within each group. Unknown dates follow dated PRs in each group. Without a
+GitHub login, Attention still orders by checks and review state. Unknown states
+never imply approval or passing checks; approval does not establish merge readiness.
+The heading shows the active scope and sort; accepted search text stays
 visible. Enter / right opens PR details; left / Esc closes details and preserves
 applied filters. Back from a temporary Activity PR context restores Activity;
 at the normal PR root it stays on PRs. All lists and details support arrows,
 paging, and Home/End.
+
+An amber `!` before the updated age marks PRs with no update for at least 14 days,
+measured at the snapshot's check time. The selected preview and details spell out
+this inactivity. It is separate from stale-cache warnings and can coexist with
+`+` for activity since your last look. Unknown or future dates are never marked inactive.
 
 `o` opens the selected PR in your default browser from the list or detail when
 its canonical GitHub URL is valid. Launch errors appear on the board. `r`

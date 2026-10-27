@@ -55,8 +55,9 @@ type File struct {
 
 // Review is a latest-per-reviewer review, not the aggregate review decision.
 type Review struct {
-	Author string
-	State  string
+	Author      string
+	State       string
+	SubmittedAt time.Time
 }
 
 // PullRequest is lightweight metadata only. It contains no body, comments,

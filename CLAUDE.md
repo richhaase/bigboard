@@ -189,7 +189,11 @@ filters: Activity Git contributors/bots, Contributors bots/name search, PRs
 Mine/GitHub authors/review/checks/state/search. Mine uses the signed-in gh account,
 resolved once per refresh inside the shared request budget and cooldown. Its
 authored-by-me and review-requested-from-me choices match user logins only;
-team membership is never inferred. Missing login clears account evidence and
+team membership is never inferred. Updated since my review compares PR UpdatedAt
+strictly after the signed-in user's latest known submitted review timestamp from
+the existing latestReviews response. It means any PR activity, independently of
+the session bookmark; missing timestamps do not match. Review timestamps require
+no extra API calls, and bounded review coverage can omit matches. Missing login clears account evidence and
 leaves selected Mine filters empty with a visible reason. Git identities are not
 GitHub accounts.
 Multiple values within a facet are OR; facets combine with AND. Empty selections
@@ -212,6 +216,13 @@ Back from the contextual list returns to Activity and restores the saved normal
 PR board; ordinary board switching also ends that temporary context. Repeated
 `p` on the normal PR board preserves location. PR range uses last-updated time;
 local history uses author dates. Unknown PR dates appear only in All time.
+PR sorting adds Attention after the existing Updated/Repository/Author/Title
+choices: review requested from the signed-in user, failing checks, changes
+requested, approved open PRs, then other, oldest update first per bucket with
+unknown dates last. Reverse applies to the complete order. Unknown status is
+never approval or passing. An amber `!` on PR ages marks 14+ days without an
+update as of the snapshot check time; preview and details explain inactivity.
+It is distinct from stale cached data and the `+` bookmark marker.
 Shared scope and board filters have separate visible rows; raw cache inventory
 is labeled separately from result counts. PR summaries use shared scope so a
 contextual jump is not silently narrowed by unrelated PR author/status filters.

@@ -14,8 +14,9 @@ type prFilters struct {
 }
 
 const (
-	prMineAuthor = "Authored by me"
-	prMineReview = "Review requested from me"
+	prMineAuthor  = "Authored by me"
+	prMineReview  = "Review requested from me"
+	prMineUpdated = "Updated since my review"
 )
 
 func (m Model) prMineStatus() string {
@@ -73,10 +74,12 @@ func (f prFilters) matchesMine(pr gh.PullRequest, login string) bool {
 				return true
 			}
 		case prMineReview:
-			for _, reviewer := range pr.RequestedReviewers {
-				if !strings.Contains(reviewer, "/") && strings.EqualFold(reviewer, login) {
-					return true
-				}
+			if prReviewRequestedFrom(pr, login) {
+				return true
+			}
+		case prMineUpdated:
+			if prUpdatedSinceReview(pr, login) {
+				return true
 			}
 		}
 	}
@@ -128,7 +131,7 @@ func (m Model) prFilterOptions() []prFilterOption {
 	switch m.prFilterKind {
 	case "mine":
 		options[0].label = "All PRs"
-		options = append(options, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview})
+		options = append(options, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview}, prFilterOption{prMineUpdated, prMineUpdated})
 	case "author":
 		options[0].label = "All authors"
 		authors := map[string]string{}

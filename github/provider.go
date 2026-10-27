@@ -65,8 +65,9 @@ type requestedReviewer struct {
 type reviewRequest struct{ RequestedReviewer *requestedReviewer }
 
 type rawReview struct {
-	Author *actor
-	State  *string
+	Author      *actor
+	State       *string
+	SubmittedAt string
 }
 
 type rawFile struct {
@@ -499,7 +500,8 @@ func convertReviews(conn *connection[rawReview]) ([]Review, bool) {
 		name := node.Author.Login
 		if !seen[strings.ToLower(name)] {
 			seen[strings.ToLower(name)] = true
-			reviews = append(reviews, Review{Author: name,
+			submitted, _ := time.Parse(time.RFC3339, node.SubmittedAt)
+			reviews = append(reviews, Review{Author: name, SubmittedAt: submitted,
 				State: normalizeState(node.State, "PENDING", "COMMENTED", "APPROVED", "CHANGES_REQUESTED", "DISMISSED")})
 		}
 	}
@@ -728,7 +730,7 @@ const summaryQuery = `query BigBoardOpenPullRequests($owner: String!, $name: Str
         }
         latestReviews(first: 50) {
           totalCount pageInfo { hasNextPage endCursor }
-          nodes { author { login } state }
+          nodes { author { login } state submittedAt }
         }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
         files(first: 100) {

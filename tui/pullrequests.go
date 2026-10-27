@@ -369,6 +369,8 @@ func (m Model) visiblePRs() []gh.PullRequest {
 			comparison = strings.Compare(strings.ToLower(a.Author), strings.ToLower(b.Author))
 		case 3:
 			comparison = strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
+		case 4:
+			comparison = comparePRAttention(a, b, m.prState.login)
 		}
 		if comparison == 0 {
 			comparison = strings.Compare(a.Key(), b.Key())
