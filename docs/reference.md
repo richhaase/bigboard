@@ -194,15 +194,21 @@ location/size, unlisted repositories, bookmark state, and coverage. `d` adds
 diagnostics. Home-directory paths are displayed with `~` for readability.
 
 PR refreshes reuse completed in-memory snapshots for at least one minute and
-join in-flight work. Rate limits pause further requests until the reported
-cooldown; no automatic retry runs. There is no persistent PR cache. Inventory
+join in-flight work. Up to four repository inventories run concurrently; all
+inventories finish before additional file pages are fetched newest-PR-first.
+Results retain repository order. Rate limits pause further requests until the
+reported cooldown; no automatic retry runs. There is no persistent PR cache. Inventory
 coverage is separate from file/reviewer coverage: missing files can make
 **directory associations** incomplete without making the list of PRs incomplete.
 Data status reports these separately. Unknown evidence is never reported as zero.
 Inventories are bounded to 200 open PRs per repository and 1,000 current file
 paths per PR. A repository can use at most half the configured request budget
-(minimum one request); reviewer lists are also bounded. PR bodies, comments,
-diffs, and check logs are not requested.
+(minimum one request). Its 90-second allowance counts active request time,
+excluding time queued behind other repositories, within the two-minute overall
+refresh deadline. Individual requests remain limited to 15 seconds. Canonical
+repository aliases share allowances and preserve complete inventory evidence;
+already-started alias lookups count toward the budget. Reviewer lists are also
+bounded. PR bodies, comments, diffs, and check logs are not requested.
 
 Big Board saves the time of the last fetched snapshot you saw, separately for
 the full view and each `--group`. The bookmark advances on normal exit after a

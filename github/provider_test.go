@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,11 +20,14 @@ type invocation struct {
 }
 
 type fakeStep struct {
-	data []byte
-	err  error
+	repo  string
+	query string
+	data  []byte
+	err   error
 }
 
 type fakeRunner struct {
+	mu    sync.Mutex
 	t     *testing.T
 	steps []fakeStep
 	calls []invocation
@@ -31,13 +35,23 @@ type fakeRunner struct {
 
 func (f *fakeRunner) Run(ctx context.Context, command string, args ...string) ([]byte, error) {
 	f.t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	assertDeadline(f.t, ctx)
 	f.calls = append(f.calls, invocation{command: command, args: append([]string(nil), args...)})
 	if len(f.steps) == 0 {
 		f.t.Fatalf("unexpected call: %s %#v", command, args)
 	}
-	step := f.steps[0]
-	f.steps = f.steps[1:]
+	index := 0
+	for i, candidate := range f.steps {
+		owner, name, _ := strings.Cut(candidate.repo, "/")
+		if candidate.repo != "" && hasPair(args, "-f", "owner="+owner) && hasPair(args, "-f", "name="+name) && hasPair(args, "-f", "query="+candidate.query) {
+			index = i
+			break
+		}
+	}
+	step := f.steps[index]
+	f.steps = append(f.steps[:index], f.steps[index+1:]...)
 	return step.data, step.err
 }
 
