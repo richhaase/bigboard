@@ -261,6 +261,9 @@ func (m Model) worklistFooter(width, height int, detail bool) footerHints {
 	if detail || width < 70 && m.areaRepoID != "" {
 		local = append(local, footerHint{"Esc", "back"})
 	}
+	if detail && m.glance.frame.tab == glanceActivity {
+		local = append(local, footerHint{"o", "commit"})
+	}
 	local = append(local, footerHint{"f", "filters"})
 	if pane {
 		local = append(local, footerHint{"Tab", "contributors"})

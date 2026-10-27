@@ -140,7 +140,7 @@ func (m Model) screenHelp() screenHelp {
 		return screenHelp{"Commit details", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll commit evidence"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to the current lens"}, {"Tab / Shift+Tab", "Next / previous lens"},
-		}}, {"Actions", []helpBinding{{"v", "Open PRs for this repository"}, {"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
+		}}, {"Actions", []helpBinding{{"o", "Open this exact commit on GitHub"}, {"v", "Open PRs for this repository"}, {"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
 	}
 	title, open, back := "Activity · Repositories", "Open repository directories", "Stay at the Activity root"
 	if m.areaRepoID != "" {
@@ -164,6 +164,9 @@ func (m Model) screenHelp() screenHelp {
 			navigation[len(navigation)-1] = helpBinding{"1–3 / 4", "Commits / People / Related; return to directories"}
 		}
 		actions = []helpBinding{{"/", "Find in this lens"}}
+		if m.glance.frame.tab == glanceActivity {
+			actions = append(actions, helpBinding{"o", "Open the selected exact commit on GitHub"})
+		}
 		if m.glance.frame.tab == glanceRelated {
 			actions = append(actions, helpBinding{"m", "Shared commits / contributor overlap"})
 		}

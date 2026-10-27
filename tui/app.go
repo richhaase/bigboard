@@ -60,6 +60,7 @@ type Model struct {
 	prRow              int
 	prOffset           int
 	prBrowserError     string
+	commitBrowserError string
 	prBrowserOpener    func(string) error
 
 	showPaths        bool
@@ -332,6 +333,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startPRRefresh()
 		}
 		return m, m.nextLoadCmd()
+
+	case commitBrowserResult:
+		if msg.err != nil {
+			m.commitBrowserError = "Could not open commit: " + displayText(msg.err.Error())
+		}
+		return m, nil
 
 	case prBrowserResult:
 		if msg.err != nil {

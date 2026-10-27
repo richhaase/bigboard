@@ -191,6 +191,9 @@ func (m Model) worklistDetailHeader(width int) []string {
 		}
 	}
 	lines = append(lines, StyleCyan.Render("  "+strings.Join(tabs, "  ")))
+	if m.glance.frame.tab == glanceActivity && m.commitBrowserError != "" {
+		lines = append(lines, wrapGlanceText(m.commitBrowserError, max(1, width-4))...)
+	}
 	people := m.glanceAreaPeople()
 	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  %s commits · %d contributors", FormatNumber(len(stats.UniqueRecords(m.glanceAreaRecords()))), len(people))))
 	if m.personID != "" {

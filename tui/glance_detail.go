@@ -351,16 +351,23 @@ func (m Model) commitInspectorLines(width int) []string {
 	return lines
 }
 func (m Model) commitInspectorMaxOffset() int {
-	return max(0, len(m.commitInspectorLines(max(1, m.width)))-max(1, m.height-5))
+	errorRows := 0
+	if m.commitBrowserError != "" {
+		errorRows = len(wrapGlanceText(m.commitBrowserError, max(1, m.width-4)))
+	}
+	return max(0, len(m.commitInspectorLines(max(1, m.width)))-max(1, m.height-5-errorRows))
 }
 func (m Model) renderCommitInspector(width, height int) string {
 	lines := worklistCompactBanner(width)
 	lines = append(lines, RenderSectionHeader("COMMIT · CHANGED PATHS", width), m.glanceScanLine(m.areaRepoID))
+	if m.commitBrowserError != "" {
+		lines = append(lines, wrapGlanceText(m.commitBrowserError, max(1, width-4))...)
+	}
 	body := m.commitInspectorLines(width)
 	budget := max(1, height-len(lines)-2)
 	offset := max(0, min(m.pathOffset, max(0, len(body)-budget)))
 	lines = append(lines, body[offset:min(len(body), offset+budget)]...)
-	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  "+screenFooter(footerHints{local: []footerHint{{"Esc", "back"}, {"↑↓", "scroll"}, {"f", "filters"}}}, width))
+	lines = append(lines, StyleDimWhite.Render(fmt.Sprintf("  Lines %d–%d/%d", offset+1, min(len(body), offset+budget), len(body))), "  "+screenFooter(footerHints{local: []footerHint{{"Esc", "back"}, {"o", "commit"}, {"↑↓", "scroll"}, {"f", "filters"}}}, width))
 	return fitGlanceLines(lines, width, height)
 }
 func wrapGlanceText(s string, width int) []string {
