@@ -159,24 +159,7 @@ func (m Model) statisticsFooter() footerHints {
 
 func (m Model) screenCoverage() string {
 	m.areaRepoID = ""
-	coverage := strings.ReplaceAll(strings.TrimSpace(ansi.Strip(m.glanceCoverageLine())), "shallow sample", "Shallow history")
-	if m.viewMode == ViewAwareness && !m.showPRs && !m.glance.detailOpen && repositoryOverviewWidths(m.width-4).prs > 0 {
-		coverage = "PRs ? incomplete/stale · " + coverage
-	}
-	if m.width < 70 {
-		bots := "bots shown"
-		if m.boardBotsHidden() {
-			bots = "bots hidden"
-		}
-		coverage = bots + " · " + coverage
-	}
-	if m.width >= 100 {
-		coverage += " · ages at local scan · fetch on launch and r"
-	}
-	if m.viewMode == ViewAwareness && m.bookmarkMarkerLegend() != "" {
-		coverage = m.bookmarkMarkerLegend() + " · " + coverage
-	}
-	return coverage
+	return strings.TrimSpace(ansi.Strip(m.glanceCoverageLine()))
 }
 
 func (m Model) statisticsBodyBudget() int {

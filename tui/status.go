@@ -177,7 +177,7 @@ func (m Model) dataStatusLines(width int) []string {
 	}
 	if m.options.CacheInfo != nil {
 		add(StyleTitle.Render("REPOSITORY CACHE"))
-		add("Location: " + displayText(m.cacheInfo.Root))
+		add("Location: " + displayPath(m.cacheInfo.Root))
 		add(fmt.Sprintf("Size: %.1f MiB · %d repositories no longer listed", float64(m.cacheInfo.Bytes)/(1024*1024), len(m.cacheInfo.Orphans)))
 		for _, repo := range m.cacheInfo.Orphans {
 			add("  " + displayText(repo.Name) + " · removal available in Repository controls")

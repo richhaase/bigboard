@@ -82,17 +82,17 @@ func TestPRAttentionSortCycleRetainsSelectionAndDefault(t *testing.T) {
 	m := prOnlySelectionFixture()
 	m = keyboardContractPress(t, m, "p", "down")
 	selected := m.selectedPRKey()
-	if m.prSortLabel() != "Updated ↓" {
+	if m.prSortLabel() != "Updated · newest first" {
 		t.Fatal("default PR sorting changed")
 	}
-	for _, want := range []string{"Repository ↑", "Author ↑", "Title ↑", "Attention ↑", "Updated ↓"} {
+	for _, want := range []string{"Repository · A–Z", "Author · A–Z", "Title · A–Z", "Attention · priority first", "Updated · newest first"} {
 		m = keyboardContractPress(t, m, "s")
 		if m.prSortLabel() != want || m.selectedPRKey() != selected {
 			t.Fatalf("sort cycle = %q, selected = %q; want %q, %q", m.prSortLabel(), m.selectedPRKey(), want, selected)
 		}
 	}
 	m = keyboardContractPress(t, m, "s", "s", "s", "s", "S")
-	if m.prSortLabel() != "Attention ↓" || m.selectedPRKey() != selected {
+	if m.prSortLabel() != "Attention · priority last" || m.selectedPRKey() != selected {
 		t.Fatal("reversing Attention did not retain the selected PR")
 	}
 }

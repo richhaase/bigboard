@@ -120,7 +120,7 @@ func TestBookmarkPRMarkersPreserveRowsAndPreviewBudget(t *testing.T) {
 			t.Fatalf("width %d preview omitted new activity explanation", width)
 		}
 		detail := ansi.Strip(strings.Join(m.prDetailLines(pr, width), "\n"))
-		if !strings.Contains(detail, "+ updated since last look") || !strings.Contains(m.prBoardCoverage(), "+ since last look") {
+		if !strings.Contains(detail, "+ updated since last look") || !strings.Contains(ansi.Strip(strings.Join(m.helpLines(80), "\n")), "saved bookmark") {
 			t.Fatal("PR details or legend omitted bookmark meaning")
 		}
 	}

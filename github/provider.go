@@ -226,10 +226,10 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 		winner.result.InventoryRequests = winner.session.requests
 		winner.session.allowance = winner.canonical.session.allowance
 	}
-	for i, batch := range batches {
-		batch = winners[batch.canonical]
+	for i, request := range repositories {
+		batch := winners[batches[i].canonical]
 		batches[i] = batch
-		for _, previous := range repositories[i].Previous {
+		for _, previous := range request.Previous {
 			if row := batch.rows[previous.Number]; row != nil && reusableFiles(row.pr, previous) {
 				row.pr.Files = slices.Clone(previous.Files)
 				row.pr.FilesComplete, row.pr.PreviousPathsComplete = previous.FilesComplete, previous.PreviousPathsComplete
