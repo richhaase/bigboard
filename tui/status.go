@@ -172,6 +172,9 @@ func (m Model) dataStatusLines(width int) []string {
 	add := func(value string) {
 		lines = append(lines, strings.Split(ansi.Wrap(value, inner, ""), "\n")...)
 	}
+	for _, line := range m.bookmarkStatusLines() {
+		add(line)
+	}
 	if m.options.CacheInfo != nil {
 		add(StyleTitle.Render("REPOSITORY CACHE"))
 		add("Location: " + displayText(m.cacheInfo.Root))

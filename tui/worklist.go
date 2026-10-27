@@ -142,7 +142,7 @@ func worklistAuthorCell(r activityRow, width int) string {
 	return padCells(ansi.Truncate(worklistLastAuthor(r), max(1, width-ansi.StringWidth(suffix)), "…")+suffix, width)
 }
 func (m Model) worklistAge(at time.Time, repoID string) string {
-	return activityAge(at, m.local.scannedAt[repoID])
+	return m.lastLookAge(at, activityAge(at, m.local.scannedAt[repoID]))
 }
 
 func activityAge(at, ref time.Time) string {

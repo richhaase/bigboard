@@ -160,6 +160,7 @@ func main() {
 	settings.InitialError = setupError
 
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
+		Bookmark:               newBookmarkOptions(*groupFlag),
 		PrepareRepository:      cache.Refresh,
 		RepositoryRevision:     cache.Revision,
 		ScanRepository:         cache.ScanRepository,
@@ -190,6 +191,11 @@ func runTUI(model tui.Model, options ...tea.ProgramOption) error {
 	final, err := p.Run()
 	if current, ok := final.(tui.Model); ok {
 		current.Close()
+		if err == nil {
+			if saveErr := current.SaveBookmark(); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save last-look bookmark: %v\n", saveErr)
+			}
+		}
 	}
 	return err
 }

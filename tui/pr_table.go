@@ -78,7 +78,7 @@ func (m Model) prUpdatedAge(pr gh.PullRequest) string {
 	if ref.IsZero() {
 		ref = time.Now()
 	}
-	return activityAge(pr.UpdatedAt, ref)
+	return m.lastLookAge(pr.UpdatedAt, activityAge(pr.UpdatedAt, ref))
 }
 
 func (m Model) prListRowHeight() int {
@@ -190,9 +190,13 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		return nil
 	}
 	pr := prs[max(0, min(m.prRow, len(prs)-1))]
+	bookmarkRows := 0
+	if m.sinceLastLook(pr.UpdatedAt) {
+		bookmarkRows = 1
+	}
 	inner := max(1, width-4)
 	identity := wrapGlanceText(fmt.Sprintf("SELECTED  %s #%d", displayText(pr.Repo), pr.Number), inner)
-	identityBudget := max(1, budget-4)
+	identityBudget := max(1, budget-4-bookmarkRows)
 	if len(identity) > identityBudget {
 		identity = identity[:identityBudget]
 		identity[identityBudget-1] = "  " + ansi.Truncate(strings.TrimPrefix(identity[identityBudget-1], "  ")+"…", inner, "…")
@@ -202,7 +206,7 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		author = githubIdentity(pr.Author) + " · ◇ Draft"
 	}
 	title := wrapGlanceText(displayText(pr.Title), inner)
-	titleBudget := max(1, budget-len(identity)-3)
+	titleBudget := max(1, budget-len(identity)-3-bookmarkRows)
 	if len(title) > titleBudget {
 		title = title[:titleBudget]
 		suffix := "… · Enter full detail"
@@ -213,6 +217,9 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		lines = append(lines, StyleTitle.Render(line))
 	}
 	lines = append(lines, title...)
+	if bookmarkRows > 0 {
+		lines = append(lines, StyleCyan.Render("  + updated since last look"))
+	}
 	lines = append(lines, StyleDimWhite.Render("  "+author), "  Review: "+prReviewStyle(pr.ReviewDecision).Render(prReviewLabel(pr.ReviewDecision))+" · Checks: "+prCheckStyle(pr.CheckState).Render(prCheckLabel(pr.CheckState)))
 	return lines
 }
@@ -268,7 +275,8 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 		if m.prQuery != "" || !m.prFilters.empty() {
 			empty = "No matching PRs. x clears filters and search."
 		}
-		if m.rangeDuration() > 0 && len(m.allPRs()) > 0 {
+		_, bounded := m.rangeCutoffAt(time.Now())
+		if bounded && len(m.allPRs()) > 0 {
 			empty = "No matching PRs in range. t changes range; x clears PR filters."
 		}
 		if len(m.prFilters.mine) > 0 && m.prState.login == "" {
@@ -301,5 +309,9 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 }
 
 func (m Model) prBoardCoverage() string {
-	return "PR updated time · " + m.rangeLabel() + " · " + m.prScopeLabel() + " · ◇ draft · ● open · contributor and bot filters do not apply"
+	legend := ""
+	if marker := m.bookmarkMarkerLegend(); marker != "" {
+		legend = marker + " · "
+	}
+	return legend + "PR updated time · " + m.rangeLabel() + " · " + m.prScopeLabel() + " · ◇ draft · ● open · contributor and bot filters do not apply"
 }
