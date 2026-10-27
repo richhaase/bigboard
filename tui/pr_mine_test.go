@@ -36,23 +36,23 @@ func mineFixture() Model {
 
 func TestPRMineMatchesAccountWithORAndOtherFacetsWithAND(t *testing.T) {
 	m := mineFixture()
-	m.prFilters.mine = filterValues{prMineAuthor}
+	m.prUI.filters.mine = filterValues{prMineAuthor}
 	if got := m.visiblePRs(); len(got) != 2 {
 		t.Fatalf("authored by account: %+v", got)
 	}
-	m.prFilters.mine = filterValues{prMineReview}
+	m.prUI.filters.mine = filterValues{prMineReview}
 	if got := m.visiblePRs(); len(got) != 1 || got[0].Number != 2 {
 		t.Fatalf("user review request must exclude team requests: %+v", got)
 	}
-	m.prFilters.mine = filterValues{prMineAuthor, prMineReview}
+	m.prUI.filters.mine = filterValues{prMineAuthor, prMineReview}
 	if got := m.visiblePRs(); len(got) != 3 {
 		t.Fatalf("Mine choices should combine with OR: %+v", got)
 	}
-	m.prFilters.checks = filterValues{"Passing"}
+	m.prUI.filters.checks = filterValues{"Passing"}
 	if got := m.visiblePRs(); len(got) != 2 {
 		t.Fatalf("other facets should combine with AND: %+v", got)
 	}
-	m.prQuery = "#2"
+	m.prUI.query = "#2"
 	if got := m.visiblePRs(); len(got) != 1 || got[0].Number != 2 {
 		t.Fatalf("Mine ignored search: %+v", got)
 	}
@@ -61,7 +61,7 @@ func TestPRMineMatchesAccountWithORAndOtherFacetsWithAND(t *testing.T) {
 func TestPRMineModalStagesSearchesCancelsAndClears(t *testing.T) {
 	m := mineFixture()
 	m = chooseFilterOption(t, m, "mine", prMineAuthor)
-	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
+	if !m.prUI.filters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("staging Mine mutated applied filters")
 	}
 	m = keyboardContractPress(t, m, "/", "requested", "enter")
@@ -69,27 +69,27 @@ func TestPRMineModalStagesSearchesCancelsAndClears(t *testing.T) {
 		t.Fatalf("Mine options search: %+v", options)
 	}
 	m = keyboardContractPress(t, m, " ", "enter")
-	if len(m.visiblePRs()) != 3 || len(m.prFilters.mine) != 2 || !strings.Contains(ansi.Strip(m.View()), "Mine:") {
+	if len(m.visiblePRs()) != 3 || len(m.prUI.filters.mine) != 2 || !strings.Contains(ansi.Strip(m.View()), "Mine:") {
 		t.Fatal("Mine did not apply all staged choices")
 	}
 	m = chooseFilterOption(t, m, "mine", prMineAuthor)
 	m = keyboardContractPress(t, m, "esc")
-	if !slices.Equal(m.prFilters.mine, filterValues{prMineAuthor, prMineReview}) {
+	if !slices.Equal(m.prUI.filters.mine, filterValues{prMineAuthor, prMineReview}) {
 		t.Fatal("cancel mutated applied Mine choices")
 	}
 	m = chooseFilterOption(t, m, "mine", "")
 	m = keyboardContractPress(t, m, "enter")
-	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
+	if !m.prUI.filters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("All did not clear Mine")
 	}
 	for _, reset := range []string{"x", "modal"} {
-		m.prFilters.mine, m.prQuery = filterValues{prMineAuthor}, "Change"
+		m.prUI.filters.mine, m.prUI.query = filterValues{prMineAuthor}, "Change"
 		if reset == "x" {
 			m = keyboardContractPress(t, m, "x")
 		} else {
 			m = keyboardContractPress(t, m, "f", "x", "enter")
 		}
-		if !m.prFilters.empty() || m.prQuery != "" || len(m.visiblePRs()) != 4 {
+		if !m.prUI.filters.empty() || m.prUI.query != "" || len(m.visiblePRs()) != 4 {
 			t.Fatalf("%s did not clear Mine and search", reset)
 		}
 	}
@@ -97,23 +97,23 @@ func TestPRMineModalStagesSearchesCancelsAndClears(t *testing.T) {
 
 func TestPRMineSurvivesBoardAndContextNavigationWithoutApplyingDraft(t *testing.T) {
 	m := mineFixture()
-	m.prFilters.mine = filterValues{prMineAuthor}
+	m.prUI.filters.mine = filterValues{prMineAuthor}
 	m = chooseFilterOption(t, m, "mine", prMineReview)
 	m = keyboardContractPress(t, m, "a", "p")
-	if m.filters.open || !slices.Equal(m.prFilters.mine, filterValues{prMineAuthor}) || len(m.visiblePRs()) != 2 {
+	if m.filters.open || !slices.Equal(m.prUI.filters.mine, filterValues{prMineAuthor}) || len(m.visiblePRs()) != 2 {
 		t.Fatal("board navigation lost Mine or applied its draft")
 	}
 	m.openContextPRs("/api")
-	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
+	if !m.prUI.filters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("contextual PRs inherited saved Mine choices")
 	}
 	m.closeContextPRs(false)
-	if !slices.Equal(m.prFilters.mine, filterValues{prMineAuthor}) || len(m.visiblePRs()) != 2 {
+	if !slices.Equal(m.prUI.filters.mine, filterValues{prMineAuthor}) || len(m.visiblePRs()) != 2 {
 		t.Fatal("context return lost saved Mine choices")
 	}
 	m.openFilters("mine")
 	m.filters.prs.mine[0] = prMineReview
-	if m.prFilters.mine[0] != prMineAuthor {
+	if m.prUI.filters.mine[0] != prMineAuthor {
 		t.Fatal("Mine draft aliases applied state")
 	}
 }
@@ -130,7 +130,7 @@ func TestPRMineUnavailableHasReasonAndNeverFallsBackToAllPRs(t *testing.T) {
 		t.Run(tc.reason, func(t *testing.T) {
 			m := mineFixture()
 			m.prState.login, m.prState.loginErr = "", tc.err
-			m.prFilters.mine = filterValues{prMineAuthor, prMineReview}
+			m.prUI.filters.mine = filterValues{prMineAuthor, prMineReview}
 			if len(m.visiblePRs()) != 0 || !strings.Contains(ansi.Strip(m.View()), "Mine unavailable: "+tc.reason) {
 				t.Fatal("missing account broadened results or hid the reason")
 			}
@@ -150,7 +150,7 @@ func TestPRMineLoginRefreshesOnceAndClearsAccountAfterFailure(t *testing.T) {
 	m := mineFixture()
 	p := &fakePRProvider{login: "viewer", result: gh.Result{Repo: "org/repo", Complete: true, PRs: m.allPRs()}}
 	m.prProvider = p
-	m.prFilters.mine = filterValues{prMineAuthor}
+	m.prUI.filters.mine = filterValues{prMineAuthor}
 	cmd := m.startPRRefresh()
 	if m.startPRRefresh() != nil {
 		t.Fatal("active refresh was not coalesced")

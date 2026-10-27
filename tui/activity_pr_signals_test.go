@@ -16,8 +16,8 @@ func TestActivityPRSignalsUseSharedScopeAndSeparateStatusCounts(t *testing.T) {
 	m.timeIdx = 0
 	m.activityPeople = filterValues{"someone-else"}
 	m.activityHideBots = true
-	m.prFilters.author = filterValues{"someone-else"}
-	m.prQuery = "unmatched"
+	m.prUI.filters.author = filterValues{"someone-else"}
+	m.prUI.query = "unmatched"
 	snapshot := m.prState.snapshots["org/repo"]
 	base := snapshot.prs[0]
 	base.CheckState, base.ReviewDecision = "FAILURE", "CHANGES_REQUESTED"

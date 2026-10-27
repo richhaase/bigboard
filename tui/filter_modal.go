@@ -54,7 +54,7 @@ func (m *Model) openFilters(category string) {
 	if !m.filters.open {
 		board, query := "activity", m.glanceQuery()
 		if m.showPRs {
-			board, query = "prs", m.prQuery
+			board, query = "prs", m.prUI.query
 		} else if m.viewMode == ViewAggregate || m.viewMode == ViewOperative {
 			board, query = "contributors", m.filterQuery
 		}
@@ -63,7 +63,7 @@ func (m *Model) openFilters(category string) {
 			timeIdx: m.timeIdx, customDays: m.customRangeDays, repos: m.sharedRepos.clone(),
 			sinceLastLook: m.sinceLastLookRange,
 			people:        m.activityPeople.clone(), activityBots: m.activityHideBots, contributorBots: m.hideBots,
-			prs: m.prFilters.clone(), query: query,
+			prs: m.prUI.filters.clone(), query: query,
 		}
 	}
 	m.filters.rows = maps.Clone(m.filters.rows)
@@ -100,7 +100,7 @@ func (m Model) filterDraftModel() Model {
 	m.activityHideBots, m.hideBots = m.filters.activityBots, m.filters.contributorBots
 	m.timeIdx, m.customRangeDays = m.filters.timeIdx, m.filters.customDays
 	m.sinceLastLookRange = m.filters.sinceLastLook
-	m.prFilters = m.filters.prs.clone()
+	m.prUI.filters = m.filters.prs.clone()
 	return m
 }
 
@@ -148,7 +148,7 @@ func (m Model) filterOptions() []prFilterOption {
 	case "bots":
 		options = []prFilterOption{{"shown", "Show bot contributors"}, {"hidden", "Hide bot contributors"}}
 	case "mine", "author", "review", "checks", "state":
-		draft.prFilterKind, draft.prFilterQuery = m.filters.category, ""
+		draft.prUI.filterKind, draft.prUI.filterQuery = m.filters.category, ""
 		options = draft.prFilterOptions()
 	case "search":
 		options = []prFilterOption{{"edit", "Edit this board's search"}, {"clear", "Clear this search"}}
@@ -356,15 +356,15 @@ func (m *Model) applyFilters() {
 	case "contributors":
 		m.hideBots, m.filterQuery = f.contributorBots, f.query
 	case "prs":
-		m.prFilters, m.prQuery = f.prs.clone(), f.query
+		m.prUI.filters, m.prUI.query = f.prs.clone(), f.query
 	}
-	m.searching, m.prSearching, m.glance.searching = false, false, false
+	m.searching, m.prUI.searching, m.glance.searching = false, false, false
 	m.recomputeAuthors()
 	m.personID = person
 	m.selectContributor(selectedContributor)
 	m.selectPR(selectedPR)
-	if m.prDetail && (selectedPR == "" || m.selectedPRKey() != selectedPR) {
-		m.prDetail, m.prOffset = false, 0
+	if m.prUI.detail && (selectedPR == "" || m.selectedPRKey() != selectedPR) {
+		m.prUI.detail, m.prUI.offset = false, 0
 	}
 	if m.showPaths && (selectedCommit == "" || !slices.Contains(m.glanceDetailIDs(), selectedCommit)) {
 		m.showPaths, m.pathOffset = false, 0

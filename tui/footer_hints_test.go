@@ -29,7 +29,7 @@ func TestFooterKeepsContextAndWidthPriorities(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			m := prFixture()
 			m.width, m.height = test.width, 36
-			m.prContext.active, m.prSearching = test.context, test.search
+			m.prContext.active, m.prUI.searching = test.context, test.search
 			footer := m.prFooter(m.visiblePRs())
 			if test.pane {
 				m.contributorPane.focused = true

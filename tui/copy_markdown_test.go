@@ -66,8 +66,8 @@ func TestMarkdownCopyContributorsAndCommits(t *testing.T) {
 func TestMarkdownCopyPRRangeFiltersAndQualifiers(t *testing.T) {
 	m := prFixture()
 	m.showPRs = true
-	m.prFilters.author = filterValues{"robot[bot]"}
-	m.prQuery = "feature"
+	m.prUI.filters.author = filterValues{"robot[bot]"}
+	m.prUI.query = "feature"
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.partial = true
 	snapshot.err = errors.New("offline")
@@ -85,7 +85,7 @@ func TestMarkdownCopyPRRangeFiltersAndQualifiers(t *testing.T) {
 	if strings.Contains(got, "Old feature") {
 		t.Fatal("PR range ignored")
 	}
-	m.prFilters.author = filterValues{"someone-else"}
+	m.prUI.filters.author = filterValues{"someone-else"}
 	if strings.Contains(m.markdownList(), "| org/repo | 7 |") {
 		t.Fatal("PR author filter ignored")
 	}

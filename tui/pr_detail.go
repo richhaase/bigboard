@@ -162,7 +162,7 @@ func (m Model) prDetailLines(pr gh.PullRequest, width int) []string {
 func (m Model) prDetailModalSize() (int, int) {
 	width := max(6, min(96, m.width-2))
 	budget := max(1, min(24, m.height-9))
-	if m.prBrowserError != "" {
+	if m.prUI.browserError != "" {
 		budget = max(1, budget-1)
 	}
 	return width, budget
@@ -178,7 +178,7 @@ func (m Model) prDetailMaxOffset() int {
 	if len(prs) == 0 {
 		return 0
 	}
-	pr := prs[max(0, min(m.prRow, len(prs)-1))]
+	pr := prs[max(0, min(m.prUI.row, len(prs)-1))]
 	width, budget := m.prDetailModalSize()
 	return max(0, len(m.prDetailLines(pr, width))-budget)
 }
@@ -188,7 +188,7 @@ func (m Model) renderPRDetailModal(background string, pr gh.PullRequest, width, 
 	panelWidth, page := m.prDetailModalSize()
 	inner := panelWidth - 4
 	lines := m.prDetailLines(pr, panelWidth)
-	offset := max(0, min(m.prOffset, len(lines)-page))
+	offset := max(0, min(m.prUI.offset, len(lines)-page))
 	end := min(len(lines), offset+page)
 	heading := fmt.Sprintf("PR #%d · %s", pr.Number, displayText(pr.Repo))
 	snapshot := m.prState.snapshots[pr.Repo]
@@ -207,8 +207,8 @@ func (m Model) renderPRDetailModal(background string, pr gh.PullRequest, width, 
 	for len(content) < min(page, len(lines))+3 {
 		content = append(content, "")
 	}
-	if m.prBrowserError != "" {
-		content = append(content, StyleAmber.Render(ansi.Truncate(displayText(m.prBrowserError), inner, "…")))
+	if m.prUI.browserError != "" {
+		content = append(content, StyleAmber.Render(ansi.Truncate(displayText(m.prUI.browserError), inner, "…")))
 	}
 	position := fmt.Sprintf("%d–%d of %d · ↑↓ / PgUp / PgDn", offset+1, end, len(lines))
 	content = append(content, StyleDimWhite.Render(ansi.Truncate(position, inner, "…")))

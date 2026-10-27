@@ -38,7 +38,7 @@ func (m Model) helpSearchActive() bool {
 		return m.filtersTextEditing()
 	}
 	if m.showPRs {
-		return m.prSearching
+		return m.prUI.searching
 	}
 	return m.viewMode == ViewAwareness && m.glance.searching || m.viewMode == ViewAggregate && m.searching
 }
@@ -151,18 +151,18 @@ func (m Model) screenHelp() screenHelp {
 	}
 	if m.showPRs {
 		title, move := "Pull requests", "Select a pull request"
-		if m.prDetail {
+		if m.prUI.detail {
 			title, move = "Pull request details", "Scroll PR details"
 		}
 		back := "Stay at the PRs root; keep filters"
-		if m.prDetail {
+		if m.prUI.detail {
 			back = "Close details; return to the PR list; keep filters"
 		} else if m.prContext.active {
 			back = "Return to Activity; restore saved PR filters"
 		}
 		navigation := []helpBinding{{"↑ / ↓", move}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last row or page"}, {"← / Esc", back}}
 		actions := []helpBinding{{"u", "Filters: PR authors"}, {"v", "Filters: review states"}, {"k", "Filters: check states"}, {"d", "Filters: draft/open states"}, {"i", "Repository controls: choose tracked repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}
-		if !m.prDetail {
+		if !m.prUI.detail {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
 			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
 		}

@@ -208,8 +208,8 @@ func fetchPRRepositories(ctx context.Context, provider PRProvider, requests []gh
 func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	selectedKey := ""
 	oldVisible := m.visiblePRs()
-	if m.prRow >= 0 && m.prRow < len(oldVisible) {
-		selectedKey = oldVisible[m.prRow].Key()
+	if m.prUI.row >= 0 && m.prUI.row < len(oldVisible) {
+		selectedKey = oldVisible[m.prUI.row].Key()
 	}
 	m.prState.loading = false
 	m.prState.login, m.prState.loginErr = msg.login, msg.loginErr
@@ -272,18 +272,18 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		m.prState.snapshots[repo] = next
 	}
 	visible := m.visiblePRs()
-	m.prRow = max(0, min(m.prRow, len(visible)-1))
+	m.prUI.row = max(0, min(m.prUI.row, len(visible)-1))
 	found := false
 	for i, pr := range visible {
 		if pr.Key() == selectedKey {
-			m.prRow = i
+			m.prUI.row = i
 			found = true
 			break
 		}
 	}
 	if !found {
-		m.prDetail = false
-		m.prOffset = 0
+		m.prUI.detail = false
+		m.prUI.offset = 0
 	}
 }
 func (m Model) prsForRepository(id string) []gh.PullRequest {
@@ -343,12 +343,12 @@ func (m Model) allPRs() []gh.PullRequest {
 func (m Model) visiblePRs() []gh.PullRequest {
 	prs := m.sharedPRs()
 	kept := prs[:0]
-	query := strings.ToLower(m.prQuery)
+	query := strings.ToLower(m.prUI.query)
 	for _, pr := range prs {
-		if !m.prFilters.matches(pr, m.prState.login) {
+		if !m.prUI.filters.matches(pr, m.prState.login) {
 			continue
 		}
-		if m.prRepoID != "" && (!m.repoInView(m.prRepoID) || pr.Repo != m.prState.repositories[m.prRepoID]) {
+		if m.prUI.repoID != "" && (!m.repoInView(m.prUI.repoID) || pr.Repo != m.prState.repositories[m.prUI.repoID]) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(fmt.Sprintf("%s %s %s #%d", pr.Repo, pr.Title, pr.Author, pr.Number)), query) {
@@ -360,7 +360,7 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	sort.Slice(prs, func(i, j int) bool {
 		a, b := prs[i], prs[j]
 		comparison := 0
-		switch m.prSort {
+		switch m.prUI.sort {
 		case 0:
 			comparison = b.UpdatedAt.Compare(a.UpdatedAt)
 		case 1:
@@ -375,7 +375,7 @@ func (m Model) visiblePRs() []gh.PullRequest {
 		if comparison == 0 {
 			comparison = strings.Compare(a.Key(), b.Key())
 		}
-		if m.prReverse {
+		if m.prUI.reverse {
 			return comparison > 0
 		}
 		return comparison < 0
@@ -384,28 +384,28 @@ func (m Model) visiblePRs() []gh.PullRequest {
 }
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if !m.prDetail {
-		if row, ok := glanceMove(key, m.prRow, len(m.visiblePRs()), m.prListPageSize()); ok {
-			m.prRow = row
+	if !m.prUI.detail {
+		if row, ok := glanceMove(key, m.prUI.row, len(m.visiblePRs()), m.prListPageSize()); ok {
+			m.prUI.row = row
 			return m, nil
 		}
 	} else {
 		page := m.prDetailBudget()
 		switch key {
 		case "up":
-			m.prOffset--
+			m.prUI.offset--
 		case "down":
-			m.prOffset++
+			m.prUI.offset++
 		case "pgup":
-			m.prOffset -= page
+			m.prUI.offset -= page
 		case "pgdown":
-			m.prOffset += page
+			m.prUI.offset += page
 		case "home":
-			m.prOffset = 0
+			m.prUI.offset = 0
 		case "end":
-			m.prOffset = m.prDetailMaxOffset()
+			m.prUI.offset = m.prDetailMaxOffset()
 		}
-		m.prOffset = max(0, min(m.prOffset, m.prDetailMaxOffset()))
+		m.prUI.offset = max(0, min(m.prUI.offset, m.prDetailMaxOffset()))
 	}
 	switch key {
 	case "t":
@@ -425,27 +425,27 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		m.clearBoardFilters()
 	case "esc", "left":
-		if m.prDetail {
-			m.prDetail, m.prOffset = false, 0
+		if m.prUI.detail {
+			m.prUI.detail, m.prUI.offset = false, 0
 		} else if m.prContext.active {
 			m.closeContextPRs(true)
 		}
 	case "enter", "right":
 		if len(m.visiblePRs()) > 0 {
-			m.prDetail = true
+			m.prUI.detail = true
 		}
 	case "/":
-		if !m.prDetail {
-			m.prSearchBefore = m.prQuery
-			m.prSearching = true
+		if !m.prUI.detail {
+			m.prUI.searchBefore = m.prUI.query
+			m.prUI.searching = true
 		}
 	case "s", "S":
-		if !m.prDetail {
+		if !m.prUI.detail {
 			selected := m.selectedPRKey()
 			if key == "s" {
-				m.prSort = (m.prSort + 1) % len(prSortLabels)
+				m.prUI.sort = (m.prUI.sort + 1) % len(prSortLabels)
 			} else {
-				m.prReverse = !m.prReverse
+				m.prUI.reverse = !m.prUI.reverse
 			}
 			m.selectPR(selected)
 		}
@@ -461,19 +461,19 @@ func (m Model) renderPRs() string {
 	if m.prContext.active {
 		title = "PRs from Activity"
 	}
-	if m.prRepoID != "" {
+	if m.prUI.repoID != "" {
 		title += " / " + m.prScopeLabel()
 	}
 	prs := m.visiblePRs()
-	if m.prDetail && len(prs) > 0 {
+	if m.prUI.detail && len(prs) > 0 {
 		background := m
-		background.prDetail = false
-		return m.renderPRDetailModal(background.renderPRs(), prs[max(0, min(m.prRow, len(prs)-1))], width, height)
+		background.prUI.detail = false
+		return m.renderPRDetailModal(background.renderPRs(), prs[max(0, min(m.prUI.row, len(prs)-1))], width, height)
 	}
 	lines := m.screenHeader(title, width)
 	lines = append(lines, m.renderPRBoardRows(prs, width)...)
-	if m.prBrowserError != "" {
-		lines = append(lines, "  "+m.prBrowserError)
+	if m.prUI.browserError != "" {
+		lines = append(lines, "  "+m.prUI.browserError)
 	}
 	return screenFinish(lines, m.prFooter(prs), m.copyCoverage(m.prBoardCoverage()), width, height)
 }

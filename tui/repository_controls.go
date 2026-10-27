@@ -27,8 +27,8 @@ func (m *Model) closeRepositoryControls(apply bool) {
 	m.viewMode, m.showPRs = m.returnView, m.overlayPRs
 	m.overlayPRs = false
 	m.selectPR(selected)
-	if m.prDetail && selected != m.selectedPRKey() {
-		m.prDetail, m.prOffset = false, 0
+	if m.prUI.detail && selected != m.selectedPRKey() {
+		m.prUI.detail, m.prUI.offset = false, 0
 	}
 }
 

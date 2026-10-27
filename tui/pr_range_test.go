@@ -47,7 +47,7 @@ func TestPRRangePresetCustomAndAllTime(t *testing.T) {
 	if len(m.visiblePRs()) != 2 {
 		t.Fatal("range set on another board did not carry into PRs")
 	}
-	m.prFilters.review, m.prQuery, m.hideBots = filterValues{"Unknown"}, "Recent", true
+	m.prUI.filters.review, m.prUI.query, m.hideBots = filterValues{"Unknown"}, "Recent", true
 	if prs := m.visiblePRs(); len(prs) != 1 || prs[0].Number != 1 {
 		t.Fatal("range did not compose with PR filters and search")
 	}
@@ -59,23 +59,23 @@ func TestPRRangePresetCustomAndAllTime(t *testing.T) {
 
 func TestPRRangeSelectionCancelAndFilteredDetail(t *testing.T) {
 	m := prRangeFixture()
-	m.prSort = 3
+	m.prUI.sort = 3
 	m = keyboardContractPress(t, m, "p", "end", "enter")
 	selected := m.selectedPRKey()
 	m = keyboardContractPress(t, m, "t", "end", "up", "esc")
-	if !m.prDetail || m.selectedPRKey() != selected || m.rangeDuration() != 14*24*time.Hour {
+	if !m.prUI.detail || m.selectedPRKey() != selected || m.rangeDuration() != 14*24*time.Hour {
 		t.Fatal("cancel changed range or detail selection")
 	}
 	m = keyboardContractPress(t, m, "t", "end", "up", " ", "enter")
-	if !m.prDetail || m.selectedPRKey() != selected || m.prRow != 2 {
+	if !m.prUI.detail || m.selectedPRKey() != selected || m.prUI.row != 2 {
 		t.Fatal("widening the range silently changed detail identity")
 	}
 	m = keyboardContractPress(t, m, "esc", "home", "down", "enter", "t", "home", " ", "enter")
-	if m.prDetail || len(m.visiblePRs()) != 2 {
+	if m.prUI.detail || len(m.visiblePRs()) != 2 {
 		t.Fatal("filtered-out detail switched to another PR instead of closing")
 	}
 	m = keyboardContractPress(t, m, "/", "t")
-	if m.filters.open || m.prQuery != "t" {
+	if m.filters.open || m.prUI.query != "t" {
 		t.Fatal("range key escaped PR search")
 	}
 }

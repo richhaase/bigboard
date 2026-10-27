@@ -10,7 +10,7 @@ import (
 
 func attentionFixture(prs []gh.PullRequest) Model {
 	m := prFixture()
-	m.prState.login, m.prSort, m.showPRs = "Viewer", 4, true
+	m.prState.login, m.prUI.sort, m.showPRs = "Viewer", 4, true
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.prs = prs
 	for i := range snapshot.prs {
@@ -50,7 +50,7 @@ func TestPRAttentionOrderAndReverse(t *testing.T) {
 	})
 	want := []int{2, 1, 12, 4, 3, 5, 6, 11, 10, 8, 7, 9}
 	assertPRAttentionOrder(t, m, want)
-	m.prReverse = true
+	m.prUI.reverse = true
 	slices.Reverse(want)
 	assertPRAttentionOrder(t, m, want)
 }

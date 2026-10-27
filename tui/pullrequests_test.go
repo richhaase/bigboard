@@ -159,7 +159,7 @@ func TestPROverlayNavigationResizeAndTerminalSafety(t *testing.T) {
 		t.Fatal("p did not open")
 	}
 	m = pressAwareness(m, "enter")
-	if !m.prDetail {
+	if !m.prUI.detail {
 		t.Fatal("no detail")
 	}
 	for _, size := range [][2]int{{120, 40}, {40, 18}, {20, 8}} {
@@ -179,7 +179,7 @@ func TestPROverlayNavigationResizeAndTerminalSafety(t *testing.T) {
 		}
 	}
 	m = pressAwareness(m, "esc")
-	if m.prDetail || !m.showPRs {
+	if m.prUI.detail || !m.showPRs {
 		t.Fatal("detail escape")
 	}
 	m = pressAwareness(m, "esc")
@@ -238,17 +238,17 @@ func TestPRRefreshKeyCoalescesRemoteFetch(t *testing.T) {
 func TestPRRefreshPreservesSelectedIdentityAndClosesRemovedDetail(t *testing.T) {
 	m := prFixture()
 	m.showPRs = true
-	m.prDetail = true
+	m.prUI.detail = true
 	old := m.allPRs()[0]
 	newer := old
 	newer.Number = 99
 	newer.UpdatedAt = old.UpdatedAt.Add(time.Hour)
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Complete: true, PRs: []gh.PullRequest{newer, old}}}})
-	if !m.prDetail || m.visiblePRs()[m.prRow].Number != 7 {
+	if !m.prUI.detail || m.visiblePRs()[m.prUI.row].Number != 7 {
 		t.Fatal("refresh silently changed selected PR")
 	}
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Complete: true, PRs: []gh.PullRequest{newer}}}})
-	if m.prDetail {
+	if m.prUI.detail {
 		t.Fatal("removed PR detail remained open")
 	}
 }

@@ -7,31 +7,52 @@ import (
 	"github.com/richhaase/bigboard/git"
 )
 
+type prUIState struct {
+	filters      prFilters
+	repoID       string
+	query        string
+	searchBefore string
+	searching    bool
+	filterKind   string
+	filterQuery  string
+	sort         int
+	reverse      bool
+	row          int
+	detail       bool
+	offset       int
+	browserError string
+}
+
+func (s prUIState) clone() prUIState {
+	s.filters = s.filters.clone()
+	return s
+}
+
 var prSortLabels = []string{"Updated", "Repository", "Author", "Title", "Attention"}
 
 func (m Model) selectedPRKey() string {
 	prs := m.visiblePRs()
-	if m.prRow >= 0 && m.prRow < len(prs) {
-		return prs[m.prRow].Key()
+	if m.prUI.row >= 0 && m.prUI.row < len(prs) {
+		return prs[m.prUI.row].Key()
 	}
 	return ""
 }
 
 func (m *Model) selectPR(key string) {
 	prs := m.visiblePRs()
-	m.prRow = max(0, min(m.prRow, len(prs)-1))
+	m.prUI.row = max(0, min(m.prUI.row, len(prs)-1))
 	for i, pr := range prs {
 		if key != "" && pr.Key() == key {
-			m.prRow = i
+			m.prUI.row = i
 			break
 		}
 	}
 }
 
 func (m Model) prScopeLabel() string {
-	if m.prRepoID != "" {
+	if m.prUI.repoID != "" {
 		for _, repo := range m.local.repositories {
-			if repo.ID == m.prRepoID {
+			if repo.ID == m.prUI.repoID {
 				return displayText(repo.Name)
 			}
 		}
@@ -45,22 +66,22 @@ func (m Model) prScopeLabel() string {
 
 func (m Model) prSortLabel() string {
 	direction := "A–Z"
-	if m.prReverse {
+	if m.prUI.reverse {
 		direction = "Z–A"
 	}
-	switch m.prSort {
+	switch m.prUI.sort {
 	case 0:
 		direction = "newest first"
-		if m.prReverse {
+		if m.prUI.reverse {
 			direction = "oldest first"
 		}
 	case 4:
 		direction = "priority first"
-		if m.prReverse {
+		if m.prUI.reverse {
 			direction = "priority last"
 		}
 	}
-	return prSortLabels[m.prSort] + " · " + direction
+	return prSortLabels[m.prUI.sort] + " · " + direction
 }
 
 func (m Model) prScopeRepositories() []git.Repository {
@@ -85,17 +106,17 @@ func (m Model) handlePRSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.quit()
 	case "enter":
-		m.prSearching = false
+		m.prUI.searching = false
 	case "esc":
-		m.prSearching, m.prQuery = false, m.prSearchBefore
+		m.prUI.searching, m.prUI.query = false, m.prUI.searchBefore
 	case "ctrl+u":
-		m.prQuery = ""
+		m.prUI.query = ""
 	case "backspace":
-		if runes := []rune(m.prQuery); len(runes) > 0 {
-			m.prQuery = string(runes[:len(runes)-1])
+		if runes := []rune(m.prUI.query); len(runes) > 0 {
+			m.prUI.query = string(runes[:len(runes)-1])
 		}
 	default:
-		m.prQuery += string(msg.Runes)
+		m.prUI.query += string(msg.Runes)
 	}
 	m.selectPR(selected)
 	return m, nil

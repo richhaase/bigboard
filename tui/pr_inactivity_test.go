@@ -76,7 +76,7 @@ func TestPRInactivityAndBookmarkPreserveResponsiveLayout(t *testing.T) {
 			t.Run(fmt.Sprintf("width=%d/error=%v", width, browserError != ""), func(t *testing.T) {
 				m := prFixture()
 				m.width, m.height, m.showPRs = width, 24, true
-				m.prBrowserError = browserError
+				m.prUI.browserError = browserError
 				snapshot := m.prState.snapshots["org/repo"]
 				pr := snapshot.prs[0]
 				pr.UpdatedAt = snapshot.checked.Add(-14 * 24 * time.Hour)

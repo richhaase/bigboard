@@ -39,12 +39,12 @@ func (m Model) openSelectedPR() (tea.Model, tea.Cmd) {
 	if len(prs) == 0 {
 		return m, nil
 	}
-	url := prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))])
+	url := prBrowserURL(prs[max(0, min(m.prUI.row, len(prs)-1))])
 	if url == "" {
-		m.prBrowserError = "Cannot open PR: canonical GitHub URL unavailable"
+		m.prUI.browserError = "Cannot open PR: canonical GitHub URL unavailable"
 		return m, nil
 	}
-	m.prBrowserError = ""
+	m.prUI.browserError = ""
 	opener := m.prBrowserOpener
 	if opener == nil {
 		opener = openPRBrowser

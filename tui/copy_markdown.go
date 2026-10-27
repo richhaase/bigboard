@@ -51,7 +51,7 @@ func (m Model) canCopyMarkdown() bool {
 		return false
 	}
 	if m.showPRs {
-		return !m.prDetail
+		return !m.prUI.detail
 	}
 	if m.viewMode == ViewAggregate {
 		return true
@@ -122,8 +122,8 @@ func (m Model) markdownList() string {
 		}
 	}
 	metadata = append(metadata, "Viewed repositories: "+strings.Join(repos, ", "))
-	if m.showPRs && m.prRepoID != "" {
-		metadata = append(metadata, "PR repository: "+m.prState.repositories[m.prRepoID])
+	if m.showPRs && m.prUI.repoID != "" {
+		metadata = append(metadata, "PR repository: "+m.prState.repositories[m.prUI.repoID])
 	} else if !m.showPRs && m.viewMode == ViewAwareness {
 		if repo, ok := m.areaRepository(); ok {
 			metadata = append(metadata, "Repository: "+repo.Name)

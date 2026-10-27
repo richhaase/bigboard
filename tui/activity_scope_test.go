@@ -65,7 +65,7 @@ func TestActivityRowsKeepOwningRepositoryWithCanonicalCloneEvidence(t *testing.T
 			}
 			opened := keyboardContractPress(t, current, "v")
 			prs := opened.visiblePRs()
-			if !opened.prContext.active || opened.prRepoID != "/source" || len(prs) != 1 || prs[0].Repo != "example/source" || prs[0].Number != 11 {
+			if !opened.prContext.active || opened.prUI.repoID != "/source" || len(prs) != 1 || prs[0].Repo != "example/source" || prs[0].Number != 11 {
 				t.Fatalf("contextual PR navigation used the canonical clone: %#v", prs)
 			}
 		})

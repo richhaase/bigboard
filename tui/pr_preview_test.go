@@ -15,7 +15,7 @@ func TestPRPreviewFollowsSelectionAndPreservesFullTitle(t *testing.T) {
 	m = keyboardContractPress(t, m, "p")
 	for _, key := range []string{"down", "pgdown", "end", "home", "s", "S"} {
 		m = keyboardContractPress(t, m, key)
-		pr := m.visiblePRs()[m.prRow]
+		pr := m.visiblePRs()[m.prUI.row]
 		preview := ansi.Strip(strings.Join(m.prSelectedPreview(m.visiblePRs(), m.width), "\n"))
 		for _, want := range []string{fmt.Sprintf("SELECTED  %s #%d", pr.Repo, pr.Number), pr.Title, githubIdentity(pr.Author), "Review: " + prReviewLabel(pr.ReviewDecision), "Checks: " + prCheckLabel(pr.CheckState)} {
 			if !strings.Contains(preview, want) {
@@ -48,10 +48,10 @@ func TestPRPreviewReservesListAndDiagnosticSpace(t *testing.T) {
 				m.prState.snapshots[repo] = snap
 			}
 			m = keyboardContractPress(t, m, "p", "end")
-			m.prBrowserError = "Could not open browser: unavailable"
+			m.prUI.browserError = "Could not open browser: unavailable"
 			view := ansi.Strip(m.View())
 			lines := strings.Split(view, "\n")
-			if len(lines) != height || !strings.Contains(view, m.prBrowserError) {
+			if len(lines) != height || !strings.Contains(view, m.prUI.browserError) {
 				t.Fatalf("%dx%d lost frame or browser diagnostic", width, height)
 			}
 			for _, line := range lines {
@@ -69,7 +69,7 @@ func TestPRPreviewReservesListAndDiagnosticSpace(t *testing.T) {
 			if !strings.Contains(view, "Enter full detail") || m.prListPageSize() < 3 {
 				t.Fatalf("%dx%d did not bound long title while preserving list", width, height)
 			}
-			pr := m.visiblePRs()[m.prRow]
+			pr := m.visiblePRs()[m.prUI.row]
 			list := strings.Join(lines[screenHeaderRows+2:height-screenFooterRows-len(preview)-1], "\n")
 			if !strings.Contains(list, "› ") || !strings.Contains(list, fmt.Sprintf("#%d", pr.Number)) {
 				t.Fatalf("%dx%d selected PR is missing from the list:\n%s", width, height, list)
@@ -88,7 +88,7 @@ func TestPRRepositoryLabelsRetainAmbiguousOwners(t *testing.T) {
 	if labels[first.prs[0].Repo] != "sample/gateway" || labels["another/gateway"] != "another/gateway" || labels["sample/worker-service"] != "worker-service" {
 		t.Fatalf("ambiguous repository labels: %v", labels)
 	}
-	m.prQuery = "another/gateway"
+	m.prUI.query = "another/gateway"
 	if m.prRepositoryLabels()["another/gateway"] != "another/gateway" {
 		t.Fatal("filtering changed repository identity labels")
 	}
