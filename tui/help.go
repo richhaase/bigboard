@@ -243,8 +243,10 @@ func (m Model) screenHelp() screenHelp {
 		}
 		if m.directory.active {
 			navigation = append(navigation, helpBinding{"1–3", "Read scope commits / people / related evidence"})
+			actions = append(actions, helpBinding{"o", "Open the selected directory / file on GitHub at the scanned revision; missing paths stay here"})
 		} else {
 			navigation = append(navigation, helpBinding{"Enter, then 2", "Read all contributors for the repository"})
+			actions = append(actions, helpBinding{"o", "Open the selected repository on GitHub"})
 		}
 		if m.contributorPane.focused {
 			title = "Activity · Contributors pane"

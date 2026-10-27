@@ -41,6 +41,9 @@ func (m Model) renderWorklist(width, height int) string {
 	}
 	lines = append(lines, boardListHeading(scope, m.overviewSortLabel(), summary, start, end, len(rows), width))
 	if m.areaRepoID == "" {
+		lines = m.activityBrowserHeader(lines, width)
+	}
+	if m.areaRepoID == "" {
 		lines = append(lines, "  "+m.repositoryOverviewColumns(inner))
 	} else if wide {
 		lines = append(lines, "  "+m.worklistColumns(inner))
@@ -270,6 +273,9 @@ func (m Model) worklistFooter(width, height int, detail bool) footerHints {
 	if detail && m.glance.frame.tab == glanceActivity {
 		local = append(local, footerHint{"o", "commit"})
 	}
+	if !detail && m.areaRepoID == "" {
+		local = append(local, footerHint{"o", "repo"})
+	}
 	local = append(local, footerHint{"f", "filters"})
 	if pane {
 		local = append(local, footerHint{"Tab", "contributors"})
@@ -297,7 +303,11 @@ func (m Model) worklistFooter(width, height int, detail bool) footerHints {
 
 func (m Model) worklistPageSize() int {
 	if m.areaRepoID == "" || m.directory.active {
-		return max(1, (m.height-screenHeaderRows-screenFooterRows-2-activityContributorsHeight(m.width, m.height))/activityRankingRowHeight(m.width))
+		errorRows := 0
+		if m.activityBrowserError != "" {
+			errorRows = 1
+		}
+		return max(1, (m.height-screenHeaderRows-screenFooterRows-2-errorRows-activityContributorsHeight(m.width, m.height))/activityRankingRowHeight(m.width))
 	}
 	if m.width >= 110 && m.height >= 28 {
 		return max(3, (m.height-19)/2)

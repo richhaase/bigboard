@@ -204,6 +204,8 @@ func (m Model) handleAwarenessKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "o":
+		return m.openSelectedActivityScope(projection.rows)
 	case "b":
 		m.activityHideBots = !m.activityHideBots
 		return m, nil

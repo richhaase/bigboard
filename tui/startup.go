@@ -53,9 +53,7 @@ func (m Model) startupRepoCmd(ctx context.Context, repo git.Repository) tea.Cmd 
 			result.Retained = true
 			return result
 		}
-		result = loadRepoCmd(ctx, repo, options, generation, false)().(RepoLoadedMsg)
-		result.Revision = revision
-		return result
+		return scanRepo(ctx, repo, options, generation, revision, nil)
 	}
 }
 

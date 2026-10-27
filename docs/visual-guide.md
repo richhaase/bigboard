@@ -35,6 +35,10 @@ pane answers who made those changes. Enter continues to child directories or a
 file's commits; Esc/left returns to the parent. Commit counts can overlap across
 directories, so they should not be summed.
 
+With the ranking focused, `o` opens the selected repository, directory, or file
+on GitHub. Directory/file links use the retained scan revision and require the
+path to exist there; deleted or unavailable paths show a message.
+
 The `1`, `2`, and `3` keys open Commits, People, and Related evidence for the current
 scope; `4` returns to the ranking. `v` opens PRs for the selected repository and
 Back returns to Activity.
