@@ -162,6 +162,7 @@ func (m Model) renderDirectoryBoard(width, height int, rows []activityRow) strin
 	start := max(0, min(selected-page/2, len(rows)-page))
 	end := min(len(rows), start+page)
 	lines = append(lines, boardListHeading("DIRECTORIES / FILES", m.overviewSortLabel(), nil, start, end, len(rows), width))
+	lines = m.activityBrowserHeader(lines, width)
 	lines = append(lines, "  "+m.repositoryOverviewColumns(width-4))
 	maxValue := m.repositoryMeasureMax(rows)
 	for i := start; i < end; i++ {
@@ -176,7 +177,7 @@ func (m Model) renderDirectoryBoard(width, height int, rows []activityRow) strin
 	} else {
 		lines = m.appendActivityContributors(lines, rows[selected], width, height)
 	}
-	local := []footerHint{{"Esc", "back"}, {"f", "filters"}}
+	local := []footerHint{{"Esc", "back"}, {"o", "path"}, {"f", "filters"}}
 	if activityContributorsHeight(width, height) > 0 {
 		local = append(local, footerHint{"Tab", "contributors"})
 	}

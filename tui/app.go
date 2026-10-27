@@ -62,6 +62,8 @@ type Model struct {
 	commitBrowserError string
 	prBrowserOpener    func(string) error
 
+	activityBrowserError string
+
 	showPaths          bool
 	showHelp           bool
 	helpOffset         int
@@ -237,17 +239,33 @@ func loadRepoCmd(ctx context.Context, repository git.Repository, options Options
 				fetchErr = git.FetchRepository(ctx, repository)
 			}
 		}
-		scan := options.ScanRepository
-		if scan == nil {
-			scan = git.ScanRepository
+		var revision string
+		if options.RepositoryRevision != nil {
+			if initial, err := options.RepositoryRevision(ctx, repository); err == nil {
+				revision = initial
+			}
 		}
-		records, err := scan(ctx, repository, git.CollectOptions{
-			IncludeGenerated: options.IncludeGenerated,
-			AIIdentities:     options.AIIdentities,
-			Identities:       options.Identities,
-		})
-		return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err, FetchErr: fetchErr}
+		return scanRepo(ctx, repository, options, generation, revision, fetchErr)
 	}
+}
+
+func scanRepo(ctx context.Context, repository git.Repository, options Options, generation uint64, revision string, fetchErr error) RepoLoadedMsg {
+	scan := options.ScanRepository
+	if scan == nil {
+		scan = git.ScanRepository
+	}
+	records, err := scan(ctx, repository, git.CollectOptions{
+		IncludeGenerated: options.IncludeGenerated,
+		AIIdentities:     options.AIIdentities,
+		Identities:       options.Identities,
+	})
+	if revision != "" && options.RepositoryRevision != nil {
+		current, revisionErr := options.RepositoryRevision(ctx, repository)
+		if revisionErr != nil || current != revision {
+			revision = ""
+		}
+	}
+	return RepoLoadedMsg{Generation: generation, Repository: repository, Records: records, Err: err, FetchErr: fetchErr, Revision: revision}
 }
 
 func (m Model) loadCmds() tea.Cmd {
@@ -463,6 +481,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.startPRRefresh(), m.cacheInfoCmd())
 		}
 		return m, m.nextLoadCmd()
+
+	case activityBrowserResult:
+		if msg.err != nil {
+			m.activityBrowserError = "Could not open Activity: " + displayText(msg.err.Error())
+		}
+		return m, nil
 
 	case commitBrowserResult:
 		if msg.err != nil {

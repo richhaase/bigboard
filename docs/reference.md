@@ -113,6 +113,11 @@ Home/End browse that pane. Esc/left returns focus to the ranking before moving
 back. A highlighted heading and side marker identify the focused pane. In very
 small windows only the ranking is shown.
 
+With the ranking focused, `o` opens the selected repository on GitHub, or the
+selected directory/file at the retained scan revision. Paths are checked in the
+local cache first; deleted or unavailable paths show a message without opening
+a page. These links stay at the scan revision even if the local branch moves.
+
 `1`, `2`, and `3` open Commits, People, and Related evidence for the current
 scope; `4` returns to its directory ranking. Tab cycles these detail lenses.
 People opens a contributor's scoped commits. Related shows shared commits;

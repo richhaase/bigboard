@@ -116,6 +116,15 @@ normalization retain their existing meanings.
 
 ## Related evidence
 
+On Activity rankings, `o` opens the selected repository on GitHub, or the selected
+directory/file at its retained scan revision. Local object lookup verifies the
+literal path and expected tree/blob type; absent/deleted paths and unavailable
+revisions produce a visible diagnostic. Links never follow a moving branch.
+The contributor pane and modal/text contexts do not open ranking selections.
+Every scan retains its revision only when the revision lookup succeeds unchanged
+before and after scanning; ordinary and identity refreshes preserve this evidence.
+Commit and PR browser actions keep their existing meanings.
+
 On the Contributors list, `m` opens the identity merge modal over all collected
 identities. With only the preselected contributor, `n` sets a display name
 without merging; blank restores automatic naming and existing aliases remain
