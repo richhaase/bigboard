@@ -112,3 +112,153 @@ func TestCalendarProjectionsPreserveEmptyAndZeroValues(t *testing.T) {
 		t.Fatalf("unknown-only daily projection: days=%+v maximum=%d", days, maximum)
 	}
 }
+
+func TestActivityTimelineDailyPreservesCalendarCountsAndSparseFuture(t *testing.T) {
+	zone := time.FixedZone("west", -7*60*60)
+	start := time.Date(2026, time.January, 30, 18, 0, 0, 0, zone)
+	end := start.Add(3 * 24 * time.Hour)
+	boundary := time.Date(2026, time.February, 1, 1, 0, 0, 0, time.UTC)
+	known := git.CommitRecord{CommitID: "same", Date: boundary, Added: 4, Removed: 2, AIAssisted: true}
+	unknown := git.CommitRecord{Date: boundary, Added: 999, Removed: 999, LinesUnknown: true, AIAssisted: true}
+	future := git.CommitRecord{Date: time.Date(2036, time.June, 3, 12, 0, 0, 0, zone), Added: 9}
+	records := []git.CommitRecord{future, known, unknown, known}
+	want := []stats.TimelineActivity{
+		{Start: time.Date(2026, time.January, 30, 0, 0, 0, 0, time.UTC)},
+		{Start: time.Date(2026, time.January, 31, 0, 0, 0, 0, time.UTC), Commits: 3, Added: 8, Removed: 4, AI: 3, UnknownLineCommits: 1},
+		{Start: time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
+		{Start: time.Date(2026, time.February, 2, 0, 0, 0, 0, time.UTC)},
+		{Start: time.Date(2036, time.June, 3, 0, 0, 0, 0, time.UTC), Commits: 1, Added: 9},
+	}
+	if got := stats.ActivityTimeline(records, zone, start, end, stats.TimelineDaily); !reflect.DeepEqual(got, want) {
+		t.Fatalf("daily timeline: got %+v, want %+v", got, want)
+	}
+	if got := stats.ActivityTimeline([]git.CommitRecord{known}, time.UTC, start, end, stats.TimelineDaily); got[1].Commits != 1 {
+		t.Fatalf("daily timeline ignored the explicit location: %+v", got)
+	}
+	if !reflect.DeepEqual(records, []git.CommitRecord{future, known, unknown, known}) {
+		t.Fatal("timeline mutated the input")
+	}
+}
+
+func TestActivityTimelineWeeklyUsesLocalSundayAndFillsSelectedWindow(t *testing.T) {
+	zone := time.FixedZone("west", -7*60*60)
+	start := time.Date(2025, time.December, 27, 18, 0, 0, 0, zone)
+	end := time.Date(2026, time.January, 12, 18, 0, 0, 0, zone)
+	records := []git.CommitRecord{
+		{Date: time.Date(2025, time.December, 28, 1, 0, 0, 0, time.UTC), Added: 2},
+		{Date: time.Date(2025, time.December, 28, 7, 0, 0, 0, time.UTC), Removed: 3, AIAssisted: true},
+		{Date: time.Date(2026, time.January, 4, 1, 0, 0, 0, time.UTC), Added: 999, LinesUnknown: true},
+		{Date: time.Date(2036, time.June, 3, 12, 0, 0, 0, zone), Added: 5},
+	}
+	want := []stats.TimelineActivity{
+		{Start: time.Date(2025, time.December, 21, 0, 0, 0, 0, time.UTC), Commits: 1, Added: 2},
+		{Start: time.Date(2025, time.December, 28, 0, 0, 0, 0, time.UTC), Commits: 2, Removed: 3, AI: 1, UnknownLineCommits: 1},
+		{Start: time.Date(2026, time.January, 4, 0, 0, 0, 0, time.UTC)},
+		{Start: time.Date(2026, time.January, 11, 0, 0, 0, 0, time.UTC)},
+		{Start: time.Date(2036, time.June, 1, 0, 0, 0, 0, time.UTC), Commits: 1, Added: 5},
+	}
+	if got := stats.ActivityTimeline(records, zone, start, end, stats.TimelineWeekly); !reflect.DeepEqual(got, want) {
+		t.Fatalf("weekly timeline: got %+v, want %+v", got, want)
+	}
+}
+
+func TestActivityTimelineUsesUTCMarkersAcrossMidnightDST(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		zone    string
+		first   time.Time
+		records []git.CommitRecord
+	}{
+		{
+			name:  "missing midnight",
+			zone:  "America/Asuncion",
+			first: time.Date(2023, time.September, 30, 0, 0, 0, 0, time.UTC),
+			records: []git.CommitRecord{
+				{Date: time.Date(2023, time.October, 1, 4, 0, 0, 0, time.UTC), Added: 2},
+				{Date: time.Date(2023, time.October, 1, 5, 0, 0, 0, time.UTC), Added: 3},
+			},
+		},
+		{
+			name:  "repeated midnight",
+			zone:  "America/Havana",
+			first: time.Date(2023, time.November, 4, 0, 0, 0, 0, time.UTC),
+			records: []git.CommitRecord{
+				{Date: time.Date(2023, time.November, 5, 4, 30, 0, 0, time.UTC), Added: 2},
+				{Date: time.Date(2023, time.November, 5, 5, 30, 0, 0, time.UTC), Added: 3},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			zone, err := time.LoadLocation(test.zone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := test.first.Add(12 * time.Hour)
+			end := start.AddDate(0, 0, 3)
+			want := []stats.TimelineActivity{
+				{Start: test.first},
+				{Start: test.first.AddDate(0, 0, 1), Commits: 2, Added: 5},
+				{Start: test.first.AddDate(0, 0, 2)},
+				{Start: test.first.AddDate(0, 0, 3)},
+			}
+			if got := stats.ActivityTimeline(test.records, zone, start, end, stats.TimelineDaily); !reflect.DeepEqual(got, want) {
+				t.Fatalf("DST timeline: got %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestActivityTimelineEmptyInputIncludesPartialFirstDayAndWeek(t *testing.T) {
+	zone := time.FixedZone("east", 9*60*60)
+	start := time.Date(2026, time.January, 31, 18, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	for _, test := range []struct {
+		name     string
+		interval stats.TimelineInterval
+		want     []stats.TimelineActivity
+	}{
+		{
+			name:     "daily",
+			interval: stats.TimelineDaily,
+			want: []stats.TimelineActivity{
+				{Start: time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
+				{Start: time.Date(2026, time.February, 2, 0, 0, 0, 0, time.UTC)},
+			},
+		},
+		{
+			name:     "weekly",
+			interval: stats.TimelineWeekly,
+			want: []stats.TimelineActivity{
+				{Start: time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := stats.ActivityTimeline(nil, zone, start, end, test.interval); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("empty timeline: got %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFilterByTimeAtUsesStrictCutoffAndRetainsFuture(t *testing.T) {
+	now := time.Date(2026, time.October, 26, 12, 0, 0, 0, time.UTC)
+	duration := 24 * time.Hour
+	cutoff := now.Add(-duration)
+	records := []git.CommitRecord{
+		{Date: cutoff.Add(-time.Nanosecond)},
+		{Date: cutoff},
+		{Date: cutoff.Add(time.Nanosecond)},
+		{Date: now},
+		{Date: now.AddDate(10, 0, 0)},
+	}
+	if got := stats.FilterByTimeAt(records, duration, now); !reflect.DeepEqual(got, records[2:]) {
+		t.Fatalf("time selection changed cutoff or future retention: %+v", got)
+	}
+	if got := stats.FilterByTimeAt(records, 0, now); len(got) != len(records) || &got[0] != &records[0] {
+		t.Fatal("all-time selection did not preserve the input slice")
+	}
+	if got := stats.FilterByTimeAt(nil, 0, now); got != nil {
+		t.Fatalf("all-time selection changed nil input: %+v", got)
+	}
+}

@@ -531,12 +531,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) filteredRecords() []git.CommitRecord {
+	return m.filteredRecordsAt(time.Now())
+}
+
+func (m *Model) filteredRecordsAt(now time.Time) []git.CommitRecord {
 	filtered := stats.FilterByRepo(m.local.records, m.excludedRepos)
 	filtered = m.filterSharedRecords(filtered)
 	if m.timeIdx < 0 || m.timeIdx >= len(TimePresets) {
 		m.timeIdx = DefaultTimeIndex
 	}
-	return stats.FilterByTime(filtered, m.rangeDuration())
+	return stats.FilterByTimeAt(filtered, m.rangeDuration(), now)
 }
 
 func (m *Model) recomputeAuthors() {
@@ -785,6 +789,10 @@ func (m Model) renderAggregateView() string {
 }
 
 func (m Model) operativeDetailContent() string {
+	return m.operativeDetailContentAt(time.Now())
+}
+
+func (m Model) operativeDetailContentAt(now time.Time) string {
 	var as *stats.AuthorStats
 	for i := range m.authors {
 		if (m.activeAuthorID != "" && m.authors[i].ID == m.activeAuthorID) || (m.activeAuthorID == "" && m.authors[i].Name == m.activeOperative) {
@@ -793,7 +801,7 @@ func (m Model) operativeDetailContent() string {
 		}
 	}
 
-	filtered := m.filteredRecords()
+	filtered := m.filteredRecordsAt(now)
 	name := m.activeOperative
 	if as != nil {
 		name = as.Name
@@ -803,11 +811,12 @@ func (m Model) operativeDetailContent() string {
 		filtered = nil
 	}
 
-	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.RenderOperativeDetail(
+	detail := OperativeView{FuzzyMatching: m.options.FuzzyMatching}.renderOperativeDetail(
 		name,
 		as,
 		filtered,
 		m.width,
+		activityChartWindow{now: now, duration: m.rangeDuration()},
 	)
 	return detail
 }
