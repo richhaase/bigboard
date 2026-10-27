@@ -53,9 +53,14 @@ func (m Model) renderWorklist(width, height int) string {
 	}
 
 	maxValue := m.repositoryMeasureMax(rows)
+	labels := m.activityRepositoryLabels()
 	for i := start; i < end; i++ {
 		if m.areaRepoID == "" {
-			lines = append(lines, m.worklistRepositoryRow(rows[i], i == selected, inner, i+1, maxValue)...)
+			displayRow := rows[i]
+			if label, ok := labels[displayRow.label]; ok {
+				displayRow.label = label
+			}
+			lines = append(lines, m.worklistRepositoryRow(displayRow, i == selected, inner, i+1, maxValue)...)
 		} else {
 			lines = append(lines, m.worklistRow(rows[i], i == selected, inner, wide)...)
 		}

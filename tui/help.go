@@ -21,6 +21,7 @@ type helpSection struct {
 type screenHelp struct {
 	title    string
 	sections []helpSection
+	legends  []helpSection
 }
 
 func (m Model) helpSearchActive() bool {
@@ -44,18 +45,20 @@ func (m Model) helpSearchActive() bool {
 
 func (m Model) currentHelp() screenHelp {
 	if !m.modalMinimum().fits(m.width, m.height) {
-		help := screenHelp{"Resize dialog", []helpSection{{"Paused", []helpBinding{{"Resize", "Enlarge the terminal to resume editing or confirmation"}, {"Esc", "Return to the dialog; Escape there cancels or goes back"}, {"Ctrl+C", "Quit BigBoard"}}}}}
+		help := screenHelp{title: "Resize dialog", sections: []helpSection{{"Paused", []helpBinding{{"Resize", "Enlarge the terminal to resume editing or confirmation"}, {"Esc", "Return to the dialog; Escape there cancels or goes back"}, {"Ctrl+C", "Quit BigBoard"}}}}}
 		if !m.settings.required && m.settings.busy != "saving" && !m.identityMerge.saving && !m.cacheRemoving {
 			help.sections = append(help.sections, helpSection{"Boards · cancel pending choices", []helpBinding{{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume PRs"}}})
 		}
 		return help
 	}
 	if m.settings.open {
-		return m.settingsHelp()
+		help := m.settingsHelp()
+		help.sections = append(help.sections, help.legends...)
+		return help
 	}
 	help := m.screenHelp()
 	if m.options.Bookmark != nil && !m.options.Bookmark.Time.IsZero() && !m.helpSearchActive() {
-		help.sections = append(help.sections, helpSection{"Since last look", []helpBinding{
+		help.legends = append(help.legends, helpSection{"Since last look", []helpBinding{
 			{"+", "Activity or PR updated after this selection's saved bookmark"},
 			{"Bookmark", "Choose Since last look in Date range; Data status shows its time and when it advances"},
 		}})
@@ -83,13 +86,14 @@ func (m Model) currentHelp() screenHelp {
 	help.sections = append(help.sections, helpSection{boards, []helpBinding{
 		{"c", "Resume Contributors"}, {"a", "Resume Activity"}, {"p", "Resume PRs"},
 	}})
+	help.sections = append(help.sections, help.legends...)
 	return help
 }
 
 func (m Model) screenHelp() screenHelp {
 	if m.identityMerge.open {
 		if m.identityMerge.edit != "" {
-			return screenHelp{"Contributor identity text", []helpSection{{"Edit", []helpBinding{
+			return screenHelp{title: "Contributor identity text", sections: []helpSection{{"Edit", []helpBinding{
 				{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Keep edit; return to choices"}, {"Esc", "Cancel edit"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 			}}}}
 		}
@@ -98,48 +102,48 @@ func (m Model) screenHelp() screenHelp {
 			if m.identityMerge.selectedCount() == 1 {
 				title, action = "Review display name", "Save the display name; keep email mappings unchanged"
 			}
-			return screenHelp{title, []helpSection{{"Confirm", []helpBinding{
+			return screenHelp{title: title, sections: []helpSection{{"Confirm", []helpBinding{
 				{"Enter", action}, {"Esc / ←", "Return to choices without saving"}, {"↑ / ↓", "Review selected emails"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last email"}, {"q / Ctrl+C", "Quit without confirming"},
 			}}}}
 		}
-		return screenHelp{"Contributor identities", []helpSection{{"Choose identities", []helpBinding{
+		return screenHelp{title: "Contributor identities", sections: []helpSection{{"Choose identities", []helpBinding{
 			{"↑ / ↓", "Select a contributor identity"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last identity"}, {"Space", "Stage identity for merging"}, {"k", "Keep highlighted email as the primary identity"}, {"n", "Set display name for one identity or a merge; blank restores automatic naming for one identity"}, {"/", "Find by name or email"}, {"Enter", "Review the name or merge before saving"}, {"Esc / ←", "Cancel without saving"}, {"q / Ctrl+C", "Quit BigBoard"},
-		}}, {"Identity", []helpBinding{{"Scope", "All collected identities are available, independently of date and board filters"}, {"[P]", "Primary email retained by the merged contributor"}, {"[—]", "Missing or invalid email; cannot save identity changes"}, {"Saving", "Updates future sessions and rescans cached local history without fetching"}}}}}
+		}}}, legends: []helpSection{{"Identity", []helpBinding{{"Scope", "All collected identities are available, independently of date and board filters"}, {"[P]", "Primary email retained by the merged contributor"}, {"[—]", "Missing or invalid email; cannot save identity changes"}, {"Saving", "Updates future sessions and rescans cached local history without fetching"}}}}}
 	}
 	if m.filters.open {
 		if m.filtersTextEditing() {
-			return screenHelp{"Filter text", []helpSection{{"Edit", []helpBinding{
+			return screenHelp{title: "Filter text", sections: []helpSection{{"Edit", []helpBinding{
 				{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear the text"}, {"Enter", "Keep this edit; return to pending choices"}, {"Esc", "Cancel this edit; return to pending choices"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 			}}}}
 		}
-		return screenHelp{"Filters", []helpSection{{"Choose", []helpBinding{
+		return screenHelp{title: "Filters", sections: []helpSection{{"Choose", []helpBinding{
 			{"Tab / Shift+Tab", "Move focus between categories and options"}, {"← / →", "Focus categories / options"}, {"↑ / ↓", "Select a category or option in the focused pane"}, {"PgUp / PgDn", "Move a page in the focused pane"}, {"Home / End", "First / last category or option in the focused pane"},
 			{"Space", "Open category options; in options, stage a choice"}, {"/", "Find options; focus the options pane"}, {"Enter", "Apply all pending changes"}, {"Esc", "Cancel pending changes; return to the board"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}, {"Reset", []helpBinding{
 			{"x", "Stage reset of this board's filters and search; Enter applies"}, {"X", "Stage reset of shared scope to All time and all tracked repositories; Enter applies"},
-		}}, {"Scope", []helpBinding{
+		}}}, legends: []helpSection{{"Scope", []helpBinding{
 			{"Shared", "Date range and viewed repositories affect every board; tracking is unchanged"}, {"This board", "Other filters stay on this board"}, {"Selections", "Any selected value; all categories must match"},
 			{"*", "Category has pending changes"}, {"Panes", "Categories and options sit side by side when space permits; narrow terminals show the focused pane"},
 		}}}}
 	}
 	if m.showScanErrors {
-		return screenHelp{"Data status", []helpSection{{"Actions", []helpBinding{
+		return screenHelp{title: "Data status", sections: []helpSection{{"Actions", []helpBinding{
 			{"↑ / ↓", "Scroll freshness and coverage"}, {"d", "Show / hide repository diagnostics"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
 			{"e / ← / Esc", "Close Data status; return to the previous view"}, {"r", "Refresh Git and PRs"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.loading {
-		return screenHelp{"Loading repositories", []helpSection{{"Actions", []helpBinding{
+		return screenHelp{title: "Loading repositories", sections: []helpSection{{"Actions", []helpBinding{
 			{"r", "Join the current refresh"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.err != nil {
-		return screenHelp{"Repositories unavailable", []helpSection{{"Recovery", []helpBinding{
+		return screenHelp{title: "Repositories unavailable", sections: []helpSection{{"Recovery", []helpBinding{
 			{"r", "Retry repository refresh"}, {"e", "Data status: read error details"}, {"q / Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.helpSearchActive() {
-		return screenHelp{"Search", []helpSection{{"Edit the search", []helpBinding{
+		return screenHelp{title: "Search", sections: []helpSection{{"Edit the search", []helpBinding{
 			{"Type", "Find in the current list; shortcut letters stay literal"}, {"Backspace", "Remove the last character"}, {"Ctrl+U", "Clear the text"},
 			{"Enter", "Keep the search and return to the list"}, {"Esc", "Restore the previous search and return"},
 			{"?", "Type a question mark"}, {"F1", "Open this help while typing"}, {"Ctrl+C", "Quit BigBoard"},
@@ -162,13 +166,13 @@ func (m Model) screenHelp() screenHelp {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
 			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
 		}
-		return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}, {"Legend", []helpBinding{{"Mine filters", "Authored by me, review requested from me, or Updated since my review; signed-in gh account"}, {"Updated since review", "Any PR activity after your latest known submitted review; missing review times do not match"}, {"Attention sort", "Requested from me → failing checks → changes requested → approved → other; oldest updates first"}, {"! age", "Inactive: no PR update for 14+ days at the last check; distinct from stale cached data"}, {"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
+		return screenHelp{title: title, sections: []helpSection{{"Navigate", navigation}, {"Actions", actions}}, legends: []helpSection{{"Legend", []helpBinding{{"Mine filters", "Authored by me, review requested from me, or Updated since my review; signed-in gh account"}, {"Updated since review", "Any PR activity after your latest known submitted review; missing review times do not match"}, {"Attention sort", "Requested from me → failing checks → changes requested → approved → other; oldest updates first"}, {"! age", "Inactive: no PR update for 14+ days at the last check; distinct from stale cached data"}, {"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
 	}
 
 	switch m.viewMode {
 	case ViewRepoOverlay:
 		if m.cacheRemoveConfirm != "" {
-			return screenHelp{"Remove cached repository", []helpSection{{"Confirm removal", []helpBinding{
+			return screenHelp{title: "Remove cached repository", sections: []helpSection{{"Confirm removal", []helpBinding{
 				{"Enter", "Delete only this BigBoard cached clone"}, {"Esc / ←", "Keep the cache and return to repository controls"},
 			}}}}
 		}
@@ -180,15 +184,15 @@ func (m Model) screenHelp() screenHelp {
 		if m.options.RemoveCachedRepository != nil {
 			bindings = append(bindings, helpBinding{"d", "Review removal of a cached repository no longer listed by the organization"})
 		}
-		return screenHelp{"Repository controls", []helpSection{{"Choose repositories", bindings}, {"Tracking", []helpBinding{{"Included", "Used for data and refreshes in this session"}, {"Filters", "Narrow the view without changing repository tracking"}}}}}
+		return screenHelp{title: "Repository controls", sections: []helpSection{{"Choose repositories", bindings}}, legends: []helpSection{{"Tracking", []helpBinding{{"Included", "Used for data and refreshes in this session"}, {"Filters", "Narrow the view without changing repository tracking"}}}}}
 	case ViewOperative:
-		return screenHelp{"Contributor details", []helpSection{{"Navigate", []helpBinding{
+		return screenHelp{title: "Contributor details", sections: []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll contributor details"}, {"PgUp / PgDn", "Scroll details"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to Contributors"},
 		}}, {"Actions", []helpBinding{{"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
 	case ViewAggregate:
 		back := "Stay at the Contributors root"
-		return screenHelp{"Contributors", []helpSection{{"Navigate", []helpBinding{
+		return screenHelp{title: "Contributors", sections: []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Select a contributor"}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last contributor"}, {"Enter / →", "Read contributor details"}, {"← / Esc", back},
 		}}, {"Actions", []helpBinding{
 			{"/", "Find contributors"}, {"s / S", "Change sort / reverse order"},
@@ -197,7 +201,7 @@ func (m Model) screenHelp() screenHelp {
 		}}}}
 	}
 	if m.showPaths {
-		return screenHelp{"Commit details", []helpSection{{"Navigate", []helpBinding{
+		return screenHelp{title: "Commit details", sections: []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll commit evidence"}, {"PgUp / PgDn", "Scroll a page"}, {"Home / End", "First / last page"},
 			{"← / Esc", "Return to the current lens"}, {"Tab / Shift+Tab", "Next / previous lens"},
 		}}, {"Actions", []helpBinding{{"o", "Open this exact commit on GitHub"}, {"v", "Open PRs for this repository"}, {"i", "Repository controls: choose tracked repositories"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}}}}
@@ -254,8 +258,13 @@ func (m Model) screenHelp() screenHelp {
 		helpBinding{"i", "Repository controls: choose tracked repositories"}, helpBinding{"v", "Open PRs for this repository"},
 		helpBinding{"q / Ctrl+C", "Quit BigBoard"}, helpBinding{"r", "Refresh Git and PRs"})
 	sections := []helpSection{{"Navigate", navigation}, {"Actions", actions}}
+	legends := []helpSection{{"Git history", []helpBinding{
+		{"Dates", "Commit author dates determine the range; ages use each repository’s last scan"},
+		{"Refresh", "Startup and r fetch history and PRs; there is no background polling"},
+		{"? lines", "Incomplete line counts; unknown paths may omit affected directories"},
+	}}}
 	if !m.glance.detailOpen {
-		sections = append(sections, helpSection{"PR counts", []helpBinding{
+		legends = append(legends, helpSection{"PR counts", []helpBinding{
 			{"Open", "Known open PRs in the shared date and repository scope"},
 			{"Failing", "PRs with failing or errored checks"},
 			{"Changes", "PRs with changes requested; may also have failing checks"},
@@ -264,19 +273,17 @@ func (m Model) screenHelp() screenHelp {
 			{"Range", "PR last-updated time; Git contributor/bot filters do not affect PR counts"},
 		}})
 	}
-	return screenHelp{title, sections}
+	return screenHelp{title: title, sections: sections, legends: legends}
 }
 
 func (m Model) helpLines(width int) []string {
 	var lines []string
-	keyWidth := 0
-	for _, section := range m.currentHelp().sections {
+	for i, section := range m.currentHelp().sections {
+		keyWidth := 0
 		for _, binding := range section.bindings {
 			keyWidth = max(keyWidth, ansi.StringWidth(binding.key))
 		}
-	}
-	keyWidth = min(keyWidth, max(1, width/2))
-	for i, section := range m.currentHelp().sections {
+		keyWidth = min(keyWidth, max(1, width/2))
 		if i > 0 {
 			lines = append(lines, "")
 		}
@@ -296,7 +303,7 @@ func (m Model) helpLines(width int) []string {
 }
 
 func helpSize(width, height int) (int, int) {
-	return max(6, min(66, width-2)), max(1, height-9)
+	return max(6, min(82, width-2)), max(1, height-9)
 }
 
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

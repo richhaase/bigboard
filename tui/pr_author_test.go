@@ -74,12 +74,12 @@ func TestPRAuthorSortAndFiltersMatchVisibleColumn(t *testing.T) {
 			t.Fatal("author sorting/filtering moved a retained selection")
 		}
 	}
-	if m.prSortLabel() != "Author ↑" {
+	if m.prSortLabel() != "Author · A–Z" {
 		t.Fatal("s did not expose author sorting")
 	}
 	assertAuthors([]string{"ada", "Mira", "Zulu"})
 	m = keyboardContractPress(t, m, "S")
-	if m.prSortLabel() != "Author ↓" {
+	if m.prSortLabel() != "Author · Z–A" {
 		t.Fatal("S did not reverse author sorting")
 	}
 	assertAuthors([]string{"Zulu", "Mira", "ada"})

@@ -105,8 +105,8 @@ func TestHelpScrollAndDismissKeys(t *testing.T) {
 	m := awarenessFixture()
 	m.width, m.height = 40, 18
 	m = keyboardContractPress(t, m, "?", "end")
-	if m.helpOffset == 0 || !strings.Contains(ansi.Strip(m.View()), "Resume PRs") {
-		t.Fatal("cannot reach the final help bindings")
+	if m.helpOffset == 0 || !strings.Contains(ansi.Strip(m.View()), "counts") {
+		t.Fatal("cannot reach the final help legend")
 	}
 	m = keyboardContractPress(t, m, "home")
 	if m.helpOffset != 0 {

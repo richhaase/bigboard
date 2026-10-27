@@ -141,7 +141,7 @@ func TestUnknownCountsAreQualifiedAtWideAndNarrowWidths(t *testing.T) {
 	for _, width := range []int{60, 80, 120} {
 		m.width = width
 		out := m.View()
-		if !strings.Contains(out, "Shallow history") || !strings.Contains(out, "5?") {
+		if !strings.Contains(out, "Unknown line counts") || !strings.Contains(out, "5?") {
 			t.Fatalf("unqualified totals at %d:\n%s", width, out)
 		}
 	}

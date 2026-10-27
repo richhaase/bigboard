@@ -110,8 +110,8 @@ func TestPRInactivityAndBookmarkPreserveResponsiveLayout(t *testing.T) {
 						t.Fatalf("line overflowed %d columns: %s", width, ansi.Strip(line))
 					}
 				}
-				if !strings.Contains(ansi.Strip(view[len(view)-1]), "! inactive ≥14d") {
-					t.Fatal("coverage clipped the inactivity legend")
+				if !strings.Contains(ansi.Strip(strings.Join(m.helpLines(80), "\n")), "Inactive: no PR update for 14+") {
+					t.Fatal("help lost the inactivity legend")
 				}
 				if browserError != "" && !strings.Contains(ansi.Strip(strings.Join(view, "\n")), browserError) {
 					t.Fatal("inactivity displaced browser diagnostics")

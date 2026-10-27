@@ -42,7 +42,7 @@ func (m Model) bookmarkStatusLines() []string {
 		lines = append(lines, "On normal exit, save snapshot time: "+m.bookmarkSeenAt.Local().Format("Jan 02 15:04:05 MST"))
 	}
 	if bookmark.Path != "" {
-		lines = append(lines, "State file: "+displayText(bookmark.Path))
+		lines = append(lines, "State file: "+displayPath(bookmark.Path))
 	}
 	return append(lines, "")
 }
