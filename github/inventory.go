@@ -83,3 +83,28 @@ func (r *inventoryRegistry) fail(err error) {
 		r.blocked = err
 	}
 }
+
+func reserveShared(ctx context.Context, allowances []*repositoryAllowance) (time.Duration, error) {
+	timeout := RequestTimeout
+	for _, allowance := range allowances {
+		allowance.mu.Lock()
+		remaining, full := FetchTimeout-allowance.elapsed, allowance.requests >= allowance.limit
+		allowance.mu.Unlock()
+		if remaining <= 0 {
+			return 0, context.DeadlineExceeded
+		}
+		if full {
+			return 0, ErrBudgetExceeded
+		}
+		timeout = min(timeout, remaining)
+	}
+	if !takeRequest(ctx) {
+		return 0, ErrBudgetExceeded
+	}
+	for _, allowance := range allowances {
+		allowance.mu.Lock()
+		allowance.requests++
+		allowance.mu.Unlock()
+	}
+	return timeout, nil
+}

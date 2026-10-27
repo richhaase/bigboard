@@ -19,6 +19,7 @@ const (
 	filePageSize         = 100
 	contextPageSize      = 50
 	inventoryConcurrency = 4
+	inventoryBatchNodes  = 50_000
 )
 
 // Provider is safe for concurrent independent repository fetches. It retains no
@@ -107,20 +108,24 @@ type rawRepository struct {
 	PullRequest   *rawPR
 }
 
+type apiData struct {
+	Repository *rawRepository
+	Viewer     *actor
+	RateLimit  *struct {
+		Remaining int
+		ResetAt   string
+	}
+}
+
+type apiError struct {
+	Message, Type string
+	Path          []any
+}
+
 type apiResponse struct {
 	probeData map[string]json.RawMessage
-	Data      *struct {
-		Repository *rawRepository
-		Viewer     *actor
-		RateLimit  *struct {
-			Remaining int
-			ResetAt   string
-		}
-	}
-	Errors []struct {
-		Message, Type string
-		Path          []any
-	}
+	Data      *apiData
+	Errors    []apiError
 }
 
 type fetchedPR struct {
@@ -136,14 +141,15 @@ type fetchedPR struct {
 }
 
 type fetchSession struct {
-	aliases   bool
-	provider  *Provider
-	ctx       context.Context
-	requests  int
-	blocked   error
-	limit     int
-	allowance *repositoryAllowance
-	registry  *inventoryRegistry
+	aliases    bool
+	provider   *Provider
+	ctx        context.Context
+	requests   int
+	blocked    error
+	limit      int
+	allowance  *repositoryAllowance
+	allowances []*repositoryAllowance
+	registry   *inventoryRegistry
 }
 
 // Fetch reads open PR summaries and current changed paths from github.com only.
@@ -191,22 +197,26 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 			jobs = append(jobs, batch)
 		}
 	}
-	queue := make(chan *repositoryFetch)
+	var inline, lean []*repositoryFetch
+	for _, batch := range jobs {
+		if batch.lean {
+			lean = append(lean, batch)
+		} else {
+			inline = append(inline, batch)
+		}
+	}
+	chunks := append(inventoryChunks(inline, inventoryBatchSize(false)), inventoryChunks(lean, inventoryBatchSize(true))...)
+	queue := make(chan []*repositoryFetch)
 	var workers sync.WaitGroup
-	for range min(inventoryConcurrency, len(jobs)) {
+	for range min(inventoryConcurrency, len(chunks)) {
 		workers.Go(func() {
-			for batch := range queue {
-				if existing := registry.lookup(batch.result.Repo); existing != nil {
-					batch.canonical = existing
-					continue
-				}
-				p.fetchInventory(batch)
-				batch.result.InventoryErr = batch.result.Err
+			for chunk := range queue {
+				p.fetchInventories(ctx, registry, chunk)
 			}
 		})
 	}
-	for _, batch := range jobs {
-		queue <- batch
+	for _, chunk := range chunks {
+		queue <- chunk
 	}
 	close(queue)
 	workers.Wait()
@@ -332,97 +342,213 @@ func reusableFiles(current, previous PullRequest) bool {
 		current.FileCount == previous.FileCount && len(previous.Files) == current.FileCount
 }
 
-func (p *Provider) fetchInventory(batch *repositoryFetch) {
-	result := &batch.result
-	repo := result.Repo
-	rows := batch.rows
-	cursor := ""
-	seenCursors := make(map[string]bool)
-	inventoryValid := true
-	total := -1
-	for page := 0; ; page++ {
-		if page >= p.limits.summaryPages || len(rows) >= p.limits.pullRequests {
-			result.Err = joinError(result.Err, ErrBudgetExceeded)
-			break
+func inventoryBatchSize(lean bool) int {
+	nested := 2*contextPageSize + 1
+	if !lean {
+		nested += filePageSize
+	}
+	return max(1, inventoryBatchNodes/(prPageSize*(1+nested)))
+}
+
+func inventoryChunks(jobs []*repositoryFetch, size int) [][]*repositoryFetch {
+	count := (len(jobs) + size - 1) / size
+	chunks := make([][]*repositoryFetch, 0, count)
+	for i := range count {
+		chunks = append(chunks, jobs[i*len(jobs)/count:(i+1)*len(jobs)/count])
+	}
+	return chunks
+}
+
+type inventoryPage struct {
+	page        int
+	cursor      string
+	seenCursors map[string]bool
+	valid       bool
+	total       int
+	done        bool
+}
+
+func (p *Provider) fetchInventories(ctx context.Context, registry *inventoryRegistry, chunk []*repositoryFetch) {
+	var batches []*repositoryFetch
+	for _, batch := range chunk {
+		if existing := registry.lookup(batch.result.Repo); existing != nil {
+			batch.canonical = existing
+			continue
 		}
+		batches = append(batches, batch)
+	}
+	pages := make([]*inventoryPage, len(batches))
+	for i := range batches {
+		pages[i] = &inventoryPage{seenCursors: make(map[string]bool), valid: true, total: -1}
+	}
+	if len(batches) > 1 {
+		p.fetchFirstInventories(ctx, registry, batches, pages)
+	}
+	for i, batch := range batches {
+		p.fetchInventory(batch, pages[i])
+		batch.result.InventoryErr = batch.result.Err
+	}
+}
+
+func (p *Provider) fetchFirstInventories(ctx context.Context, registry *inventoryRegistry, batches []*repositoryFetch, pages []*inventoryPage) {
+	var members []int
+	var repos []string
+	var allowances []*repositoryAllowance
+	for i, batch := range batches {
+		if p.inventoryRoom(batch, pages[i]) {
+			members = append(members, i)
+			repos = append(repos, batch.result.Repo)
+			allowances = append(allowances, batch.session.allowance)
+		}
+	}
+	if len(members) < 2 {
+		return
+	}
+	session := fetchSession{provider: p, ctx: ctx, registry: registry, aliases: true, allowances: allowances}
+	response, requestErr := session.request(inventoryBatchQuery(repos, batches[members[0]].lean), "", "", 0)
+	batches[members[0]].session.requests += session.requests
+	aliases := make(map[string]int, len(members))
+	for i := range members {
+		aliases[fmt.Sprintf("repo%d", i)] = i
+	}
+	owned := make([][]apiError, len(members))
+	scoped := response.Data != nil && (requestErr == nil || probeFieldErrors(requestErr))
+	for _, problem := range response.Errors {
+		var alias string
+		if len(problem.Path) > 0 {
+			alias, _ = problem.Path[0].(string)
+		}
+		member, ok := aliases[alias]
+		if !ok {
+			scoped = false
+			continue
+		}
+		problem.Path = append([]any{"repository"}, problem.Path[1:]...)
+		owned[member] = append(owned[member], problem)
+	}
+	for i, index := range members {
+		memberResponse, memberErr := apiResponse{Errors: owned[i]}, requestErr
+		if scoped {
+			memberErr = nil
+			for _, problem := range owned[i] {
+				kind := classifyFailure(problem.Type + " " + problem.Message)
+				if kind == ErrRequest {
+					kind = ErrIncomplete
+				}
+				memberErr = joinError(memberErr, kind)
+			}
+		}
+		if response.Data != nil {
+			var repository *rawRepository
+			if raw := response.probeData[fmt.Sprintf("repo%d", i)]; len(raw) > 0 && json.Unmarshal(raw, &repository) != nil {
+				repository, memberErr = nil, joinError(memberErr, ErrResponse)
+			}
+			memberResponse.Data = &apiData{Repository: repository, RateLimit: response.Data.RateLimit}
+		}
+		p.acceptInventoryPage(batches[index], pages[index], memberResponse, memberErr)
+	}
+}
+
+func (p *Provider) fetchInventory(batch *repositoryFetch, state *inventoryPage) {
+	for p.inventoryRoom(batch, state) {
 		query := summaryQuery
 		if batch.lean {
 			query = leanSummaryQuery
 		}
-		response, requestErr := batch.session.request(query, repo, cursor, 0)
-		if fileFieldErrors(response, requestErr) {
-			result.FilesErr = joinError(result.FilesErr, requestErr)
-			requestErr = nil
-		}
-		if response.Data == nil || response.Data.Repository == nil {
-			if requestErr == nil {
-				requestErr = ErrRepository
-			}
-			result.Err = joinError(result.Err, requestErr)
-			break
-		}
-		data := response.Data.Repository
-		canonical, canonicalErr := CanonicalRepo(data.NameWithOwner)
-		if canonicalErr != nil || (page > 0 && canonical != result.Repo) {
-			result.Err = joinError(result.Err, ErrResponse)
-			break
-		}
-		result.Repo, repo = canonical, canonical
-		if page == 0 {
-			batch.canonical = batch.session.registry.claim(repo, batch)
-		}
-		conn := data.PullRequests
-		if conn == nil || conn.PageInfo == nil || conn.TotalCount == nil || *conn.TotalCount < 0 {
-			result.Err = joinError(result.Err, joinError(requestErr, ErrResponse))
-			break
-		}
-		if total != -1 && total != *conn.TotalCount {
-			inventoryValid = false
-			result.Err = joinError(result.Err, ErrIncomplete)
-		}
-		total = *conn.TotalCount
-		if len(conn.Nodes) > prPageSize {
-			inventoryValid = false
-			result.Err = joinError(result.Err, ErrResponse)
-		}
-		for i, raw := range conn.Nodes {
-			if i >= prPageSize || len(rows) >= p.limits.pullRequests {
-				inventoryValid = false
-				result.Err = joinError(result.Err, ErrBudgetExceeded)
-				break
-			}
-			if raw == nil || raw.Number < 1 {
-				inventoryValid = false
-				result.Err = joinError(result.Err, ErrResponse)
-				continue
-			}
-			row := p.convertPR(repo, raw, batch.lean)
-			if previous, exists := rows[raw.Number]; !exists || row.pr.UpdatedAt.After(previous.pr.UpdatedAt) {
-				rows[raw.Number] = row
-			}
-		}
-		if requestErr != nil {
-			result.Err = joinError(result.Err, requestErr)
-			break
-		}
-		if !conn.PageInfo.HasNextPage {
-			result.Complete = inventoryValid && len(rows) == total
-			if !result.Complete {
-				result.Err = joinError(result.Err, ErrIncomplete)
-			}
-			break
-		}
-		if batch.canonical != batch {
-			result.Err = joinError(result.Err, ErrIncomplete)
-			break
-		}
-		next := conn.PageInfo.EndCursor
-		if !validCursor(next) || seenCursors[next] || len(conn.Nodes) == 0 {
-			result.Err = joinError(result.Err, ErrResponse)
-			break
-		}
-		seenCursors[next], cursor = true, next
+		response, requestErr := batch.session.request(query, batch.result.Repo, state.cursor, 0)
+		p.acceptInventoryPage(batch, state, response, requestErr)
 	}
+}
+
+func (p *Provider) inventoryRoom(batch *repositoryFetch, state *inventoryPage) bool {
+	if state.done {
+		return false
+	}
+	if state.page >= p.limits.summaryPages || len(batch.rows) >= p.limits.pullRequests {
+		batch.result.Err = joinError(batch.result.Err, ErrBudgetExceeded)
+		state.done = true
+	}
+	return !state.done
+}
+
+func (p *Provider) acceptInventoryPage(batch *repositoryFetch, state *inventoryPage, response apiResponse, requestErr error) {
+	result := &batch.result
+	rows := batch.rows
+	state.done = true
+	if fileFieldErrors(response, requestErr) {
+		result.FilesErr = joinError(result.FilesErr, requestErr)
+		requestErr = nil
+	}
+	if response.Data == nil || response.Data.Repository == nil {
+		if requestErr == nil {
+			requestErr = ErrRepository
+		}
+		result.Err = joinError(result.Err, requestErr)
+		return
+	}
+	data := response.Data.Repository
+	canonical, canonicalErr := CanonicalRepo(data.NameWithOwner)
+	if canonicalErr != nil || (state.page > 0 && canonical != result.Repo) {
+		result.Err = joinError(result.Err, ErrResponse)
+		return
+	}
+	result.Repo = canonical
+	if state.page == 0 {
+		batch.canonical = batch.session.registry.claim(canonical, batch)
+	}
+	conn := data.PullRequests
+	if conn == nil || conn.PageInfo == nil || conn.TotalCount == nil || *conn.TotalCount < 0 {
+		result.Err = joinError(result.Err, joinError(requestErr, ErrResponse))
+		return
+	}
+	if state.total != -1 && state.total != *conn.TotalCount {
+		state.valid = false
+		result.Err = joinError(result.Err, ErrIncomplete)
+	}
+	state.total = *conn.TotalCount
+	if len(conn.Nodes) > prPageSize {
+		state.valid = false
+		result.Err = joinError(result.Err, ErrResponse)
+	}
+	for i, raw := range conn.Nodes {
+		if i >= prPageSize || len(rows) >= p.limits.pullRequests {
+			state.valid = false
+			result.Err = joinError(result.Err, ErrBudgetExceeded)
+			break
+		}
+		if raw == nil || raw.Number < 1 {
+			state.valid = false
+			result.Err = joinError(result.Err, ErrResponse)
+			continue
+		}
+		row := p.convertPR(canonical, raw, batch.lean)
+		if previous, exists := rows[raw.Number]; !exists || row.pr.UpdatedAt.After(previous.pr.UpdatedAt) {
+			rows[raw.Number] = row
+		}
+	}
+	if requestErr != nil {
+		result.Err = joinError(result.Err, requestErr)
+		return
+	}
+	if !conn.PageInfo.HasNextPage {
+		result.Complete = state.valid && len(rows) == state.total
+		if !result.Complete {
+			result.Err = joinError(result.Err, ErrIncomplete)
+		}
+		return
+	}
+	if batch.canonical != batch {
+		result.Err = joinError(result.Err, ErrIncomplete)
+		return
+	}
+	next := conn.PageInfo.EndCursor
+	if !validCursor(next) || state.seenCursors[next] || len(conn.Nodes) == 0 {
+		result.Err = joinError(result.Err, ErrResponse)
+		return
+	}
+	state.seenCursors[next], state.cursor = true, next
+	state.page++
+	state.done = false
 }
 
 func fileFieldErrors(response apiResponse, err error) bool {
@@ -746,6 +872,12 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 		if err != nil {
 			return response, err
 		}
+	} else if len(s.allowances) > 0 {
+		var err error
+		timeout, err = reserveShared(s.ctx, s.allowances)
+		if err != nil {
+			return response, err
+		}
 	} else if s.requests >= s.limit || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
@@ -766,8 +898,12 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	defer cancel()
 	started := time.Now()
 	data, err := s.provider.runner.Run(ctx, "gh", args...)
+	elapsed := time.Since(started)
 	if s.allowance != nil {
-		s.allowance.charge(time.Since(started))
+		s.allowance.charge(elapsed)
+	}
+	for _, allowance := range s.allowances {
+		allowance.charge(elapsed)
 	}
 	if ctx.Err() != nil {
 		err = ctx.Err()
@@ -867,9 +1003,7 @@ func joinError(current, next error) error {
 	return errors.Join(current, next)
 }
 
-const summaryQueryPrefix = `query BigBoardOpenPullRequests($owner: String!, $name: String!, $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    nameWithOwner
+const inventoryFieldsPrefix = `    nameWithOwner
     pullRequests(states: OPEN, first: 50, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
       totalCount
       pageInfo { hasNextPage endCursor }
@@ -891,20 +1025,47 @@ const summaryQueryPrefix = `query BigBoardOpenPullRequests($owner: String!, $nam
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 `
 
-const summaryQuerySuffix = `      }
+const inventoryFieldsSuffix = `      }
     }
-  }
-  rateLimit { remaining resetAt }
-}`
+`
 
-const summaryQuery = summaryQueryPrefix + `        files(first: 100) {
+const inlineInventoryFields = inventoryFieldsPrefix + `        files(first: 100) {
           totalCount pageInfo { hasNextPage endCursor }
           nodes { path changeType }
         }
-` + summaryQuerySuffix
+` + inventoryFieldsSuffix
 
-const leanSummaryQuery = summaryQueryPrefix + `        files { totalCount }
-` + summaryQuerySuffix
+const leanInventoryFields = inventoryFieldsPrefix + `        files { totalCount }
+` + inventoryFieldsSuffix
+
+const summaryQueryPrefix = `query BigBoardOpenPullRequests($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+`
+
+const summaryQuerySuffix = `  }
+  rateLimit { remaining resetAt }
+}`
+
+const summaryQuery = summaryQueryPrefix + inlineInventoryFields + summaryQuerySuffix
+
+const leanSummaryQuery = summaryQueryPrefix + leanInventoryFields + summaryQuerySuffix
+
+func inventoryBatchQuery(repositories []string, lean bool) string {
+	fields := inlineInventoryFields
+	if lean {
+		fields = leanInventoryFields
+	}
+	var query strings.Builder
+	query.WriteString("query BigBoardOpenPullRequestBatch($cursor: String) {\n")
+	for i, repo := range repositories {
+		owner, name, _ := strings.Cut(repo, "/")
+		fmt.Fprintf(&query, "  repo%d: repository(owner: %q, name: %q) { ...BigBoardOpenPullRequests }\n", i, owner, name)
+	}
+	query.WriteString("  rateLimit { remaining resetAt }\n}\nfragment BigBoardOpenPullRequests on Repository {\n")
+	query.WriteString(fields)
+	query.WriteString("}")
+	return query.String()
+}
 
 const firstFilesFields = ` number updatedAt headRefOid baseRefOid files(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { path changeType } } `
 

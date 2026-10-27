@@ -24,6 +24,7 @@ type fakeStep struct {
 	query string
 	data  []byte
 	err   error
+	batch bool
 }
 
 type fakeRunner struct {
@@ -39,13 +40,28 @@ func (f *fakeRunner) Run(ctx context.Context, command string, args ...string) ([
 	defer f.mu.Unlock()
 	assertDeadline(f.t, ctx)
 	f.calls = append(f.calls, invocation{command: command, args: append([]string(nil), args...)})
+	if repos, query, ok := batchedRepositories(args); ok {
+		if len(f.steps) > 0 && f.steps[0].batch {
+			step := f.steps[0]
+			f.steps = f.steps[1:]
+			return step.data, step.err
+		}
+		return combineInventories(f.t, repos, func(repo string) ([]byte, error) { return f.take(command, args, repo, query) })
+	}
+	owner, _ := argValue(args, "owner=")
+	name, _ := argValue(args, "name=")
+	query, _ := argValue(args, "query=")
+	return f.take(command, args, owner+"/"+name, query)
+}
+
+func (f *fakeRunner) take(command string, args []string, repo, query string) ([]byte, error) {
+	f.t.Helper()
 	if len(f.steps) == 0 {
 		f.t.Fatalf("unexpected call: %s %#v", command, args)
 	}
 	index := 0
 	for i, candidate := range f.steps {
-		owner, name, _ := strings.Cut(candidate.repo, "/")
-		if candidate.repo != "" && hasPair(args, "-f", "owner="+owner) && hasPair(args, "-f", "name="+name) && hasPair(args, "-f", "query="+candidate.query) {
+		if candidate.repo != "" && candidate.repo == repo && candidate.query == query {
 			index = i
 			break
 		}
@@ -53,6 +69,76 @@ func (f *fakeRunner) Run(ctx context.Context, command string, args ...string) ([
 	step := f.steps[index]
 	f.steps = append(f.steps[:index], f.steps[index+1:]...)
 	return step.data, step.err
+}
+
+func argValue(args []string, prefix string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-f" {
+			if value, ok := strings.CutPrefix(args[i+1], prefix); ok {
+				return value, true
+			}
+		}
+	}
+	return "", false
+}
+
+var batchAliasPattern = regexp.MustCompile(`repo\d+: repository\(owner: "([^"]+)", name: "([^"]+)"\)`)
+
+func batchedRepositories(args []string) ([]string, string, bool) {
+	query, _ := argValue(args, "query=")
+	if !strings.HasPrefix(query, "query BigBoardOpenPullRequestBatch") {
+		return nil, "", false
+	}
+	single := summaryQuery
+	if strings.Contains(query, "files { totalCount }") {
+		single = leanSummaryQuery
+	}
+	var repos []string
+	for _, match := range batchAliasPattern.FindAllStringSubmatch(query, -1) {
+		repos = append(repos, match[1]+"/"+match[2])
+	}
+	return repos, single, true
+}
+
+func combineInventories(t *testing.T, repos []string, respond func(repo string) ([]byte, error)) ([]byte, error) {
+	t.Helper()
+	data := map[string]any{"rateLimit": map[string]int{"remaining": 100}}
+	var problems []map[string]any
+	var failure error
+	for i, repo := range repos {
+		alias := fmt.Sprintf("repo%d", i)
+		body, err := respond(repo)
+		if failure == nil {
+			failure = err
+		}
+		data[alias] = nil
+		if len(body) == 0 {
+			continue
+		}
+		var decoded struct {
+			Data   map[string]json.RawMessage
+			Errors []map[string]any
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		data[alias] = decoded.Data["repository"]
+		for _, problem := range decoded.Errors {
+			if path, ok := problem["path"].([]any); ok && len(path) > 0 && path[0] == "repository" {
+				problem["path"] = append([]any{alias}, path[1:]...)
+			}
+			problems = append(problems, problem)
+		}
+	}
+	body := map[string]any{"data": data}
+	if len(problems) > 0 {
+		body["errors"] = problems
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded, failure
 }
 
 func pointer[T any](v T) *T { return &v }
@@ -283,7 +369,7 @@ func TestQueryIncludesSubmittedAtInBoundedLatestReviews(t *testing.T) {
 }
 
 func TestQueryIncludesOnlyReadOnlyLightweightContext(t *testing.T) {
-	for _, query := range []string{summaryQuery, leanSummaryQuery, filesQuery, fileBatchQuery([]int{1, 2})} {
+	for _, query := range []string{summaryQuery, leanSummaryQuery, filesQuery, fileBatchQuery([]int{1, 2}), inventoryBatchQuery([]string{"acme/one", "acme/two"}, false), inventoryBatchQuery([]string{"acme/one", "acme/two"}, true)} {
 		for _, forbidden := range []string{"mutation", "body", "bodyText", "comments", "patch", "diff", "log", "contents", "accessToken"} {
 			if regexp.MustCompile(`\b` + regexp.QuoteMeta(forbidden) + `\b`).MatchString(query) {
 				t.Errorf("query requests forbidden field %q", forbidden)
