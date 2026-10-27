@@ -19,6 +19,7 @@ import (
 // PRProvider is independent of local commit statistics and never mutates GitHub.
 type PRProvider interface {
 	Resolve(context.Context, string) (string, error)
+	CurrentLogin(context.Context) (string, error)
 	Fetch(context.Context, string) gh.Result
 }
 
@@ -39,6 +40,9 @@ type prState struct {
 	snapshots         map[string]prSnapshot
 	loading           bool
 	nextRefresh       time.Time
+	login             string
+	loginErr          error
+	accountRequests   int
 	inventoryRequests int
 	fileRequests      int
 	requestBudget     int
@@ -50,6 +54,9 @@ type prsLoadedMsg struct {
 	errors            map[string]error
 	results           map[string]gh.Result
 	checked           time.Time
+	login             string
+	loginErr          error
+	accountRequests   int
 	inventoryRequests int
 	fileRequests      int
 	requestBudget     int
@@ -122,7 +129,24 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				requests = append(requests, gh.RepositoryRequest{Repo: remote, Previous: snapshots[remote].prs})
 			}
 		}
-		results := fetchPRRepositories(ctx, provider, requests)
+		var results []gh.Result
+		if len(requests) > 0 {
+			before := gh.RequestCount(ctx)
+			msg.login, msg.loginErr = provider.CurrentLogin(ctx)
+			msg.accountRequests = gh.RequestCount(ctx) - before
+			if msg.loginErr != nil {
+				msg.login = ""
+			} else if msg.login == "" {
+				msg.loginErr = gh.ErrResponse
+			}
+		}
+		if errors.Is(msg.loginErr, gh.ErrAuthentication) || errors.Is(msg.loginErr, gh.ErrUnavailable) {
+			for _, request := range requests {
+				results = append(results, gh.Result{Repo: request.Repo, Err: msg.loginErr})
+			}
+		} else {
+			results = fetchPRRepositories(ctx, provider, requests)
+		}
 		for i, result := range results {
 			remote := requests[i].Repo
 			canonical, err := gh.CanonicalRepo(result.Repo)
@@ -181,6 +205,8 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		selectedKey = oldVisible[m.prRow].Key()
 	}
 	m.prState.loading = false
+	m.prState.login, m.prState.loginErr = msg.login, msg.loginErr
+	m.prState.accountRequests = msg.accountRequests
 	m.prState.inventoryRequests = msg.inventoryRequests
 	m.prState.fileRequests = msg.fileRequests
 	m.prState.requestBudget = msg.requestBudget
@@ -312,7 +338,7 @@ func (m Model) visiblePRs() []gh.PullRequest {
 	kept := prs[:0]
 	query := strings.ToLower(m.prQuery)
 	for _, pr := range prs {
-		if !m.prFilters.matches(pr) {
+		if !m.prFilters.matches(pr, m.prState.login) {
 			continue
 		}
 		if m.prRepoID != "" && (!m.repoInView(m.prRepoID) || pr.Repo != m.prState.repositories[m.prRepoID]) {

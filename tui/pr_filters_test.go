@@ -69,16 +69,16 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 
 func TestPRUnknownFiltersDoNotImplyApproval(t *testing.T) {
 	pr := gh.PullRequest{ReviewDecision: "UNRECOGNIZED", CheckState: "", Draft: true}
-	if !(prFilters{author: filterValues{"?"}, review: filterValues{"Unknown"}, checks: filterValues{"Unknown"}, state: filterValues{"draft"}}).matches(pr) {
+	if !(prFilters{author: filterValues{"?"}, review: filterValues{"Unknown"}, checks: filterValues{"Unknown"}, state: filterValues{"draft"}}).matches(pr, "") {
 		t.Fatal("unknown evidence disappeared from explicit unknown filters")
 	}
 	for _, f := range []prFilters{{review: filterValues{"Approved"}}, {checks: filterValues{"Passing"}}, {state: filterValues{"open"}}} {
-		if f.matches(pr) {
+		if f.matches(pr, "") {
 			t.Fatal("unknown or draft PR matched a stronger state")
 		}
 	}
 	pr.Author = "Contributor"
-	if !(prFilters{author: filterValues{"contributor"}}).matches(pr) {
+	if !(prFilters{author: filterValues{"contributor"}}).matches(pr, "") {
 		t.Fatal("author filtering is case sensitive")
 	}
 }

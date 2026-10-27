@@ -105,6 +105,7 @@ type rawRepository struct {
 type apiResponse struct {
 	Data *struct {
 		Repository *rawRepository
+		Viewer     *actor
 		RateLimit  *struct {
 			Remaining int
 			ResetAt   string
@@ -604,9 +605,12 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	if s.requests >= s.limit || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
-	owner, name, _ := strings.Cut(repo, "/")
 	args := []string{"api", "graphql", "--hostname", "github.com", "--method", "POST", "--include",
-		"-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name}
+		"-f", "query=" + query}
+	if repo != "" {
+		owner, name, _ := strings.Cut(repo, "/")
+		args = append(args, "-f", "owner="+owner, "-f", "name="+name)
+	}
 	if cursor != "" {
 		args = append(args, "-f", "cursor="+cursor)
 	}

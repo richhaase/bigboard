@@ -134,7 +134,7 @@ func (m Model) screenHelp() screenHelp {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
 			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
 		}
-		return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}, {"Legend", []helpBinding{{"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
+		return screenHelp{title, []helpSection{{"Navigate", navigation}, {"Actions", actions}, {"Legend", []helpBinding{{"Mine filters", "Authored by / review requested from the signed-in gh account; user requests only"}, {"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
 	}
 
 	switch m.viewMode {

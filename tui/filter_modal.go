@@ -42,7 +42,7 @@ func (m Model) filterCategories() []filterCategory {
 	categories := []filterCategory{{"range", "Date range", true}, {"repos", "Repositories", true}, {"shared-reset", "Reset shared", true}}
 	switch m.filters.board {
 	case "prs":
-		categories = append(categories, filterCategory{"author", "Authors", false}, filterCategory{"review", "Review", false}, filterCategory{"checks", "Checks", false}, filterCategory{"state", "State", false})
+		categories = append(categories, filterCategory{"mine", "Mine", false}, filterCategory{"author", "Authors", false}, filterCategory{"review", "Review", false}, filterCategory{"checks", "Checks", false}, filterCategory{"state", "State", false})
 	case "activity":
 		categories = append(categories, filterCategory{"people", "Contributors", false}, filterCategory{"bots", "Bots", false})
 	default:
@@ -139,7 +139,7 @@ func (m Model) filterOptions() []prFilterOption {
 		options = draft.activityPeopleOptions()
 	case "bots":
 		options = []prFilterOption{{"shown", "Show bot contributors"}, {"hidden", "Hide bot contributors"}}
-	case "author", "review", "checks", "state":
+	case "mine", "author", "review", "checks", "state":
 		draft.prFilterKind, draft.prFilterQuery = m.filters.category, ""
 		options = draft.prFilterOptions()
 	case "search":
@@ -175,7 +175,7 @@ func (m Model) filterOptionSelected(value string) bool {
 		values = f.repos
 	case "people":
 		values = f.people
-	case "author", "review", "checks", "state":
+	case "mine", "author", "review", "checks", "state":
 		values = f.prs.values(f.category)
 	case "bots":
 		hide := f.activityBots
@@ -225,7 +225,7 @@ func (m *Model) stageFilterOption(value string) {
 		f.repos = f.repos.toggle(value)
 	case "people":
 		f.people = f.people.toggle(value)
-	case "author", "review", "checks", "state":
+	case "mine", "author", "review", "checks", "state":
 		f.prs.setValues(f.category, f.prs.values(f.category).toggle(value))
 	case "bots":
 		if f.board == "contributors" {
@@ -491,6 +491,8 @@ func (m Model) renderFiltersModal(background string, width, height int) string {
 		description = "All time + all included repositories"
 	case "board-reset":
 		description = "Clear board filters; keep shared scope"
+	case "mine":
+		description = m.prMineStatus()
 	case "people", "author", "review", "checks", "state":
 		description = "Choose any · selections combine across tabs"
 	}

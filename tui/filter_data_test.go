@@ -116,7 +116,7 @@ func TestPRMultiValueFiltersUseORWithinAndANDAcrossCategories(t *testing.T) {
 		{Author: "One", ReviewDecision: "APPROVED", CheckState: "SUCCESS"},
 		{Author: "two", ReviewDecision: "REVIEW_REQUIRED", CheckState: "PENDING", Draft: true},
 	} {
-		if !f.matches(pr) {
+		if !f.matches(pr, "") {
 			t.Fatal("an alternate selected value failed to match")
 		}
 	}
@@ -126,12 +126,12 @@ func TestPRMultiValueFiltersUseORWithinAndANDAcrossCategories(t *testing.T) {
 		{Author: base.Author, ReviewDecision: "CHANGES_REQUESTED", CheckState: base.CheckState},
 		{Author: base.Author, ReviewDecision: base.ReviewDecision, CheckState: "FAILURE"},
 	} {
-		if f.matches(pr) {
+		if f.matches(pr, "") {
 			t.Fatal("different filter categories were combined with OR")
 		}
 	}
 	unknown := prFilters{author: filterValues{"?"}, review: filterValues{"Unknown"}, checks: filterValues{"Unknown"}, state: filterValues{"draft"}}
-	if !unknown.matches(gh.PullRequest{Draft: true}) {
+	if !unknown.matches(gh.PullRequest{Draft: true}, "") {
 		t.Fatal("unknown values no longer remain explicitly selectable")
 	}
 	clone := f.clone()

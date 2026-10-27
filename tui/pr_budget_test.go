@@ -93,6 +93,11 @@ func (r *budgetRunner) Run(_ context.Context, cmd string, args ...string) ([]byt
 		}
 	}
 	r.calls++
+	for _, arg := range args {
+		if strings.Contains(arg, "BigBoardCurrentAccount") {
+			return []byte(`{"data":{"viewer":{"login":"viewer"},"rateLimit":{"remaining":5000}}}`), nil
+		}
+	}
 	var name string
 	for _, a := range args {
 		if strings.HasPrefix(a, "name=") {
@@ -123,7 +128,7 @@ func TestPRGlobalBudgetWithRealProvider(t *testing.T) {
 			}
 		}
 	}
-	if partial != 5 {
+	if partial != 6 || msg.accountRequests != 1 || msg.inventoryRequests != gh.MaxRefreshRequests-1 {
 		t.Fatal(partial)
 	}
 }

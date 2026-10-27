@@ -78,7 +78,7 @@ func (m Model) boardFiltersLabel(width int) string {
 	var parts []string
 	query, searching := m.filterQuery, m.searching
 	if m.showPRs {
-		for _, category := range []struct{ key, label string }{{"author", "Author"}, {"review", "Review"}, {"checks", "Checks"}, {"state", "State"}} {
+		for _, category := range []struct{ key, label string }{{"mine", "Mine"}, {"author", "Author"}, {"review", "Review"}, {"checks", "Checks"}, {"state", "State"}} {
 			if values := m.prFilters.values(category.key); len(values) > 0 {
 				parts = append(parts, category.label+": "+displayText(strings.Join(values, ", ")))
 			}
