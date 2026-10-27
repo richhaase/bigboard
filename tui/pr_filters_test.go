@@ -14,7 +14,7 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 	m := boardLayoutFixture()
 	m.width, m.height = 120, 36
 	m = keyboardContractPress(t, m, "p", "f", "down", "right", "/", "gateway", "enter", " ", "enter")
-	if len(m.visiblePRs()) != 3 || len(m.sharedRepos) != 1 || m.sharedRepos[0] != "/sample/gateway" || m.prRepoID != "" {
+	if len(m.visiblePRs()) != 3 || len(m.sharedRepos) != 1 || m.sharedRepos[0] != "/sample/gateway" || m.prUI.repoID != "" {
 		t.Fatal("repository search did not select the repository")
 	}
 	m = keyboardContractPress(t, m, "u", "/", "contributor03", "enter", " ")
@@ -35,7 +35,7 @@ func TestPRFiltersCombineAndClearWithoutChangingInclusion(t *testing.T) {
 		t.Fatal("contradictory filters did not show an empty result")
 	}
 	m = keyboardContractPress(t, m, "x")
-	if len(m.visiblePRs()) != 3 || len(m.excludedRepos) != 0 || !m.prFilters.empty() || m.prRepoID != "" {
+	if len(m.visiblePRs()) != 3 || len(m.excludedRepos) != 0 || !m.prUI.filters.empty() || m.prUI.repoID != "" {
 		t.Fatal("board reset changed shared scope or failed to clear PR filters")
 	}
 	m = keyboardContractPress(t, m, "f", "X", "enter")
@@ -56,7 +56,7 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 		t.Fatal("help dismissal lost filter search")
 	}
 	m = keyboardContractPress(t, m, "esc", "end", "esc")
-	if !m.prFilters.empty() || m.filters.open {
+	if !m.prUI.filters.empty() || m.filters.open {
 		t.Fatal("cancel applied pending author")
 	}
 	m = keyboardContractPress(t, m, "f", "down", "tab")
@@ -64,7 +64,7 @@ func TestPRFilterPickerOwnsSearchAndCancelsPendingChoices(t *testing.T) {
 		t.Fatal("Tab did not focus the selected category's options")
 	}
 	m = keyboardContractPress(t, m, "end", "a")
-	if m.showPRs || m.filters.open || !m.prFilters.empty() {
+	if m.showPRs || m.filters.open || !m.prUI.filters.empty() {
 		t.Fatal("board switch applied pending filter")
 	}
 }

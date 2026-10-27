@@ -140,7 +140,7 @@ func TestScanErrorRefreshRetainsModal(t *testing.T) {
 	next, cmd := m.Update(keyboardContractKey("r"))
 	refreshed := next.(Model)
 	defer refreshed.Close()
-	if cmd == nil || !refreshed.scan.running || !refreshed.showScanErrors || refreshed.prRow != m.prRow || !strings.Contains(ansi.Strip(refreshed.View()), "refreshing") {
+	if cmd == nil || !refreshed.scan.running || !refreshed.showScanErrors || refreshed.prUI.row != m.prUI.row || !strings.Contains(ansi.Strip(refreshed.View()), "refreshing") {
 		t.Fatal("refresh lost the modal or its board selection")
 	}
 }

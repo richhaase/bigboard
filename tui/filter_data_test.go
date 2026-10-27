@@ -159,8 +159,8 @@ func TestPRScopeEvidenceUsesSharedRangeAndLiteralPaths(t *testing.T) {
 		{Repo: "org/repo", Number: 5, UpdatedAt: now, FilesComplete: false},
 	}
 	m.prState.snapshots["org/repo"] = snapshot
-	m.prFilters.author = filterValues{"nobody"}
-	m.prQuery = "does not exist"
+	m.prUI.filters.author = filterValues{"nobody"}
+	m.prUI.query = "does not exist"
 	if len(m.visiblePRs()) != 0 || len(m.scopePRs("/api")) != 3 || len(m.allPRs()) != 5 {
 		t.Fatal("PR board filters leaked into shared evidence or raw snapshot counts")
 	}
@@ -186,14 +186,14 @@ func TestPRScopeEvidenceUsesSharedRangeAndLiteralPaths(t *testing.T) {
 
 func TestFilterAuthorOptionsUseSharedScopeAndRetainMissingSelections(t *testing.T) {
 	m := prRangeFixture()
-	m.prFilterKind = "author"
+	m.prUI.filterKind = "author"
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.prs[0].Author = "recent"
 	snapshot.prs[1].Author = "older"
 	snapshot.prs[2].Author = "undated"
 	snapshot.prs[3].Author = "future"
 	m.prState.snapshots["org/repo"] = snapshot
-	m.prFilters.author = filterValues{"missing"}
+	m.prUI.filters.author = filterValues{"missing"}
 	options := m.prFilterOptions()
 	values := make([]string, len(options))
 	for i, option := range options {

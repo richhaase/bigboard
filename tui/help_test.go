@@ -61,7 +61,7 @@ func TestHelpContextContainsOnlyRelevantControls(t *testing.T) {
 			return keyboardContractPress(t, m, "enter", "enter", "3")
 		}},
 		{"PR list", "Open the selected PR in your browser", "Show / hide bots", func(m Model) Model { m.showPRs = true; return m }},
-		{"PR detail", "Scroll PR details", "Select a pull request", func(m Model) Model { m.showPRs, m.prDetail = true, true; return m }},
+		{"PR detail", "Scroll PR details", "Select a pull request", func(m Model) Model { m.showPRs, m.prUI.detail = true, true; return m }},
 		{"repository controls", "Stage include / exclude", "Refresh Git and PRs", func(m Model) Model { m.viewMode = ViewRepoOverlay; return m }},
 		{"range", "Apply all pending changes", "Show / hide bots", func(m Model) Model { m.openRangePicker(); return m }},
 		{"contributor", "Scroll contributor details", "Change sort / reverse order", func(m Model) Model { m.viewMode = ViewOperative; return m }},

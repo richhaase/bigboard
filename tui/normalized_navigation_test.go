@@ -59,7 +59,7 @@ func TestNormalizedBoardListPaging(t *testing.T) {
 			case "c":
 				return m.selectedRow
 			case "p":
-				return m.prRow
+				return m.prUI.row
 			default:
 				return m.selectedRepository(m.glanceRepositories())
 			}
@@ -85,23 +85,23 @@ func TestNormalizedBoardListPaging(t *testing.T) {
 
 func TestContextPRScopeIsIndependentAndBoardKeysRestoreNormalPRs(t *testing.T) {
 	m := keyboardContractPress(t, normalizedPRFixture(), "a", "v")
-	if m.prRepoID != "/api" || len(m.visiblePRs()) != 30 || m.excludedRepos["/web"] {
+	if m.prUI.repoID != "/api" || len(m.visiblePRs()) != 30 || m.excludedRepos["/web"] {
 		t.Fatal("context scope did not focus the PR board independently of inclusion")
 	}
 	m = keyboardContractPress(t, m, "right", "enter")
-	if !m.prDetail {
+	if !m.prUI.detail {
 		t.Fatal("Enter navigated backward from detail")
 	}
 	m = keyboardContractPress(t, m, "end")
-	if m.prOffset == 0 {
+	if m.prUI.offset == 0 {
 		t.Fatal("PR details did not scroll to end")
 	}
 	m = keyboardContractPress(t, m, "home", "pgdown")
-	if m.prOffset == 0 {
+	if m.prUI.offset == 0 {
 		t.Fatal("PR details did not page")
 	}
 	m = keyboardContractPress(t, m, "left")
-	if m.prDetail || m.prRepoID != "/api" {
+	if m.prUI.detail || m.prUI.repoID != "/api" {
 		t.Fatal("detail back lost repository scope")
 	}
 	m = keyboardContractPress(t, m, "left")
@@ -109,7 +109,7 @@ func TestContextPRScopeIsIndependentAndBoardKeysRestoreNormalPRs(t *testing.T) {
 		t.Fatal("context Back did not return to Activity")
 	}
 	m = keyboardContractPress(t, m, "v", "p")
-	if !m.showPRs || m.prContext.active || m.prRepoID != "" || len(m.visiblePRs()) != 60 {
+	if !m.showPRs || m.prContext.active || m.prUI.repoID != "" || len(m.visiblePRs()) != 60 {
 		t.Fatal("PR board key did not restore its regular scope")
 	}
 }
@@ -124,15 +124,15 @@ func TestPRSearchSortAndRefreshRetainIdentity(t *testing.T) {
 		}
 	}
 	m = keyboardContractPress(t, m, "/", "Change 02", "enter")
-	if len(m.visiblePRs()) != 2 || m.prQuery != "Change 02" {
+	if len(m.visiblePRs()) != 2 || m.prUI.query != "Change 02" {
 		t.Fatal("PR title search failed")
 	}
 	m = keyboardContractPress(t, m, "/")
-	if m.prQuery != "Change 02" {
+	if m.prUI.query != "Change 02" {
 		t.Fatal("reopening search cleared the query")
 	}
 	m = keyboardContractPress(t, m, "esc", "/", "ctrl+u", "lwp?Roq", "f1", "esc")
-	if !m.prSearching || m.prQuery != "lwp?Roq" || !m.showPRs || m.showHelp {
+	if !m.prUI.searching || m.prUI.query != "lwp?Roq" || !m.showPRs || m.showHelp {
 		t.Fatal("PR search leaked shortcuts")
 	}
 	m = keyboardContractPress(t, m, "esc", "x", "/", "org/web", "enter")
@@ -151,7 +151,7 @@ func TestPRSearchSortAndRefreshRetainIdentity(t *testing.T) {
 	selected = m.selectedPRKey()
 	old := m.prState.snapshots["org/repo"]
 	m.applyPRResult(prsLoadedMsg{results: map[string]gh.Result{"org/repo": {Complete: true, PRs: old.prs}}, checked: time.Now()})
-	if m.selectedPRKey() != selected || !m.prDetail || m.prRepoID != "/api" {
+	if m.selectedPRKey() != selected || !m.prUI.detail || m.prUI.repoID != "/api" {
 		t.Fatal("refresh lost scoped detail identity")
 	}
 }
@@ -173,12 +173,12 @@ func TestRepositoryControlsApplyAndCancelFromEveryBoard(t *testing.T) {
 	m := keyboardContractPress(t, normalizedPRFixture(), "p")
 	for i, pr := range m.visiblePRs() {
 		if pr.Repo == "org/repo" {
-			m.prRow = i
+			m.prUI.row = i
 			break
 		}
 	}
 	m = keyboardContractPress(t, m, "right", "i", " ", "enter")
-	if m.prDetail {
+	if m.prUI.detail {
 		t.Fatal("excluding selected PR's repository silently retargeted detail")
 	}
 }

@@ -12,7 +12,7 @@ func TestPRBrowserListDetailAndErrors(t *testing.T) {
 		for _, fail := range []bool{false, true} {
 			m := prFixture()
 			m.width, m.height = 80, 30
-			m.showPRs, m.prDetail = true, detail
+			m.showPRs, m.prUI.detail = true, detail
 			calls := 0
 			m.prBrowserOpener = func(url string) error {
 				calls++
@@ -34,7 +34,7 @@ func TestPRBrowserListDetailAndErrors(t *testing.T) {
 			}
 			next, _ = m.Update(cmd())
 			m = next.(Model)
-			if calls != 1 || m.prDetail != detail || !m.showPRs {
+			if calls != 1 || m.prUI.detail != detail || !m.showPRs {
 				t.Fatal("opener altered navigation")
 			}
 			if strings.Contains(m.View(), "Could not open browser: launcher failed") != fail {
@@ -112,14 +112,14 @@ func TestPRBrowserDetailCanScrollToFinalPath(t *testing.T) {
 	for _, width := range []int{40, 80, 120} {
 		m := prFixture()
 		m.width, m.height = width, 18
-		m.showPRs, m.prDetail = true, true
+		m.showPRs, m.prUI.detail = true, true
 		snapshot := m.prState.snapshots["org/repo"]
 		for range 40 {
 			snapshot.prs[0].Files = append(snapshot.prs[0].Files, gh.File{Path: "extra/path.go"})
 		}
 		snapshot.prs[0].Files = append(snapshot.prs[0].Files, gh.File{Path: "FINAL-PATH.go"})
 		m.prState.snapshots["org/repo"] = snapshot
-		m.prBrowserError = "Could not open browser: failed"
+		m.prUI.browserError = "Could not open browser: failed"
 		for range 300 {
 			next, _ := m.handleKey(key("down"))
 			m = next.(Model)
@@ -136,7 +136,7 @@ func TestPRBrowserDetailCanScrollToFinalPath(t *testing.T) {
 func TestPRBrowserOpensSelectedRow(t *testing.T) {
 	m := prOnlySelectionFixture()
 	m.showPRs = true
-	m.prRow = 2
+	m.prUI.row = 2
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.prs[2].URL = "https://github.com/org/repo/pull/262"
 	m.prState.snapshots["org/repo"] = snapshot

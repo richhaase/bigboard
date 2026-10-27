@@ -50,27 +50,15 @@ type Model struct {
 	activityHideBots   bool
 	contributorsView   ViewMode
 	searchBefore       string
-	prSearchBefore     string
 	glanceSearchBefore string
+	prUI               prUIState
 	prContext          prContextState
 	prState            prState
 	prProvider         PRProvider
 	prGeneration       uint64
 	cancelPRs          context.CancelFunc
 	showPRs            bool
-	prDetail           bool
-	prRepoID           string
-	prFilters          prFilters
-	prFilterKind       string
-	prFilterQuery      string
-	prQuery            string
-	prSearching        bool
-	prSort             int
-	prReverse          bool
 	overlayPRs         bool
-	prRow              int
-	prOffset           int
-	prBrowserError     string
 	commitBrowserError string
 	prBrowserOpener    func(string) error
 
@@ -484,7 +472,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prBrowserResult:
 		if msg.err != nil {
-			m.prBrowserError = "Could not open browser: " + displayText(msg.err.Error())
+			m.prUI.browserError = "Could not open browser: " + displayText(msg.err.Error())
 		}
 		return m, nil
 

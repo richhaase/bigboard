@@ -129,7 +129,7 @@ func TestFilterResetActionsRemainStagedAndPreserveFocus(t *testing.T) {
 		m.width, m.height = 80, 24
 		m = keyboardContractPress(t, m, "p")
 		m.sharedRepos = filterValues{"/sample/gateway"}
-		m.prFilters.review, m.prQuery = filterValues{"Approved"}, "Change"
+		m.prUI.filters.review, m.prUI.query = filterValues{"Approved"}, "Change"
 		m.openFilters("review")
 		if focusCategories {
 			m = keyboardContractPress(t, m, "left")
@@ -138,7 +138,7 @@ func TestFilterResetActionsRemainStagedAndPreserveFocus(t *testing.T) {
 		if m.filters.category != "review" || m.filters.categoryFocus != focusCategories || !m.filters.prs.empty() || m.filters.query != "" {
 			t.Fatal("board reset did not preserve focus and clear the board draft")
 		}
-		if !slices.Equal(m.filters.repos, m.sharedRepos) || m.filters.timeIdx != m.timeIdx || !slices.Equal(m.prFilters.review, filterValues{"Approved"}) || m.prQuery != "Change" {
+		if !slices.Equal(m.filters.repos, m.sharedRepos) || m.filters.timeIdx != m.timeIdx || !slices.Equal(m.prUI.filters.review, filterValues{"Approved"}) || m.prUI.query != "Change" {
 			t.Fatal("board reset changed shared scope or applied values before Enter")
 		}
 		m = keyboardContractPress(t, m, "X")
@@ -162,7 +162,7 @@ func TestFilterApplyCancelAndBoardSwitchUseFreshDrafts(t *testing.T) {
 		m = chooseFilterOption(t, m, "review", "Needs review")
 		m = chooseFilterOption(t, m, "repos", "/sample/gateway")
 		m = keyboardContractPress(t, m, exit)
-		if m.filters.open || !slices.Equal(m.prFilters.review, filterValues{"Approved"}) || len(m.sharedRepos) != 0 {
+		if m.filters.open || !slices.Equal(m.prUI.filters.review, filterValues{"Approved"}) || len(m.sharedRepos) != 0 {
 			t.Fatalf("%s applied or retained an abandoned filter draft", exit)
 		}
 		m = keyboardContractPress(t, m, "p", "f")
@@ -173,7 +173,7 @@ func TestFilterApplyCancelAndBoardSwitchUseFreshDrafts(t *testing.T) {
 	}
 	m = chooseFilterOption(t, m, "review", "Needs review")
 	m = keyboardContractPress(t, m, "enter", "f")
-	if len(m.prFilters.review) != 2 || !slices.Equal(m.filters.prs.review, m.prFilters.review) || !strings.Contains(ansi.Strip(m.View()), "No pending changes") {
+	if len(m.prUI.filters.review) != 2 || !slices.Equal(m.filters.prs.review, m.prUI.filters.review) || !strings.Contains(ansi.Strip(m.View()), "No pending changes") {
 		t.Fatal("a later Apply reused stale values from a canceled draft")
 	}
 }

@@ -166,11 +166,11 @@ func TestPRSelectionAndPagingUsePhysicalRowBudget(t *testing.T) {
 		m := boardLayoutFixture()
 		m.width, m.height = width, 24
 		m = keyboardContractPress(t, m, "p", "pgdown")
-		if m.prRow != m.prListPageSize() {
+		if m.prUI.row != m.prListPageSize() {
 			t.Fatal("paging ignored row height")
 		}
 		m = keyboardContractPress(t, m, "end")
-		selected := m.visiblePRs()[m.prRow]
+		selected := m.visiblePRs()[m.prUI.row]
 		body := strings.Split(ansi.Strip(m.View()), "\n")[screenHeaderRows : m.height-screenFooterRows]
 		if !strings.Contains(strings.Join(body, "\n"), fmt.Sprintf("#%d", selected.Number)) {
 			t.Fatalf("%d hid selected PR", width)
@@ -202,8 +202,8 @@ func TestPRBrowserErrorSurvivesRepositoryDiagnostics(t *testing.T) {
 	for _, repo := range m.local.repositories {
 		m.prState.errors[repo.ID] = fmt.Errorf("repository snapshot unavailable")
 	}
-	m.prBrowserError = "Could not open browser: unavailable"
-	if !strings.Contains(m.View(), m.prBrowserError) {
+	m.prUI.browserError = "Could not open browser: unavailable"
+	if !strings.Contains(m.View(), m.prUI.browserError) {
 		t.Fatal("repository diagnostics displaced browser error")
 	}
 }

@@ -32,7 +32,7 @@ func TestScreenFrameAcrossViews(t *testing.T) {
 						}
 					case "PR list", "PR detail":
 						m.showPRs = true
-						m.prDetail = screen == "PR detail"
+						m.prUI.detail = screen == "PR detail"
 					}
 					raw := m.View()
 					lines := strings.Split(ansi.Strip(raw), "\n")

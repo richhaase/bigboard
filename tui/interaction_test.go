@@ -67,7 +67,7 @@ func TestHiddenModalConfirmationWaitsForVisibleDialog(t *testing.T) {
 				if cmd != nil || calls != 0 {
 					t.Fatal("hidden confirmation scheduled an action")
 				}
-				if kind == "filters" && (!m.filters.open || m.prQuery != "") {
+				if kind == "filters" && (!m.filters.open || m.prUI.query != "") {
 					t.Fatal("hidden filter draft was applied")
 				}
 				canceled := keyboardContractPress(t, m, "esc")
@@ -92,7 +92,7 @@ func TestHiddenModalConfirmationWaitsForVisibleDialog(t *testing.T) {
 				m, _ = applyLocal(t, m, tea.WindowSizeMsg{Width: 100, Height: 32})
 				m, cmd = applyLocal(t, m, key("enter"))
 				if kind == "filters" {
-					if m.filters.open || m.prQuery != "pending search" {
+					if m.filters.open || m.prUI.query != "pending search" {
 						t.Fatal("visible filter could not apply preserved draft")
 					}
 				} else {

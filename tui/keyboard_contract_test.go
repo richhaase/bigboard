@@ -141,8 +141,8 @@ func keyboardContractState(m Model) string {
 	return fmt.Sprintf("%#v", []any{
 		m.viewMode, m.returnView, m.glance, m.selectedRepoID, m.areaRepoID, m.selectedAreaID, m.personID,
 		m.selectedRow, m.scrollOffset, m.activeAuthorID, m.activeOperative, m.statDetailOffset,
-		m.showPaths, m.pathOffset, m.showPRs, m.prDetail, m.prRow, m.prOffset,
-		m.prBrowserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
+		m.showPaths, m.pathOffset, m.showPRs, m.prUI.detail, m.prUI.row, m.prUI.offset,
+		m.prUI.browserError, m.showScanErrors, m.scanErrorOffset, m.overlayCursor, m.overlayExcluded, m.excludedRepos,
 		m.filterQuery, m.searching, m.filters, m.timeIdx, m.customRangeDays, m.overviewSort,
 		m.showHelp, m.helpOffset,
 		m.sortField, m.sortAsc, m.hideBots, m.loading, m.scan.running, m.quitting, m.scan.generation, m.prGeneration,
@@ -161,7 +161,7 @@ func TestKeyboardContractRemovedAliasesAreInert(t *testing.T) {
 					before := keyboardContractState(base)
 					after := keyboardContractPress(t, base, k)
 					if k == "k" && base.showPRs && !base.showHelp && !base.showScanErrors && !base.filters.open {
-						if !after.filters.open || after.filters.category != "checks" || after.prRow != base.prRow || after.prOffset != base.prOffset {
+						if !after.filters.open || after.filters.category != "checks" || after.prUI.row != base.prUI.row || after.prUI.offset != base.prUI.offset {
 							t.Fatal("k should open check filters without moving PR selection")
 						}
 						return
@@ -208,7 +208,7 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 			t.Run(tc.name+"/"+shortcut, func(t *testing.T) {
 				m := tc.setup(t)
 				contributorDetail := !m.showPRs && (m.viewMode == ViewOperative || m.viewMode == ViewRepoOverlay && m.returnView == ViewOperative)
-				prDetail := m.showPRs && m.prDetail && !m.prContext.active
+				prDetail := m.showPRs && m.prUI.detail && !m.prContext.active
 				m = keyboardContractPress(t, m, shortcut)
 				if m.showHelp || m.showScanErrors || m.filters.open || m.viewMode == ViewRepoOverlay {
 					t.Fatal("board shortcut left a temporary dialog open")
@@ -220,7 +220,7 @@ func TestKeyboardContractBoardKeysWorkAcrossPages(t *testing.T) {
 					t.Fatal("board navigation discarded repository diagnostics")
 				}
 				if shortcut == "p" {
-					if !m.showPRs || m.prDetail != prDetail {
+					if !m.showPRs || m.prUI.detail != prDetail {
 						t.Fatal("p did not restore the PR board")
 					}
 				} else {

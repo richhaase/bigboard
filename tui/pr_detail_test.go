@@ -44,11 +44,11 @@ func TestPRDetailModalKeepsIdentityWarningsAndDismissalState(t *testing.T) {
 			}
 		}
 		m = keyboardContractPress(t, m, "f", "esc")
-		if !m.prDetail {
+		if !m.prUI.detail {
 			t.Fatal("canceling a filter lost the detail modal")
 		}
 		m = keyboardContractPress(t, m, "?", "esc", "esc")
-		if m.prDetail || ansi.Strip(m.View()) != before {
+		if m.prUI.detail || ansi.Strip(m.View()) != before {
 			t.Fatal("closing the detail modal changed the underlying PR list")
 		}
 	}

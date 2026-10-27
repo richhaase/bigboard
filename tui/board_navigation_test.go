@@ -41,7 +41,7 @@ func TestBoardRootBackKeepsAppliedSearch(t *testing.T) {
 				t.Fatal("Contributors root Back removed applied search")
 			}
 		case "p":
-			if m.prQuery != query {
+			if m.prUI.query != query {
 				t.Fatal("PR root Back removed applied search")
 			}
 		}
@@ -57,9 +57,9 @@ func TestSearchCancelRestoresAppliedQuery(t *testing.T) {
 		case "c":
 			query = m.filterQuery
 		case "p":
-			query = m.prQuery
+			query = m.prUI.query
 		}
-		if query != "original" || m.searching || m.prSearching || m.glance.searching {
+		if query != "original" || m.searching || m.prUI.searching || m.glance.searching {
 			t.Fatalf("%s canceled search did not restore its applied value", board)
 		}
 		m = keyboardContractPress(t, m, "/", "ctrl+u", "replacement", "enter")
@@ -69,7 +69,7 @@ func TestSearchCancelRestoresAppliedQuery(t *testing.T) {
 		case "c":
 			query = m.filterQuery
 		case "p":
-			query = m.prQuery
+			query = m.prUI.query
 		}
 		if query != "replacement" {
 			t.Fatalf("%s accepted search did not become the next cancel target", board)
@@ -126,11 +126,11 @@ func TestRefreshNormalizesRememberedContributorDetails(t *testing.T) {
 
 func TestBoardSwitchCancelSearchKeepsSelectedIdentity(t *testing.T) {
 	m := keyboardContractPress(t, normalizedPRFixture(), "p")
-	m.prRow = 20
+	m.prUI.row = 20
 	selectedPR := m.selectedPRKey()
-	query := m.visiblePRs()[m.prRow].Title
+	query := m.visiblePRs()[m.prUI.row].Title
 	m = keyboardContractPress(t, m, "/", query, "f1", "c", "p")
-	if m.prQuery != "" || m.selectedPRKey() != selectedPR {
+	if m.prUI.query != "" || m.selectedPRKey() != selectedPR {
 		t.Fatal("canceling PR search through a board switch changed the selected PR")
 	}
 	m = keyboardContractPress(t, keyboardContractFixture(), "c")
@@ -145,20 +145,23 @@ func TestBoardSwitchCancelSearchKeepsSelectedIdentity(t *testing.T) {
 
 func TestContextPRsRestoreDestinationWithoutRollingBackData(t *testing.T) {
 	m := normalizedPRFixture()
-	m.prFilters.author = filterValues{"author29"}
-	m.prQuery, m.prRepoID, m.prSort, m.prReverse = "Change 00", "/web", 3, true
-	m.prOffset, m.prBrowserError = 7, "previous browser error"
+	m.prUI.filters.author = filterValues{"author29"}
+	m.prUI.query, m.prUI.repoID, m.prUI.sort, m.prUI.reverse = "Change 00", "/web", 3, true
+	m.prUI.offset, m.prUI.browserError = 7, "previous browser error"
+	m.prUI.searchBefore = "Change"
+	savedUI := m.prUI.clone()
 	selected := m.selectedPRKey()
 	before := m.glance
 	m.openContextPRs("/api")
-	if !m.showPRs || !m.prContext.active || m.prRepoID != "/api" || !m.prFilters.empty() || m.prQuery != "" || len(m.visiblePRs()) != 30 {
+	if !m.showPRs || !m.prContext.active || m.prUI.repoID != "/api" || !m.prUI.filters.empty() || m.prUI.query != "" || len(m.visiblePRs()) != 30 {
 		t.Fatal("context jump inherited unrelated destination filters")
 	}
 	checked := time.Now().Add(time.Minute)
 	snapshot := m.prState.snapshots["org/repo"]
 	snapshot.checked = checked
 	m.prState.snapshots["org/repo"] = snapshot
-	m = keyboardContractPress(t, m, "enter", "esc")
+	m = keyboardContractPress(t, m, "/", "Change", "enter", "s", "S", "enter", "esc")
+	m.prUI.browserError = "context browser error"
 	if !m.showPRs || !m.prContext.active {
 		t.Fatal("closing detail skipped the context list")
 	}
@@ -166,7 +169,7 @@ func TestContextPRsRestoreDestinationWithoutRollingBackData(t *testing.T) {
 	if m.showPRs || m.prContext.active || m.viewMode != ViewAwareness || !reflect.DeepEqual(before, m.glance) {
 		t.Fatal("context Back did not restore its Activity origin")
 	}
-	if m.prRepoID != "/web" || m.prQuery != "Change 00" || m.prSort != 3 || !m.prReverse || m.prOffset != 7 || m.selectedPRKey() != selected || !reflect.DeepEqual(m.prFilters.author, filterValues{"author29"}) {
+	if !reflect.DeepEqual(m.prUI, savedUI) || m.selectedPRKey() != selected {
 		t.Fatal("context Back did not restore saved PR board state")
 	}
 	if !m.prState.snapshots["org/repo"].checked.Equal(checked) {
@@ -174,7 +177,7 @@ func TestContextPRsRestoreDestinationWithoutRollingBackData(t *testing.T) {
 	}
 	m.openContextPRs("/api")
 	m = keyboardContractPress(t, m, "p")
-	if !m.showPRs || m.prContext.active || m.prRepoID != "/web" || m.prQuery != "Change 00" || m.selectedPRKey() != selected {
+	if !m.showPRs || m.prContext.active || m.prUI.repoID != "/web" || m.prUI.query != "Change 00" || m.selectedPRKey() != selected {
 		t.Fatal("PR board key did not leave temporary context for saved PR state")
 	}
 }
@@ -182,11 +185,68 @@ func TestContextPRsRestoreDestinationWithoutRollingBackData(t *testing.T) {
 func TestBoardSwitchCancelsDialogsWithoutChangingUnderlyingState(t *testing.T) {
 	m := keyboardContractPress(t, normalizedPRFixture(), "p", "down")
 	selected := m.selectedPRKey()
-	m.prQuery = "Change"
+	m.prUI.query = "Change"
 	for _, open := range []string{"?", "t", "i", "f"} {
 		m = keyboardContractPress(t, m, open, "p")
-		if !m.showPRs || m.showHelp || m.filters.open || m.viewMode == ViewRepoOverlay || m.selectedPRKey() != selected || m.prQuery != "Change" {
+		if !m.showPRs || m.showHelp || m.filters.open || m.viewMode == ViewRepoOverlay || m.selectedPRKey() != selected || m.prUI.query != "Change" {
 			t.Fatalf("%s changed the PR board while dismissing a dialog", open)
 		}
+	}
+}
+
+func TestContextPRsSavedFiltersDoNotAliasPriorOrRestoredModels(t *testing.T) {
+	m := normalizedPRFixture()
+	want := prFilters{
+		mine: filterValues{prMineAuthor}, author: filterValues{"author29"},
+		review: filterValues{"Unknown"}, checks: filterValues{"Unknown"}, state: filterValues{"open"},
+	}
+	m.prUI.filters = want.clone()
+	prior := m
+	m.openContextPRs("/api")
+	for _, kind := range []string{"mine", "author", "review", "checks", "state"} {
+		prior.prUI.filters.values(kind)[0] = "changed before context"
+	}
+	context := m
+	m.closeContextPRs(false)
+	if !reflect.DeepEqual(m.prUI.filters, want) {
+		t.Fatal("context restoration reused filter slices from the prior model")
+	}
+	for _, kind := range []string{"mine", "author", "review", "checks", "state"} {
+		m.prUI.filters.values(kind)[0] = "changed after context"
+	}
+	if !reflect.DeepEqual(context.prContext.ui.filters, want) {
+		t.Fatal("restored filters mutated the prior context snapshot")
+	}
+}
+
+func TestContextPRsReconcileSavedSelectionWithLatestData(t *testing.T) {
+	for _, removed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reordered", true: "removed"}[removed], func(t *testing.T) {
+			m := normalizedPRFixture()
+			m.prUI.repoID, m.prUI.query, m.prUI.sort, m.prUI.reverse = "/web", "Change", 3, true
+			m.prUI.row, m.prUI.detail, m.prUI.offset = 10, true, 7
+			selected := m.selectedPRKey()
+			m.openContextPRs("/api")
+			snapshot := m.prState.snapshots["org/web"]
+			for i := range snapshot.prs {
+				if snapshot.prs[i].Key() == selected {
+					if removed {
+						snapshot.prs = append(snapshot.prs[:i], snapshot.prs[i+1:]...)
+					} else {
+						snapshot.prs[i].Title = "Change zz"
+					}
+					break
+				}
+			}
+			m.prState.snapshots["org/web"] = snapshot
+			m.closeContextPRs(false)
+			if removed {
+				if m.selectedPRKey() == selected || m.prUI.detail || m.prUI.offset != 0 || len(m.visiblePRs()) != 29 {
+					t.Fatal("context restoration kept stale details for a removed PR")
+				}
+			} else if m.selectedPRKey() != selected || m.prUI.row != 0 || !m.prUI.detail || m.prUI.offset != 7 {
+				t.Fatal("context restoration lost the selected PR after reordering")
+			}
+		})
 	}
 }

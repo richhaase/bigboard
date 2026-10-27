@@ -37,12 +37,12 @@ func TestSharedFiltersStageAllFacetsAndCancelAtomically(t *testing.T) {
 	m = chooseFilterOption(t, m, "checks", "Pending")
 	m = chooseFilterOption(t, m, "state", "open")
 	m = chooseFilterOption(t, m, "state", "draft")
-	if len(m.visiblePRs()) != 48 || len(m.sharedRepos) > 0 || !m.prFilters.empty() || m.timeIdx != beforeRange {
+	if len(m.visiblePRs()) != 48 || len(m.sharedRepos) > 0 || !m.prUI.filters.empty() || m.timeIdx != beforeRange {
 		t.Fatal("staging modified the applied filters")
 	}
 	draft := m
 	m = keyboardContractPress(t, m, "esc")
-	if m.filters.open || len(m.visiblePRs()) != 48 || len(m.sharedRepos) > 0 || !m.prFilters.empty() {
+	if m.filters.open || len(m.visiblePRs()) != 48 || len(m.sharedRepos) > 0 || !m.prUI.filters.empty() {
 		t.Fatal("cancel changed applied filters")
 	}
 	m = keyboardContractPress(t, draft, "enter")
@@ -50,14 +50,14 @@ func TestSharedFiltersStageAllFacetsAndCancelAtomically(t *testing.T) {
 	if m.filters.open || len(m.sharedRepos) != 2 || len(prs) != 2 || prs[0].Number != 100 || prs[1].Number != 101 {
 		t.Fatalf("OR within facets and AND across facets returned %+v", prs)
 	}
-	if len(m.prFilters.author) != 2 || len(m.prFilters.review) != 2 || len(m.prFilters.checks) != 2 || len(m.prFilters.state) != 2 {
+	if len(m.prUI.filters.author) != 2 || len(m.prUI.filters.review) != 2 || len(m.prUI.filters.checks) != 2 || len(m.prUI.filters.state) != 2 {
 		t.Fatal("Enter failed to apply every staged category")
 	}
 	for _, category := range []string{"author", "review", "checks", "state", "repos"} {
 		m = chooseFilterOption(t, m, category, "")
 	}
 	m = keyboardContractPress(t, m, "enter")
-	if len(m.visiblePRs()) != 48 || !m.prFilters.empty() || len(m.sharedRepos) != 0 {
+	if len(m.visiblePRs()) != 48 || !m.prUI.filters.empty() || len(m.sharedRepos) != 0 {
 		t.Fatal("All did not clear each multi-select category")
 	}
 }
@@ -67,10 +67,10 @@ func TestSharedFiltersDraftDoesNotAliasAppliedOrPriorModels(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.sharedRepos = filterValues{"/sample/gateway", "/sample/web-client"}
 	m.activityPeople = filterValues{"first", "second"}
-	m.prFilters.author = filterValues{"one", "two"}
+	m.prUI.filters.author = filterValues{"one", "two"}
 	m.openFilters("repos")
 	m.filters.repos[0], m.filters.people[0], m.filters.prs.author[0] = "changed", "changed", "changed"
-	if m.sharedRepos[0] != "/sample/gateway" || m.activityPeople[0] != "first" || m.prFilters.author[0] != "one" {
+	if m.sharedRepos[0] != "/sample/gateway" || m.activityPeople[0] != "first" || m.prUI.filters.author[0] != "one" {
 		t.Fatal("draft slices alias the applied filters")
 	}
 	prior := m
@@ -156,32 +156,32 @@ func TestSharedFiltersResetScopeAndBoardIndependently(t *testing.T) {
 		m.sharedRepos = filterValues{"/sample/gateway"}
 		m.activityPeople, m.activityHideBots = filterValues{"missing-person"}, true
 		m.hideBots, m.filterQuery = true, "kept-contributor-search"
-		m.prFilters.review, m.prQuery = filterValues{"Approved"}, "kept-pr-search"
+		m.prUI.filters.review, m.prUI.query = filterValues{"Approved"}, "kept-pr-search"
 		m.setGlanceQuery("kept-activity-search")
-		m.personID, m.prRepoID = "context-person", "/sample/gateway"
+		m.personID, m.prUI.repoID = "context-person", "/sample/gateway"
 		beforeRange := m.timeIdx
 		m = keyboardContractPress(t, m, "f", "x")
 		m = keyboardContractPress(t, m, "enter")
-		if !reflect.DeepEqual(m.sharedRepos, filterValues{"/sample/gateway"}) || m.timeIdx != beforeRange || m.personID != "context-person" || m.prRepoID != "/sample/gateway" {
+		if !reflect.DeepEqual(m.sharedRepos, filterValues{"/sample/gateway"}) || m.timeIdx != beforeRange || m.personID != "context-person" || m.prUI.repoID != "/sample/gateway" {
 			t.Fatalf("%s reset discarded shared scope or navigation", board)
 		}
 		switch board {
 		case "a":
-			if len(m.activityPeople) > 0 || m.activityHideBots || m.glanceQuery() != "" || !m.hideBots || m.prQuery != "kept-pr-search" {
+			if len(m.activityPeople) > 0 || m.activityHideBots || m.glanceQuery() != "" || !m.hideBots || m.prUI.query != "kept-pr-search" {
 				t.Fatal("Activity reset affected the wrong board")
 			}
 		case "c":
-			if m.hideBots || m.filterQuery != "" || !m.activityHideBots || m.prQuery != "kept-pr-search" {
+			if m.hideBots || m.filterQuery != "" || !m.activityHideBots || m.prUI.query != "kept-pr-search" {
 				t.Fatal("Contributors reset affected the wrong board")
 			}
 		case "p":
-			if !m.prFilters.empty() || m.prQuery != "" || !m.hideBots || !m.activityHideBots {
+			if !m.prUI.filters.empty() || m.prUI.query != "" || !m.hideBots || !m.activityHideBots {
 				t.Fatal("PR reset affected the wrong board")
 			}
 		}
 		m = keyboardContractPress(t, m, "f", "X")
 		m = keyboardContractPress(t, m, "enter")
-		if len(m.sharedRepos) != 0 || m.timeIdx != len(TimePresets)-1 || m.customRangeDays != 0 || m.prRepoID != "/sample/gateway" || m.personID != "context-person" {
+		if len(m.sharedRepos) != 0 || m.timeIdx != len(TimePresets)-1 || m.customRangeDays != 0 || m.prUI.repoID != "/sample/gateway" || m.personID != "context-person" {
 			t.Fatal("shared reset changed navigation or failed to clear shared scope")
 		}
 	}
@@ -194,12 +194,12 @@ func TestSharedFiltersPreserveSelectionsAndCloseHiddenPRInspector(t *testing.T) 
 	key := m.selectedPRKey()
 	m = chooseFilterOption(t, m, "repos", "/sample/gateway")
 	m = keyboardContractPress(t, m, "enter")
-	if m.selectedPRKey() != key || !m.prDetail {
+	if m.selectedPRKey() != key || !m.prUI.detail {
 		t.Fatal("visible PR selection or inspector was lost")
 	}
 	m = chooseFilterOption(t, m, "review", "Changes req.")
 	m = keyboardContractPress(t, m, "enter")
-	if m.selectedPRKey() == key || m.prDetail {
+	if m.selectedPRKey() == key || m.prUI.detail {
 		t.Fatal("hidden PR inspector remained open")
 	}
 	m = keyboardContractPress(t, m, "c", "down")

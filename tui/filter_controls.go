@@ -10,10 +10,10 @@ import (
 func (m *Model) clearBoardFilters() {
 	selectedPR, selectedContributor := m.selectedPRKey(), m.selectedContributorID()
 	if m.showPRs {
-		m.prFilters, m.prQuery = prFilters{}, ""
+		m.prUI.filters, m.prUI.query = prFilters{}, ""
 		m.selectPR(selectedPR)
-		if m.prDetail && m.selectedPRKey() != selectedPR {
-			m.prDetail, m.prOffset = false, 0
+		if m.prUI.detail && m.selectedPRKey() != selectedPR {
+			m.prUI.detail, m.prUI.offset = false, 0
 		}
 		return
 	}
@@ -79,11 +79,11 @@ func (m Model) boardFiltersLabel(width int) string {
 	query, searching := m.filterQuery, m.searching
 	if m.showPRs {
 		for _, category := range []struct{ key, label string }{{"mine", "Mine"}, {"author", "Author"}, {"review", "Review"}, {"checks", "Checks"}, {"state", "State"}} {
-			if values := m.prFilters.values(category.key); len(values) > 0 {
+			if values := m.prUI.filters.values(category.key); len(values) > 0 {
 				parts = append(parts, category.label+": "+displayText(strings.Join(values, ", ")))
 			}
 		}
-		query, searching = m.prQuery, m.prSearching
+		query, searching = m.prUI.query, m.prUI.searching
 	} else {
 		if m.boardBotsHidden() {
 			parts = append(parts, "bots hidden")

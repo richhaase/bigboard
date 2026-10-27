@@ -56,11 +56,11 @@ func TestPRMineUpdatedReviewStagesCombinesAndPreservesNavigation(t *testing.T) {
 	m.prState.snapshots["org/repo"] = snapshot
 	m.options.Bookmark = &BookmarkOptions{Time: snapshot.prs[2].UpdatedAt.Add(time.Hour)}
 	m = chooseFilterOption(t, m, "mine", prMineUpdated)
-	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
+	if !m.prUI.filters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("staging updated-since-review applied early")
 	}
 	m = keyboardContractPress(t, m, "esc")
-	if !m.prFilters.empty() {
+	if !m.prUI.filters.empty() {
 		t.Fatal("cancel retained updated-since-review")
 	}
 	m = chooseFilterOption(t, m, "mine", prMineUpdated)
@@ -69,7 +69,7 @@ func TestPRMineUpdatedReviewStagesCombinesAndPreservesNavigation(t *testing.T) {
 		t.Fatalf("confirmed review evidence should match independently of bookmark or partial coverage: %+v", got)
 	}
 	m = keyboardContractPress(t, m, "c", "p")
-	if !slices.Equal(m.prFilters.mine, filterValues{prMineUpdated}) || len(m.visiblePRs()) != 1 {
+	if !slices.Equal(m.prUI.filters.mine, filterValues{prMineUpdated}) || len(m.visiblePRs()) != 1 {
 		t.Fatal("board navigation lost updated-since-review")
 	}
 	m.openContextPRs("/api")
@@ -77,18 +77,18 @@ func TestPRMineUpdatedReviewStagesCombinesAndPreservesNavigation(t *testing.T) {
 		t.Fatal("Activity context inherited saved Mine filter")
 	}
 	m.closeContextPRs(false)
-	if !slices.Equal(m.prFilters.mine, filterValues{prMineUpdated}) || len(m.visiblePRs()) != 1 {
+	if !slices.Equal(m.prUI.filters.mine, filterValues{prMineUpdated}) || len(m.visiblePRs()) != 1 {
 		t.Fatal("return from Activity lost saved Mine filter")
 	}
-	m.prFilters.mine = filterValues{prMineUpdated, prMineAuthor}
+	m.prUI.filters.mine = filterValues{prMineUpdated, prMineAuthor}
 	if len(m.visiblePRs()) != 3 {
 		t.Fatal("review updates did not combine with other Mine values using OR")
 	}
-	m.prFilters.checks = filterValues{"Passing"}
+	m.prUI.filters.checks = filterValues{"Passing"}
 	if len(m.visiblePRs()) != 2 {
 		t.Fatal("review updates did not combine with Checks using AND")
 	}
-	m.prQuery = "#3"
+	m.prUI.query = "#3"
 	if got := m.visiblePRs(); len(got) != 1 || got[0].Number != 3 {
 		t.Fatal("review updates ignored search")
 	}

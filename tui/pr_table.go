@@ -110,7 +110,7 @@ func (m Model) prListPageSize() int {
 
 func (m Model) prListCapacity(previewRows int) int {
 	budget := m.height - screenHeaderRows - screenFooterRows - 2 - previewRows
-	if m.prBrowserError != "" {
+	if m.prUI.browserError != "" {
 		budget--
 	}
 	return max(1, budget/m.prListRowHeight())
@@ -180,14 +180,14 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		return nil
 	}
 	budget := m.height - screenHeaderRows - screenFooterRows - 2 - 3*m.prListRowHeight()
-	if m.prBrowserError != "" {
+	if m.prUI.browserError != "" {
 		budget--
 	}
 	budget = min(10, budget)
 	if budget < 5 {
 		return nil
 	}
-	pr := prs[max(0, min(m.prRow, len(prs)-1))]
+	pr := prs[max(0, min(m.prUI.row, len(prs)-1))]
 	var notices []string
 	if m.sinceLastLook(pr.UpdatedAt) {
 		notices = append(notices, StyleCyan.Render("  + updated since last look"))
@@ -224,21 +224,21 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 }
 
 func (m Model) prFooter(prs []gh.PullRequest) footerHints {
-	if m.prSearching {
+	if m.prUI.searching {
 		return searchFooter()
 	}
 	var local []footerHint
-	if m.prDetail || m.prContext.active {
+	if m.prUI.detail || m.prContext.active {
 		local = append(local, footerHint{"Esc", "back"})
 	}
-	if m.prDetail {
+	if m.prUI.detail {
 		local = append(local, footerHint{"↑↓", "scroll"})
 	}
 	local = append(local, footerHint{"f", "filters"})
-	if !m.prDetail {
+	if !m.prUI.detail {
 		local = append(local, footerHint{"/", "find"}, footerHint{"Enter", "open"})
 	}
-	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prRow, len(prs)-1))]) != "" {
+	if len(prs) > 0 && prBrowserURL(prs[max(0, min(m.prUI.row, len(prs)-1))]) != "" {
 		local = append(local, footerHint{"o", "browser"})
 	}
 	local = append(local, footerHint{"t", "date range"})
@@ -248,7 +248,7 @@ func (m Model) prFooter(prs []gh.PullRequest) footerHints {
 func (m Model) prListErrors() []string {
 	var lines []string
 	for _, repo := range m.local.repositories {
-		if !m.repoInView(repo.ID) || m.prRepoID != "" && repo.ID != m.prRepoID {
+		if !m.repoInView(repo.ID) || m.prUI.repoID != "" && repo.ID != m.prUI.repoID {
 			continue
 		}
 		err := m.prState.errors[repo.ID]
@@ -265,20 +265,20 @@ func (m Model) prListErrors() []string {
 func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 	preview := m.prSelectedPreview(prs, width)
 	budget := m.prListCapacity(len(preview))
-	selected := max(0, min(m.prRow, len(prs)-1))
+	selected := max(0, min(m.prUI.row, len(prs)-1))
 	start := max(0, min(selected-budget/2, len(prs)-budget))
 	end := min(len(prs), start+budget)
 	lines := []string{boardListHeading("OPEN PRs", m.prSortLabel(), nil, start, end, len(prs), width), prTableColumns(width)}
 	if len(prs) == 0 {
 		empty := "No PRs to display in this snapshot."
-		if m.prQuery != "" || !m.prFilters.empty() {
+		if m.prUI.query != "" || !m.prUI.filters.empty() {
 			empty = "No matching PRs. x clears filters and search."
 		}
 		_, bounded := m.rangeCutoffAt(time.Now())
 		if bounded && len(m.allPRs()) > 0 {
 			empty = "No matching PRs in range. t changes range; x clears PR filters."
 		}
-		if len(m.prFilters.mine) > 0 && m.prState.login == "" {
+		if len(m.prUI.filters.mine) > 0 && m.prState.login == "" {
 			empty = m.prMineStatus()
 		}
 		lines = append(lines, "  "+empty)
@@ -288,7 +288,7 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 		lines = append(lines, m.prTableRow(prs[i], labels[prs[i].Repo], i == selected, i, width)...)
 	}
 	remaining := m.height - screenHeaderRows - screenFooterRows - len(lines) - len(preview)
-	if m.prBrowserError != "" {
+	if m.prUI.browserError != "" {
 		remaining--
 	}
 	remaining = max(0, remaining)

@@ -56,12 +56,12 @@ func (m Model) filterCategoryChanged(id string) bool {
 		}
 		return f.activityBots != m.activityHideBots
 	case "mine", "author", "review", "checks", "state":
-		return !sameFilterValues(f.prs.values(id), m.prFilters.values(id))
+		return !sameFilterValues(f.prs.values(id), m.prUI.filters.values(id))
 	case "search":
 		query := m.glanceQuery()
 		switch f.board {
 		case "prs":
-			query = m.prQuery
+			query = m.prUI.query
 		case "contributors":
 			query = m.filterQuery
 		}

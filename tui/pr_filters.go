@@ -128,7 +128,7 @@ func (f *prFilters) setValues(kind string, values filterValues) {
 
 func (m Model) prFilterOptions() []prFilterOption {
 	options := []prFilterOption{{"", "All"}}
-	switch m.prFilterKind {
+	switch m.prUI.filterKind {
 	case "mine":
 		options[0].label = "All PRs"
 		options = append(options, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview}, prFilterOption{prMineUpdated, prMineUpdated})
@@ -145,7 +145,7 @@ func (m Model) prFilterOptions() []prFilterOption {
 				authors[value] = "Unknown author"
 			}
 		}
-		for _, active := range m.prFilters.author {
+		for _, active := range m.prUI.filters.author {
 			if authors[active] == "" {
 				authors[active] = githubIdentity(active)
 				if active == "?" {
@@ -176,12 +176,12 @@ func (m Model) prFilterOptions() []prFilterOption {
 			options = append(options, prFilterOption{repo.ID, displayText(repo.Name)})
 		}
 	}
-	if m.prFilterQuery == "" {
+	if m.prUI.filterQuery == "" {
 		return options
 	}
 	filtered := options[:0]
 	for _, option := range options {
-		if strings.Contains(strings.ToLower(option.label), strings.ToLower(m.prFilterQuery)) {
+		if strings.Contains(strings.ToLower(option.label), strings.ToLower(m.prUI.filterQuery)) {
 			filtered = append(filtered, option)
 		}
 	}

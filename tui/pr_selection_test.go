@@ -36,7 +36,7 @@ func TestPRBoardIgnoresWorklistSearchPersonAndBots(t *testing.T) {
 		m.personID = "email:absent@example.test"
 		m.hideBots, m.timeIdx = true, 0
 		m = keyboardContractPress(t, m, "p")
-		if !m.showPRs || m.prDetail || len(m.visiblePRs()) != 3 {
+		if !m.showPRs || m.prUI.detail || len(m.visiblePRs()) != 3 {
 			t.Fatalf("query %q limited the PR board: %+v", query, m.visiblePRs())
 		}
 		if !strings.Contains(m.View(), "all repos") {
@@ -56,13 +56,13 @@ func TestPRBoardRespectsIncludedRepositories(t *testing.T) {
 
 func TestPRBoardRetainsSelectionAcrossBoardChanges(t *testing.T) {
 	m := keyboardContractPress(t, prOnlySelectionFixture(), "p", "down")
-	selected := m.visiblePRs()[m.prRow].Key()
+	selected := m.visiblePRs()[m.prUI.row].Key()
 	m = keyboardContractPress(t, m, "l", "p")
-	if m.prDetail || m.visiblePRs()[m.prRow].Key() != selected {
+	if m.prUI.detail || m.visiblePRs()[m.prUI.row].Key() != selected {
 		t.Fatal("returning to the PR board lost selection")
 	}
 	m = keyboardContractPress(t, m, "enter", "down", "w", "p")
-	if m.prDetail || m.visiblePRs()[m.prRow].Key() != selected {
+	if m.prUI.detail || m.visiblePRs()[m.prUI.row].Key() != selected {
 		t.Fatal("p did not return from detail to the selected PR in the board")
 	}
 }
@@ -83,7 +83,7 @@ func TestPRBoardEscapeStaysAtBoardRoot(t *testing.T) {
 		m := prOnlySelectionFixture()
 		m.viewMode = view
 		m = keyboardContractPress(t, m, "p", "enter", "esc")
-		if !m.showPRs || m.prDetail {
+		if !m.showPRs || m.prUI.detail {
 			t.Fatal("Esc did not return to PR list")
 		}
 		m = keyboardContractPress(t, m, "esc")

@@ -212,6 +212,8 @@ selections so canceled edits cannot mutate the source model.
 PR shortcuts `u`/`v`/`k`/`d` focus Authors/Review/Checks/State options in the common modal.
 Activity `v` opens a contextual repository PR list using shared scope and no
 unrelated saved PR filters. It snapshots only PR UI state, never fetched data.
+`prUIState` groups the PR filters, search, sort, selection, and detail state;
+context navigation clones that value while refresh data stays in `prState`.
 Back from the contextual list returns to Activity and restores the saved normal
 PR board; ordinary board switching also ends that temporary context. Repeated
 `p` on the normal PR board preserves location. PR range uses last-updated time;
