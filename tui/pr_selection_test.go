@@ -39,7 +39,7 @@ func TestPRBoardIgnoresWorklistSearchPersonAndBots(t *testing.T) {
 		if !m.showPRs || m.prDetail || len(m.visiblePRs()) != 3 {
 			t.Fatalf("query %q limited the PR board: %+v", query, m.visiblePRs())
 		}
-		if !strings.Contains(m.View(), "all included repositories") {
+		if !strings.Contains(m.View(), "all repos") {
 			t.Fatal("PR board does not identify its scope")
 		}
 	}

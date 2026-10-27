@@ -72,15 +72,15 @@ func (m Model) glanceCoverageLine() string {
 			unknown++
 		}
 	}
-	sample := "author dates"
+	var coverage []string
 	if shallow {
-		sample += " · shallow sample"
+		coverage = append(coverage, "Unknown line counts")
 	}
 	if unknown > 0 {
-		sample += fmt.Sprintf(" · %d commits with unknown paths", unknown)
-	} else {
-		sample += " · no unknown paths in range"
+		coverage = append(coverage, fmt.Sprintf("%d commits with unknown paths", unknown))
 	}
+	coverage = append(coverage, "Git author dates")
+	sample := strings.Join(coverage, " · ")
 	return StyleDimWhite.Render("  " + sample)
 }
 func (m Model) glanceScanLine(scope string) string {

@@ -504,12 +504,12 @@ func settingsPushAge(at, now time.Time) string {
 
 func (m Model) settingsHelp() screenHelp {
 	if m.settings.edit != "" {
-		return screenHelp{"Settings text", []helpSection{{"Edit", []helpBinding{
+		return screenHelp{title: "Settings text", sections: []helpSection{{"Edit", []helpBinding{
 			{"Type / Backspace", "Edit text; shortcut letters stay literal"}, {"Ctrl+U", "Clear text"}, {"Enter", "Accept edit"}, {"Esc", "Cancel edit"}, {"F1", "Show help while typing"}, {"Ctrl+C", "Quit BigBoard"},
 		}}}}
 	}
 	if m.settings.busy == "saving" {
-		return screenHelp{"Saving settings", []helpSection{{"Saving", []helpBinding{{"Ctrl+C", "Quit BigBoard"}}}}}
+		return screenHelp{title: "Saving settings", sections: []helpSection{{"Saving", []helpBinding{{"Ctrl+C", "Quit BigBoard"}}}}}
 	}
 	back := "Previous step; cancel without saving from Sources"
 	if m.settings.required {
@@ -533,7 +533,7 @@ func (m Model) settingsHelp() screenHelp {
 	if !m.settings.required {
 		bindings = append(bindings, helpBinding{"a / c / p", "Cancel settings and switch boards"})
 	}
-	return screenHelp{"Setup and settings", []helpSection{{"Choose and review", bindings}, {"Saved configuration", []helpBinding{{"Sources", "Choose your personal account, organizations, or both"}, {"Last push", "GitHub push activity across branches; newest first, unknown dates (—) last"}, {"Save", "Applies repository sources and exclusions to future sessions, then reloads the current board"}, {"GitHub access", "Personal sources include owned public and private repositories accessible to the signed-in GitHub CLI account"}, {"Local data", "Caches selected repositories; developer checkouts are untouched"}}}}}
+	return screenHelp{title: "Setup and settings", sections: []helpSection{{"Choose and review", bindings}}, legends: []helpSection{{"Saved configuration", []helpBinding{{"Sources", "Choose your personal account, organizations, or both"}, {"Last push", "GitHub push activity across branches; newest first, unknown dates (—) last"}, {"Save", "Applies repository sources and exclusions to future sessions, then reloads the current board"}, {"GitHub access", "Personal sources include owned public and private repositories accessible to the signed-in GitHub CLI account"}, {"Local data", "Caches selected repositories; developer checkouts are untouched"}}}}}
 }
 
 func (m Model) renderSettings(background string, width, height int) string {

@@ -44,18 +44,23 @@ func (m Model) prScopeLabel() string {
 }
 
 func (m Model) prSortLabel() string {
-	direction := "↑"
-	if m.prSort == 0 {
-		direction = "↓"
-	}
+	direction := "A–Z"
 	if m.prReverse {
-		if direction == "↑" {
-			direction = "↓"
-		} else {
-			direction = "↑"
+		direction = "Z–A"
+	}
+	switch m.prSort {
+	case 0:
+		direction = "newest first"
+		if m.prReverse {
+			direction = "oldest first"
+		}
+	case 4:
+		direction = "priority first"
+		if m.prReverse {
+			direction = "priority last"
 		}
 	}
-	return prSortLabels[m.prSort] + " " + direction
+	return prSortLabels[m.prSort] + " · " + direction
 }
 
 func (m Model) prScopeRepositories() []git.Repository {

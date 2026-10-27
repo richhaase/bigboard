@@ -27,18 +27,24 @@ func (m Model) overviewSortLabel() string {
 		labels = changeSortLabels
 	}
 	mode = max(0, min(mode, len(labels)-1))
-	direction := "↓"
-	if labels[mode] == "Name" {
-		direction = "↑"
+	direction := "most first"
+	switch labels[mode] {
+	case "Name":
+		direction = "A–Z"
+	case "Recent":
+		direction = "newest first"
 	}
 	if m.overviewReverse {
-		if direction == "↑" {
-			direction = "↓"
-		} else {
-			direction = "↑"
+		switch direction {
+		case "A–Z":
+			direction = "Z–A"
+		case "newest first":
+			direction = "oldest first"
+		default:
+			direction = "fewest first"
 		}
 	}
-	return labels[mode] + " " + direction
+	return labels[mode] + " · " + direction
 }
 
 type glanceFrame struct {

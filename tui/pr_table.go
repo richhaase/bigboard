@@ -168,26 +168,11 @@ func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, in
 }
 
 func (m Model) prRepositoryLabels() map[string]string {
-	names := map[string]string{}
-	duplicates := map[string]bool{}
-	labels := map[string]string{}
+	names := make([]string, 0)
 	for _, pr := range m.allPRs() {
-		_, name, ok := strings.Cut(pr.Repo, "/")
-		if !ok {
-			name = pr.Repo
-		}
-		if other, exists := names[name]; exists && other != pr.Repo {
-			duplicates[name] = true
-		}
-		names[name] = pr.Repo
-		labels[pr.Repo] = name
+		names = append(names, pr.Repo)
 	}
-	for repo, name := range labels {
-		if duplicates[name] {
-			labels[repo] = repo
-		}
-	}
-	return labels
+	return shortRepositoryLabels(names)
 }
 
 func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
@@ -323,9 +308,5 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 }
 
 func (m Model) prBoardCoverage() string {
-	legend := "! inactive ≥14d · "
-	if marker := m.bookmarkMarkerLegend(); marker != "" {
-		legend += marker + " · "
-	}
-	return legend + "PR updated time · " + m.rangeLabel() + " · " + m.prScopeLabel() + " · ◇ draft · ● open · contributor and bot filters do not apply"
+	return "PR updated time · Git contributor and bot filters do not apply"
 }

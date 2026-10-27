@@ -137,7 +137,7 @@ func TestBoardFiltersAndSortStayInPredictableRows(t *testing.T) {
 			m = keyboardContractPress(t, m, "x", "/", "gateway", "enter")
 		}
 		lines := strings.Split(ansi.Strip(m.View()), "\n")
-		if !strings.Contains(lines[2], "Find:") || !strings.Contains(lines[1], "Shared:") || !strings.Contains(lines[screenHeaderRows], "↓") {
+		if !strings.Contains(lines[2], "Find:") || !strings.Contains(lines[1], "Shared:") || !strings.Contains(lines[screenHeaderRows], map[string]string{"a": "most first", "l": "↓", "p": "newest first"}[key]) {
 			t.Fatalf("%s misplaced filter, scope or sort", key)
 		}
 	}
