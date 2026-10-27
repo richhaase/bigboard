@@ -43,9 +43,7 @@ func TestBookmarkRangeStagesCancelsAndResetsAcrossBoards(t *testing.T) {
 		t.Fatal("preset did not replace bookmark range")
 	}
 	m = keyboardContractPress(t, m, "t", "end", " ", "enter")
-	m.openFilters("shared-reset")
-	m.stageFilterOption("reset")
-	m.applyFilters()
+	m = keyboardContractPress(t, m, "f", "X", "enter")
 	if m.sinceLastLookRange || m.rangeLabel() != "All time" {
 		t.Fatal("shared reset did not clear bookmark range")
 	}

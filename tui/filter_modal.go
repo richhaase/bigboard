@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 	"sort"
@@ -9,13 +8,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type sharedFilterState struct {
 	open                          bool
 	board, category               string
+	categoryFocus                 bool
 	rows                          map[string]int
 	queries                       map[string]string
 	edit, input, prior, error     string
@@ -27,7 +25,7 @@ type sharedFilterState struct {
 	activityBots, contributorBots bool
 	prs                           prFilters
 	query                         string
-	resetShared, resetBoard       bool
+	resetBoard                    bool
 }
 
 type filterCategory struct {
@@ -40,7 +38,7 @@ func (m Model) filtersTextEditing() bool {
 }
 
 func (m Model) filterCategories() []filterCategory {
-	categories := []filterCategory{{"range", "Date range", true}, {"repos", "Repositories", true}, {"shared-reset", "Reset shared", true}}
+	categories := []filterCategory{{"range", "Date range", true}, {"repos", "Repositories", true}}
 	switch m.filters.board {
 	case "prs":
 		categories = append(categories, filterCategory{"mine", "Mine", false}, filterCategory{"author", "Authors", false}, filterCategory{"review", "Review", false}, filterCategory{"checks", "Checks", false}, filterCategory{"state", "State", false})
@@ -49,7 +47,7 @@ func (m Model) filterCategories() []filterCategory {
 	default:
 		categories = append(categories, filterCategory{"bots", "Bots", false})
 	}
-	return append(categories, filterCategory{"search", "Search", false}, filterCategory{"board-reset", "Reset board", false})
+	return append(categories, filterCategory{"search", "Search", false})
 }
 
 func (m *Model) openFilters(category string) {
@@ -70,6 +68,7 @@ func (m *Model) openFilters(category string) {
 	}
 	m.filters.rows = maps.Clone(m.filters.rows)
 	m.filters.queries = maps.Clone(m.filters.queries)
+	m.filters.categoryFocus = category == ""
 	if category == "repo" {
 		category = "repos"
 	}
@@ -153,13 +152,9 @@ func (m Model) filterOptions() []prFilterOption {
 		options = draft.prFilterOptions()
 	case "search":
 		options = []prFilterOption{{"edit", "Edit this board's search"}, {"clear", "Clear this search"}}
-	case "shared-reset":
-		options = []prFilterOption{{"reset", "Reset shared scope"}}
-	case "board-reset":
-		options = []prFilterOption{{"reset", "Reset this board's filters"}}
 	}
 	query := strings.ToLower(m.filters.queries[m.filters.category])
-	if query == "" || m.filters.category == "search" || strings.HasSuffix(m.filters.category, "reset") {
+	if query == "" || m.filters.category == "search" {
 		return options
 	}
 	filtered := make([]prFilterOption, 0, len(options))
@@ -197,16 +192,13 @@ func (m Model) filterOptionSelected(value string) bool {
 		return hide == (value == "hidden")
 	case "search":
 		return value == "clear" && f.query == ""
-	case "shared-reset":
-		return f.resetShared
-	case "board-reset":
-		return f.resetBoard
 	}
 	return value == "" && len(values) == 0 || value != "" && slices.Contains(values, value)
 }
 
 func (m *Model) beginFilterEdit(kind string) {
 	f := &m.filters
+	f.categoryFocus = false
 	f.edit, f.error, f.overflow, f.replace = kind, "", false, false
 	f.priorRow = f.rows[f.category]
 	switch kind {
@@ -254,19 +246,25 @@ func (m *Model) stageFilterOption(value string) {
 		} else {
 			f.query = ""
 		}
-	case "shared-reset":
-		f.timeIdx, f.customDays, f.repos, f.resetShared = len(TimePresets)-1, 0, nil, true
-		f.sinceLastLook = false
-	case "board-reset":
-		f.query, f.resetBoard = "", true
-		switch f.board {
-		case "activity":
-			f.people, f.activityBots = nil, false
-		case "contributors":
-			f.contributorBots = false
-		case "prs":
-			f.prs = prFilters{}
-		}
+	}
+}
+
+func (m *Model) stageSharedFilterReset() {
+	f := &m.filters
+	f.timeIdx, f.customDays, f.repos = len(TimePresets)-1, 0, nil
+	f.sinceLastLook = false
+}
+
+func (m *Model) stageBoardFilterReset() {
+	f := &m.filters
+	f.query, f.resetBoard = "", true
+	switch f.board {
+	case "activity":
+		f.people, f.activityBots = nil, false
+	case "contributors":
+		f.contributorBots = false
+	case "prs":
+		f.prs = prFilters{}
 	}
 }
 
@@ -392,19 +390,20 @@ func (m Model) handleFiltersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.applyFilters()
 		return m, nil
-	case "left", "right", "tab", "shift+tab":
-		categories := m.filterCategories()
-		index := 0
-		for i, category := range categories {
-			if category.id == m.filters.category {
-				index = i
-			}
-		}
-		step := 1
-		if msg.String() == "left" || msg.String() == "shift+tab" {
-			step = -1
-		}
-		m.filters.category = categories[(index+step+len(categories))%len(categories)].id
+	case "left":
+		m.filters.categoryFocus = true
+		return m, nil
+	case "right":
+		m.filters.categoryFocus = false
+		return m, nil
+	case "tab", "shift+tab":
+		m.filters.categoryFocus = !m.filters.categoryFocus
+		return m, nil
+	case "x":
+		m.stageBoardFilterReset()
+		return m, nil
+	case "X":
+		m.stageSharedFilterReset()
 		return m, nil
 	case "/":
 		kind := "options"
@@ -414,170 +413,34 @@ func (m Model) handleFiltersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.beginFilterEdit(kind)
 		return m, nil
 	}
+	if m.filters.categoryFocus {
+		if msg.String() == " " {
+			m.filters.categoryFocus = false
+			return m, nil
+		}
+		categories := m.filterCategories()
+		index := 0
+		for i, category := range categories {
+			if category.id == m.filters.category {
+				index = i
+				break
+			}
+		}
+		_, page := filterModalSize(m.width, m.height)
+		if next, ok := glanceMove(msg.String(), index, len(categories), page); ok {
+			m.filters.category = categories[next].id
+		}
+		return m, nil
+	}
 	options := m.filterOptions()
 	row := max(0, min(m.filters.rows[m.filters.category], len(options)-1))
 	if msg.String() == " " && len(options) > 0 {
 		m.stageFilterOption(options[row].value)
 		return m, nil
 	}
-	_, page := filterModalSize(m.width, m.height)
+	page := filterOptionPageSize(m.width, m.height)
 	if next, ok := glanceMove(msg.String(), row, len(options), page); ok {
 		m.filters.rows[m.filters.category] = next
 	}
 	return m, nil
-}
-
-func filterModalSize(width, height int) (int, int) {
-	return max(6, min(84, width-2)), max(1, min(12, height-13))
-}
-
-func (m Model) filterCategoryLine(shared bool, width int) string {
-	var categories []filterCategory
-	selected := 0
-	for _, category := range m.filterCategories() {
-		if category.shared == shared {
-			if category.id == m.filters.category {
-				selected = len(categories)
-			}
-			categories = append(categories, category)
-		}
-	}
-	group := "This board: "
-	if shared {
-		group = "Shared: "
-	}
-	labels := make([]string, len(categories))
-	for i, category := range categories {
-		label := category.label
-		if category.id == "repos" {
-			label = "Repos"
-		} else if strings.HasSuffix(category.id, "reset") {
-			label = "Reset"
-		}
-		if category.id == m.filters.category {
-			label = "[" + label + "]"
-		}
-		labels[i] = label
-	}
-	start, end := selected, selected+1
-	text := func() string {
-		left, right := "", ""
-		if start > 0 {
-			left = "‹ "
-		}
-		if end < len(labels) {
-			right = " ›"
-		}
-		return group + left + strings.Join(labels[start:end], " ") + right
-	}
-	for end < len(labels) {
-		end++
-		if ansi.StringWidth(text()) > width {
-			end--
-			break
-		}
-	}
-	for start > 0 {
-		start--
-		if ansi.StringWidth(text()) > width {
-			start++
-			break
-		}
-	}
-	line := text()
-	if strings.Contains(line, "[") {
-		return StyleTitle.Render(padCells(line, width))
-	}
-	return StyleDimWhite.Render(padCells(line, width))
-}
-
-func (m Model) renderFiltersModal(background string, width, height int) string {
-	if width < 40 || height < 18 {
-		return renderCenteredModal(background, []string{"Filters", "Resize to 40×18", "Esc cancels"}, max(6, min(30, width)), width, height)
-	}
-	panelWidth, page := filterModalSize(width, height)
-	inner := panelWidth - 4
-	board := map[string]string{"activity": "Activity", "contributors": "Contributors", "prs": "PRs"}[m.filters.board]
-	content := []string{StyleTitle.Render("Filters · " + board), m.filterCategoryLine(true, inner), m.filterCategoryLine(false, inner)}
-	description := "Space stages choices · Enter applies all"
-	switch m.filters.category {
-	case "range":
-		description = "Date range applies to all three boards"
-	case "repos":
-		description = "Repository scope applies to all boards"
-	case "shared-reset":
-		description = "All time + all included repositories"
-	case "board-reset":
-		description = "Clear board filters; keep shared scope"
-	case "mine":
-		description = m.prMineStatus()
-	case "people", "author", "review", "checks", "state":
-		description = "Choose any · selections combine across tabs"
-	}
-	content = append(content, StyleDimWhite.Render(padCells(description, inner)))
-	query := m.filters.queries[m.filters.category]
-	field := "/ Find options"
-	if query != "" {
-		field = "/ " + displayText(query)
-	}
-	if m.filters.category == "search" {
-		field = "Search: " + displayText(m.filters.query)
-	}
-	if m.filtersTextEditing() {
-		prefix := "/ "
-		switch m.filters.edit {
-		case "query":
-			prefix = "Search: "
-		case "custom":
-			prefix = "Days (1–3650): "
-		}
-		field = prefix + ansi.Truncate(displayText(m.filters.input), max(1, inner-ansi.StringWidth(prefix)-1), "…") + "▌"
-	}
-	content = append(content, lipgloss.NewStyle().Foreground(ColorBrightWht).Background(ColorRowEven).Render(padCells(field, inner)), StyleDimCyan.Render(strings.Repeat("─", inner)))
-	options := m.filterOptions()
-	selected := max(0, min(m.filters.rows[m.filters.category], len(options)-1))
-	start := max(0, min(selected-page/2, len(options)-page))
-	end := min(len(options), start+page)
-	for i := start; i < end; i++ {
-		cursor, mark := "  ", "[ ] "
-		if i == selected {
-			cursor = "› "
-		}
-		if m.filterOptionSelected(options[i].value) {
-			mark = "[✓] "
-		}
-		line := padCells(cursor+mark+displayText(options[i].label), inner)
-		if i == selected {
-			line = selectedRowBackground(StyleTitle.Background(ColorRowSelect).Render(line))
-		}
-		content = append(content, line)
-	}
-	if len(options) == 0 {
-		content = append(content, StyleAmber.Render("No matching options"))
-	}
-	for len(content) < 6+page {
-		content = append(content, "")
-	}
-	position := fmt.Sprintf("%d–%d of %d · staged choices", start+1, end, len(options))
-	if len(options) == 0 {
-		position = "0 options · staged choices"
-	}
-	if m.filters.error != "" {
-		position = m.filters.error
-	}
-	content = append(content, StyleAmber.Render(padCells(position, inner)))
-	if m.filtersTextEditing() {
-		content = append(content, StyleTitle.Render(padCells("Enter keep edit · Esc cancel edit", inner)), StyleDimWhite.Render(padCells("Ctrl+U clear · F1 help", inner)))
-	} else {
-		actions := "Space toggle · Enter apply · Esc cancel"
-		if ansi.StringWidth(actions) > inner {
-			actions = "Space · Enter apply · Esc cancel"
-		}
-		hints := "↑↓ select · ←→/Tab category · / find · ? help"
-		if ansi.StringWidth(hints) > inner {
-			hints = "↑↓ · ←→/Tab · / find · ? help"
-		}
-		content = append(content, StyleTitle.Render(padCells(actions, inner)), StyleDimWhite.Render(padCells(hints, inner)))
-	}
-	return renderCenteredModal(background, content, panelWidth, width, height)
 }

@@ -82,13 +82,12 @@ func TestPRMineModalStagesSearchesCancelsAndClears(t *testing.T) {
 	if !m.prFilters.empty() || len(m.visiblePRs()) != 4 {
 		t.Fatal("All did not clear Mine")
 	}
-	for _, reset := range []string{"x", "board-reset"} {
+	for _, reset := range []string{"x", "modal"} {
 		m.prFilters.mine, m.prQuery = filterValues{prMineAuthor}, "Change"
 		if reset == "x" {
 			m = keyboardContractPress(t, m, "x")
 		} else {
-			m = chooseFilterOption(t, m, reset, "reset")
-			m = keyboardContractPress(t, m, "enter")
+			m = keyboardContractPress(t, m, "f", "x", "enter")
 		}
 		if !m.prFilters.empty() || m.prQuery != "" || len(m.visiblePRs()) != 4 {
 			t.Fatalf("%s did not clear Mine and search", reset)
