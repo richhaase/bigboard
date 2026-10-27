@@ -427,7 +427,7 @@ func (c *RepositoryCache) git(ctx context.Context, dir string, args ...string) (
 
 func runCacheGit(ctx context.Context, dir string, args ...string) (string, error) {
 	pinned := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "credential.interactive=false",
-		"-c", "credential.helper=!gh auth git-credential", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "fetch.writeCommitGraph=false",
+		"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "fetch.writeCommitGraph=false",
 		"-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "remote.origin.pruneTags=false"}
 	if dir != "" {
 		pinned = append(pinned, "--git-dir="+dir)

@@ -190,7 +190,9 @@ Startup discovers repositories, scans existing cached Git history, then fetches
 in the background and rescans changed revisions. With no cache, initial cloning
 must finish before data is shown. The spinner indicates working; Git progress
 also reports completed/total repositories where space permits. Each scan pass
-publishes a complete snapshot. There is no periodic refresh; use `r`.
+publishes a complete snapshot. There is no periodic refresh; use `r`. Cache clones
+and fetches authenticate only through `gh`; other Git credential helpers are
+ignored.
 
 The shared Git/PR status row describes all tracked repositories, independently
 of viewing filters. Failed refreshes retain last-good evidence where available
