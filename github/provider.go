@@ -25,10 +25,11 @@ const (
 // credentials or response cache; the caller owns refresh scheduling and stale
 // snapshots. Shared quota cooldown survives individual fetch cancellation.
 type Provider struct {
-	runner Runner
-	limits limits
-	quota  quotaState
-	now    func() time.Time
+	runner      Runner
+	limits      limits
+	quota       quotaState
+	now         func() time.Time
+	conditional conditionalCache
 }
 
 type limits struct {

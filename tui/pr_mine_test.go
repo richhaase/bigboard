@@ -190,3 +190,28 @@ func TestPRMineDoesNotResolveLoginWithoutSupportedIncludedRepositories(t *testin
 		}
 	}
 }
+
+func TestPRMineFollowsValidAccountSwitchBetweenRefreshes(t *testing.T) {
+	m := mineFixture()
+	p := &fakePRProvider{login: "viewer", result: gh.Result{Repo: "org/repo", Complete: true, PRs: m.allPRs()}}
+	m.prProvider = p
+	m.prUI.filters.mine = filterValues{prMineAuthor}
+	m.applyPRResult(m.startPRRefresh()().(prsLoadedMsg))
+	if m.prState.login != "viewer" || len(m.visiblePRs()) != 2 || m.visiblePRs()[0].Author == "other" {
+		t.Fatal("first refresh did not use the signed-in account")
+	}
+	p.login = "other"
+	m.prState.nextRefresh = time.Time{}
+	m.applyPRResult(m.startPRRefresh()().(prsLoadedMsg))
+	if p.logins != 2 || m.prState.login != "other" || m.prState.loginErr != nil || len(m.visiblePRs()) != 2 {
+		t.Fatalf("account switch was not revalidated: logins=%d login=%q", p.logins, m.prState.login)
+	}
+	for _, pr := range m.visiblePRs() {
+		if pr.Author != "other" {
+			t.Fatalf("Mine kept the previous account: %+v", pr)
+		}
+	}
+	if !strings.Contains(m.prMineStatus(), "other") {
+		t.Fatalf("Mine status = %q", m.prMineStatus())
+	}
+}

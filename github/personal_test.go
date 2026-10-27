@@ -23,7 +23,7 @@ func TestDiscoverPersonalRepositoriesPaginatesOwnedPublicPrivateAndForks(t *test
 		}
 	}
 	runner := &fakeRunner{t: t, steps: []fakeStep{
-		{data: []byte(`{"login":"EXAMPLE"}`)},
+		includedStep(`{"login":"EXAMPLE"}`),
 		discoveryPage(t, rows),
 		discoveryPage(t, []map[string]any{
 			{"full_name": "EXAMPLE/repo-001", "default_branch": "main", "archived": false},
@@ -45,7 +45,7 @@ func TestDiscoverPersonalRepositoriesPaginatesOwnedPublicPrivateAndForks(t *test
 		t.Fatalf("calls=%d refresh requests=%d", len(runner.calls), RequestCount(ctx))
 	}
 	for i, call := range runner.calls {
-		wantArgs := []string{"api", "--hostname", "github.com", "--method", "GET", endpoints[i]}
+		wantArgs := []string{"api", "--hostname", "github.com", "--method", "GET", "--include", endpoints[i]}
 		if call.command != "gh" || !reflect.DeepEqual(call.args, wantArgs) {
 			t.Errorf("request %d=%+v", i, call)
 		}
@@ -53,7 +53,7 @@ func TestDiscoverPersonalRepositoriesPaginatesOwnedPublicPrivateAndForks(t *test
 }
 
 func TestDiscoverPersonalRepositoriesRejectsDifferentSignedInAccount(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"login":"other-user"}`)}}}
+	runner := &fakeRunner{t: t, steps: []fakeStep{includedStep(`{"login":"other-user"}`)}}
 	got, err := NewProvider(runner).DiscoverPersonalRepositories(t.Context(), "saved-user")
 	if got != nil || err == nil || !strings.Contains(err.Error(), "other-user") || !strings.Contains(err.Error(), "saved-user") || !strings.Contains(err.Error(), "gh auth switch") || len(runner.calls) != 1 {
 		t.Fatalf("account mismatch repositories=%+v err=%v calls=%d", got, err, len(runner.calls))
@@ -61,7 +61,7 @@ func TestDiscoverPersonalRepositoriesRejectsDifferentSignedInAccount(t *testing.
 }
 
 func TestDiscoverPersonalRepositoriesEmptyAndInvalidAccounts(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"login":"example"}`)}, {data: []byte(`[]`)}}}
+	runner := &fakeRunner{t: t, steps: []fakeStep{includedStep(`{"login":"example"}`), includedStep(`[]`)}}
 	got, err := NewProvider(runner).DiscoverPersonalRepositories(t.Context(), "example")
 	if err != nil || len(got) != 0 || len(runner.calls) != 2 {
 		t.Fatalf("empty inventory=%+v err=%v calls=%d", got, err, len(runner.calls))
@@ -79,7 +79,7 @@ func TestDiscoverPersonalRepositoriesEmptyAndInvalidAccounts(t *testing.T) {
 func TestDiscoverPersonalRepositoriesRejectsMalformedAccountAndInventory(t *testing.T) {
 	for _, body := range []string{`{}`, `null`, `[]`, `not JSON`, `{"login":123}`, `{"login":""}`, `{"login":"other\n"}`} {
 		t.Run("user "+body, func(t *testing.T) {
-			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
+			runner := &fakeRunner{t: t, steps: []fakeStep{includedStep(body)}}
 			got, err := NewProvider(runner).DiscoverPersonalRepositories(t.Context(), "example")
 			if got != nil || !errors.Is(err, ErrResponse) || len(runner.calls) != 1 {
 				t.Fatalf("repositories=%+v err=%v calls=%d", got, err, len(runner.calls))
@@ -93,7 +93,7 @@ func TestDiscoverPersonalRepositoriesRejectsMalformedAccountAndInventory(t *test
 		`[{"full_name":"other/repo","archived":true}]`,
 	} {
 		t.Run("repositories "+body, func(t *testing.T) {
-			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"login":"example"}`)}, {data: []byte(body)}}}
+			runner := &fakeRunner{t: t, steps: []fakeStep{includedStep(`{"login":"example"}`), includedStep(body)}}
 			got, err := NewProvider(runner).DiscoverPersonalRepositories(t.Context(), "example")
 			if got != nil || !errors.Is(err, ErrResponse) {
 				t.Fatalf("repositories=%+v err=%v", got, err)
@@ -120,7 +120,7 @@ func TestDiscoverPersonalRepositoriesPreservesSafeFailuresAndOutputLimit(t *test
 			t.Run(stage+" "+tc.name, func(t *testing.T) {
 				steps := []fakeStep{tc.step}
 				if stage == "repositories" {
-					steps = append([]fakeStep{{data: []byte(`{"login":"example"}`)}}, steps...)
+					steps = append([]fakeStep{includedStep(`{"login":"example"}`)}, steps...)
 				}
 				runner := &fakeRunner{t: t, steps: steps}
 				got, err := NewProvider(runner).DiscoverPersonalRepositories(t.Context(), "example")
@@ -140,7 +140,7 @@ func TestDiscoverPersonalRepositoriesBoundsRequestsAndReturnsNoPartialInventory(
 	page := discoveryPage(t, rows)
 	for _, limited := range []bool{false, true} {
 		t.Run(fmt.Sprint(limited), func(t *testing.T) {
-			steps := []fakeStep{{data: []byte(`{"login":"example"}`)}, page}
+			steps := []fakeStep{includedStep(`{"login":"example"}`), page}
 			want, calls := ErrAuthentication, 3
 			if limited {
 				want, calls = ErrBudgetExceeded, MaxRefreshRequests

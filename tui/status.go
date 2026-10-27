@@ -67,6 +67,9 @@ func (m Model) gitDataStatus() dataStatus {
 			status.label, status.compact = "not scanned", "unknown"
 		}
 	}
+	if m.discoveryErr != "" {
+		status.label, status.compact, status.warning = status.label+" · discovery failed", status.compact+"!", true
+	}
 	return status
 }
 
@@ -206,6 +209,9 @@ func (m Model) dataStatusLines(width int) []string {
 		}
 	}
 	add(fmt.Sprintf("%d/%d tracked repositories have scanned history.", scanned, len(repos)))
+	if m.discoveryErr != "" {
+		add(StyleAmber.Render("Repository discovery failed on the last refresh; the previous tracked set is unchanged: " + m.discoveryErr))
+	}
 	if !m.startup.cachedAt.IsZero() {
 		add("Cached snapshot committed: " + m.startup.cachedAt.Local().Format("Jan 02 15:04:05 MST"))
 	}

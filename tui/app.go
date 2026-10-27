@@ -86,6 +86,7 @@ type Model struct {
 	scanErrorOffset    int
 	scanErrorDetails   bool
 	excludedRepos      map[string]bool
+	discoveryErr       string
 	overlayExcluded    map[string]bool
 	overlayCursor      int
 	viewMode           ViewMode
@@ -147,6 +148,7 @@ type Options struct {
 	ScanRepository         func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
 	CacheInfo              func() (git.CacheInfo, error)
 	RemoveCachedRepository func(string) error
+	Rediscover             func(context.Context) ([]git.Repository, map[string]bool, error)
 	PRProvider             PRProvider
 	PRRequestBudget        int
 
@@ -377,10 +379,13 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) startLocalRefresh() tea.Cmd {
-	if m.quitting || len(m.repositories) == 0 || m.scan.running {
+	if m.quitting || len(m.repositories) == 0 && m.options.Rediscover == nil || m.scan.running {
 		return nil
 	}
 	m.resetPending()
+	if m.options.Rediscover != nil {
+		return m.startRediscovery()
+	}
 	return m.startRemotePass()
 }
 
@@ -411,6 +416,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applySettingsRepositories(msg), nil
 	case settingsSavedMsg:
 		return m.applySavedSettings(msg)
+	case repositoriesRediscoveredMsg:
+		return m.applyRediscovery(msg)
 	case settingsReloadMsg:
 		if msg.generation == m.cacheGeneration {
 			return m, m.Init()

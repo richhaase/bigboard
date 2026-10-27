@@ -154,7 +154,7 @@ func main() {
 
 	store := newConfigStore(cfgPath, cfg)
 	inventory := &repositoryInventory{}
-	inventory.replace(listed)
+	inventory.track(*cfg, listed)
 	settings := newSettingsOptions(cfgPath, cfg, *groupFlag, provider, cache, store, inventory)
 	settings.Required = setupRequired
 	settings.InitialError = setupError
@@ -167,6 +167,7 @@ func main() {
 		ScanRepository:         cache.ScanRepository,
 		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(inventory.snapshot()) },
 		RemoveCachedRepository: cache.Remove,
+		Rediscover:             newRediscovery(provider, cache, *groupFlag, inventory),
 		PRRequestBudget:        cfg.PRRequestBudget,
 		FuzzyMatching:          cfg.Fuzzy,
 		IncludeGenerated:       cfg.AllFiles,

@@ -38,7 +38,11 @@ func discoveryPage(t *testing.T, rows []map[string]any) fakeStep {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fakeStep{data: data}
+	return includedStep(string(data))
+}
+
+func includedStep(body string) fakeStep {
+	return fakeStep{data: []byte("HTTP/2.0 200 OK\nContent-Type: application/json; charset=utf-8\r\n\r\n" + body)}
 }
 
 func TestDiscoverRepositoriesPaginatesAndExcludesArchived(t *testing.T) {
@@ -75,7 +79,7 @@ func TestDiscoverRepositoriesPaginatesAndExcludesArchived(t *testing.T) {
 		t.Fatalf("requests = %d, want %d", len(runner.calls), len(endpoints))
 	}
 	for i, call := range runner.calls {
-		wantArgs := []string{"api", "--hostname", "github.com", "--method", "GET", endpoints[i]}
+		wantArgs := []string{"api", "--hostname", "github.com", "--method", "GET", "--include", endpoints[i]}
 		if call.command != "gh" || !reflect.DeepEqual(call.args, wantArgs) {
 			t.Errorf("request %d = %+v", i, call)
 		}
@@ -88,14 +92,14 @@ func TestDiscoverRepositoriesRejectsFailedAndMalformedResponses(t *testing.T) {
 		step fakeStep
 		want error
 	}{
-		{"invalid-json", fakeStep{data: []byte("unfinished")}, ErrResponse},
-		{"null", fakeStep{data: []byte(`null`)}, ErrResponse},
-		{"object", fakeStep{data: []byte(`{"message":"not a repository list"}`)}, ErrResponse},
-		{"null-row", fakeStep{data: []byte(`[null]`)}, ErrResponse},
-		{"missing-name", fakeStep{data: []byte(`[{"archived":false}]`)}, ErrResponse},
-		{"invalid-name", fakeStep{data: []byte(`[{"full_name":"example/../escape"}]`)}, ErrResponse},
-		{"wrong-owner", fakeStep{data: []byte(`[{"full_name":"example-other/api"}]`)}, ErrResponse},
-		{"wrong-archived-type", fakeStep{data: []byte(`[{"full_name":"example/api","archived":"false"}]`)}, ErrResponse},
+		{"invalid-json", includedStep("unfinished"), ErrResponse},
+		{"null", includedStep(`null`), ErrResponse},
+		{"object", includedStep(`{"message":"not a repository list"}`), ErrResponse},
+		{"null-row", includedStep(`[null]`), ErrResponse},
+		{"missing-name", includedStep(`[{"archived":false}]`), ErrResponse},
+		{"invalid-name", includedStep(`[{"full_name":"example/../escape"}]`), ErrResponse},
+		{"wrong-owner", includedStep(`[{"full_name":"example-other/api"}]`), ErrResponse},
+		{"wrong-archived-type", includedStep(`[{"full_name":"example/api","archived":"false"}]`), ErrResponse},
 		{"authentication", fakeStep{err: ErrAuthentication}, ErrAuthentication},
 		{"unavailable", fakeStep{err: ErrUnavailable}, ErrUnavailable},
 		{"rate-limit", fakeStep{err: ErrRateLimited}, ErrRateLimited},
@@ -120,7 +124,7 @@ func TestDiscoverRepositoriesRejectsFailedAndMalformedResponses(t *testing.T) {
 
 func TestDiscoverRepositoriesEmptyAndInvalidOrganizations(t *testing.T) {
 	t.Run("empty inventory", func(t *testing.T) {
-		runner := &discoveryRunner{t: t, steps: []fakeStep{{data: []byte(`[]`)}}}
+		runner := &discoveryRunner{t: t, steps: []fakeStep{includedStep(`[]`)}}
 		got, err := NewProvider(runner).DiscoverRepositories(t.Context(), []string{"example"})
 		if err != nil || len(got) != 0 || len(runner.calls) != 1 {
 			t.Fatalf("empty discovery = %+v, %v; requests = %d", got, err, len(runner.calls))
@@ -138,7 +142,7 @@ func TestDiscoverRepositoriesEmptyAndInvalidOrganizations(t *testing.T) {
 
 func TestDiscoverRepositoriesNeverReturnsPartialInventory(t *testing.T) {
 	runner := &discoveryRunner{t: t, steps: []fakeStep{
-		{data: []byte(`[{"full_name":"example/api","default_branch":"main","archived":false}]`)},
+		includedStep(`[{"full_name":"example/api","default_branch":"main","archived":false}]`),
 		{err: ErrAuthentication},
 	}}
 	got, err := NewProvider(runner).DiscoverRepositories(t.Context(), []string{"example", "other"})
@@ -179,7 +183,7 @@ func TestRepositoryDiscoveryPreservesPushTimeWithoutMetadataFallback(t *testing.
 		t.Run(fmt.Sprintf("personal=%v", personal), func(t *testing.T) {
 			steps := []fakeStep{page}
 			if personal {
-				steps = append([]fakeStep{{data: []byte(`{"login":"example"}`)}}, steps...)
+				steps = append([]fakeStep{includedStep(`{"login":"example"}`)}, steps...)
 			}
 			runner := &discoveryRunner{t: t, steps: steps}
 			provider := NewProvider(runner)

@@ -194,6 +194,16 @@ publishes a complete snapshot. There is no periodic refresh; use `r`. Cache clon
 and fetches authenticate only through `gh`; other Git credential helpers are
 ignored.
 
+`r` also repeats repository discovery before fetching, so repositories created
+during a session appear and repositories no longer listed (deleted, archived, or
+inaccessible) stop being tracked. Groups, exclusions, Settings, and this
+session's Repository controls choices still apply, and an untracked cache stays
+as an unlisted entry until you remove it. Discovery requests send the ETag of the
+previous response for the same page (kept in memory only); an unchanged page
+returns `304 Not Modified`, which does not use core rate limit. If rediscovery
+fails, the current repositories stay tracked, the refresh continues, and the Git
+status and Data status report the failure.
+
 Before the startup network pass and each `r`, a bounded GitHub probe checks the
 default branch name/revision and open-PR count for up to 100 repositories per
 request. A matching branch/revision skips Git fetch only when the owned cache
