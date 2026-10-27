@@ -658,6 +658,40 @@ func TestCacheGitIsolatesEnvironmentAndDisablesPrompts(t *testing.T) {
 	}
 }
 
+func TestCacheGitUsesOnlyGHCredentialHelper(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	home := filepath.Join(dir, "home")
+	inherited := filepath.Join(dir, "inherited.log")
+	for _, path := range []string{bin, home} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gh := "#!/bin/sh\ncat >/dev/null\nprintf 'username=gh-user\\npassword=gh-token\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0700); err != nil {
+		t.Fatal(err)
+	}
+	global := "[credential]\n\thelper = \"!f() { cat >/dev/null; echo \\\"$1\\\" >> '" + inherited + "'; printf 'username=inherited\\\\npassword=inherited\\\\n'; }; f\"\n"
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(global), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	probe := "alias.probe=!printf 'protocol=https\\nhost=example.invalid\\n\\n' | git credential fill"
+	out, err := runCacheGit(context.Background(), "", "-c", probe, "probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "username=gh-user\n") || !strings.Contains(out, "password=gh-token\n") {
+		t.Errorf("credentials did not come from gh: %q", out)
+	}
+	if _, err := os.Stat(inherited); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("inherited credential helper was invoked: %v", err)
+	}
+}
+
 func TestRepositoryCacheBareMailmap(t *testing.T) {
 	cache, repo, source := cacheFixture(t)
 	if err := os.WriteFile(filepath.Join(source, ".mailmap"), []byte("Canonical Contributor <canonical@example.invalid> <example@example.invalid>\n"), 0600); err != nil {
