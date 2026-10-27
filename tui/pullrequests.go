@@ -440,7 +440,7 @@ func (m Model) renderPRs() string {
 	if m.prBrowserError != "" {
 		lines = append(lines, "  "+m.prBrowserError)
 	}
-	return screenFinish(lines, m.prFooter(prs), m.prBoardCoverage(), width, height)
+	return screenFinish(lines, m.prFooter(prs), m.copyCoverage(m.prBoardCoverage()), width, height)
 }
 
 func githubIdentity(login string) string {
