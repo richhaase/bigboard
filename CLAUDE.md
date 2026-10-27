@@ -8,8 +8,10 @@ High-contrast terminal dashboard for visualizing contributor statistics across m
 
 ```
 cmd/bigboard/main.go    CLI entry (4 flags: --version/--config/--group/--export), config resolution, repo discovery
-cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): organizations, excludes, owner/name groups, sort/since, identities
-cmd/bigboard/repositories.go  Organization validation, discovery, group selection, offline cache inventory
+cmd/bigboard/config.go  JSON config (~/.config/bigboard/config.json): personal account, organizations, excludes, owner/name groups, sort/since, identities
+cmd/bigboard/repositories.go  Repository-source validation, discovery, group selection, offline cache inventory
+cmd/bigboard/settings.go  Setup/settings callbacks, saved repository selection, synchronized cache inventory
+cmd/bigboard/identity_config.go  Shared atomic config store for settings and identity mappings
 cmd/bigboard/export.go  Headless --export (JSON only, ALL window, concurrent scans)
 git/git.go              Git ops: branch detection, streaming commit collection, path filtering, AI detection
 git/cache.go            Owned full bare default-branch cache: clone/fetch, integrity/ownership checks, inventory and removal
@@ -34,8 +36,8 @@ tui/repository_cache.go  Cache status and ownership-checked removal command orch
 
 ## Data Flow
 
-1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags). `organizations` is required; `groups` contains canonical `owner/name` identities within those organizations. Legacy `paths`, `depth`, path-based groups, and positional paths are rejected without fallback. Interactive startup discovers accessible non-archived organization repositories with the existing authenticated `gh` CLI, then applies group selection and excludes.
-2. `--export` skips discovery, clone, and fetch, selects verified existing cached repositories, and runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans), then exits. Empty cache selection reports an error. Without `--export`, the TUI launches.
+1. `main.go` loads config (all preferences are config-only; the CLI has exactly 4 flags). At least one of `personal_account` or `organizations` is required; `groups` contains canonical `owner/name` identities within that combined owner scope. Legacy `paths`, `depth`, path-based groups, and positional paths are rejected without fallback. Interactive startup discovers accessible non-archived repositories owned by the selected personal account and organizations with the existing authenticated `gh` CLI, then applies group selection and excludes. Missing configuration or repository sources opens required first-run setup; discovery failures open setup with a retryable error. Missing explicit `--config` paths can be created only by confirmed setup saves. Invalid and legacy configurations remain errors.
+2. `--export` requires an existing valid configuration and skips discovery, clone, and fetch, selects verified existing cached repositories, and runs the pipeline headlessly (JSON, ALL window, 8-way concurrent scans), then exits. Empty cache selection reports an error. Without `--export`, the TUI launches.
 3. `Model.Init` streams bounded cache-prepare-and-scan commands once on launch. Only explicit `r` requests start subsequent refreshes; there is no periodic refresh timer. `PrepareRepository` clones or fetches an owned cache entry before its offline scan. `scanBatch` admits generation-tagged `RepoLoadedMsg` results and publishes one `localSnapshot` when the batch finishes. The batch owns result admission and retention rules; the model owns commands, lifecycle, and navigation reconciliation. Refreshes preserve visible last-good data and navigation.
 4. `recomputeAuthors()` → `filteredRecords()` (`FilterByRepo` → `FilterByTime`) → `Aggregate` (tags bots) → optional bot filter (`b`) → `Sort` (with ascending toggle).
 5. Activity renders ranked repositories and literal directories/files through `worklist*.go`; scoped Commits/People/Related lenses share identity-preserving navigation in `glance*.go`. Statistics renders the scroll window of `displayedAuthors()` (sorted, optionally `/`-filtered).
@@ -47,7 +49,7 @@ tui/repository_cache.go  Cache status and ownership-checked removal command orch
 - **In-memory filtering**: git log is collected once; all time/repo/search filtering is in-memory.
 - **Identity merging**: canonical emails after Git `.mailmap` and configured `identities` aliases establish identity; names never merge contributors. The config maps canonical emails to aliases and optional display names, validates unique normalized emails, and applies mappings once during collection before author AI classification. Co-author trailer evidence is preserved, and bot classification sees the canonical identity. TUI and export share these records. Missing-email identities are repository-scoped. `fuzzy` is accepted for old configs but does not affect aggregation. Contributor selection follows the stable identity, not its current display name.
 - **Path filtering**: generated/vendored files (lockfiles, `vendor/`, `node_modules/`, `*.min.*`, `go.sum`, …) are excluded from line counts by default; the `"all_files": true` config setting includes them.
-- **Repository identity**: the application keys repositories by canonical GitHub `owner/name`, independently of their cache paths. Excludes match a basename, `owner/name`, or a glob of either; a basename applies across organizations. Work-area config uses the same `owner/name` identity.
+- **Repository identity**: the application keys repositories by canonical GitHub `owner/name`, independently of their cache paths. Excludes match a basename, `owner/name`, or a glob of either; a basename applies across personal and organization repositories. Work-area config uses the same `owner/name` identity.
 - **AI authorship**: detected from a `Co-authored-by` trailer or an AI author identity, including GitHub-noreply agent accounts (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, …); extensible via `ai_identities` (exact email or `@domain`). Surfaced as a first-class metric (Contributors `AI%`, per-month/per-repo share).
 - **Bots are counted, not excluded**: bot identities (`[bot]` names/emails, builtin roster, `bot_identities` config) get `AuthorStats.Bot` and a Contributors `BOT` tag; the `b` key toggles visibility (default shown). Agents that do their own work rank like any contributor.
 - **Owned repository cache**: `$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git`, defaulting to `~/.cache/bigboard/repos`, contains full bare default-branch-only repositories. Developer repositories and worktrees are never discovered, scanned, or modified. Cache verification requires the ownership marker, matching GitHub origin, bare layout, and independent complete history; it rejects symlinks, alternates, shallow/partial clones, and unsafe repository configuration. Data status reports location, size, unlisted cache entries, and problems. Unlisted entries are retained until Repository controls `d` then Enter explicitly removes a verified cache entry after refresh finishes. Group selection and exclusions do not orphan listed repositories.
@@ -85,7 +87,7 @@ go test ./...
 
 ## Automatic PR context
 
-GitHub PR context loads automatically with existing gh authentication for discovered repositories. There is no PR feature toggle. Interactive startup requires organization discovery; subsequent PR failures leave already-loaded cached history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped. `pr_request_budget` defaults to 128 calls per refresh, with a per-repository cap of half that budget (minimum one). All repository inventories precede additional file pages; efficient inline file evidence is retained, then remaining pages run newest-PR-first. File reuse requires matching updated time, head/base revisions, and file count. Inventory completeness drives repository PARTIAL status independently of current-file and reviewer coverage; Data status reports coverage and requests by phase. Provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No PR polling, automatic retries, persistent PR cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial inventories retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
+GitHub PR context loads automatically with existing gh authentication for discovered repositories. There is no PR feature toggle. Interactive startup uses setup when repository discovery fails; subsequent PR failures leave already-loaded cached history usable with a visible status. `github/` owns a bounded read-only provider through existing gh authentication, with strict github.com origins and no credential reads. `tui/pullrequests.go` owns in-memory async snapshots and the all-included PR board. PR handles/data never enter CommitRecord, contributor stats, or export. Initial loading and explicit `r` request GitHub context; active remote refreshes coalesce and completed snapshots are reused for at least one minute. Excluded repositories are skipped. `pr_request_budget` defaults to 128 calls per refresh, with a per-repository cap of half that budget (minimum one). All repository inventories precede additional file pages; efficient inline file evidence is retained, then remaining pages run newest-PR-first. File reuse requires matching updated time, head/base revisions, and file count. Inventory completeness drives repository PARTIAL status independently of current-file and reviewer coverage; Data status reports coverage and requests by phase. Provider-wide quota cooldown survives cancellation. Retry-After/reset times are respected; missing timing uses bounded exponential cooldown. No PR polling, automatic retries, persistent PR cache, or credential storage. Local refreshes do not cancel or restart GitHub requests. Complete empty success clears while failures/partial inventories retain visible stale evidence. `stats.WorkAreaDefinition.ClassifyPaths` maps PR evidence without synthetic commits.
 
 ## Progressive disclosure
 
@@ -118,7 +120,23 @@ cancels. Saving preserves unrelated config fields and rejects external changes.
 Failure retains the draft and original mappings. Success remaps contributor
 selections and starts a generation-isolated offline local rescan; existing PR
 requests and fetch-stale coverage are preserved. Only this confirmed action
-persists identity mappings; filters and repository inclusion remain session-only.
+persists identity mappings; filters and Repository controls inclusion remain session-only.
+
+Comma opens Settings on every board. First-run setup and Settings share personal-account
+and organization selection, repository checklist, and explicit review/save steps.
+The repository checklist sorts by GitHub `pushed_at` descending, unknown dates
+last, with repository identity as the tie-breaker, and shows a LAST PUSH column.
+This is GitHub push recency across branches, passed through discovery metadata;
+it requires no extra requests or Git scans.
+Account suggestions use the existing authenticated `gh` session; organization
+names can also be entered. Personal-only selection is valid without any organization;
+personal discovery requires the configured login to match the signed-in account.
+Saving replaces `personal_account`, `organizations`, and `exclude` (with exact unchecked `owner/name`
+identities), preserves unrelated configuration and named groups, and reloads the
+board selection. Cancellation preserves the active configuration. Settings and
+identity merges share one serialized atomic store and expected source, so repeated
+saves coexist while external configuration changes are rejected. Cache status reads
+a synchronized full discovery inventory, including excluded and out-of-group repos.
 
 `worklist_related.go` separates exact nonempty shared commit IDs from canonical
 contributor overlap. Related Enter opens shared commits; `m` exposes a scrollable

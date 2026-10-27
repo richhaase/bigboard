@@ -136,6 +136,7 @@ type Repository struct {
 	Path          string
 	Name          string
 	DefaultBranch string
+	PushedAt      time.Time
 }
 
 // NewRepositories converts paths into stable repository identities. Duplicate

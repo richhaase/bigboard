@@ -81,7 +81,7 @@ func TestRepositoryConfigRejectsInvalidOrganizationScope(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{"missing", Config{}, "organizations is required"},
+		{"missing", Config{}, "organizations or personal_account is required"},
 		{"empty", Config{Organizations: []string{" "}}, "invalid organization"},
 		{"path", Config{Organizations: []string{"../example"}}, "invalid organization"},
 		{"url", Config{Organizations: []string{"https://github.com/example"}}, "invalid organization"},

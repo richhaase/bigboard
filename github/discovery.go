@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 type DiscoveredRepository struct {
 	Name          string
 	DefaultBranch string
+	PushedAt      time.Time
 }
 
 func (p *Provider) DiscoverRepositories(ctx context.Context, organizations []string) ([]DiscoveredRepository, error) {
@@ -39,9 +41,10 @@ func (p *Provider) DiscoverRepositories(ctx context.Context, organizations []str
 				return nil, ErrOutputLimit
 			}
 			var rows []struct {
-				Name          string `json:"full_name"`
-				DefaultBranch string `json:"default_branch"`
-				Archived      bool   `json:"archived"`
+				Name          string    `json:"full_name"`
+				DefaultBranch string    `json:"default_branch"`
+				Archived      bool      `json:"archived"`
+				PushedAt      time.Time `json:"pushed_at"`
 			}
 			if err := json.Unmarshal(data, &rows); err != nil || rows == nil {
 				return nil, ErrResponse
@@ -55,7 +58,7 @@ func (p *Provider) DiscoverRepositories(ctx context.Context, organizations []str
 					continue
 				}
 				seen[name] = true
-				result = append(result, DiscoveredRepository{Name: name, DefaultBranch: row.DefaultBranch})
+				result = append(result, DiscoveredRepository{Name: name, DefaultBranch: row.DefaultBranch, PushedAt: row.PushedAt})
 			}
 			if len(rows) < 100 {
 				break

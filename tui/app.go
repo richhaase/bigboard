@@ -26,6 +26,11 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	settings           settingsState
+	settingsContext    context.Context
+	cancelSettings     context.CancelFunc
+	settingsGeneration uint64
+	cacheGeneration    uint64
 	cacheInfo          git.CacheInfo
 	cacheError         string
 	cacheRemoveConfirm string
@@ -136,6 +141,7 @@ const maxConcurrentRepoScans = 8
 
 // Options controls model behavior without process-wide package state.
 type Options struct {
+	Settings               *SettingsOptions
 	PrepareRepository      func(context.Context, git.Repository) error
 	ScanRepository         func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
 	CacheInfo              func() (git.CacheInfo, error)
@@ -190,6 +196,9 @@ func NewModelWithOptions(repositories []git.Repository, initialSort stats.SortFi
 	m.resetPending()
 	if len(repositories) == 0 {
 		m.finalizeLoad()
+	}
+	if options.Settings != nil && options.Settings.Required {
+		m.prepareSettings(true)
 	}
 	return m
 }
@@ -321,6 +330,9 @@ func bootLine(repo string, ok bool) string {
 
 // Init kicks off the initial concurrent load.
 func (m Model) Init() tea.Cmd {
+	if m.settings.open && m.settings.required {
+		return m.settingsAccountCmd()
+	}
 	if len(m.repositories) == 0 {
 		return m.cacheInfoCmd()
 	}
@@ -348,7 +360,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg := msg.(type) {
+	case settingsAccountMsg:
+		return m.applySettingsAccount(msg), nil
+	case settingsRepositoriesMsg:
+		return m.applySettingsRepositories(msg), nil
+	case settingsSavedMsg:
+		return m.applySavedSettings(msg)
+	case settingsReloadMsg:
+		if msg.generation == m.cacheGeneration {
+			return m, m.Init()
+		}
+		return m, nil
 	case cacheInfoMsg:
+		if msg.generation != m.cacheGeneration {
+			return m, nil
+		}
 		if m.cacheRemoving && !msg.removal {
 			return m, nil
 		}
@@ -421,6 +447,28 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.copyStatus = ""
+	if m.settings.open {
+		if m.settings.busy == "saving" {
+			return m.handleSettingsKey(msg)
+		}
+		if m.showHelp {
+			return m.handleHelpKey(msg)
+		}
+		if msg.String() == "f1" || msg.String() == "?" && m.settings.edit == "" {
+			m.showHelp, m.helpOffset = true, 0
+			return m, nil
+		}
+		return m.handleSettingsKey(msg)
+	}
+	if msg.String() == "," && m.options.Settings != nil && !m.helpSearchActive() && !m.identityMerge.saving && !m.cacheRemoving {
+		if m.viewMode == ViewRepoOverlay {
+			m.closeRepositoryControls(false)
+		}
+		m.filters, m.identityMerge = sharedFilterState{}, identityMergeState{}
+		m.showHelp, m.showScanErrors = false, false
+		m.prepareSettings(false)
+		return m, m.settingsAccountCmd()
+	}
 	if msg.String() == "y" && m.canCopyMarkdown() {
 		return m.copyMarkdown()
 	}
@@ -803,6 +851,9 @@ func (m Model) View() string {
 	}
 	if m.showScanErrors {
 		content = m.renderScanErrors(content, max(1, width), max(1, height))
+	}
+	if m.settings.open {
+		content = m.renderSettings(content, max(1, width), max(1, height))
 	}
 	if m.showHelp {
 		content = m.renderHelpModal(content, max(1, width), max(1, height))

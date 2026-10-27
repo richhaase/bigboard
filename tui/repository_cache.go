@@ -9,9 +9,10 @@ import (
 )
 
 type cacheInfoMsg struct {
-	info    git.CacheInfo
-	err     error
-	removal bool
+	generation uint64
+	info       git.CacheInfo
+	err        error
+	removal    bool
 }
 
 func (m Model) cacheInfoCmd() tea.Cmd {
@@ -21,7 +22,7 @@ func (m Model) cacheInfoCmd() tea.Cmd {
 	read := m.options.CacheInfo
 	return m.commands.wrap(func() tea.Msg {
 		info, err := read()
-		return cacheInfoMsg{info: info, err: err}
+		return cacheInfoMsg{generation: m.cacheGeneration, info: info, err: err}
 	})
 }
 
@@ -58,9 +59,9 @@ func (m Model) removeCachedRepository() (tea.Model, tea.Cmd) {
 	m.cacheRemoving = true
 	return m, m.commands.wrap(func() tea.Msg {
 		if err := remove(id); err != nil {
-			return cacheInfoMsg{info: m.cacheInfo, err: fmt.Errorf("cache removal failed: %w", err), removal: true}
+			return cacheInfoMsg{generation: m.cacheGeneration, info: m.cacheInfo, err: fmt.Errorf("cache removal failed: %w", err), removal: true}
 		}
 		info, err := read()
-		return cacheInfoMsg{info: info, err: err, removal: true}
+		return cacheInfoMsg{generation: m.cacheGeneration, info: info, err: err, removal: true}
 	})
 }

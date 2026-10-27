@@ -45,6 +45,9 @@ func (g *commandGroup) wait() {
 // signals and terminal errors that Bubble Tea handles without calling Update.
 // Call it after Program.Run returns, before exiting the process.
 func (m Model) Close() {
+	if m.cancelSettings != nil {
+		m.cancelSettings()
+	}
 	if m.cancelLocalScans != nil {
 		m.cancelLocalScans()
 	}

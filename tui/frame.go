@@ -35,6 +35,9 @@ func (m Model) screenHeader(title string, width int) []string {
 	if m.version != "" {
 		right += " · " + displayText(m.version)
 	}
+	if m.options.Settings != nil {
+		right += " · , settings"
+	}
 	right += "  "
 	if width >= 90 {
 		left = ansi.Truncate(left, max(1, width-ansi.StringWidth(right)-2), "…")

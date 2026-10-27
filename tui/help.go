@@ -24,6 +24,9 @@ type screenHelp struct {
 }
 
 func (m Model) helpSearchActive() bool {
+	if m.settings.open {
+		return m.settings.edit != ""
+	}
 	if m.identityMerge.open {
 		return m.identityMerge.edit != ""
 	}
@@ -40,7 +43,13 @@ func (m Model) helpSearchActive() bool {
 }
 
 func (m Model) currentHelp() screenHelp {
+	if m.settings.open {
+		return m.settingsHelp()
+	}
 	help := m.screenHelp()
+	if m.options.Settings != nil && !m.helpSearchActive() && !m.identityMerge.saving && !m.cacheRemoving {
+		help.sections = append(help.sections, helpSection{"Settings", []helpBinding{{",", "Configure personal and organization repositories; save for future sessions"}}})
+	}
 	copyView := m
 	copyView.showHelp = false
 	if copyView.canCopyMarkdown() {

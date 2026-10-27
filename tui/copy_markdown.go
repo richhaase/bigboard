@@ -47,7 +47,7 @@ func (c *clipboardCommand) Run() error {
 }
 
 func (m Model) canCopyMarkdown() bool {
-	if m.identityMerge.open || m.identityMerge.saving || m.loading || m.err != nil || m.showHelp || m.showScanErrors || m.filters.open || m.helpSearchActive() || m.viewMode == ViewRepoOverlay {
+	if m.settings.open || m.identityMerge.open || m.identityMerge.saving || m.loading || m.err != nil || m.showHelp || m.showScanErrors || m.filters.open || m.helpSearchActive() || m.viewMode == ViewRepoOverlay {
 		return false
 	}
 	if m.showPRs {

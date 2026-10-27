@@ -13,8 +13,15 @@ import (
 const repositoryConfigExample = `{"organizations":["example-org"],"groups":{"backend":["example-org/api"]}}`
 
 func validateRepositoryConfig(cfg *Config) error {
-	if len(cfg.Organizations) == 0 {
-		return fmt.Errorf("organizations is required; configure GitHub organizations, for example: %s", repositoryConfigExample)
+	if len(cfg.Organizations) == 0 && cfg.PersonalAccount == "" {
+		return fmt.Errorf("organizations or personal_account is required; configure a GitHub account or organizations, for example: %s", repositoryConfigExample)
+	}
+	if cfg.PersonalAccount != "" {
+		canonical, err := gh.CanonicalRepo(strings.TrimSpace(cfg.PersonalAccount) + "/repository")
+		if err != nil {
+			return fmt.Errorf("invalid personal account %q", cfg.PersonalAccount)
+		}
+		cfg.PersonalAccount, _, _ = strings.Cut(canonical, "/")
 	}
 	for i, org := range cfg.Organizations {
 		canonical, err := gh.CanonicalRepo(strings.TrimSpace(org) + "/repository")
@@ -30,8 +37,8 @@ func validateRepositoryConfig(cfg *Config) error {
 				return fmt.Errorf("groups.%s must contain owner/name repository identities, not paths; new schema: %s", group, repositoryConfigExample)
 			}
 			owner, _, _ := strings.Cut(canonical, "/")
-			if !slices.Contains(cfg.Organizations, owner) {
-				return fmt.Errorf("groups.%s contains %s outside configured organizations", group, canonical)
+			if owner != cfg.PersonalAccount && !slices.Contains(cfg.Organizations, owner) {
+				return fmt.Errorf("groups.%s contains %s outside configured organizations or personal account", group, canonical)
 			}
 			cfg.Groups[group][i] = canonical
 		}
@@ -52,7 +59,7 @@ func selectRepositories(cfg *Config, group string, repos []git.Repository) ([]gi
 	seen := make(map[string]bool)
 	for _, repo := range repos {
 		owner, _, _ := strings.Cut(repo.ID, "/")
-		if !slices.Contains(cfg.Organizations, owner) || group != "" && !slices.Contains(names, repo.ID) {
+		if owner != cfg.PersonalAccount && !slices.Contains(cfg.Organizations, owner) || group != "" && !slices.Contains(names, repo.ID) {
 			continue
 		}
 		selected = append(selected, repo)
@@ -66,21 +73,42 @@ func selectRepositories(cfg *Config, group string, repos []git.Repository) ([]gi
 	return selected, nil
 }
 
-func discoverCachedRepositories(ctx context.Context, cfg *Config, cache *git.RepositoryCache, offline bool) ([]git.Repository, error) {
+func discoverCachedRepositories(ctx context.Context, cfg *Config, cache *git.RepositoryCache, provider settingsProvider, offline bool) ([]git.Repository, error) {
 	if offline {
 		return cache.CachedRepositories()
 	}
-	remote, err := gh.NewProvider(nil).DiscoverRepositories(ctx, cfg.Organizations)
-	if err != nil {
-		return nil, err
+	return discoverRepositories(ctx, provider, cfg, cache)
+}
+
+func discoverRepositories(ctx context.Context, provider settingsProvider, cfg *Config, cache *git.RepositoryCache) ([]git.Repository, error) {
+	var remote []gh.DiscoveredRepository
+	if len(cfg.Organizations) > 0 {
+		organizations, err := provider.DiscoverRepositories(ctx, cfg.Organizations)
+		if err != nil {
+			return nil, err
+		}
+		remote = append(remote, organizations...)
+	}
+	if cfg.PersonalAccount != "" {
+		personal, err := provider.DiscoverPersonalRepositories(ctx, cfg.PersonalAccount)
+		if err != nil {
+			return nil, err
+		}
+		remote = append(remote, personal...)
 	}
 	repos := make([]git.Repository, 0, len(remote))
+	seen := make(map[string]bool)
 	for _, item := range remote {
 		repo, err := cache.Repository(item.Name, item.DefaultBranch)
 		if err != nil {
 			return nil, err
 		}
-		repos = append(repos, repo)
+		if !seen[repo.ID] {
+			repo.PushedAt = item.PushedAt
+			repos = append(repos, repo)
+			seen[repo.ID] = true
+		}
 	}
+	slices.SortFunc(repos, func(a, b git.Repository) int { return strings.Compare(a.ID, b.ID) })
 	return repos, nil
 }
