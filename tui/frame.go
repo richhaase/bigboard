@@ -147,7 +147,7 @@ func (m Model) statisticsFooter() footerHints {
 	if m.width >= 70 {
 		local = append(local, footerHint{"/", "find"})
 	}
-	local = append(local, footerHint{"Enter", "open"}, footerHint{"m", "merge"})
+	local = append(local, footerHint{"Enter", "open"}, footerHint{"m", "name/merge"})
 	if m.width >= 110 {
 		local = append(local, footerHint{"t", "date range"})
 	}

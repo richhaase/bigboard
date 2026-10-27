@@ -96,6 +96,30 @@ func (r identityResolver) resolve(name, email string) (string, string) {
 	return name, email
 }
 
+func SetIdentityDisplayName(existing map[string]Identity, email, name string) (map[string]Identity, error) {
+	result, err := NormalizeIdentities(existing)
+	if err != nil {
+		return nil, err
+	}
+	email, err = identityEmail(email)
+	if err != nil {
+		return nil, err
+	}
+	for canonical, identity := range result {
+		if slices.Contains(identity.Aliases, email) {
+			email = canonical
+			break
+		}
+	}
+	if result == nil {
+		result = make(map[string]Identity)
+	}
+	identity := result[email]
+	identity.Name = strings.TrimSpace(name)
+	result[email] = identity
+	return result, nil
+}
+
 func MergeIdentities(existing map[string]Identity, primary string, emails []string, name string) (map[string]Identity, error) {
 	result, err := NormalizeIdentities(existing)
 	if err != nil {

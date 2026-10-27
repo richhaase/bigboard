@@ -68,6 +68,63 @@ func TestIdentitySaverPreservesConfigAndSupportsRepeatedMerges(t *testing.T) {
 	}
 }
 
+func TestIdentitySaverPersistsDisplayNamesWithoutChangingGroups(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	source := []byte(`{"organizations":["example"],"exclude":["archive"],"sort":"commits","since":"90d","groups":{"team":["example/api"]},"identities":{"primary@example.com":{"aliases":["alias@example.com"],"name":"Original"},"other@example.com":{"aliases":["other-old@example.com"],"name":"Unrelated"}}}`)
+	if err := os.WriteFile(path, source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	save := newIdentitySaver(path, cfg)
+	for _, change := range []struct{ email, name string }{
+		{"new@example.com", "New Contributor"},
+		{"alias@example.com", "Updated Name"},
+		{"primary@example.com", ""},
+	} {
+		mapping, err := git.SetIdentityDisplayName(cfg.Identities, change.email, change.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := save(mapping); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err = loadConfig(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(cfg.Identities, mapping) {
+			t.Fatalf("display name mapping not retained after reload: %+v", cfg.Identities)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var before, after map[string]any
+		if err := json.Unmarshal(source, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &after); err != nil {
+			t.Fatal(err)
+		}
+		delete(before, "identities")
+		delete(after, "identities")
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("unrelated config changed: %+v", after)
+		}
+	}
+	want := map[string]git.Identity{
+		"primary@example.com": {Aliases: []string{"alias@example.com"}},
+		"other@example.com":   {Aliases: []string{"other-old@example.com"}, Name: "Unrelated"},
+		"new@example.com":     {Name: "New Contributor"},
+	}
+	if !reflect.DeepEqual(cfg.Identities, want) {
+		t.Fatalf("identity groups changed: %+v", cfg.Identities)
+	}
+}
+
 func TestIdentitySaverCreatesMissingConfigOnConfirmation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "bigboard", "config.json")
 	cfg, err := loadConfig(path, false)

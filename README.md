@@ -269,7 +269,7 @@ origins are reported in the PR board without suppressing local history.
 
 ## Accuracy notes
 
-- **Author identity** is resolved by Git's native `.mailmap`, then the configured `identities` email aliases, and grouped by canonical email. Press `m` on the Contributors list to merge a person's email identities and save the mapping. Shared or similar names do not merge people. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
+- **Author identity** is resolved by Git's native `.mailmap`, then the configured `identities` email aliases, and grouped by canonical email. Press `m` on the Contributors list to set a display name or merge a person's email identities. Shared or similar names do not merge people. Missing-email identities are scoped to the repository and exact name. The legacy `fuzzy` preference is accepted but no longer changes identity matching. Selection follows the identity when its display name changes across time ranges.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on Contributors with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
@@ -478,14 +478,19 @@ global inclusion and returns to the same PR view.
 
 ### Contributors
 
-Press `m` on the Contributors list to merge identities across repositories. The
-modal shows all collected names and emails, including contributors outside the
-current date range. Space selects identities, `k` chooses the primary email,
-`n` sets an optional display name, and `/` searches. Enter reviews the full email
-mapping; a second Enter confirms and saves it. Esc returns to editing or cancels.
-Identities without a valid email cannot be merged.
+Press `m` on the Contributors list to set a display name or merge identities
+across repositories. The highlighted contributor is already selected: press `n`
+to edit their name without selecting anyone else. Enter keeps the edit, Enter
+reviews it, and a final Enter saves it. Clearing the name restores automatic
+naming. Existing email aliases remain unchanged.
 
-Confirmed merges persist in the active config file and apply to every board and
+The modal shows all collected names and emails, including contributors outside
+the current date range. To merge, Space selects additional identities and `k`
+chooses the primary email; `/` searches. Enter reviews the full email mapping;
+a second Enter confirms and saves it. Esc returns to editing or cancels.
+Identities without a valid email cannot have saved name overrides or merges.
+
+Confirmed name changes and merges persist in the active config file and apply to every board and
 JSON export. BigBoard rescans cached local history without fetching Git or PR
 data, preserving your scope and contributor selections. Unrelated settings stay
 intact; if the config changed externally or saving fails, the original mapping
