@@ -51,6 +51,7 @@ type scanBatch struct {
 	generation uint64
 	running    bool
 	initial    bool
+	localOnly  bool
 	inFlight   map[string]bool
 	remaining  int
 	active     int
@@ -108,6 +109,10 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 	}
 	maps.Copy(next.scannedAt, previous.scannedAt)
 	maps.Copy(next.staleRepos, previous.staleRepos)
+	if b.localOnly {
+		next.failed = slices.Clone(previous.failed)
+		maps.Copy(next.errors, previous.errors)
+	}
 	for _, outcome := range b.outcomes {
 		result := outcome.result
 		id := result.Repository.ID
@@ -120,10 +125,10 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 			next.retainRepository(previous, id)
 			continue
 		}
-		if result.FetchErr == nil || b.initial {
+		if !b.localOnly && (result.FetchErr == nil || b.initial) {
 			next.scannedAt[id] = outcome.completedAt
 		}
-		if result.FetchErr == nil {
+		if !b.localOnly && result.FetchErr == nil {
 			delete(next.staleRepos, id)
 		}
 		next.records = append(next.records, result.Records...)
@@ -133,6 +138,7 @@ func (b *scanBatch) publish(previous localSnapshot) (localSnapshot, bool) {
 		return next.repositories[i].Name < next.repositories[j].Name
 	})
 	sort.Strings(next.failed)
+	next.failed = slices.Compact(next.failed)
 	b.running = false
 	b.outcomes = nil
 	return next, true

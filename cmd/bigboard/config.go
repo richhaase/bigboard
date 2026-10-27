@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/richhaase/bigboard/git"
 	gh "github.com/richhaase/bigboard/github"
 	"github.com/richhaase/bigboard/stats"
 	"github.com/richhaase/bigboard/tui"
@@ -28,8 +29,10 @@ type Config struct {
 	Groups          map[string][]string             `json:"groups"`
 	AIIdentities    []string                        `json:"ai_identities"`
 	BotIdentities   []string                        `json:"bot_identities"`
+	Identities      map[string]git.Identity         `json:"identities"`
 	WorkAreas       map[string][]stats.WorkAreaRule `json:"work_areas"`
 	PRRequestBudget int                             `json:"pr_request_budget"`
+	source          []byte
 }
 
 func defaultConfigPath() string {
@@ -79,9 +82,14 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 			return nil, fmt.Errorf("work_areas %q: %w", repository, err)
 		}
 	}
+	cfg.Identities, err = git.NormalizeIdentities(cfg.Identities)
+	if err != nil {
+		return nil, fmt.Errorf("identities: %w", err)
+	}
 	if cfg.PRRequestBudget < 1 {
 		return nil, fmt.Errorf("pr_request_budget must be a positive integer")
 	}
+	cfg.source = data
 	return &cfg, nil
 }
 

@@ -139,6 +139,7 @@ func main() {
 			IncludeGenerated: cfg.AllFiles,
 			AIIdentities:     cfg.AIIdentities,
 			BotIdentities:    cfg.BotIdentities,
+			Identities:       cfg.Identities,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -152,6 +153,8 @@ func main() {
 		IncludeGenerated: cfg.AllFiles,
 		AIIdentities:     cfg.AIIdentities,
 		BotIdentities:    cfg.BotIdentities,
+		Identities:       cfg.Identities,
+		SaveIdentities:   newIdentitySaver(cfgPath, cfg),
 		WorkAreas:        cfg.WorkAreas,
 	})
 

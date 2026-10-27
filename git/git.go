@@ -46,6 +46,7 @@ var (
 type CollectOptions struct {
 	IncludeGenerated bool
 	AIIdentities     []string
+	Identities       map[string]Identity
 }
 
 type pathFilter struct {
@@ -232,7 +233,7 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 	repo := NewRepositories([]string{dir})[0]
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	return collectRepository(ctx, repo, ref, legacyPathFilter(), newAIMatcher(nil))
+	return collectRepository(ctx, repo, ref, legacyPathFilter(), newAIMatcher(nil), nil)
 }
 
 // CollectRepository collects commits using explicit repository identity and
@@ -240,7 +241,11 @@ func CollectCommits(dir string, ref string) ([]CommitRecord, error) {
 func CollectRepository(repo Repository, ref string, options CollectOptions) ([]CommitRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	return collectRepository(ctx, repo, ref, defaultPathFilter(options), newAIMatcher(options.AIIdentities))
+	identities, err := newIdentityResolver(options.Identities)
+	if err != nil {
+		return nil, err
+	}
+	return collectRepository(ctx, repo, ref, defaultPathFilter(options), newAIMatcher(options.AIIdentities), identities)
 }
 
 // ScanRepository detects the default branch and collects its commits under one
@@ -248,10 +253,14 @@ func CollectRepository(repo Repository, ref string, options CollectOptions) ([]C
 func ScanRepository(ctx context.Context, repo Repository, options CollectOptions) ([]CommitRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	return collectRepository(ctx, repo, "", defaultPathFilter(options), newAIMatcher(options.AIIdentities))
+	identities, err := newIdentityResolver(options.Identities)
+	if err != nil {
+		return nil, err
+	}
+	return collectRepository(ctx, repo, "", defaultPathFilter(options), newAIMatcher(options.AIIdentities), identities)
 }
 
-func collectRepository(ctx context.Context, repo Repository, ref string, filter pathFilter, ai aiMatcher) ([]CommitRecord, error) {
+func collectRepository(ctx context.Context, repo Repository, ref string, filter pathFilter, ai aiMatcher, identities identityResolver) ([]CommitRecord, error) {
 	partial, err := partialClone(ctx, repo.Path)
 	if err != nil {
 		return nil, err
@@ -301,7 +310,7 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	scanner.Split(splitNUL)
-	records, scanErr := parseLog(scanner, repo, filter, ai)
+	records, scanErr := parseLog(scanner, repo, filter, ai, identities)
 	if scanErr != nil {
 		// A parse failure must stop the producer before waiting for its exit.
 		_ = cmd.Process.Kill()

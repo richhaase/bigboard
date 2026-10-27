@@ -16,6 +16,7 @@ type analysisOptions struct {
 	IncludeGenerated bool
 	AIIdentities     []string
 	BotIdentities    []string
+	Identities       map[string]git.Identity
 }
 
 const maxConcurrentExportScans = 8
@@ -46,6 +47,7 @@ func runExportJSON(w, errw io.Writer, repositories []git.Repository, excluded ma
 			records, err := git.ScanRepository(context.Background(), repo, git.CollectOptions{
 				IncludeGenerated: options.IncludeGenerated,
 				AIIdentities:     options.AIIdentities,
+				Identities:       options.Identities,
 			})
 			results[i] = scanResult{records: records, err: err}
 		}(i, repo)

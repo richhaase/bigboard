@@ -10,6 +10,7 @@ type prContextState struct {
 }
 
 func (m Model) switchBoard(key string) Model {
+	m.identityMerge = identityMergeState{}
 	if m.viewMode == ViewRepoOverlay {
 		m.closeRepositoryControls(false)
 	}

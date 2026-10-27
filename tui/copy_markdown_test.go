@@ -92,7 +92,7 @@ func TestMarkdownCopyPRRangeFiltersAndQualifiers(t *testing.T) {
 }
 
 func TestMarkdownCopyContextsAndStatus(t *testing.T) {
-	for _, context := range []string{"search", "help", "filters", "detail", "people", "loading", "inspector"} {
+	for _, context := range []string{"search", "help", "filters", "detail", "people", "loading", "inspector", "identity", "saving"} {
 		t.Run(context, func(t *testing.T) {
 			m := awarenessFixture()
 			switch context {
@@ -110,6 +110,10 @@ func TestMarkdownCopyContextsAndStatus(t *testing.T) {
 				m.loading = true
 			case "inspector":
 				m.showPaths = true
+			case "identity":
+				m.identityMerge.open = true
+			case "saving":
+				m.identityMerge.open, m.identityMerge.saving = true, true
 			}
 			if m.canCopyMarkdown() {
 				t.Fatal("unsupported context enabled")
