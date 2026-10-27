@@ -142,7 +142,12 @@ letters are literal; F1 opens help and Ctrl+C quits.
 date plus repository viewing selection, applied in memory across all boards.
 `i` separately manages repository tracking/refresh coverage. Board-specific
 filters: Activity Git contributors/bots, Contributors bots/name search, PRs
-GitHub authors/review/checks/state/search. Git identities are not GitHub accounts.
+Mine/GitHub authors/review/checks/state/search. Mine uses the signed-in gh account,
+resolved once per refresh inside the shared request budget and cooldown. Its
+authored-by-me and review-requested-from-me choices match user logins only;
+team membership is never inferred. Missing login clears account evidence and
+leaves selected Mine filters empty with a visible reason. Git identities are not
+GitHub accounts.
 Multiple values within a facet are OR; facets combine with AND. Empty selections
 mean All. Left/right and Tab switch categories, arrows/page keys select options,
 Space stages choices, Enter applies the entire draft, Escape cancels. Custom-day

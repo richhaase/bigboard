@@ -38,6 +38,10 @@ func TestCloseCancelsAndJoinsRunningCommands(t *testing.T) {
 
 type cancelWaitingPRProvider struct{ started, stopped chan struct{} }
 
+func (p *cancelWaitingPRProvider) CurrentLogin(context.Context) (string, error) {
+	return "viewer", nil
+}
+
 func (p *cancelWaitingPRProvider) Resolve(context.Context, string) (string, error) {
 	return "org/repo", nil
 }

@@ -48,6 +48,8 @@ type renamedPRProvider struct {
 	fetched []string
 }
 
+func (p *renamedPRProvider) CurrentLogin(context.Context) (string, error) { return "viewer", nil }
+
 func (p *renamedPRProvider) Resolve(context.Context, string) (string, error) { return "org/old", nil }
 func (p *renamedPRProvider) Fetch(_ context.Context, repo string) gh.Result {
 	p.fetched = append(p.fetched, repo)

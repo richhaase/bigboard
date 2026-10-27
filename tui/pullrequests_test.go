@@ -15,10 +15,21 @@ import (
 
 type fakePRProvider struct {
 	resolves, fetches int
+	logins            int
+	login             string
+	loginErr          error
 	result            gh.Result
 	ctx               context.Context
 	repoByPath        map[string]string
 	resolveErr        error
+}
+
+func (p *fakePRProvider) CurrentLogin(context.Context) (string, error) {
+	p.logins++
+	if p.login != "" || p.loginErr != nil {
+		return p.login, p.loginErr
+	}
+	return "viewer", nil
 }
 
 func (p *fakePRProvider) Resolve(ctx context.Context, path string) (string, error) {

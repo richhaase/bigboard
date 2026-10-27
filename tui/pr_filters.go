@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -8,14 +10,41 @@ import (
 )
 
 type prFilters struct {
-	author, review, checks, state filterValues
+	mine, author, review, checks, state filterValues
+}
+
+const (
+	prMineAuthor = "Authored by me"
+	prMineReview = "Review requested from me"
+)
+
+func (m Model) prMineStatus() string {
+	if m.prState.login != "" {
+		return "Mine uses " + githubIdentity(m.prState.login)
+	}
+	reason := "login not loaded"
+	switch {
+	case m.prState.loading:
+		reason = "loading login"
+	case errors.Is(m.prState.loginErr, gh.ErrResponse):
+		reason = "login not returned"
+	case errors.Is(m.prState.loginErr, gh.ErrBudgetExceeded):
+		reason = "request limit reached"
+	case errors.Is(m.prState.loginErr, context.DeadlineExceeded):
+		reason = "login request timed out"
+	case errors.Is(m.prState.loginErr, context.Canceled):
+		reason = "login request canceled"
+	case m.prState.loginErr != nil:
+		reason = prFailureReason(m.prState.loginErr)
+	}
+	return "Mine unavailable: " + reason
 }
 
 type prFilterOption struct {
 	value, label string
 }
 
-func (f prFilters) matches(pr gh.PullRequest) bool {
+func (f prFilters) matches(pr gh.PullRequest, login string) bool {
 	author := strings.ToLower(pr.Author)
 	if author == "" {
 		author = "?"
@@ -24,22 +53,48 @@ func (f prFilters) matches(pr gh.PullRequest) bool {
 	if pr.Draft {
 		state = "draft"
 	}
-	return f.author.includes(author) &&
+	return f.matchesMine(pr, login) && f.author.includes(author) &&
 		f.review.includes(prReviewLabel(pr.ReviewDecision)) &&
 		f.checks.includes(prCheckLabel(pr.CheckState)) &&
 		f.state.includes(state)
 }
 
+func (f prFilters) matchesMine(pr gh.PullRequest, login string) bool {
+	if len(f.mine) == 0 {
+		return true
+	}
+	if login == "" {
+		return false
+	}
+	for _, value := range f.mine {
+		switch value {
+		case prMineAuthor:
+			if strings.EqualFold(pr.Author, login) {
+				return true
+			}
+		case prMineReview:
+			for _, reviewer := range pr.RequestedReviewers {
+				if !strings.Contains(reviewer, "/") && strings.EqualFold(reviewer, login) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (f prFilters) empty() bool {
-	return len(f.author)+len(f.review)+len(f.checks)+len(f.state) == 0
+	return len(f.mine)+len(f.author)+len(f.review)+len(f.checks)+len(f.state) == 0
 }
 
 func (f prFilters) clone() prFilters {
-	return prFilters{author: f.author.clone(), review: f.review.clone(), checks: f.checks.clone(), state: f.state.clone()}
+	return prFilters{mine: f.mine.clone(), author: f.author.clone(), review: f.review.clone(), checks: f.checks.clone(), state: f.state.clone()}
 }
 
 func (f prFilters) values(kind string) filterValues {
 	switch kind {
+	case "mine":
+		return f.mine
 	case "author":
 		return f.author
 	case "review":
@@ -55,6 +110,8 @@ func (f prFilters) values(kind string) filterValues {
 
 func (f *prFilters) setValues(kind string, values filterValues) {
 	switch kind {
+	case "mine":
+		f.mine = values.clone()
 	case "author":
 		f.author = values.clone()
 	case "review":
@@ -69,6 +126,9 @@ func (f *prFilters) setValues(kind string, values filterValues) {
 func (m Model) prFilterOptions() []prFilterOption {
 	options := []prFilterOption{{"", "All"}}
 	switch m.prFilterKind {
+	case "mine":
+		options[0].label = "All PRs"
+		options = append(options, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview})
 	case "author":
 		options[0].label = "All authors"
 		authors := map[string]string{}

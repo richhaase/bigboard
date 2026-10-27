@@ -271,6 +271,9 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 		if m.rangeDuration() > 0 && len(m.allPRs()) > 0 {
 			empty = "No matching PRs in range. t changes range; x clears PR filters."
 		}
+		if len(m.prFilters.mine) > 0 && m.prState.login == "" {
+			empty = m.prMineStatus()
+		}
 		lines = append(lines, "  "+empty)
 	}
 	labels := m.prRepositoryLabels()

@@ -25,6 +25,16 @@ func WithRequestBudget(ctx context.Context, requests int) context.Context {
 	return context.WithValue(ctx, budgetKey{}, &requestBudget{remaining: max(0, requests), limit: max(0, requests)})
 }
 
+func RequestCount(ctx context.Context) int {
+	budget, ok := ctx.Value(budgetKey{}).(*requestBudget)
+	if !ok {
+		return 0
+	}
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	return budget.limit - budget.remaining
+}
+
 func repositoryRequestLimit(ctx context.Context, fallback int) int {
 	if budget, ok := ctx.Value(budgetKey{}).(*requestBudget); ok && fallback == MaxRequests {
 		return max(1, budget.limit/2)

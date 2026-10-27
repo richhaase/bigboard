@@ -213,7 +213,7 @@ repositories are not fetched. The entire remote refresh shares a request cap
 additional file pages, which are fetched newest-PR-first across repositories.
 Inventory queries retain the first 100 files per PR to avoid extra calls for
 ordinary PRs. Data status separates inventory coverage from file/reviewer details
-and shows request use for the inventory and additional-file phases;
+and shows request use for account lookup, inventory and additional-file phases;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
 exponential cooldowns when no retry time is available. The PR board status shows when `r`
@@ -280,7 +280,7 @@ the available height and pages by visible commits.
 All three boards share an in-memory **date range and repository viewing scope**.
 `f` opens the same centered filter modal; `t` opens its Date range category directly.
 Shared choices apply to every board. Activity has Git contributor and bot filters;
-Contributors has its own bot setting; PRs has GitHub author, review, checks, and
+Contributors has its own bot setting; PRs has Mine, GitHub author, review, checks, and
 open/draft filters. Each board keeps its own search. Git identities and GitHub
 authors remain separate. Viewing filters do not change repository tracking or
 refresh coverage; `i` opens repository controls in a centered modal over the
@@ -379,6 +379,14 @@ global date range. `t` changes that range for all three boards; All time restore
 all open PRs. Missing update timestamps appear only in All time. Local person
 and bot filters do not apply. `f` edits shared repositories and PR filters in one
 modal. `u`, `v`, `k`, and `d` open its author, review, checks, and state categories.
+The Mine category offers **Authored by me** and **Review requested from me**.
+It uses the current GitHub account from `gh`, resolved once per remote refresh
+within the same request budget and cooldown. Select both to include either kind
+of PR; other facets and search still narrow the results. Review requests match
+explicit user logins only; team membership is not inferred. Bounded reviewer
+coverage may omit requests, as reported in Data status and PR details. If the
+account cannot be resolved, Mine shows the reason and selected Mine filters show
+no results. Git contributor aliases do not affect these filters.
 Activity's `v` opens a contextual repository PR view with the shared range and
 repository scope, temporarily omitting unrelated saved PR filters. Back from its
 list returns to Activity. Leaving this context restores the normal PR board's
