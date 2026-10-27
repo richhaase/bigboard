@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 const (
 	prPageSize           = 50
+	fileBatchSize        = 50
 	filePageSize         = 100
 	contextPageSize      = 50
 	inventoryConcurrency = 4
@@ -134,7 +136,7 @@ type fetchedPR struct {
 }
 
 type fetchSession struct {
-	probe     bool
+	aliases   bool
 	provider  *Provider
 	ctx       context.Context
 	requests  int
@@ -157,6 +159,7 @@ type repositoryFetch struct {
 	session   fetchSession
 	rows      map[int]*fetchedPR
 	canonical *repositoryFetch
+	lean      bool
 }
 
 func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryRequest) []Result {
@@ -170,6 +173,7 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 	for i, request := range repositories {
 		repo, err := CanonicalRepo(request.Repo)
 		if existing := unique[repo]; existing != nil && err == nil {
+			existing.lean = existing.lean || len(request.Previous) > 0
 			batches[i] = existing
 			continue
 		}
@@ -178,6 +182,7 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 			session: fetchSession{provider: p, ctx: ctx, registry: registry,
 				allowance: &repositoryAllowance{limit: repositoryRequestLimit(ctx, p.limits.requests)}},
 			rows: make(map[int]*fetchedPR),
+			lean: len(request.Previous) > 0,
 		}
 		batch.canonical = batch
 		batches[i] = batch
@@ -263,7 +268,26 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 		}
 		return a.Key() < b.Key()
 	})
-	for _, task := range pending {
+	for i, task := range pending {
+		if !task.row.needsFiles {
+			continue
+		}
+		if firstFilePage(task.row, p.limits.files) {
+			group := []*fetchedPR{task.row}
+			for _, later := range pending[i+1:] {
+				if len(group) == fileBatchSize {
+					break
+				}
+				if later.batch == task.batch && firstFilePage(later.row, p.limits.files) {
+					group = append(group, later.row)
+				}
+			}
+			err := task.batch.session.fetchFirstFiles(task.batch.result.Repo, group)
+			task.batch.result.FilesErr = joinError(task.batch.result.FilesErr, err)
+			if !task.row.needsFiles {
+				continue
+			}
+		}
 		err := task.batch.session.fetchFiles(task.batch.result.Repo, task.row)
 		task.batch.result.FilesErr = joinError(task.batch.result.FilesErr, err)
 	}
@@ -321,7 +345,11 @@ func (p *Provider) fetchInventory(batch *repositoryFetch) {
 			result.Err = joinError(result.Err, ErrBudgetExceeded)
 			break
 		}
-		response, requestErr := batch.session.request(summaryQuery, repo, cursor, 0)
+		query := summaryQuery
+		if batch.lean {
+			query = leanSummaryQuery
+		}
+		response, requestErr := batch.session.request(query, repo, cursor, 0)
 		if fileFieldErrors(response, requestErr) {
 			result.FilesErr = joinError(result.FilesErr, requestErr)
 			requestErr = nil
@@ -368,7 +396,7 @@ func (p *Provider) fetchInventory(batch *repositoryFetch) {
 				result.Err = joinError(result.Err, ErrResponse)
 				continue
 			}
-			row := p.convertPR(repo, raw)
+			row := p.convertPR(repo, raw, batch.lean)
 			if previous, exists := rows[raw.Number]; !exists || row.pr.UpdatedAt.After(previous.pr.UpdatedAt) {
 				rows[raw.Number] = row
 			}
@@ -426,7 +454,7 @@ func onlyIncompleteErrors(err error) bool {
 	return err == ErrRequest || err == ErrIncomplete
 }
 
-func (p *Provider) convertPR(repo string, raw *rawPR) *fetchedPR {
+func (p *Provider) convertPR(repo string, raw *rawPR, lean bool) *fetchedPR {
 	updated, timeErr := time.Parse(time.RFC3339, raw.UpdatedAt)
 	row := &fetchedPR{
 		pr: PullRequest{
@@ -452,6 +480,14 @@ func (p *Provider) convertPR(repo string, raw *rawPR) *fetchedPR {
 	}
 	row.pr.RequestedReviewers, row.pr.RequestedReviewersComplete = convertReviewers(raw.ReviewRequests)
 	row.pr.Reviews, row.pr.ReviewsComplete = convertReviews(raw.LatestReviews)
+	if lean && raw.Files != nil && raw.Files.TotalCount != nil && *raw.Files.TotalCount >= 0 {
+		row.fileTotal = *raw.Files.TotalCount
+		row.pr.FileCount = row.fileTotal
+		row.pr.FilesComplete = row.fileTotal == 0
+		row.pr.PreviousPathsComplete = row.pr.FilesComplete
+		row.needsFiles = !row.pr.FilesComplete
+		return row
+	}
 	if raw.Files == nil || raw.Files.TotalCount == nil || raw.Files.PageInfo == nil || *raw.Files.TotalCount < 0 {
 		row.pr.PreviousPathsComplete = false
 		return row
@@ -587,15 +623,10 @@ func (s *fetchSession) fetchFiles(repo string, row *fetchedPR) error {
 		}
 		canonical, err := CanonicalRepo(response.Data.Repository.NameWithOwner)
 		raw := response.Data.Repository.PullRequest
-		updated, timeErr := time.Parse(time.RFC3339, raw.UpdatedAt)
-		if err != nil || canonical != repo || raw.Number != row.pr.Number || timeErr != nil || !updated.Equal(row.pr.UpdatedAt) ||
-			raw.HeadRefOid != row.headOID || raw.BaseRefOid != row.baseOID {
+		if err != nil || canonical != repo || !row.samePage(raw) {
 			return ErrIncomplete
 		}
 		conn := raw.Files
-		if conn == nil || conn.PageInfo == nil || conn.TotalCount == nil || *conn.TotalCount != row.fileTotal {
-			return ErrIncomplete
-		}
 		row.pr.PreviousPathsComplete = originsKnown
 		row.consumeFiles(conn, s.provider.limits.files)
 		for _, file := range row.pr.Files {
@@ -613,6 +644,83 @@ func (s *fetchSession) fetchFiles(repo string, row *fetchedPR) error {
 		}
 	}
 	return nil
+}
+
+func (row *fetchedPR) samePage(raw *rawPR) bool {
+	if raw == nil {
+		return false
+	}
+	updated, timeErr := time.Parse(time.RFC3339, raw.UpdatedAt)
+	conn := raw.Files
+	return raw.Number == row.pr.Number && timeErr == nil && updated.Equal(row.pr.UpdatedAt) &&
+		raw.HeadRefOid == row.headOID && raw.BaseRefOid == row.baseOID &&
+		conn != nil && conn.PageInfo != nil && conn.TotalCount != nil && *conn.TotalCount == row.fileTotal
+}
+
+func firstFilePage(row *fetchedPR, limit int) bool {
+	return row.needsFiles && row.metadataValid && row.fileCursor == "" && len(row.pr.Files) == 0 && limit > 0
+}
+
+func (s *fetchSession) fetchFirstFiles(repo string, rows []*fetchedPR) error {
+	numbers := make([]int, len(rows))
+	for i, row := range rows {
+		row.needsFiles = false
+		numbers[i] = row.pr.Number
+	}
+	s.aliases = true
+	response, requestErr := s.request(fileBatchQuery(numbers), repo, "", 0)
+	s.aliases = false
+	failed := make(map[string]bool)
+	for _, problem := range response.Errors {
+		if requestErr != nil && !onlyIncompleteErrors(requestErr) || len(problem.Path) < 2 || problem.Path[0] != "repository" {
+			return requestErr
+		}
+		alias, _ := problem.Path[1].(string)
+		failed[alias] = true
+	}
+	if response.Data == nil || response.Data.Repository == nil {
+		if requestErr != nil {
+			return requestErr
+		}
+		return ErrIncomplete
+	}
+	if requestErr != nil && len(response.Errors) == 0 {
+		return requestErr
+	}
+	canonical, err := CanonicalRepo(response.Data.Repository.NameWithOwner)
+	var fields map[string]json.RawMessage
+	if err != nil || canonical != repo || json.Unmarshal(response.probeData["repository"], &fields) != nil {
+		return ErrIncomplete
+	}
+	var result error
+	for i, row := range rows {
+		alias := fmt.Sprintf("pr%d", i)
+		var raw *rawPR
+		if failed[alias] || json.Unmarshal(fields[alias], &raw) != nil || !row.samePage(raw) {
+			result = joinError(result, ErrIncomplete)
+			continue
+		}
+		row.pr.PreviousPathsComplete = true
+		row.consumeFiles(raw.Files, s.provider.limits.files)
+		if len(raw.Files.Nodes) == 0 || !row.needsFiles && !row.pr.FilesComplete {
+			row.needsFiles, row.pr.FilesComplete, row.pr.PreviousPathsComplete = false, false, false
+			result = joinError(result, ErrIncomplete)
+		}
+	}
+	if len(failed) > 0 {
+		result = joinError(result, requestErr)
+	}
+	return result
+}
+
+func fileBatchQuery(numbers []int) string {
+	var query strings.Builder
+	query.WriteString("query BigBoardPullRequestFileBatch($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n    nameWithOwner\n")
+	for i, number := range numbers {
+		fmt.Fprintf(&query, "    pr%d: pullRequest(number: %d) {%s}\n", i, number, firstFilesFields)
+	}
+	query.WriteString("  }\n  rateLimit { remaining resetAt }\n}")
+	return query.String()
 }
 
 func (s *fetchSession) request(query, repo, cursor string, number int) (apiResponse, error) {
@@ -704,7 +812,7 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 		err = joinError(err, ErrResponse)
 		return apiResponse{}, err
 	}
-	if s.probe {
+	if s.aliases {
 		var envelope struct{ Data map[string]json.RawMessage }
 		if json.Unmarshal(data, &envelope) != nil {
 			return apiResponse{}, ErrResponse
@@ -759,7 +867,7 @@ func joinError(current, next error) error {
 	return errors.Join(current, next)
 }
 
-const summaryQuery = `query BigBoardOpenPullRequests($owner: String!, $name: String!, $cursor: String) {
+const summaryQueryPrefix = `query BigBoardOpenPullRequests($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
     pullRequests(states: OPEN, first: 50, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
@@ -781,15 +889,24 @@ const summaryQuery = `query BigBoardOpenPullRequests($owner: String!, $name: Str
           nodes { author { login } state submittedAt }
         }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-        files(first: 100) {
-          totalCount pageInfo { hasNextPage endCursor }
-          nodes { path changeType }
-        }
-      }
+`
+
+const summaryQuerySuffix = `      }
     }
   }
   rateLimit { remaining resetAt }
 }`
+
+const summaryQuery = summaryQueryPrefix + `        files(first: 100) {
+          totalCount pageInfo { hasNextPage endCursor }
+          nodes { path changeType }
+        }
+` + summaryQuerySuffix
+
+const leanSummaryQuery = summaryQueryPrefix + `        files { totalCount }
+` + summaryQuerySuffix
+
+const firstFilesFields = ` number updatedAt headRefOid baseRefOid files(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { path changeType } } `
 
 const filesQuery = `query BigBoardPullRequestFiles($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {

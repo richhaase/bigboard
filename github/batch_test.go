@@ -118,7 +118,7 @@ func TestFetchAllReusesOnlyCurrentCompleteFileEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := pendingPR(7)
-			old := NewProvider(nil).convertPR("acme/repo", pr(7, file("first.go", "MODIFIED"), file("old-only.go", "ADDED"))).pr
+			old := NewProvider(nil).convertPR("acme/repo", pr(7, file("first.go", "MODIFIED"), file("old-only.go", "ADDED")), false).pr
 			if tc.mutate != nil {
 				tc.mutate(raw, &old)
 			}

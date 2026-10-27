@@ -219,6 +219,10 @@ diagnostics. Home-directory paths are displayed with `~` for readability.
 PR refreshes reuse completed in-memory snapshots for at least one minute and
 join in-flight work. Up to four repository inventories run concurrently; all
 inventories finish before additional file pages are fetched newest-PR-first.
+The first refresh inlines each PR's first page of changed files. Later refreshes
+request only file counts and reuse file lists for PRs whose update time,
+head/base revisions, and file count are unchanged; first pages for the remaining
+PRs are fetched together, up to 50 PRs per request for each repository.
 Results retain repository order. Rate limits pause further requests until the
 reported cooldown; no automatic retry runs. There is no persistent PR cache. Inventory
 coverage is separate from file/reviewer coverage: missing files can make

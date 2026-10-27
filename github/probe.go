@@ -39,7 +39,7 @@ func (p *Provider) ProbeAll(ctx context.Context, repositories []string) []Reposi
 		}
 		indexes[repo] = append(indexes[repo], i)
 	}
-	session := fetchSession{provider: p, ctx: ctx, limit: MaxRefreshRequests, probe: true}
+	session := fetchSession{provider: p, ctx: ctx, limit: MaxRefreshRequests, aliases: true}
 	for start := 0; start < len(unique); start += probeBatchSize {
 		batch := unique[start:min(start+probeBatchSize, len(unique))]
 		before := session.requests
