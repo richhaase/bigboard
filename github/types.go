@@ -106,6 +106,7 @@ func (p PullRequest) Key() string {
 // PR's completeness flags for bounded supporting context. Err can accompany
 // useful partial data, including a complete inventory with incomplete files.
 type Result struct {
+	CheckedAt         time.Time
 	Repo              string
 	PRs               []PullRequest
 	Complete          bool

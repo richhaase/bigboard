@@ -106,7 +106,8 @@ type rawRepository struct {
 }
 
 type apiResponse struct {
-	Data *struct {
+	probeData map[string]json.RawMessage
+	Data      *struct {
 		Repository *rawRepository
 		Viewer     *actor
 		RateLimit  *struct {
@@ -133,6 +134,7 @@ type fetchedPR struct {
 }
 
 type fetchSession struct {
+	probe     bool
 	provider  *Provider
 	ctx       context.Context
 	requests  int
@@ -701,6 +703,13 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	if json.Unmarshal(data, &response) != nil {
 		err = joinError(err, ErrResponse)
 		return apiResponse{}, err
+	}
+	if s.probe {
+		var envelope struct{ Data map[string]json.RawMessage }
+		if json.Unmarshal(data, &envelope) != nil {
+			return apiResponse{}, ErrResponse
+		}
+		response.probeData = envelope.Data
 	}
 	for _, problem := range response.Errors {
 		kind := classifyFailure(problem.Type + " " + problem.Message)

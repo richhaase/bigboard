@@ -43,6 +43,7 @@ type prState struct {
 	login             string
 	loginErr          error
 	accountRequests   int
+	probeRequests     int
 	inventoryRequests int
 	fileRequests      int
 	requestBudget     int
@@ -57,6 +58,7 @@ type prsLoadedMsg struct {
 	login             string
 	loginErr          error
 	accountRequests   int
+	probeRequests     int
 	inventoryRequests int
 	fileRequests      int
 	requestBudget     int
@@ -71,6 +73,10 @@ func (m *Model) cancelPRRefresh() {
 	m.prState.loading = false
 }
 func (m *Model) startPRRefresh() tea.Cmd {
+	return m.startPRRefreshWithProbe(nil)
+}
+
+func (m *Model) startPRRefreshWithProbe(probes *remoteProbeState) tea.Cmd {
 	// Reuse the current snapshot and coalesce repeated refresh keys.
 	if m.prState.loading || time.Now().Before(m.prState.nextRefresh) {
 		return nil
@@ -80,12 +86,17 @@ func (m *Model) startPRRefresh() tea.Cmd {
 	if parent == nil {
 		parent = context.Background()
 	}
+	if probes != nil {
+		parent = probes.context
+	}
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	budget := m.options.PRRequestBudget
 	if budget <= 0 {
 		budget = gh.MaxRefreshRequests
 	}
-	ctx = gh.WithRequestBudget(ctx, budget)
+	if probes == nil {
+		ctx = gh.WithRequestBudget(ctx, budget)
+	}
 	m.cancelPRs = cancel
 	m.prState.loading = true
 	generation := m.prGeneration
@@ -107,6 +118,23 @@ func (m *Model) startPRRefresh() tea.Cmd {
 		msg := prsLoadedMsg{generation: generation, repositories: map[string]string{}, errors: map[string]error{}, results: map[string]gh.Result{}}
 		msg.aliases = aliases
 		msg.requestBudget = budget
+		if probes != nil {
+			msg.probeRequests = probes.requests
+		}
+		zeroes := make(map[string]bool)
+		var probeRetryAt time.Time
+		if probes != nil {
+			for _, probe := range probes.results {
+				if probe.RetryAt.After(probeRetryAt) {
+					probeRetryAt = probe.RetryAt
+				}
+				zero := probe.Err == nil && probe.OpenPRCount != nil && *probe.OpenPRCount == 0
+				if old, exists := zeroes[probe.Repo]; exists {
+					zero = zero && old
+				}
+				zeroes[probe.Repo] = zero
+			}
+		}
 		var requests []gh.RepositoryRequest
 		seen := make(map[string]bool)
 		for _, repo := range repos {
@@ -126,6 +154,13 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				continue
 			}
 			origin := remote
+			if probes != nil {
+				if probe, exists := probes.results[repo.ID]; exists && probe.Err == nil && zeroes[probe.Repo] {
+					if canonical, err := gh.CanonicalRepo(probe.Repo); err == nil {
+						aliases[remote] = canonical
+					}
+				}
+			}
 			for i := 0; i < len(aliases) && aliases[remote] != "" && aliases[remote] != remote; i++ {
 				remote = aliases[remote]
 			}
@@ -133,11 +168,15 @@ func (m *Model) startPRRefresh() tea.Cmd {
 			msg.repositories[repo.ID] = remote
 			if !seen[remote] {
 				seen[remote] = true
-				requests = append(requests, gh.RepositoryRequest{Repo: remote, Previous: snapshots[remote].prs})
+				if zeroes[remote] {
+					msg.results[remote] = gh.Result{Repo: remote, Complete: true, CheckedAt: probes.checked, RetryAt: probeRetryAt}
+				} else {
+					requests = append(requests, gh.RepositoryRequest{Repo: remote, Previous: snapshots[remote].prs})
+				}
 			}
 		}
 		var results []gh.Result
-		if len(requests) > 0 {
+		if len(requests) > 0 || len(msg.results) > 0 {
 			before := gh.RequestCount(ctx)
 			msg.login, msg.loginErr = provider.CurrentLogin(ctx)
 			msg.accountRequests = gh.RequestCount(ctx) - before
@@ -161,7 +200,9 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				canonical = remote
 			}
 			aliases[remote] = canonical
-			msg.results[canonical] = result
+			if previous, exists := msg.results[canonical]; !exists || result.Complete || !previous.Complete || len(result.PRs) > 0 {
+				msg.results[canonical] = result
+			}
 			msg.inventoryRequests += result.InventoryRequests
 			msg.fileRequests += result.FileRequests
 		}
@@ -214,6 +255,7 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	m.prState.loading = false
 	m.prState.login, m.prState.loginErr = msg.login, msg.loginErr
 	m.prState.accountRequests = msg.accountRequests
+	m.prState.probeRequests = msg.probeRequests
 	m.prState.inventoryRequests = msg.inventoryRequests
 	m.prState.fileRequests = msg.fileRequests
 	m.prState.requestBudget = msg.requestBudget
@@ -250,7 +292,11 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 		if inventoryErr == nil && result.FilesErr == nil {
 			inventoryErr = result.Err
 		}
-		next := prSnapshot{checked: msg.checked, lastGood: old.lastGood, partial: !result.Complete, err: inventoryErr, filesErr: result.FilesErr}
+		checked := msg.checked
+		if !result.CheckedAt.IsZero() {
+			checked = result.CheckedAt
+		}
+		next := prSnapshot{checked: checked, lastGood: old.lastGood, partial: !result.Complete, err: inventoryErr, filesErr: result.FilesErr}
 		kept := make(map[string]gh.PullRequest)
 		for _, pr := range old.prs {
 			if !result.Complete {
@@ -266,7 +312,7 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 			next.prs = append(next.prs, pr)
 		}
 		if result.Complete && inventoryErr == nil {
-			next.lastGood = msg.checked
+			next.lastGood = checked
 		}
 
 		m.prState.snapshots[repo] = next

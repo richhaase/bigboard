@@ -288,9 +288,9 @@ func (m Model) dataStatusLines(width int) []string {
 		add(fmt.Sprintf("%d PRs have incomplete reviewer/review details.", missingReviews))
 	}
 	if m.prState.requestBudget > 0 {
-		add(fmt.Sprintf("Last refresh requests: %d/%d · account %d · inventory %d · additional files %d.",
-			m.prState.accountRequests+m.prState.inventoryRequests+m.prState.fileRequests, m.prState.requestBudget,
-			m.prState.accountRequests, m.prState.inventoryRequests, m.prState.fileRequests))
+		add(fmt.Sprintf("Last refresh requests: %d/%d · probe %d · account %d · inventory %d · additional files %d.",
+			m.prState.probeRequests+m.prState.accountRequests+m.prState.inventoryRequests+m.prState.fileRequests, m.prState.requestBudget,
+			m.prState.probeRequests, m.prState.accountRequests, m.prState.inventoryRequests, m.prState.fileRequests))
 	}
 	add(m.prMineStatus())
 	var first, last time.Time

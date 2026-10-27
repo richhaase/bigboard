@@ -54,6 +54,7 @@ type Model struct {
 	prUI               prUIState
 	prContext          prContextState
 	prState            prState
+	remoteProbe        *remoteProbeState
 	prProvider         PRProvider
 	prGeneration       uint64
 	cancelPRs          context.CancelFunc
@@ -141,6 +142,7 @@ type Options struct {
 	Bookmark               *BookmarkOptions
 	Settings               *SettingsOptions
 	PrepareRepository      func(context.Context, git.Repository) error
+	PrepareIfChanged       func(context.Context, git.Repository, string, string) error
 	RepositoryRevision     func(context.Context, git.Repository) (string, error)
 	ScanRepository         func(context.Context, git.Repository, git.CollectOptions) ([]git.CommitRecord, error)
 	CacheInfo              func() (git.CacheInfo, error)
@@ -288,6 +290,7 @@ func (m *Model) resetPending() {
 		parent = context.Background()
 	}
 	m.localScanContext, m.cancelLocalScans = context.WithCancel(parent)
+	m.remoteProbe = nil
 	m.scan = newScanBatch(m.repositories, m.scan.generation+1, m.loading)
 	m.bootLines = nil
 }
@@ -301,6 +304,7 @@ func (m *Model) nextLoadCmd() tea.Cmd {
 }
 
 func (m Model) repoLoadCmd(repository git.Repository) tea.Cmd {
+	m.options = m.probedOptions(repository)
 	ctx := m.localScanContext
 	if ctx == nil {
 		ctx = m.scanContext
@@ -377,7 +381,7 @@ func (m *Model) startLocalRefresh() tea.Cmd {
 		return nil
 	}
 	m.resetPending()
-	return m.loadCmds()
+	return m.startRemotePass()
 }
 
 // Update handles all incoming messages.
@@ -437,6 +441,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case identitySavedMsg:
 		return m.applyIdentitySave(msg)
+	case repositoriesProbedMsg:
+		return m.applyRepositoryProbes(msg)
 	case prsLoadedMsg:
 		if msg.generation == m.prGeneration {
 			m.applyPRResult(msg)
@@ -478,7 +484,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if startupFetch {
 				return m, m.cacheInfoCmd()
 			}
-			return m, tea.Batch(m.startPRRefresh(), m.cacheInfoCmd())
+			return m, tea.Batch(m.startPRRefreshWithProbe(m.remoteProbe), m.cacheInfoCmd())
 		}
 		return m, m.nextLoadCmd()
 

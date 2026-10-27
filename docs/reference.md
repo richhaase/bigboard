@@ -192,6 +192,17 @@ must finish before data is shown. The spinner indicates working; Git progress
 also reports completed/total repositories where space permits. Each scan pass
 publishes a complete snapshot. There is no periodic refresh; use `r`.
 
+Before the startup network pass and each `r`, a bounded GitHub probe checks the
+default branch name/revision and open-PR count for up to 100 repositories per
+request. A matching branch/revision skips Git fetch only after the owned cache
+passes its full integrity checks. Missing or damaged caches still use the normal
+clone/repair path. Unknown probe results fall back to normal refresh behavior.
+Parsed Git scans retain their existing fingerprint checks, including on `r`.
+When a PR refresh is admitted, an explicit zero count clears retained PRs without
+an inventory request. Positive counts still refresh PR checks and reviews even
+when the branch revision has not changed. The existing one-minute reuse and
+in-flight coalescing rules still apply.
+
 The shared Git/PR status row describes all tracked repositories, independently
 of viewing filters. Failed refreshes retain last-good evidence where available
 and remain visibly stale/partial. `e` shows timestamps, startup progress, cache
@@ -205,7 +216,9 @@ Results retain repository order. Rate limits pause further requests until the
 reported cooldown; no automatic retry runs. There is no persistent PR cache. Inventory
 coverage is separate from file/reviewer coverage: missing files can make
 **directory associations** incomplete without making the list of PRs incomplete.
-Data status reports these separately. Unknown evidence is never reported as zero.
+Data status reports these separately, along with requests spent on probes, the
+account lookup, inventories, and file pages. Probes share `pr_request_budget` and
+the provider cooldown with PR work. Unknown evidence is never reported as zero.
 Inventories are bounded to 200 open PRs per repository and 1,000 current file
 paths per PR. A repository can use at most half the configured request budget
 (minimum one request). Its 90-second allowance counts active request time,
@@ -239,7 +252,7 @@ Schema or counting changes invalidate them; missing or damaged scan files and
 cache-write failures fall back to a full local scan. A `GIT_ATTR_SOURCE` override
 also uses a full scan. The file is removed with
 its repository cache. Reuse does not certify remote freshness or advance the
-last-look bookmark; the existing fetch pass still runs. Cached repositories
+last-look bookmark; the remote verification/fetch pass still runs. Cached repositories
 no longer listed by discovery are retained. Select one in Repository controls,
 press `d`, then Enter to explicitly confirm removal after refresh has finished.
 A group selection or exclusion does not make a listed repository removable.

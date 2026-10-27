@@ -30,7 +30,7 @@ func TestPRFileCoverageDoesNotMakeInventoryPartial(t *testing.T) {
 		t.Fatalf("file coverage changed inventory status: %+v", status)
 	}
 	details := ansi.Strip(strings.Join(m.dataStatusLines(120), "\n"))
-	for _, want := range []string{"3 known open PRs", "2/3 PRs have complete current-file lists", "Areas unknown for 1 PRs", "1 PRs have incomplete reviewer/review details", "8/8 · account 0 · inventory 3 · additional files 5", "inventory complete"} {
+	for _, want := range []string{"3 known open PRs", "2/3 PRs have complete current-file lists", "Areas unknown for 1 PRs", "1 PRs have incomplete reviewer/review details", "8/8 · probe 0 · account 0 · inventory 3 · additional files 5", "inventory complete"} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("missing %q:\n%s", want, details)
 		}

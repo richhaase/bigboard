@@ -102,6 +102,42 @@ func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string
 	return strings.TrimSpace(oid), nil
 }
 
+func (c *RepositoryCache) RefreshIfChanged(ctx context.Context, repo Repository, branch, oid string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if branch == "" || oid == "" {
+		return c.Refresh(ctx, repo)
+	}
+	repo.DefaultBranch = branch
+	expected, err := c.Repository(repo.ID, branch)
+	if err != nil {
+		return err
+	}
+	if repo.Path != expected.Path {
+		return fmt.Errorf("repository path is outside its owned cache location")
+	}
+	if err := c.verify(ctx, repo, true); err != nil {
+		return c.Refresh(ctx, repo)
+	}
+	for _, ref := range []struct{ name, target string }{
+		{"refs/remotes/origin/HEAD", "refs/remotes/origin/" + branch},
+		{"HEAD", "refs/heads/" + branch},
+	} {
+		target, err := c.git(ctx, repo.Path, "symbolic-ref", ref.name)
+		if err != nil || strings.TrimSpace(target) != ref.target {
+			return c.Refresh(ctx, repo)
+		}
+		current, err := c.git(ctx, repo.Path, "rev-parse", "--verify", "--end-of-options", ref.target+"^{commit}")
+		if err != nil || strings.TrimSpace(current) != oid {
+			return c.Refresh(ctx, repo)
+		}
+	}
+	return ctx.Err()
+}
+
 func (c *RepositoryCache) Refresh(ctx context.Context, repo Repository) error {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
