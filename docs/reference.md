@@ -170,9 +170,8 @@ review. The first two match your signed-in GitHub login; team membership is not
 inferred. Updated since my review means any PR activity after your latest known
 submitted review, independently of the Since last look bookmark. Missing review
 timestamps do not match. Bounded reviewer coverage can omit matches; Data status
-and PR details report that limitation. The login is resolved once per session
-and again only after an authentication error or a Settings save. If the account
-cannot be resolved, selected Mine filters show no results and explain why.
+and PR details report that limitation. If the account cannot be resolved, selected
+Mine filters show no results and explain why.
 
 `s` cycles Updated, Repository, Author, Title, and Attention; `S` reverses the
 order. Updated starts newest first. Attention starts with review requests to

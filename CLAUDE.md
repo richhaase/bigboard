@@ -201,7 +201,7 @@ repository viewing selection, applied in memory across all boards.
 of cached repositories no longer listed by organization discovery. Board-specific
 filters: Activity Git contributors/bots, Contributors bots/name search, PRs
 Mine/GitHub authors/review/checks/state/search. Mine uses the signed-in gh account,
-resolved once per session inside the shared request budget and cooldown, and again only after an authentication error or a Settings save. Its
+resolved once per refresh inside the shared request budget and cooldown. Its
 authored-by-me and review-requested-from-me choices match user logins only;
 team membership is never inferred. Updated since my review compares PR UpdatedAt
 strictly after the signed-in user's latest known submitted review timestamp from
