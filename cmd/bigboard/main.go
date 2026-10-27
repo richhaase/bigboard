@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -92,50 +93,53 @@ func main() {
 		os.Exit(1)
 	}
 
-	depth := cfg.Depth
-	if depth < 1 {
-		depth = 1
+	if len(flag.Args()) != 0 {
+		fmt.Fprintln(os.Stderr, "Error: positional repository paths are no longer supported; configure organizations and select a --group")
+		os.Exit(1)
 	}
-
-	var paths []string
-	switch {
-	case *groupFlag != "":
-		g, ok := cfg.Groups[*groupFlag]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Error: unknown group %q (config: %s)\n", *groupFlag, cfgPath)
-			os.Exit(1)
-		}
-		paths = g
-	case len(flag.Args()) > 0:
-		paths = flag.Args()
-	case len(cfg.Paths) > 0:
-		paths = cfg.Paths
-	default:
-		paths = []string{"."}
-	}
-	for i, p := range paths {
-		paths[i] = expandHome(p)
-	}
-	if err := validateScanPaths(paths); err != nil {
+	if err := validateRepositoryConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	repoPaths := git.DiscoverReposDepth(paths, depth)
-	if len(repoPaths) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no git repositories found in %v\n", paths)
+	cache, err := git.NewRepositoryCache()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	repositories := git.NewRepositories(repoPaths)
+	if !*exportFlag {
+		fmt.Fprintln(os.Stderr, "Discovering GitHub organization repositories…")
+	}
+	listed, err := discoverCachedRepositories(context.Background(), cfg, cache, *exportFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: repository discovery: %v\n", err)
+		os.Exit(1)
+	}
+	repositories, err := selectRepositories(cfg, *groupFlag, listed)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	excludedRepos, err := buildExcludeSet(repositories, cfg.Exclude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid exclusion: %v\n", err)
 		os.Exit(1)
 	}
+	selected := repositories[:0]
+	for _, repo := range repositories {
+		if !excludedRepos[repo.ID] {
+			selected = append(selected, repo)
+		}
+	}
+	repositories = selected
 
 	if *exportFlag {
+		if len(repositories) == 0 {
+			fmt.Fprintln(os.Stderr, "Error: no cached repositories for this selection; launch BigBoard online first")
+			os.Exit(1)
+		}
 		if err := runExportJSON(os.Stdout, os.Stderr, repositories, excludedRepos, initialSort, analysisOptions{
+			ScanRepository:   cache.ScanRepository,
 			IncludeGenerated: cfg.AllFiles,
 			AIIdentities:     cfg.AIIdentities,
 			BotIdentities:    cfg.BotIdentities,
@@ -148,14 +152,18 @@ func main() {
 	}
 
 	model := tui.NewModelWithOptions(repositories, initialSort, excludedRepos, version, timeIdx, tui.Options{
-		PRRequestBudget:  cfg.PRRequestBudget,
-		FuzzyMatching:    cfg.Fuzzy,
-		IncludeGenerated: cfg.AllFiles,
-		AIIdentities:     cfg.AIIdentities,
-		BotIdentities:    cfg.BotIdentities,
-		Identities:       cfg.Identities,
-		SaveIdentities:   newIdentitySaver(cfgPath, cfg),
-		WorkAreas:        cfg.WorkAreas,
+		PrepareRepository:      cache.Refresh,
+		ScanRepository:         cache.ScanRepository,
+		CacheInfo:              func() (git.CacheInfo, error) { return cache.Info(listed) },
+		RemoveCachedRepository: cache.Remove,
+		PRRequestBudget:        cfg.PRRequestBudget,
+		FuzzyMatching:          cfg.Fuzzy,
+		IncludeGenerated:       cfg.AllFiles,
+		AIIdentities:           cfg.AIIdentities,
+		BotIdentities:          cfg.BotIdentities,
+		Identities:             cfg.Identities,
+		SaveIdentities:         newIdentitySaver(cfgPath, cfg),
+		WorkAreas:              cfg.WorkAreas,
 	})
 
 	if err := runTUI(model, tea.WithAltScreen()); err != nil {
@@ -178,7 +186,7 @@ func buildExcludeSet(repositories []git.Repository, patterns []string) (map[stri
 	for _, pattern := range patterns {
 		exact := false
 		for _, repo := range repositories {
-			if pattern == filepath.Base(repo.Path) || pattern == repo.Name {
+			if pattern == repositoryBasename(repo) || pattern == repo.Name {
 				ex[repo.ID] = true
 				exact = true
 			}
@@ -190,7 +198,7 @@ func buildExcludeSet(repositories []git.Repository, patterns []string) (map[stri
 			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
 		}
 		for _, repo := range repositories {
-			if ok, _ := filepath.Match(pattern, filepath.Base(repo.Path)); ok {
+			if ok, _ := filepath.Match(pattern, repositoryBasename(repo)); ok {
 				ex[repo.ID] = true
 				continue
 			}
@@ -202,27 +210,9 @@ func buildExcludeSet(repositories []git.Repository, patterns []string) (map[stri
 	return ex, nil
 }
 
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			if p == "~" {
-				return home
-			}
-			return filepath.Join(home, p[2:])
-		}
+func repositoryBasename(repo git.Repository) string {
+	if !filepath.IsAbs(repo.ID) && strings.Contains(repo.ID, "/") {
+		return filepath.Base(repo.ID)
 	}
-	return p
-}
-
-func validateScanPaths(paths []string) error {
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("scan path %q: %w", path, err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("scan path %q is not a directory", path)
-		}
-	}
-	return nil
+	return filepath.Base(repo.Path)
 }

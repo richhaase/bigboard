@@ -139,11 +139,20 @@ func (m Model) screenHelp() screenHelp {
 
 	switch m.viewMode {
 	case ViewRepoOverlay:
-		return screenHelp{"Repository controls", []helpSection{{"Choose repositories", []helpBinding{
+		if m.cacheRemoveConfirm != "" {
+			return screenHelp{"Remove cached repository", []helpSection{{"Confirm removal", []helpBinding{
+				{"Enter", "Delete only this BigBoard cached clone"}, {"Esc / ←", "Keep the cache and return to repository controls"},
+			}}}}
+		}
+		bindings := []helpBinding{
 			{"↑ / ↓", "Select a repository"}, {"Space", "Stage include / exclude for this repository"},
 			{"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last repository"},
 			{"Enter", "Apply tracking choices and return"}, {"Esc / ←", "Cancel pending choices and return"}, {"q / Ctrl+C", "Quit BigBoard"},
-		}}, {"Tracking", []helpBinding{{"Included", "Used for data and refreshes in this session"}, {"Filters", "Narrow the view without changing repository tracking"}}}}}
+		}
+		if m.options.RemoveCachedRepository != nil {
+			bindings = append(bindings, helpBinding{"d", "Review removal of a cached repository no longer listed by the organization"})
+		}
+		return screenHelp{"Repository controls", []helpSection{{"Choose repositories", bindings}, {"Tracking", []helpBinding{{"Included", "Used for data and refreshes in this session"}, {"Filters", "Narrow the view without changing repository tracking"}}}}}
 	case ViewOperative:
 		return screenHelp{"Contributor details", []helpSection{{"Navigate", []helpBinding{
 			{"↑ / ↓", "Scroll contributor details"}, {"PgUp / PgDn", "Scroll details"}, {"Home / End", "First / last page"},

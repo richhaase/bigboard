@@ -131,12 +131,11 @@ type CommitRecord struct {
 }
 
 // Repository identifies a repository independently from its display name.
-// ID is a cleaned absolute path; Name is the shortest unique path suffix among
-// the repositories in the current scan.
 type Repository struct {
-	ID   string
-	Path string
-	Name string
+	ID            string
+	Path          string
+	Name          string
+	DefaultBranch string
 }
 
 // NewRepositories converts paths into stable repository identities. Duplicate

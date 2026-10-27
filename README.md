@@ -15,8 +15,10 @@ read the counts. [Controls](#controls) · [Configuration](#config-file) ·
 
 ## Install
 
-Big Board requires Git 2.31 or newer on `PATH`. Partial clones require Git
-2.45.1 or newer so scans can reliably disable automatic object fetching.
+Big Board requires Git 2.31 or newer on `PATH`. Interactive use also requires
+an installed and signed-in `gh` CLI with access to your configured GitHub
+organizations. Big Board uses those existing credentials for discovery and its
+own repository cache.
 
 ### Homebrew
 
@@ -33,20 +35,21 @@ go install github.com/richhaase/bigboard/cmd/bigboard@latest
 ## Usage
 
 Big Board is TUI-first: preferences live in the config file, and the CLI has exactly four flags.
+Configure `organizations` in your [config file](#config-file) before launching:
+
+```json
+{"organizations": ["example-org"]}
+```
 
 ```bash
-# Analyze current directory
+# Discover organization repositories and refresh Big Board's cache
 bigboard
-
-# Analyze specific repos or scan directories for repos
-bigboard ~/src/repo1 ~/src/repo2
-bigboard ~/src/
 
 # Use a named group from your config
 bigboard --group backend
 
-# Print contributor stats as JSON and exit (all-time window)
-bigboard --export ~/src/ > board.json
+# Print cached contributor stats as JSON and exit (offline, all-time window)
+bigboard --export > board.json
 
 # Use an alternate config file
 bigboard --config ./bigboard.json
@@ -54,6 +57,12 @@ bigboard --config ./bigboard.json
 # Print version and exit
 bigboard --version
 ```
+
+Repository groups use `owner/name` identities within configured organizations.
+Positional repository paths, the old `paths` and `depth` settings, and path-based
+groups are rejected; there is no current-directory or developer-checkout fallback.
+`--export` selects only existing cached repositories and performs no discovery,
+clone, or fetch. Launch online first to populate the cache.
 
 The shared scope row shows the active range. Press `t` to open Date range in the
 filter modal. Space stages a preset or opens custom entry for 1–3650 days;
@@ -124,7 +133,7 @@ For meaningful cross-directory groups, optionally configure `work_areas`:
 ```json
 {
   "work_areas": {
-    "my-monorepo": [
+    "example-org/my-monorepo": [
       {"name": "Authentication", "paths": ["services/auth", "apps/web/src/auth"]},
       {"name": "Payments", "paths": ["services/payments"]}
     ]
@@ -132,25 +141,30 @@ For meaningful cross-directory groups, optionally configure `work_areas`:
 }
 ```
 
-The repository key is its unique display name or absolute path (absolute path
-wins). Prefixes are literal repository-relative files or directories, not globs.
-The longest matching prefix wins; unmatched paths keep automatic groups. Names
-must be unique within a repository, and one prefix cannot name two areas.
-The existing `depth` setting still controls repository discovery only.
+The repository key is its `owner/name` identity. Prefixes are literal
+repository-relative files or directories, not globs. The longest matching prefix
+wins; unmatched paths keep automatic groups. Names must be unique within a
+repository, and one prefix cannot name two areas.
 
-The board updates local repository data only on launch and when you press `r`.
-There is no periodic auto-refresh. “Local” shows the last successful local
-refresh for the selected repository; “Updating…” keeps the existing view usable during a refresh.
-Startup and `r` fetch included repositories from `origin`, then scan local history
-and request GitHub PR context subject to the PR cooldown described below. Export
-scans cached history without fetching. Fetches update remote-tracking branches only;
-local branches, tags, working trees, and submodules stay untouched. Repositories
-without `origin` remain local-only. Fetches use existing Git credentials, disable
-interactive prompts, and run at most eight repositories at once with a two-minute
-fetch timeout per repository. A failed fetch still allows the local scan, with a
-STALE marker and diagnostics under `e`; a failed scan retains that repository's
-last successful data. A successful fetch and scan, including an empty one, clears
-the stale state. The board
+On launch, Big Board discovers accessible, non-archived repositories in the
+configured GitHub organizations. It owns full bare clones containing only each
+repository's default-branch history at
+`$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git`, with `~/.cache` as the
+default cache home. Developer checkouts are never scanned or changed.
+
+Startup and `r` clone or fetch included cache entries, then scan their history
+offline and request GitHub PR context subject to the PR cooldown described below.
+Clone/fetch and scan work shares eight repository slots; clone/fetch operations
+have a two-minute timeout per repository. Credentials come from the existing
+`gh` session, interactive prompts are disabled, and tags, other branches, and
+submodules are not fetched. Export only scans existing cached history.
+
+The board refreshes only on launch or `r`; there is no periodic auto-refresh.
+“Local” shows the last successful scan for the selected repository; “Updating…”
+keeps the existing view usable during a refresh. A failed clone/fetch still
+attempts the offline scan, with a STALE marker and diagnostics under `e`; a failed
+scan retains that repository's last successful data. A successful fetch and scan,
+including an empty one, clears the stale state. The board
 requires at least 40 columns by 18 rows. Narrow or short terminals keep one primary
 surface with the same controls. In area lists, two-line rows at 80 columns keep
 names and subjects readable. `Enter` replaces the list with detail; `Esc` restores its
@@ -172,12 +186,12 @@ narrow terminal cannot fit the whole range.
 
 ## Automatic GitHub PR awareness
 
-Read-only open pull request context loads automatically for supported GitHub
-origins using an already installed and signed-in `gh` CLI. No config setting is
-needed.
-Missing `gh` or authentication is shown without blocking local history. Bigboard
+Read-only open pull request context loads automatically for the discovered
+GitHub repositories using the existing `gh` session. No additional PR setting is
+needed. PR authentication or request failures leave loaded cached history usable;
+interactive startup still requires successful organization discovery. Bigboard
 never signs in, requests access, creates credentials, or changes pull requests.
-Headless `--export` stays local and unchanged.
+Headless `--export` stays offline and includes no PR data.
 Only a supported GitHub `origin` is used, with no upstream guessing.
 
 PR counts appear beside existing Activity repository and directory/file rows
@@ -197,8 +211,8 @@ approval or merge readiness; “updated” includes any PR activity.
 
 Changed file paths map to the same configured prefixes and automatic Work areas
 as local history, including new PR-only areas. Generated files follow `all_files`.
-A PR touching multiple areas appears in each; the overall count deduplicates it,
-including across duplicate local clones. The PR board follows the global range
+A PR touching multiple areas appears in each; the overall count deduplicates it.
+The PR board follows the global range
 using PR last-updated time; local contributor and bot filters do not apply.
 Activity PR counts and work-area summaries follow that shared scope, independently
 of saved PR-board filters. Fetch coverage retains all open PRs. PRs never enter
@@ -217,7 +231,7 @@ and shows request use for the inventory and additional-file phases;
 repositories left unfetched retain explicitly stale/partial evidence. Rate limits
 pause all remaining requests, honor GitHub's reset/Retry-After time, and use bounded
 exponential cooldowns when no retry time is available. The PR board status shows when `r`
-can request data again; no background retry runs. There is no polling or disk cache,
+can request data again; no background retry runs. There is no PR polling or PR disk cache,
 so a new process starts a fresh remote refresh. Failed or incomplete inventories retain
 last-good evidence with visible stale/partial labels; a complete open inventory
 clears missing PRs even when supporting context is partial. `PARTIAL` repository
@@ -238,10 +252,10 @@ origins are reported in the PR board without suppressing local history.
 - **AI authorship** is detected from specific known agent authors and `Co-authored-by` identities, including agent accounts that commit via GitHub (`Copilot`, `claude[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, …). Working at an AI company does not classify someone as an agent. Add your own agents' emails or explicit `@domains` under `ai_identities`. Sorting compares exact AI ratios; percentages are rounded only for display.
 - **Bots are counted, not hidden.** Bot accounts (`dependabot[bot]`, `renovate[bot]`, your own agents via `bot_identities`) rank on Contributors with a `BOT` tag; press `b` to toggle them out of view.
 - **Generated & vendored files** (lockfiles, `vendor/`, `node_modules/`, `dist/`, `*.min.*`, `*.snap`, `go.sum`, …) are excluded from line counts by default so they don't inflate scores. Set `"all_files": true` to count everything.
-- **Scope** is each repo's default branch, excluding merge commits. Cached remote default history is preferred over the local branch; local `main`/`master`, then `HEAD`, provide fallbacks. Startup and `r` fetch included repositories before scanning; export uses cached history. Locally divergent commits outside that selected history are excluded. Branches are resolved to commit IDs so same-named tags cannot change the history. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
+- **Scope** is each repo's default branch, excluding merge commits. Big Board caches its full history without other branches or tags. Startup and `r` refresh included cache entries before scanning; export uses cached history. Developer-checkout commits are outside this scope. Branches are resolved to commit IDs. Rename/copy changes use `-M -C` with explicit diff settings and literal, NUL-delimited filenames.
 - **Shared commits** count once across selected repositories, by Git object ID. Repository subtotals retain every association and can overlap; do not sum them to obtain board totals. When copies have different mailmaps, attribution comes from a complete copy first, then the lowest repository ID, deterministically. Filtering a repository out also removes it as a source of attribution/counts.
 - **Calendar dates** use your local timezone for active days, monthly totals, first/last dates, and heatmaps. Future-dated commits remain counted; ALL includes every collected commit and recent windows retain their existing lower-bound filtering. Churn remains removals/additions, with `0.00` when additions are zero.
-- **Incomplete history** is flagged for shallow clones. Boundary line counts are unknown, shown as `?` or a known subtotal followed by `?`. A complete copy of the same commit can supply its missing counts. JSON export keeps numeric known subtotals and includes `unknown_line_commits` on contributor/repository objects when nonzero; stderr reports shallow repositories. Partial clones with missing objects are reported as scan failures instead of downloading data.
+- **Cache integrity** requires complete, independent bare repositories. Shallow and partial clones are not accepted as cache entries; scans never download missing objects. Failed refreshes and scans remain visibly qualified, with the last successful in-memory data retained when available.
 
 ## Board layout
 
@@ -324,9 +338,9 @@ location. Applied filters are cleared explicitly, never by Back.
 | `s` / `S` | Change sort / reverse order in sortable lists |
 | `f` / `t` | Open Filters / open its shared Date range category directly |
 | `x` | Clear this board’s filters and search; preserve shared scope and location |
-| `i` | Open Repository controls to choose tracked repositories and refresh coverage |
-| `r` | Fetch included repositories and request PR context, subject to PR cooldown; preserve location |
-| `e` | Open Data status for Git/PR freshness, coverage and diagnostics |
+| `i` | Open Repository controls to choose tracked repositories or remove unlisted cached clones |
+| `r` | Clone/fetch included cache entries and request PR context, subject to PR cooldown; preserve location |
+| `e` | Open Data status for cache location/size, unlisted repositories, Git/PR freshness and diagnostics |
 | `?` / `F1` | Open contextual help |
 | `q` / `Ctrl+C` | Quit outside text entry; `Ctrl+C` always quits |
 
@@ -345,8 +359,9 @@ prioritize the current context and keep help available; secondary actions remain
 in the help modal. Filter editors show `F1` for help while typing.
 
 `e` opens Data status in a centered modal over the current board, even when
-there are no errors. Git/PR freshness and tracked-repository coverage appear
-first; `d` shows repository diagnostics. Arrows, paging, and Home/End scroll
+there are no errors. It shows cache location and size, cached repositories no
+longer listed by organization discovery, Git/PR freshness, and tracked-repository
+coverage; `d` shows repository diagnostics. Arrows, paging, and Home/End scroll
 the modal, `r` refreshes, and Esc closes it without changing selection or filters.
 
 ### Activity
@@ -432,7 +447,16 @@ applied searches; `x` clears board filters and search. `q` quits immediately.
 Repository tracking is session-wide and separate from shared viewing scope.
 Use arrows, paging, and Home/End to select a repository, and Space to toggle it.
 Enter applies choices; Esc / left cancels. Exclusion removes a repository from
-all boards and subsequent fetch/PR requests. It does not write the config file.
+all boards and subsequent fetch/PR requests. It does not write the config file
+or delete the cached clone.
+
+Cached repositories no longer listed by organization discovery are retained until
+you remove them explicitly. In Repository controls, select an entry marked
+“no longer listed,” press `d`, then Enter to confirm removal; Esc cancels. Removal
+is available after refresh finishes and verifies cache ownership before deleting
+only that clone. Data status (`e`) shows these entries, total cache size, location,
+and any cache problems. Choosing a group or excluding a listed repository does
+not make its cache eligible for removal.
 
 `t` opens Date range in the shared filter modal on all three boards and their details.
 It uses commit author time for local history and last-updated time for PRs.
@@ -445,8 +469,9 @@ Activity and Contributors each keep their own bot visibility.
 
 ## Config file
 
-Optional, at `$XDG_CONFIG_HOME/bigboard/config.json` when `XDG_CONFIG_HOME` is set,
-otherwise `~/.config/bigboard/config.json`. Override either with `--config`.
+Required for repository selection, at `$XDG_CONFIG_HOME/bigboard/config.json`
+when `XDG_CONFIG_HOME` is set, otherwise `~/.config/bigboard/config.json`. Override
+either with `--config`. `organizations` must contain at least one GitHub organization.
 Malformed JSON, unknown fields, and unsupported `sort`, `since`, or `theme` values
 report an error. Settings are read at startup;
 interactive filters and inclusion changes do not rewrite the file. Confirming a
@@ -454,18 +479,17 @@ contributor merge explicitly saves its identity mapping to this file.
 
 ```json
 {
-  "paths": ["~/src"],
-  "exclude": ["vendor-*", "org-a/api"],
+  "organizations": ["example-org"],
+  "exclude": ["vendor-*", "example-org/legacy-api"],
   "sort": "net",
   "since": "90d",
   "theme": "dark",
   "fuzzy": false,
   "all_files": false,
-  "depth": 2,
   "pr_request_budget": 128,
   "groups": {
-    "backend": ["~/src/api", "~/src/workers"],
-    "frontend": ["~/src/web"]
+    "backend": ["example-org/api", "example-org/workers"],
+    "frontend": ["example-org/web"]
   },
   "ai_identities": ["my-agent@example.com", "@agents.example.com"],
   "bot_identities": ["my-agent@example.com"],
@@ -478,8 +502,9 @@ contributor merge explicitly saves its identity mapping to this file.
 }
 ```
 
-- `paths` supplies scan roots when no positional paths or `--group` are given; without any of these, Bigboard scans the current directory.
-- `depth` controls recursive repository discovery, with a default of `1`; values below `1` also use `1`. It does not change work-area grouping.
+- `organizations` supplies the GitHub organizations to discover through the existing authenticated `gh` session. Archived repositories are omitted.
+- `groups` maps names to `owner/name` repository identities within those organizations. `--group` limits the selection to its members; an unavailable or archived member reports an error.
+- Legacy `paths`, `depth`, and path-based `groups` are rejected with migration guidance. Positional paths are also rejected; there is no legacy fallback.
 - `sort` sets the Contributors sort: `commits`, `added`, `removed`, `net`, `ai`, or `total` (`impact` is an alias for `total`). The default is `total`. This setting changes contributor ordering; bars still show lines changed. Activity starts ranked by lines changed and can independently sort by commits, recency, or name.
 - `theme` accepts `auto`, `light`, or `dark` as a terminal-background hint; the current Activity canvas uses its fixed high-contrast palette.
 - `all_files` includes generated/vendored paths in line totals; it defaults to `false`.
@@ -487,7 +512,7 @@ contributor merge explicitly saves its identity mapping to this file.
 - `pr_request_budget` is the positive maximum number of GitHub requests per refresh (default `128`). It does not change rate-limit cooldowns, timeouts, or the PR/file count limits.
 - `since` takes a preset label: `1d`, `7d`, `14d`, `30d`, `90d`, `1y`, or `all`, with a default of `14d`.
 - `fuzzy` is retained for config compatibility; use `.mailmap` or `identities` for identity aliases.
-- `exclude` entries match a repo basename, a unique display name like `org-a/api` (for duplicate basenames), or a glob of either.
+- `exclude` entries match a repository basename, its `owner/name` identity, or a glob of either. A basename matches that name across all configured organizations.
 - `ai_identities` marks commits by those authors (or co-authors) as AI-assisted; entries are exact emails or `@domain` suffixes.
 - `bot_identities` tags contributors as bots; entries are exact emails, `@domain` suffixes, or exact author names.
 - `identities` maps each canonical email to `aliases` and an optional display `name`. Keys and aliases are trimmed and lowercased; each email may appear only once across the map, and self-aliases are rejected. Names alone never merge people. Mappings apply after Git's `.mailmap`, before author AI/bot classification, to all boards and JSON export. Co-author AI evidence is preserved. Without a display override, the most frequent name remains the display name. An incorrect alias assigns someone else's commits to the canonical identity; check the People lens after editing the map.
@@ -496,7 +521,7 @@ contributor merge explicitly saves its identity mapping to this file.
 ## Features
 
 - Relationship-first repository and work-area views, cross-scope contributor focus, and scrollable commit/path evidence
-- Local updates on launch or `r`, separate local/PR freshness, and retained last-good data on refresh failures
+- Organization discovery and owned full bare caches, refreshed on launch or `r`, with separate local/PR freshness and retained last-good data on refresh failures
 - High-contrast Activity with responsive full-width evidence and compact list-to-detail navigation
 - Streaming repository-scan loader that surfaces unreadable repos as they load
 - Gradient impact bars with trailing glow; gold/silver/bronze rank styling
@@ -504,9 +529,9 @@ contributor merge explicitly saves its identity mapping to this file.
 - Bot contributors counted and tagged (`BOT`), with a one-key toggle to hide them
 - Per-contributor drill-down: repo breakdown, gap-aware monthly timeline, neon contribution heatmap, and derived metrics (active days, first/last commit, churn)
 - Scrollable, height-aware Contributors board with incremental `/` search — every contributor reachable
-- Headless `--export` (JSON, same pipeline and identity policy as the TUI), config file with named `--group`s, glob excludes, and recursive scan depth
+- Offline `--export` from cached history (JSON, same pipeline and identity policy as the TUI), organization config with named `--group`s and glob excludes
 - Accurate-by-default: native `.mailmap`, generated/vendored files excluded, deterministic ordering, rename/copy-aware churn
-- Git worktree detection (linked worktrees are skipped); separate-Git-directory repositories are supported, and symlinked repo directories are followed and deduplicated
+- Cache location, size, and unlisted repositories in Data status, with explicit ownership-checked removal in Repository controls
 
 ## License
 

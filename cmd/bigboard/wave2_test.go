@@ -119,7 +119,7 @@ func TestLoadConfigMissing(t *testing.T) {
 	}
 
 	unknown := filepath.Join(t.TempDir(), "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"paths":[],"typo":true}`), 0o600); err != nil {
+	if err := os.WriteFile(unknown, []byte(`{"organizations":["example"],"typo":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadConfig(unknown, true); err == nil {
@@ -148,32 +148,6 @@ func TestLoadConfigIdentityLists(t *testing.T) {
 func TestDiagnosticText(t *testing.T) {
 	if got := diagnosticText("repo\x1b\nname"); strings.ContainsAny(got, "\x1b\n") {
 		t.Errorf("diagnosticText retained terminal controls: %q", got)
-	}
-}
-
-func TestExpandHome(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	if got := expandHome("~/src"); got != filepath.Join(home, "src") {
-		t.Errorf("expandHome(~/src) = %q", got)
-	}
-	if got := expandHome("/abs/path"); got != "/abs/path" {
-		t.Errorf("expandHome left absolute path alone: %q", got)
-	}
-}
-
-func TestValidateScanPaths(t *testing.T) {
-	if err := validateScanPaths([]string{t.TempDir()}); err != nil {
-		t.Fatalf("valid directory: %v", err)
-	}
-	if err := validateScanPaths([]string{filepath.Join(t.TempDir(), "missing")}); err == nil {
-		t.Error("missing scan path should return an error")
-	}
-	file := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateScanPaths([]string{file}); err == nil {
-		t.Error("non-directory scan path should return an error")
 	}
 }
 

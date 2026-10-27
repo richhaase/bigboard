@@ -30,19 +30,36 @@ func (m Model) renderRepoOverlay() string {
 	}
 	panelWidth, page := repositoryModalSize(width, height)
 	inner := panelWidth - 4
+	if m.cacheRemoveConfirm != "" {
+		lines := []string{StyleTitle.Render("Remove cached repository?"), "", displayText(m.cacheRemoveConfirm), "Only BigBoard's cached clone will be removed.", "", "Enter remove · Esc cancel"}
+		if m.cacheRemoving {
+			lines[len(lines)-1] = "Removing cached clone…"
+		}
+		if m.cacheError != "" {
+			lines = append(lines, m.cacheError)
+		}
+		for i, line := range lines {
+			lines[i] = ansi.Truncate(line, inner, "…")
+		}
+		return renderCenteredModal(background.viewContent(), lines, panelWidth, width, height)
+	}
+	rows := m.repositoryControlRows()
 	sections := []string{
 		StyleTitle.Render("Repository controls"),
 		StyleDimWhite.Render(padCells("Changes apply when you press Enter", inner)),
 		worklistRule.Render(strings.Repeat("─", inner)),
 	}
-	selected := max(0, min(m.overlayCursor, len(m.local.repositories)-1))
-	start := max(0, min(selected-page/2, len(m.local.repositories)-page))
-	end := min(len(m.local.repositories), start+page)
+	selected := max(0, min(m.overlayCursor, len(rows)-1))
+	start := max(0, min(selected-page/2, len(rows)-page))
+	end := min(len(rows), start+page)
 	for i := start; i < end; i++ {
-		repo := m.local.repositories[i]
+		repo := rows[i]
 		checkbox, style := "[x] ", StyleAuthor
 		if m.overlayExcluded[repo.ID] {
 			checkbox, style = "[ ] ", StyleDimWhite
+		}
+		if m.orphanedRepository(repo.ID) {
+			checkbox, style = "[−] ", StyleDimWhite
 		}
 		cursor := "  "
 		if i == selected {
@@ -54,19 +71,19 @@ func (m Model) renderRepoOverlay() string {
 		}
 		sections = append(sections, line)
 	}
-	if len(m.local.repositories) == 0 {
+	if len(rows) == 0 {
 		sections = append(sections, StyleDimWhite.Render("No repositories available"))
 	}
 	for len(sections) < 3+page {
 		sections = append(sections, "")
 	}
 	excluded := 0
-	for _, repo := range m.local.repositories {
-		if m.overlayExcluded[repo.ID] {
+	for _, repo := range rows {
+		if m.overlayExcluded[repo.ID] || m.orphanedRepository(repo.ID) {
 			excluded++
 		}
 	}
-	total := len(m.local.repositories)
+	total := len(rows)
 	position := fmt.Sprintf("%d–%d of %d · %d included", start+1, end, total, total-excluded)
 	if inner < 50 {
 		position = fmt.Sprintf("%d–%d/%d · %d included", start+1, end, total, total-excluded)
@@ -75,11 +92,20 @@ func (m Model) renderRepoOverlay() string {
 		position = "0 repositories · 0 included"
 	}
 	hints := "Esc cancel · ↑↓ select · ? help"
+	if len(m.cacheInfo.Orphans) > 0 {
+		hints = "[−] no longer listed · d remove cache · Esc cancel"
+	}
+	if m.cacheError != "" {
+		hints = m.cacheError
+	}
 	boards := boardShortcuts(inner)
 	if ansi.StringWidth(hints+" · "+boards) <= inner {
 		hints += " · " + boards
-	} else if inner < 50 {
+	} else if inner < 50 && m.cacheError == "" {
 		hints = "Esc cancel · ? help"
+		if len(m.cacheInfo.Orphans) > 0 {
+			hints = "d remove unlisted · ? help"
+		}
 		if ansi.StringWidth(hints+" · "+boards) <= inner {
 			hints += " · " + boards
 		}

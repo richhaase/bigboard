@@ -120,7 +120,7 @@ func (m Model) prsInViewForRepository(id string) []gh.PullRequest {
 
 func (m Model) sharedPRs() []gh.PullRequest {
 	unique := make(map[string]gh.PullRequest)
-	for _, repo := range m.local.repositories {
+	for _, repo := range m.prRepositories() {
 		for _, pr := range m.prsInViewForRepository(repo.ID) {
 			unique[pr.Key()] = pr
 		}

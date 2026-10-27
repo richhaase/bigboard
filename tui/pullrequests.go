@@ -83,12 +83,13 @@ func (m *Model) startPRRefresh() tea.Cmd {
 	m.prState.loading = true
 	generation := m.prGeneration
 	var repos []git.Repository
-	for _, repo := range m.local.repositories {
+	for _, repo := range m.prRepositories() {
 		if !m.excludedRepos[repo.ID] {
 			repos = append(repos, repo)
 		}
 	}
 	provider := m.prProvider
+	managed := m.options.PrepareRepository != nil
 	snapshots := maps.Clone(m.prState.snapshots)
 	aliases := maps.Clone(m.prState.aliases)
 	if aliases == nil {
@@ -106,7 +107,13 @@ func (m *Model) startPRRefresh() tea.Cmd {
 				msg.errors[repo.ID] = ctx.Err()
 				continue
 			}
-			remote, err := provider.Resolve(ctx, repo.Path)
+			var remote string
+			var err error
+			if managed {
+				remote, err = gh.CanonicalRepo(repo.ID)
+			} else {
+				remote, err = provider.Resolve(ctx, repo.Path)
+			}
 			if err != nil {
 				msg.errors[repo.ID] = err
 				continue
@@ -294,7 +301,7 @@ func (m Model) scopePRs(scope string) []gh.PullRequest {
 }
 func (m Model) allPRs() []gh.PullRequest {
 	unique := map[string]gh.PullRequest{}
-	for _, repo := range m.local.repositories {
+	for _, repo := range m.prRepositories() {
 		if !m.excludedRepos[repo.ID] {
 			for _, pr := range m.prsForRepository(repo.ID) {
 				unique[pr.Key()] = pr

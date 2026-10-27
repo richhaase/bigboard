@@ -17,7 +17,7 @@ func TestLoadWorkAreaConfiguration(t *testing.T) {
 		{`{"work_areas":{"mono":[{"name":"Bad","paths":["../outside"]}]}}`, false},
 		{`{"work_areas":{"mono":[{"name":"A","paths":["src"]},{"name":"B","paths":["src"]}]}}`, false},
 		{`{"work_areas":{" ":[]}}`, false},
-		{`{"depth":2}`, true},
+		{`{"depth":2}`, false},
 	}
 	for _, tc := range cases {
 		path := filepath.Join(t.TempDir(), "config.json")

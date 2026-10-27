@@ -18,14 +18,13 @@ import (
 // Config is the optional persistent configuration, read from a JSON file
 // (default ~/.config/bigboard/config.json).
 type Config struct {
-	Paths           []string                        `json:"paths"`
+	Organizations   []string                        `json:"organizations"`
 	Exclude         []string                        `json:"exclude"`
 	Sort            string                          `json:"sort"`
 	Since           string                          `json:"since"`
 	Theme           string                          `json:"theme"`
 	Fuzzy           bool                            `json:"fuzzy"`
 	AllFiles        bool                            `json:"all_files"`
-	Depth           int                             `json:"depth"`
 	Groups          map[string][]string             `json:"groups"`
 	AIIdentities    []string                        `json:"ai_identities"`
 	BotIdentities   []string                        `json:"bot_identities"`
@@ -56,6 +55,15 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"paths", "depth"} {
+		if _, exists := keys[key]; exists {
+			return nil, fmt.Errorf("legacy %s is no longer supported; BigBoard uses its own cache; new schema: %s", key, repositoryConfigExample)
+		}
+	}
 	decoder.DisallowUnknownFields()
 	// Tolerate the obsolete setting from the earlier PR build without
 	// retaining a switch or requiring users to edit their existing config.
@@ -88,6 +96,13 @@ func loadConfig(path string, explicit bool) (*Config, error) {
 	}
 	if cfg.PRRequestBudget < 1 {
 		return nil, fmt.Errorf("pr_request_budget must be a positive integer")
+	}
+	for name, members := range cfg.Groups {
+		for _, member := range members {
+			if _, err := gh.CanonicalRepo(member); err != nil {
+				return nil, fmt.Errorf("groups.%s must contain owner/name values, not paths; new schema: %s", name, repositoryConfigExample)
+			}
+		}
 	}
 	cfg.source = data
 	return &cfg, nil
