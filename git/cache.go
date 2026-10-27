@@ -26,7 +26,7 @@ const (
 
 var ErrCacheDamaged = errors.New("repository cache is damaged and will be rebuilt on refresh")
 
-var objectDamagePattern = regexp.MustCompile(`(?i)(unable to read|could not read) [0-9a-f]{40,64}|missing (blob|tree|commit) [0-9a-f]{40,64}|bad object [0-9a-f]{40,64}|inflate: |could not parse object|loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
+var objectDamagePattern = regexp.MustCompile(`(?i)(unable to|could not|cannot) read( (object|tree|blob|commit|tag))? '?\(?[0-9a-f]{40,64}|(could not|cannot) parse (object|tree|commit|tag) '?\(?[0-9a-f]{40,64}|missing (blob|tree|commit|tag) [0-9a-f]{40,64}|bad( (tree|blob|commit|tag))? object [0-9a-f]{40,64}|inflate: |loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
 
 type RepositoryCache struct {
 	Root string

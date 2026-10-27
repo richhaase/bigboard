@@ -270,7 +270,7 @@ func removeCacheObject(t *testing.T, repo Repository, objectID string) {
 }
 
 func TestRepositoryCacheScanDamageRebuildsOnRefresh(t *testing.T) {
-	for _, object := range []string{"HEAD:file.txt", "HEAD~1"} {
+	for _, object := range []string{"HEAD:file.txt", "HEAD~1", "HEAD^{tree}"} {
 		t.Run(object, func(t *testing.T) {
 			cache, repo, source := cacheFixture(t)
 			if err := cache.Refresh(context.Background(), repo); err != nil {
@@ -361,7 +361,16 @@ func TestIsObjectDamage(t *testing.T) {
 		"error: missing blob " + oid:                                                         true,
 		"fatal: bad object " + oid:                                                           true,
 		"error: inflate: data stream error (incorrect header check)":                         true,
-		"error: could not parse object " + oid:                                               true,
+		"fatal: unable to read tree (" + oid + ")":                                           true,
+		"error: could not parse commit " + oid:                                               true,
+		"error: Could not parse object '" + oid + "'":                                        true,
+		"error: missing tree " + oid + " for commit " + oid:                                  true,
+		"error: bad tree object " + oid:                                                      true,
+		"fatal: cannot read blob " + oid + " for path file.txt":                              true,
+		"fatal: unable to read tree (HEAD)":                                                  false,
+		"error: could not parse commit message":                                              false,
+		"fatal: bad tree object":                                                             false,
+		"error: could not parse object":                                                      false,
 		"error: loose object " + oid + " (stored in objects/aa/x) is corrupt":                true,
 		"error: packfile objects/pack/p.pack cannot be accessed":                             true,
 		"fatal: not a git repository":                                                        false,
