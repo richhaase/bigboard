@@ -198,8 +198,11 @@ request. A matching branch/revision skips Git fetch only when the owned cache
 passes its ownership and layout checks and holds exactly the expected
 default-branch refs at that revision; any other refs force a normal refresh.
 Missing caches and caches that fail these checks still use the normal
-clone/repair path. Git fetch checks the objects it receives; a Git scan that
-reads objects later lost or corrupted fails and is reported as stale.
+clone/repair path. Git fetch checks the objects it receives. When a Git scan
+fails because objects were later lost or corrupted, the cache is marked damaged
+and its parsed scan is discarded; the repository is reported stale, and the next
+startup fetch pass or `r` rebuilds it with a fresh clone even when the probe
+matches. `--export` reports the damage without repairing it.
 Unknown probe results fall back to normal refresh behavior.
 Parsed Git scans retain their existing fingerprint checks, including on `r`.
 When a PR refresh is admitted, an explicit zero count clears retained PRs without

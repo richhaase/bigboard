@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,46 +261,121 @@ func TestRepositoryCacheRefreshIfChangedRepairsUnusableCache(t *testing.T) {
 	}
 }
 
-func TestRepositoryCacheMissingObjectsFailScan(t *testing.T) {
-	for _, kind := range []string{"incomplete", "corrupt"} {
-		t.Run(kind, func(t *testing.T) {
+func removeCacheObject(t *testing.T, repo Repository, objectID string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(repo.Path, "objects", objectID[:2], objectID[2:])); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryCacheScanDamageRebuildsOnRefresh(t *testing.T) {
+	for _, object := range []string{"HEAD:file.txt", "HEAD~1"} {
+		t.Run(object, func(t *testing.T) {
 			cache, repo, source := cacheFixture(t)
 			if err := cache.Refresh(context.Background(), repo); err != nil {
 				t.Fatal(err)
 			}
-			oid := cacheFixtureGit(t, source, "rev-parse", "HEAD")
-			object := "HEAD:file.txt"
-			if kind == "corrupt" {
-				object = "HEAD^{tree}"
-			}
-			objectID := cacheFixtureGit(t, source, "rev-parse", object)
-			path := filepath.Join(repo.Path, "objects", objectID[:2], objectID[2:])
-			if err := os.Remove(path); err != nil {
+			if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if kind == "corrupt" {
-				if err := os.WriteFile(path, []byte("invalid object"), 0600); err != nil {
-					t.Fatal(err)
-				}
+			oid := cacheFixtureGit(t, source, "rev-parse", "HEAD")
+			removeCacheObject(t, repo, cacheFixtureGit(t, source, "rev-parse", object))
+			if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{}); !errors.Is(err, ErrCacheDamaged) {
+				t.Fatalf("scan error=%v, want ErrCacheDamaged", err)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Path, damagedCacheFile)); err != nil {
+				t.Fatalf("damage marker missing: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Path, scanCacheFile)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("parsed scan cache retained: %v", err)
+			}
+			if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{}); !errors.Is(err, ErrCacheDamaged) {
+				t.Fatalf("marked cache scanned: %v", err)
+			}
+			if repos, err := cache.CachedRepositories(); err != nil || len(repos) != 1 {
+				t.Fatalf("damaged cache missing from inventory: %v, %v", repos, err)
 			}
 			originalRun := cache.run
-			fetches := 0
+			fetches, replacements, checks := 0, 0, 0
 			cache.run = func(ctx context.Context, dir string, args ...string) (string, error) {
-				if args[0] == "fetch" {
+				switch args[0] {
+				case "fetch":
 					fetches++
+				case "init":
+					replacements++
+				case "fsck":
+					checks++
 				}
 				return originalRun(ctx, dir, args...)
 			}
 			if err := cache.RefreshIfChanged(context.Background(), repo, "main", oid); err != nil {
 				t.Fatal(err)
 			}
-			if fetches != 0 {
-				t.Fatalf("unchanged remote fetched: %d", fetches)
+			if fetches != 1 || replacements != 1 || checks != 0 {
+				t.Fatalf("fetches=%d replacements=%d fsck=%d, want 1, 1, 0", fetches, replacements, checks)
 			}
-			if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{}); err == nil {
-				t.Fatal("scan succeeded with missing history objects")
+			if _, err := os.Stat(filepath.Join(repo.Path, damagedCacheFile)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("damage marker carried over: %v", err)
+			}
+			records, err := cache.ScanRepository(context.Background(), repo, CollectOptions{})
+			if err != nil || len(records) != 2 {
+				t.Fatalf("rebuilt scan: %d records, %v", len(records), err)
 			}
 		})
+	}
+}
+
+func TestRepositoryCacheScanFailuresWithoutDamageLeaveNoMarker(t *testing.T) {
+	cache, repo, source := cacheFixture(t)
+	if err := cache.Refresh(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.ScanRepository(context.Background(), repo, CollectOptions{Identities: map[string]Identity{"not an email": {}}}); err == nil || errors.Is(err, ErrCacheDamaged) {
+		t.Fatalf("invalid options error=%v", err)
+	}
+	removeCacheObject(t, repo, cacheFixtureGit(t, source, "rev-parse", "HEAD:file.txt"))
+	ctx, cancel := context.WithCancel(context.Background())
+	originalRun := cache.run
+	cache.run = func(runCtx context.Context, dir string, args ...string) (string, error) {
+		output, err := originalRun(runCtx, dir, args...)
+		if args[0] == "rev-parse" && args[len(args)-1] == "--is-bare-repository" {
+			cancel()
+		}
+		return output, err
+	}
+	if _, err := cache.ScanRepository(ctx, repo, CollectOptions{}); err == nil || errors.Is(err, ErrCacheDamaged) {
+		t.Fatalf("canceled scan error=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Path, damagedCacheFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("marker written without classified damage: %v", err)
+	}
+}
+
+func TestIsObjectDamage(t *testing.T) {
+	oid := strings.Repeat("a", 40)
+	for text, want := range map[string]bool{
+		"git log failed: unexpected EOF: fatal: unable to read " + oid:                          true,
+		"error: Could not read " + oid + "\nfatal: Failed to traverse parents of commit " + oid: true,
+		"error: missing blob " + oid:                                                         true,
+		"fatal: bad object " + oid:                                                           true,
+		"error: inflate: data stream error (incorrect header check)":                         true,
+		"error: could not parse object " + oid:                                               true,
+		"error: loose object " + oid + " (stored in objects/aa/x) is corrupt":                true,
+		"error: packfile objects/pack/p.pack cannot be accessed":                             true,
+		"fatal: not a git repository":                                                        false,
+		"fatal: could not read Username for 'https://github.com': terminal prompts disabled": false,
+		"cache is not a complete independent clone":                                          false,
+		"cache has unsupported configuration: remote.origin.promisor":                        false,
+		"fatal: bad object HEAD":                                                             false,
+	} {
+		if got := isObjectDamage(errors.New(text)); got != want {
+			t.Errorf("isObjectDamage(%q)=%v, want %v", text, got, want)
+		}
+	}
+	for _, err := range []error{context.Canceled, context.DeadlineExceeded, fmt.Errorf("unable to read %s: %w", oid, context.DeadlineExceeded)} {
+		if isObjectDamage(err) {
+			t.Errorf("classified %v as damage", err)
+		}
 	}
 }
 

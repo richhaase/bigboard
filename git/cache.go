@@ -8,12 +8,19 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/richhaase/bigboard/github"
 )
+
+const damagedCacheFile = "bigboard-damaged"
+
+var ErrCacheDamaged = errors.New("repository cache is damaged and will be rebuilt on refresh")
+
+var objectDamagePattern = regexp.MustCompile(`(?i)(unable to read|could not read) [0-9a-f]{40,64}|missing (blob|tree|commit) [0-9a-f]{40,64}|bad object [0-9a-f]{40,64}|inflate: |could not parse object|loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
 
 type RepositoryCache struct {
 	Root string
@@ -70,7 +77,61 @@ func (c *RepositoryCache) ScanRepository(ctx context.Context, repo Repository, o
 	if err := c.verify(ctx, repo); err != nil {
 		return nil, err
 	}
-	return c.scanCached(ctx, repo, options)
+	records, err := c.scanCached(ctx, repo, options)
+	if err == nil || ctx.Err() != nil || !isObjectDamage(err) {
+		return records, err
+	}
+	if markErr := c.markDamaged(repo); markErr != nil {
+		return nil, fmt.Errorf("%w: %v; record damage: %v", ErrCacheDamaged, err, markErr)
+	}
+	return nil, fmt.Errorf("%w: %v", ErrCacheDamaged, err)
+}
+
+func isObjectDamage(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return objectDamagePattern.MatchString(err.Error())
+}
+
+func (c *RepositoryCache) markDamaged(repo Repository) error {
+	if err := c.safePath(repo.Path); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(repo.Path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	owner, err := root.ReadFile("bigboard-cache")
+	if err != nil || string(owner) != repo.ID+"\n" {
+		return fmt.Errorf("cache ownership is not verified for %s", repo.ID)
+	}
+	temporary := "." + damagedCacheFile + ".tmp"
+	_ = root.Remove(temporary)
+	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Remove(temporary) }()
+	if _, err := file.WriteString(repo.ID + "\n"); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := root.Rename(temporary, damagedCacheFile); err != nil {
+		return err
+	}
+	if err := root.Remove(scanCacheFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (c *RepositoryCache) Revision(ctx context.Context, repo Repository) (string, error) {
@@ -317,6 +378,9 @@ func (c *RepositoryCache) verify(ctx context.Context, repo Repository) error {
 	if err != nil || strings.TrimSpace(bare) != "true" {
 		return fmt.Errorf("cache is not a bare repository")
 	}
+	if _, err := os.Lstat(filepath.Join(repo.Path, damagedCacheFile)); !errors.Is(err, fs.ErrNotExist) {
+		return ErrCacheDamaged
+	}
 	return nil
 }
 
@@ -397,7 +461,7 @@ func (c *RepositoryCache) inventory() ([]Repository, []string) {
 				problems = append(problems, "unrecognized cache entry: "+filepath.Join(ownerPath, entry.Name()))
 				continue
 			}
-			if err := c.verify(ctx, repo); err != nil {
+			if err := c.verify(ctx, repo); err != nil && !errors.Is(err, ErrCacheDamaged) {
 				problems = append(problems, repo.ID+": "+err.Error())
 				continue
 			}
@@ -421,7 +485,7 @@ func (c *RepositoryCache) Remove(id string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	if err := c.verify(ctx, repo); err != nil {
+	if err := c.verify(ctx, repo); err != nil && !errors.Is(err, ErrCacheDamaged) {
 		return fmt.Errorf("refusing to remove unverified cache: %w", err)
 	}
 	root, err := os.OpenRoot(c.Root)
