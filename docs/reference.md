@@ -170,8 +170,9 @@ review. The first two match your signed-in GitHub login; team membership is not
 inferred. Updated since my review means any PR activity after your latest known
 submitted review, independently of the Since last look bookmark. Missing review
 timestamps do not match. Bounded reviewer coverage can omit matches; Data status
-and PR details report that limitation. If the account cannot be resolved, selected
-Mine filters show no results and explain why.
+and PR details report that limitation. The login is resolved once per session
+and again only after an authentication error or a Settings save. If the account
+cannot be resolved, selected Mine filters show no results and explain why.
 
 `s` cycles Updated, Repository, Author, Title, and Attention; `S` reverses the
 order. Updated starts newest first. Attention starts with review requests to
@@ -191,6 +192,16 @@ in the background and rescans changed revisions. With no cache, initial cloning
 must finish before data is shown. The spinner indicates working; Git progress
 also reports completed/total repositories where space permits. Each scan pass
 publishes a complete snapshot. There is no periodic refresh; use `r`.
+
+`r` also repeats repository discovery before fetching, so repositories created
+during a session appear and repositories no longer listed (deleted, archived, or
+inaccessible) stop being tracked. Groups, exclusions, Settings, and this
+session's Repository controls choices still apply, and an untracked cache stays
+as an unlisted entry until you remove it. Discovery requests send the ETag of the
+previous response for the same page (kept in memory only); an unchanged page
+returns `304 Not Modified`, which does not use core rate limit. If rediscovery
+fails, the current repositories stay tracked, the refresh continues, and the Git
+status and Data status report the failure.
 
 Before the startup network pass and each `r`, a bounded GitHub probe checks the
 default branch name/revision and open-PR count for up to 100 repositories per

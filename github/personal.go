@@ -17,7 +17,7 @@ func (p *Provider) DiscoverPersonalRepositories(ctx context.Context, account str
 	owner, _, _ := strings.Cut(canonical, "/")
 	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
 	defer cancel()
-	data, err := p.setupRequest(ctx, "user")
+	data, err := p.conditionalRequest(ctx, "user")
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (p *Provider) DiscoverPersonalRepositories(ctx context.Context, account str
 	var result []DiscoveredRepository
 	for page := 1; page < MaxRefreshRequests; page++ {
 		endpoint := fmt.Sprintf("user/repos?affiliation=owner&visibility=all&per_page=100&page=%d", page)
-		data, err := p.setupRequest(ctx, endpoint)
+		data, err := p.conditionalRequest(ctx, endpoint)
 		if err != nil {
 			return nil, fmt.Errorf("discovering personal repositories for %s: %w", owner, err)
 		}

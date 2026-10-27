@@ -243,7 +243,7 @@ func TestRepositoryInventoryConcurrentSnapshots(t *testing.T) {
 	for range 8 {
 		workers.Go(func() {
 			for range 100 {
-				inventory.replace(repos)
+				inventory.track(Config{}, repos)
 				current := inventory.snapshot()
 				current[0].ID = "local/edit"
 			}

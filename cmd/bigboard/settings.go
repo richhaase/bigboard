@@ -18,14 +18,33 @@ type settingsProvider interface {
 }
 
 type repositoryInventory struct {
-	mu     sync.RWMutex
-	listed []git.Repository
+	mu      sync.RWMutex
+	listed  []git.Repository
+	config  Config
+	version uint64
 }
 
-func (i *repositoryInventory) replace(repos []git.Repository) {
+func (i *repositoryInventory) track(cfg Config, repos []git.Repository) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	i.config, i.listed = cfg, slices.Clone(repos)
+	i.version++
+}
+
+func (i *repositoryInventory) sources() (Config, uint64) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.config, i.version
+}
+
+func (i *repositoryInventory) replaceTracked(version uint64, repos []git.Repository) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.version != version {
+		return false
+	}
 	i.listed = slices.Clone(repos)
+	return true
 }
 
 func (i *repositoryInventory) snapshot() []git.Repository {
@@ -69,9 +88,27 @@ func newSettingsOptions(path string, cfg *Config, group string, provider setting
 			if err := store.update(ctx, map[string]any{"personal_account": draft.PersonalAccount, "organizations": draft.Organizations, "exclude": draft.Exclude}); err != nil {
 				return nil, err
 			}
-			inventory.replace(discovered)
+			inventory.track(draft, discovered)
 			return selected, nil
 		},
+	}
+}
+
+func newRediscovery(provider settingsProvider, cache *git.RepositoryCache, group string, inventory *repositoryInventory) func(context.Context) ([]git.Repository, map[string]bool, error) {
+	return func(ctx context.Context) ([]git.Repository, map[string]bool, error) {
+		cfg, version := inventory.sources()
+		listed, err := discoverRepositories(ctx, provider, &cfg, cache)
+		if err != nil {
+			return nil, nil, err
+		}
+		selected, excluded, err := selectIncludedRepositories(&cfg, group, listed)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !inventory.replaceTracked(version, listed) {
+			return nil, nil, fmt.Errorf("repository settings changed during discovery")
+		}
+		return selected, excluded, nil
 	}
 }
 

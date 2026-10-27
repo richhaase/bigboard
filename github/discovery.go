@@ -33,12 +33,9 @@ func (p *Provider) DiscoverRepositories(ctx context.Context, organizations []str
 			}
 			requests++
 			endpoint := fmt.Sprintf("orgs/%s/repos?type=all&per_page=100&page=%d", owner, page)
-			data, err := p.runner.Run(ctx, "gh", "api", "--hostname", "github.com", "--method", "GET", endpoint)
+			data, err := p.conditionalRequest(ctx, endpoint)
 			if err != nil {
-				return nil, fmt.Errorf("discovering %s: %w", owner, safeRequestError(err))
-			}
-			if len(data) > MaxOutputBytes {
-				return nil, ErrOutputLimit
+				return nil, fmt.Errorf("discovering %s: %w", owner, err)
 			}
 			var rows []struct {
 				Name          string    `json:"full_name"`
