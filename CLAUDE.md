@@ -224,6 +224,14 @@ the modal, `x` applies that board reset directly. Use copy-on-write for pending
 selections so canceled edits cannot mutate the source model.
 
 PR shortcuts `u`/`v`/`k`/`d` focus Authors/Review/Checks/State options in the common modal.
+`m`/`M`/`n` directly toggle the Mine facet to Needs my attention/Authored by me/
+Review requested from me, preserving shared scope, search and other facets.
+Attention includes own failed/error checks, requested changes, approved passing
+non-drafts, individual review requests and other PRs updated since the user's review.
+`YOU` marks owned rows. `A` sorts authors A–Z with newest PRs first per author;
+`z` opens the numbered sort picker while `s`/`S` retain cycling/reversal.
+Tab expands/focuses the selected preview at 70×24+; navigation scrolls its full
+details until Tab/Esc returns to the list. Hidden previews cannot receive focus.
 Activity `v` opens a contextual repository PR list using shared scope and no
 unrelated saved PR filters. It snapshots only PR UI state, never fetched data.
 `prUIState` groups the PR filters, search, sort, selection, and detail state;

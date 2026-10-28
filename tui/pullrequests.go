@@ -330,6 +330,7 @@ func (m *Model) applyPRResult(msg prsLoadedMsg) {
 	if !found {
 		m.prUI.detail = false
 		m.prUI.offset = 0
+		m.prUI.previewOffset = 0
 	}
 }
 func (m Model) prsForRepository(id string) []gh.PullRequest {
@@ -413,6 +414,9 @@ func (m Model) visiblePRs() []gh.PullRequest {
 			comparison = strings.Compare(strings.ToLower(a.Repo), strings.ToLower(b.Repo))
 		case 2:
 			comparison = strings.Compare(strings.ToLower(a.Author), strings.ToLower(b.Author))
+			if comparison == 0 {
+				comparison = b.UpdatedAt.Compare(a.UpdatedAt)
+			}
 		case 3:
 			comparison = strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
 		case 4:
@@ -430,9 +434,15 @@ func (m Model) visiblePRs() []gh.PullRequest {
 }
 func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if !m.prUI.detail {
+	if !m.prUI.detail && m.prUI.previewFocus && len(m.prSelectedPreview(m.visiblePRs(), m.width)) > 0 {
+		if offset, ok := glanceMove(key, m.prUI.previewOffset, m.prPreviewLineCount(), m.prPreviewBudget()-2); ok {
+			m.prUI.previewOffset = min(offset, max(0, m.prPreviewLineCount()-(m.prPreviewBudget()-2)))
+			return m, nil
+		}
+	} else if !m.prUI.detail {
 		if row, ok := glanceMove(key, m.prUI.row, len(m.visiblePRs()), m.prListPageSize()); ok {
 			m.prUI.row = row
+			m.prUI.previewOffset = 0
 			return m, nil
 		}
 	} else {
@@ -454,6 +464,24 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prUI.offset = max(0, min(m.prUI.offset, m.prDetailMaxOffset()))
 	}
 	switch key {
+	case "m":
+		m.togglePRMine(prMineAttention)
+	case "M":
+		m.togglePRMine(prMineAuthor)
+	case "n":
+		m.togglePRMine(prMineReview)
+	case "A":
+		selected := m.selectedPRKey()
+		m.prUI.sort, m.prUI.reverse = 2, false
+		m.selectPR(selected)
+	case "z":
+		if !m.prUI.detail {
+			m.prUI.sortOpen, m.prUI.sortRow = true, m.prUI.sort
+		}
+	case "tab", "shift+tab":
+		if !m.prUI.detail && len(m.prSelectedPreview(m.visiblePRs(), m.width)) > 0 {
+			m.prUI.previewFocus = !m.prUI.previewFocus
+		}
 	case "t":
 		m.openRangePicker()
 	case "o":
@@ -473,6 +501,8 @@ func (m Model) handlePRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "left":
 		if m.prUI.detail {
 			m.prUI.detail, m.prUI.offset = false, 0
+		} else if m.prUI.previewFocus {
+			m.prUI.previewFocus = false
 		} else if m.prContext.active {
 			m.closeContextPRs(true)
 		}
@@ -521,7 +551,11 @@ func (m Model) renderPRs() string {
 	if m.prUI.browserError != "" {
 		lines = append(lines, "  "+m.prUI.browserError)
 	}
-	return screenFinish(lines, m.prFooter(prs), m.copyCoverage(m.prBoardCoverage()), width, height)
+	view := screenFinish(lines, m.prFooter(prs), m.copyCoverage(m.prBoardCoverage()), width, height)
+	if m.prUI.sortOpen {
+		return m.renderPRSort(view)
+	}
+	return view
 }
 
 func githubIdentity(login string) string {

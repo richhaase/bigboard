@@ -71,14 +71,14 @@ func (m Model) currentHelp() screenHelp {
 	if copyView.canCopyMarkdown() {
 		help.sections = append(help.sections, helpSection{"Copy", []helpBinding{{"y", "Copy the entire filtered list as Markdown (OSC 52 terminal clipboard support required)"}}})
 	}
-	if !m.identityMerge.open && !m.filters.open && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
+	if !m.identityMerge.open && !m.filters.open && (!m.showPRs || !m.prUI.sortOpen) && !m.helpSearchActive() && !m.loading && m.err == nil && !m.showScanErrors && m.viewMode != ViewRepoOverlay {
 		help.sections = append(help.sections, helpSection{"Filters", []helpBinding{{"f", "Filters: category overview with current selections"}, {"t", "Date range options: shared across all boards"}, {"x", "Clear board filters and search; keep scope and location"}}})
 	}
-	if !m.identityMerge.open && !m.filters.open && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
+	if !m.identityMerge.open && !m.filters.open && (!m.showPRs || !m.prUI.sortOpen) && !m.showScanErrors && !m.loading && m.err == nil && m.viewMode != ViewRepoOverlay && !m.helpSearchActive() {
 		help.sections = append(help.sections, helpSection{"Data status", []helpBinding{{"e", "Data status: Git/PR freshness, coverage and diagnostics"}}})
 	}
 	boards := "Boards"
-	if m.identityMerge.open || m.filters.open || m.viewMode == ViewRepoOverlay {
+	if m.identityMerge.open || m.filters.open || m.showPRs && m.prUI.sortOpen || m.viewMode == ViewRepoOverlay {
 		boards = "Boards · cancel pending choices"
 	} else if m.helpSearchActive() {
 		boards = "Boards · from help"
@@ -150,23 +150,33 @@ func (m Model) screenHelp() screenHelp {
 		}}}}
 	}
 	if m.showPRs {
+		if m.prUI.sortOpen {
+			return screenHelp{title: "Sort pull requests", sections: []helpSection{{"Choose sort", []helpBinding{
+				{"1–5", "Apply Updated / Repository / Author / Title / Attention"}, {"↑ / ↓", "Choose a sort"}, {"Home / End", "First / last sort"}, {"Enter", "Apply selected sort"}, {"Esc / ←", "Cancel without changing the sort"}, {"q / Ctrl+C", "Quit BigBoard"},
+			}}}}
+		}
 		title, move := "Pull requests", "Select a pull request"
 		if m.prUI.detail {
 			title, move = "Pull request details", "Scroll PR details"
+		} else if m.prUI.previewFocus {
+			title, move = "Pull request preview", "Scroll the selected PR preview"
 		}
 		back := "Stay at the PRs root; keep filters"
 		if m.prUI.detail {
 			back = "Close details; return to the PR list; keep filters"
+		} else if m.prUI.previewFocus {
+			back = "Collapse preview; return focus to the PR list"
 		} else if m.prContext.active {
 			back = "Return to Activity; restore saved PR filters"
 		}
 		navigation := []helpBinding{{"↑ / ↓", move}, {"PgUp / PgDn", "Move a page"}, {"Home / End", "First / last row or page"}, {"← / Esc", back}}
-		actions := []helpBinding{{"u", "Filters: PR authors"}, {"v", "Filters: review states"}, {"k", "Filters: check states"}, {"d", "Filters: draft/open states"}, {"i", "Repository controls: choose tracked repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}
+		actions := []helpBinding{{"m", "Toggle Needs my attention"}, {"M", "Toggle Authored by me"}, {"n", "Toggle Review requested from me"}, {"u", "Filters: PR authors"}, {"v", "Filters: review states"}, {"k", "Filters: check states"}, {"d", "Filters: draft/open states"}, {"i", "Repository controls: choose tracked repositories"}, {"o", "Open the selected PR in your browser"}, {"q / Ctrl+C", "Quit BigBoard"}, {"r", "Refresh Git and PRs"}}
 		if !m.prUI.detail {
 			navigation = append(navigation, helpBinding{"Enter / →", "Read PR details"})
-			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"s / S", "Change sort / reverse order"}}, actions...)
+			navigation = append(navigation, helpBinding{"Tab / Shift+Tab", "Expand and focus preview / return to list (70×24+)"})
+			actions = append([]helpBinding{{"/", "Find by repo, title, author or PR number"}, {"A", "Sort by author A–Z, newest PRs first per author"}, {"z", "Choose sort directly"}, {"s / S", "Change sort / reverse order"}}, actions...)
 		}
-		return screenHelp{title: title, sections: []helpSection{{"Navigate", navigation}, {"Actions", actions}}, legends: []helpSection{{"Legend", []helpBinding{{"Mine filters", "Authored by me, review requested from me, or Updated since my review; signed-in gh account"}, {"Updated since review", "Any PR activity after your latest known submitted review; missing review times do not match"}, {"Attention sort", "Requested from me → failing checks → changes requested → approved → other; oldest updates first"}, {"! age", "Inactive: no PR update for 14+ days at the last check; distinct from stale cached data"}, {"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
+		return screenHelp{title: title, sections: []helpSection{{"Navigate", navigation}, {"Actions", actions}}, legends: []helpSection{{"Legend", []helpBinding{{"YOU", "Authored by the signed-in GitHub account"}, {"Mine filters", "Needs my attention, Authored by me, review requested from me, or Updated since my review; signed-in gh account"}, {"Needs my attention", "Your failing checks or requested changes; your approved non-draft PRs with passing checks; review requested from you or updated since your review"}, {"Quick filters", "m / M / n toggle the Mine facet; other filters and shared scope still apply"}, {"Updated since review", "Any PR activity after your latest known submitted review; missing review times do not match"}, {"Attention sort", "Requested from me → failing checks → changes requested → approved → other; oldest updates first"}, {"! age", "Inactive: no PR update for 14+ days at the last check; distinct from stale cached data"}, {"◇ / ●", "Draft / open non-draft; drafts have subdued titles"}, {"Green", "Approved review or passing checks; not a merge-readiness verdict"}, {"Date range", "PR last-updated time; local history uses author dates"}}}}}
 	}
 
 	switch m.viewMode {

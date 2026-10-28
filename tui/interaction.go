@@ -31,6 +31,8 @@ func (m Model) modalMinimum() modalMinimum {
 		return identityMinimum
 	case m.filters.open:
 		return filterMinimum
+	case m.showPRs && m.prUI.sortOpen:
+		return filterMinimum
 	case m.viewMode == ViewRepoOverlay:
 		return repositoryMinimum
 	default:

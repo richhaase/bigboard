@@ -14,9 +14,10 @@ type prFilters struct {
 }
 
 const (
-	prMineAuthor  = "Authored by me"
-	prMineReview  = "Review requested from me"
-	prMineUpdated = "Updated since my review"
+	prMineAttention = "Needs my attention"
+	prMineAuthor    = "Authored by me"
+	prMineReview    = "Review requested from me"
+	prMineUpdated   = "Updated since my review"
 )
 
 func (m Model) prMineStatus() string {
@@ -69,6 +70,10 @@ func (f prFilters) matchesMine(pr gh.PullRequest, login string) bool {
 	}
 	for _, value := range f.mine {
 		switch value {
+		case prMineAttention:
+			if len(prAttentionReasons(pr, login)) > 0 {
+				return true
+			}
 		case prMineAuthor:
 			if strings.EqualFold(pr.Author, login) {
 				return true
@@ -131,7 +136,7 @@ func (m Model) prFilterOptions() []prFilterOption {
 	switch m.prUI.filterKind {
 	case "mine":
 		options[0].label = "All PRs"
-		options = append(options, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview}, prFilterOption{prMineUpdated, prMineUpdated})
+		options = append(options, prFilterOption{prMineAttention, prMineAttention}, prFilterOption{prMineAuthor, prMineAuthor}, prFilterOption{prMineReview, prMineReview}, prFilterOption{prMineUpdated, prMineUpdated})
 	case "author":
 		options[0].label = "All authors"
 		authors := map[string]string{}
