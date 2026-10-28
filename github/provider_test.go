@@ -369,7 +369,7 @@ func TestQueryIncludesSubmittedAtInBoundedLatestReviews(t *testing.T) {
 }
 
 func TestQueryIncludesOnlyReadOnlyLightweightContext(t *testing.T) {
-	for _, query := range []string{summaryQuery, leanSummaryQuery, filesQuery, fileBatchQuery([]int{1, 2}), inventoryBatchQuery([]string{"acme/one", "acme/two"}, false), inventoryBatchQuery([]string{"acme/one", "acme/two"}, true)} {
+	for _, query := range []string{summaryQuery, leanSummaryQuery, filesQuery, fileBatchQuery([]int{1, 2}), inventoryBatchQuery([]string{"acme/one", "acme/two"})} {
 		for _, forbidden := range []string{"mutation", "body", "bodyText", "comments", "patch", "diff", "log", "contents", "accessToken"} {
 			if regexp.MustCompile(`\b` + regexp.QuoteMeta(forbidden) + `\b`).MatchString(query) {
 				t.Errorf("query requests forbidden field %q", forbidden)

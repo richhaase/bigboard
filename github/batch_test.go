@@ -39,22 +39,24 @@ func TestFetchAllPrioritizesInventoriesAcrossRepositories(t *testing.T) {
 		runner.steps = append(runner.steps, repoSummaries(t, repo, []*rawPR{row}, 1, false, ""))
 		requests = append(requests, RepositoryRequest{Repo: repo})
 	}
-	for i, row := range rows {
-		runner.steps = append(runner.steps, repoFiles(t, fmt.Sprintf("acme/repo%d", i), row, []*rawFile{file("last.go", "ADDED")}, 2, false, ""))
-	}
+	runner.steps = append(runner.steps, repoFiles(t, "acme/repo0", rows[0], []*rawFile{file("last.go", "ADDED")}, 2, false, ""))
 	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), requests)
 	if len(results) != 3 || len(runner.calls) != 4 {
 		t.Fatalf("results=%d calls=%d", len(results), len(runner.calls))
 	}
-	if _, query, ok := batchedRepositories(runner.calls[0].args); !ok || query != summaryQuery {
-		t.Fatal("file pagination ran before the batched inventory")
-	}
 	for i, result := range results {
-		if !result.Complete || result.InventoryErr != nil || (result.InventoryRequests == 1) != (i == 0) || len(result.PRs) != 1 {
+		if !result.Complete || result.InventoryErr != nil || result.InventoryRequests != 1 || len(result.PRs) != 1 {
 			t.Fatalf("inventory %d was starved: %+v", i, result)
 		}
-		if result.FileRequests != 1 || !result.PRs[0].FilesComplete {
-			t.Fatalf("files not completed: %+v", result)
+		if i == 0 {
+			if result.FileRequests != 1 || !result.PRs[0].FilesComplete {
+				t.Fatalf("first files not completed: %+v", result)
+			}
+		} else if result.FileRequests != 0 || !errors.Is(result.FilesErr, ErrBudgetExceeded) || result.PRs[0].FilesComplete {
+			t.Fatalf("unknown file coverage hidden: %+v", result)
+		}
+		if !hasPair(runner.calls[i].args, "-f", "query="+summaryQuery) {
+			t.Fatal("file pagination ran before every inventory")
 		}
 	}
 }
@@ -69,7 +71,7 @@ func TestFetchAllFilesPrioritizeNewestAcrossRepositories(t *testing.T) {
 		repoFiles(t, "acme/older", older, []*rawFile{file("older.go", "ADDED")}, 2, false, ""),
 	}}
 	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), []RepositoryRequest{{Repo: "acme/older"}, {Repo: "acme/newer"}})
-	if len(runner.calls) != 3 || !hasPair(runner.calls[1].args, "-f", "name=newer") {
+	if !hasPair(runner.calls[2].args, "-f", "name=newer") {
 		t.Fatal("repository order displaced newer PR files")
 	}
 	for _, result := range results {
@@ -213,9 +215,7 @@ func TestFetchAllCancellationPreservesCollectedInventory(t *testing.T) {
 	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		calls.Add(1)
 		cancel()
-		return inventoryResponse(t, args, func(repo string) []byte {
-			return repoSummaries(t, repo, []*rawPR{pendingPR(7)}, 1, false, "").data
-		}), nil
+		return repoSummaries(t, requestRepository(args), []*rawPR{pendingPR(7)}, 1, false, "").data, nil
 	}))
 	var requests []RepositoryRequest
 	for i := range 12 {
@@ -234,7 +234,7 @@ func TestFetchAllCancellationPreservesCollectedInventory(t *testing.T) {
 			}
 		}
 	}
-	if got := calls.Load(); got < 1 || got > inventoryConcurrency || retained != int(got)*inventoryBatchSize(false) {
+	if got := calls.Load(); got < 1 || got > inventoryConcurrency || retained != int(got) {
 		t.Fatalf("cancellation lost returned evidence: calls=%d retained=%d", got, retained)
 	}
 }
@@ -251,7 +251,7 @@ func TestFetchAllFileAuthenticationFailureStopsOtherRepositories(t *testing.T) {
 			t.Fatalf("file failure corrupted inventory: %+v", result)
 		}
 	}
-	if len(runner.calls) != 2 {
+	if len(runner.calls) != 3 {
 		t.Fatal("authentication failure did not stop the remaining file work")
 	}
 }
@@ -267,7 +267,7 @@ func TestFetchAllCountsRequestsForNewlyDiscoveredAliases(t *testing.T) {
 	for _, result := range results {
 		requests += result.InventoryRequests
 	}
-	if len(runner.calls) != 1 || requests != len(runner.calls) {
+	if len(runner.calls) < 2 || len(runner.calls) > 3 || requests != len(runner.calls) {
 		t.Fatalf("actual redirect lookups were not counted: calls=%d requests=%d", len(runner.calls), requests)
 	}
 }
@@ -285,7 +285,7 @@ func TestFetchAllIncompleteAliasCannotReplaceCompleteCanonicalInventory(t *testi
 			t.Fatalf("redundant alias degraded a complete canonical inventory: %+v", result)
 		}
 	}
-	if requests != 1 || len(runner.calls) != 1 {
+	if requests != 2 || len(runner.calls) != 2 {
 		t.Fatal("canonical alias lookup was not charged exactly once")
 	}
 }
@@ -306,7 +306,7 @@ func TestFetchAllAliasLookupSharesCanonicalAllowance(t *testing.T) {
 			t.Fatalf("alias reset canonical request allowance: %+v", result)
 		}
 	}
-	if requests != 2 || len(runner.calls) != 2 {
+	if requests != 3 || len(runner.calls) != 3 {
 		t.Fatalf("per-repository allowance was exceeded: calls=%d requests=%d", len(runner.calls), requests)
 	}
 }

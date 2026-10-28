@@ -31,23 +31,22 @@ func batchInventory(t *testing.T, repositories map[string]*rawRepository, proble
 func repositoryRequests(count int) []RepositoryRequest {
 	requests := make([]RepositoryRequest, count)
 	for i := range requests {
-		requests[i] = RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)}
+		requests[i] = RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i), Previous: []PullRequest{snapshot(99)}}
 	}
 	return requests
 }
 
-func TestInventoryBatchSizesStayWellUnderNodeLimit(t *testing.T) {
-	inline := prPageSize * (1 + 2*contextPageSize + 1 + filePageSize)
-	lean := prPageSize * (1 + 2*contextPageSize + 1)
-	if inventoryBatchSize(false) != 4 || inventoryBatchSize(true) != 9 {
-		t.Fatalf("batch sizes inline=%d lean=%d", inventoryBatchSize(false), inventoryBatchSize(true))
+func TestInventoryBatchSizesStayWellUnderNodeAndOutputLimits(t *testing.T) {
+	nodes := prPageSize * (1 + 2*contextPageSize + 1)
+	if inventoryBatchSize() != 8 {
+		t.Fatalf("lean batch size = %d", inventoryBatchSize())
 	}
-	if inventoryBatchSize(false)*inline > inventoryBatchNodes || inventoryBatchSize(true)*lean > inventoryBatchNodes || inventoryBatchNodes > 500_000/10 {
-		t.Fatal("batched inventory exceeds its node allowance")
+	if inventoryBatchSize()*nodes > inventoryBatchNodes || inventoryBatchNodes > 500_000/10 || inventoryBatchSize()*leanInventoryBytes > MaxOutputBytes/2 {
+		t.Fatal("batched inventory exceeds its node or output allowance")
 	}
 	jobs := make([]*repositoryFetch, 15)
 	var sizes []int
-	for _, chunk := range inventoryChunks(jobs, inventoryBatchSize(true)) {
+	for _, chunk := range inventoryChunks(jobs, inventoryBatchSize()) {
 		sizes = append(sizes, len(chunk))
 	}
 	if fmt.Sprint(sizes) != "[7 8]" {
@@ -55,67 +54,114 @@ func TestInventoryBatchSizesStayWellUnderNodeLimit(t *testing.T) {
 	}
 }
 
-func TestInventoryBatchQueryUsesAliasedRepositoriesAndSharedFields(t *testing.T) {
-	for _, lean := range []bool{false, true} {
-		query := inventoryBatchQuery([]string{"acme/one", "acme/two.go"}, lean)
-		for _, want := range []string{
-			`repo0: repository(owner: "acme", name: "one") { ...BigBoardOpenPullRequests }`,
-			`repo1: repository(owner: "acme", name: "two.go") { ...BigBoardOpenPullRequests }`,
-			"fragment BigBoardOpenPullRequests on Repository",
-		} {
-			if !strings.Contains(query, want) {
-				t.Fatalf("missing %q in %s", want, query)
-			}
+func TestInventoryBatchQueryUsesAliasedRepositoriesAndLeanFields(t *testing.T) {
+	query := inventoryBatchQuery([]string{"acme/one", "acme/two.go"})
+	for _, want := range []string{
+		`repo0: repository(owner: "acme", name: "one") { ...BigBoardOpenPullRequests }`,
+		`repo1: repository(owner: "acme", name: "two.go") { ...BigBoardOpenPullRequests }`,
+		"fragment BigBoardOpenPullRequests on Repository",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("missing %q in %s", want, query)
 		}
-		fields := inlineInventoryFields
-		if lean {
-			fields = leanInventoryFields
-		}
-		if !strings.HasSuffix(query, fields+"}") || !strings.HasPrefix(query, "query ") || strings.Contains(query, "mutation") {
-			t.Fatal("batched inventory diverged from the per-repository fields")
-		}
+	}
+	if !strings.HasSuffix(query, leanInventoryFields+"}") || !strings.HasPrefix(query, "query ") || strings.Contains(query, "mutation") {
+		t.Fatal("batched inventory diverged from the lean per-repository fields")
 	}
 }
 
-func TestFetchAllBatchesFirstInventoryPages(t *testing.T) {
-	for _, lean := range []bool{false, true} {
-		t.Run(fmt.Sprint("lean=", lean), func(t *testing.T) {
-			var requests []RepositoryRequest
-			repositories := make(map[string]*rawRepository)
-			for i := range 3 {
-				repo := fmt.Sprintf("acme/repo%d", i)
-				row := pr(i + 1)
-				var previous []PullRequest
-				if lean {
-					row = leanPR(i+1, 0)
-					previous = []PullRequest{snapshot(99)}
-				}
-				repositories[fmt.Sprintf("repo%d", i)] = &rawRepository{NameWithOwner: repo, PullRequests: conn([]*rawPR{row}, 1, false, "")}
-				requests = append(requests, RepositoryRequest{Repo: repo, Previous: previous})
+func TestFetchAllBatchesOnlyLeanFirstInventoryPages(t *testing.T) {
+	requests := repositoryRequests(3)
+	repositories := make(map[string]*rawRepository)
+	for i := range requests {
+		repositories[fmt.Sprintf("repo%d", i)] = &rawRepository{NameWithOwner: requests[i].Repo, PullRequests: conn([]*rawPR{leanPR(i+1, 0)}, 1, false, "")}
+	}
+	runner := &fakeRunner{t: t, steps: []fakeStep{{batch: true, data: batchInventory(t, repositories)}}}
+	ctx := WithRequestBudget(context.Background(), 10)
+	results := NewProvider(runner).FetchAll(ctx, requests)
+	if len(runner.calls) != 1 || RequestCount(ctx) != 1 {
+		t.Fatalf("calls=%d budget=%d", len(runner.calls), RequestCount(ctx))
+	}
+	if repos, query, ok := batchedRepositories(runner.calls[0].args); !ok || len(repos) != 3 || query != leanSummaryQuery {
+		t.Fatalf("not one batched lean inventory: %v", runner.calls[0].args)
+	}
+	if hasPair(runner.calls[0].args, "-f", "owner=acme") {
+		t.Fatal("batched inventory used per-repository variables")
+	}
+	inventories := 0
+	for i, result := range results {
+		inventories += result.InventoryRequests
+		if result.Repo != requests[i].Repo || !result.Complete || result.Err != nil || len(result.PRs) != 1 || result.PRs[0].Number != i+1 || result.FileRequests != 0 {
+			t.Fatalf("result %d: %+v", i, result)
+		}
+	}
+	if inventories != 1 {
+		t.Fatalf("shared request counted %d times", inventories)
+	}
+}
+
+func TestFetchAllInlineInventoriesStayPerRepository(t *testing.T) {
+	runner := &fakeRunner{t: t}
+	var requests []RepositoryRequest
+	for i := range 3 {
+		repo := fmt.Sprintf("acme/repo%d", i)
+		runner.steps = append(runner.steps, repoSummaries(t, repo, []*rawPR{pr(i + 1)}, 1, false, ""))
+		requests = append(requests, RepositoryRequest{Repo: repo})
+	}
+	for _, result := range NewProvider(runner).FetchAll(context.Background(), requests) {
+		if !result.Complete || result.Err != nil || result.InventoryRequests != 1 {
+			t.Fatalf("inline inventory: %+v", result)
+		}
+	}
+	for _, call := range runner.calls {
+		if _, _, batched := batchedRepositories(call.args); batched || queryOf(call) != summaryQuery {
+			t.Fatal("inline-files inventory was batched")
+		}
+	}
+	if len(runner.calls) != 3 {
+		t.Fatalf("calls=%d", len(runner.calls))
+	}
+}
+
+func TestFetchAllBatchOverOutputLimitFallsBackToRepositories(t *testing.T) {
+	title := strings.Repeat("t", 12_000)
+	respond := func(repo string) []byte {
+		var rows []*rawPR
+		for number := 1; number <= prPageSize; number++ {
+			row := leanPR(number, 0)
+			row.Title = title
+			rows = append(rows, row)
+		}
+		return payload(t, &rawRepository{NameWithOwner: repo, PullRequests: conn(rows, len(rows), false, "")}, 100)
+	}
+	requests := repositoryRequests(4)
+	var batches, singles int
+	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if repos, _, ok := batchedRepositories(args); ok {
+			batches++
+			data, _ := combineInventories(t, repos, func(repo string) ([]byte, error) { return respond(repo), nil })
+			if len(data) <= MaxOutputBytes {
+				t.Fatalf("fixture fits combined: %d bytes", len(data))
 			}
-			runner := &fakeRunner{t: t, steps: []fakeStep{{batch: true, data: batchInventory(t, repositories)}}}
-			ctx := WithRequestBudget(context.Background(), 10)
-			results := NewProvider(runner).FetchAll(ctx, requests)
-			if len(runner.calls) != 1 || RequestCount(ctx) != 1 {
-				t.Fatalf("calls=%d budget=%d", len(runner.calls), RequestCount(ctx))
-			}
-			if repos, query, ok := batchedRepositories(runner.calls[0].args); !ok || len(repos) != 3 || (query == leanSummaryQuery) != lean {
-				t.Fatalf("not one batched inventory: %v", runner.calls[0].args)
-			}
-			if hasPair(runner.calls[0].args, "-f", "owner=acme") {
-				t.Fatal("batched inventory used per-repository variables")
-			}
-			inventories := 0
-			for i, result := range results {
-				inventories += result.InventoryRequests
-				if result.Repo != requests[i].Repo || !result.Complete || result.Err != nil || len(result.PRs) != 1 || result.PRs[0].Number != i+1 || result.FileRequests != 0 {
-					t.Fatalf("result %d: %+v", i, result)
-				}
-			}
-			if inventories != 1 {
-				t.Fatalf("shared request counted %d times", inventories)
-			}
-		})
+			return data, nil
+		}
+		singles++
+		data := respond(requestRepository(args))
+		if len(data) > MaxOutputBytes/2 {
+			t.Fatalf("fixture too large alone: %d bytes", len(data))
+		}
+		return data, nil
+	}))
+	ctx := WithRequestBudget(context.Background(), 10)
+	inventories := 0
+	for i, result := range p.FetchAll(ctx, requests) {
+		inventories += result.InventoryRequests
+		if result.Repo != requests[i].Repo || !result.Complete || result.Err != nil || len(result.PRs) != prPageSize {
+			t.Fatalf("repository %d lost its inventory: %+v", i, result)
+		}
+	}
+	if batches != 1 || singles != 4 || inventories != 5 || RequestCount(ctx) != 5 {
+		t.Fatalf("batches=%d singles=%d inventories=%d budget=%d", batches, singles, inventories, RequestCount(ctx))
 	}
 }
 
@@ -126,10 +172,10 @@ func TestFetchAllBatchedInventoryFollowsOnlyRepositoriesWithMorePages(t *testing
 			"repo0": {NameWithOwner: "acme/repo0", PullRequests: conn([]*rawPR{pr(1)}, 2, true, "page-two")},
 			"repo1": {NameWithOwner: "acme/repo1", PullRequests: conn([]*rawPR{pr(5)}, 1, false, "")},
 		})},
-		repoSummaries(t, "acme/repo0", []*rawPR{second}, 2, false, ""),
+		{repo: "acme/repo0", query: leanSummaryQuery, data: payload(t, &rawRepository{NameWithOwner: "acme/repo0", PullRequests: conn([]*rawPR{second}, 2, false, "")}, 100)},
 	}}
 	results := NewProvider(runner).FetchAll(context.Background(), repositoryRequests(2))
-	if len(runner.calls) != 2 || !hasPair(runner.calls[1].args, "-f", "cursor=page-two") || !hasPair(runner.calls[1].args, "-f", "name=repo0") || queryOf(runner.calls[1]) != summaryQuery {
+	if len(runner.calls) != 2 || !hasPair(runner.calls[1].args, "-f", "cursor=page-two") || !hasPair(runner.calls[1].args, "-f", "name=repo0") || queryOf(runner.calls[1]) != leanSummaryQuery {
 		t.Fatalf("follow-up page missing: %+v", runner.calls)
 	}
 	if !results[0].Complete || len(results[0].PRs) != 2 || results[0].InventoryRequests != 2 || results[0].Err != nil {
@@ -181,7 +227,7 @@ func TestFetchAllBatchedFileFieldErrorKeepsInventoryComplete(t *testing.T) {
 	raw.Files = nil
 	runner := &fakeRunner{t: t, steps: []fakeStep{{batch: true, err: ErrRequest, data: batchInventory(t, map[string]*rawRepository{
 		"repo0": {NameWithOwner: "acme/repo0", PullRequests: conn([]*rawPR{raw}, 1, false, "")},
-		"repo1": {NameWithOwner: "acme/repo1", PullRequests: conn([]*rawPR{pr(2, file("a.go", "ADDED"))}, 1, false, "")},
+		"repo1": {NameWithOwner: "acme/repo1", PullRequests: conn([]*rawPR{leanPR(2, 0)}, 1, false, "")},
 	}, map[string]any{"message": "field unavailable", "path": []any{"repo0", "pullRequests", "nodes", 0, "files"}})}}}
 	results := NewProvider(runner).FetchAll(context.Background(), repositoryRequests(2))
 	if !results[0].Complete || results[0].InventoryErr != nil || results[0].FilesErr == nil || results[0].PRs[0].FilesComplete {
@@ -248,7 +294,7 @@ func TestFetchAllBatchedInventoryRespectsBudgetAndCooldown(t *testing.T) {
 			calls.Add(1)
 			return nil, ErrRateLimited
 		}))
-		results := p.FetchAll(context.Background(), repositoryRequests((inventoryConcurrency+1)*inventoryBatchSize(false)))
+		results := p.FetchAll(context.Background(), repositoryRequests((inventoryConcurrency+1)*inventoryBatchSize()))
 		for _, result := range results {
 			if result.Complete || !errors.Is(result.InventoryErr, ErrRateLimited) || !result.RetryAt.After(time.Now()) {
 				t.Fatalf("cooldown missing: %+v", result)
@@ -266,7 +312,8 @@ func TestFetchAllBatchedRenamedRepositoriesShareCanonicalResult(t *testing.T) {
 		"repo1": {NameWithOwner: "Acme/Repo", PullRequests: conn([]*rawPR{pr(1)}, 2, true, "next")},
 		"repo2": {NameWithOwner: "acme/other", PullRequests: conn([]*rawPR{pr(3)}, 1, false, "")},
 	})}}}
-	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/old-name"}, {Repo: "acme/other"}, {Repo: "ACME/OLD-NAME"}})
+	previous := []PullRequest{snapshot(99)}
+	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: previous}, {Repo: "acme/old-name"}, {Repo: "acme/other", Previous: previous}, {Repo: "ACME/OLD-NAME", Previous: previous}})
 	if len(runner.calls) != 1 {
 		t.Fatalf("calls=%d", len(runner.calls))
 	}
@@ -283,5 +330,36 @@ func TestFetchAllBatchedRenamedRepositoriesShareCanonicalResult(t *testing.T) {
 	}
 	if requests != 1 || len(results[1].PRs) != 2 {
 		t.Fatalf("renamed repository evidence: requests=%d %+v", requests, results[1])
+	}
+}
+
+func TestFetchAllBatchedCompleteAliasEvidenceWinsWithoutDoubleCounting(t *testing.T) {
+	runner := &fakeRunner{t: t, steps: []fakeStep{{batch: true, data: batchInventory(t, map[string]*rawRepository{
+		"repo0": {NameWithOwner: "Acme/Repo", PullRequests: conn([]*rawPR{pr(1)}, 2, false, "")},
+		"repo1": {NameWithOwner: "Acme/Repo", PullRequests: conn([]*rawPR{pr(1), pr(2)}, 2, false, "")},
+	})}}}
+	previous := []PullRequest{snapshot(99)}
+	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old-name", Previous: previous}, {Repo: "acme/repo", Previous: previous}})
+	requests := 0
+	for _, result := range results {
+		requests += result.InventoryRequests
+		if result.Repo != "acme/repo" || !result.Complete || result.Err != nil || len(result.PRs) != 2 {
+			t.Fatalf("incomplete alias evidence replaced complete evidence: %+v", results)
+		}
+	}
+	if requests != 1 || len(runner.calls) != 1 {
+		t.Fatalf("shared request counted %d times over %d calls", requests, len(runner.calls))
+	}
+}
+
+func TestFetchAllBatchedUnscopedErrorSurvivesMemberFileFieldError(t *testing.T) {
+	runner := &fakeRunner{t: t, steps: []fakeStep{{batch: true, err: ErrRequest, data: batchInventory(t, map[string]*rawRepository{
+		"repo0": {NameWithOwner: "acme/repo0", PullRequests: conn([]*rawPR{leanPR(1, 0)}, 1, false, "")},
+		"repo1": {NameWithOwner: "acme/repo1", PullRequests: conn([]*rawPR{leanPR(2, 0)}, 1, false, "")},
+	}, map[string]any{"message": "query failed"}, map[string]any{"message": "field unavailable", "path": []any{"repo0", "pullRequests", "nodes", 0, "files"}})}}}
+	for i, result := range NewProvider(runner).FetchAll(context.Background(), repositoryRequests(2)) {
+		if result.Complete || result.InventoryErr == nil {
+			t.Fatalf("batch-wide failure cleared for repository %d: %+v", i, result)
+		}
 	}
 }

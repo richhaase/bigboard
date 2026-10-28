@@ -23,26 +23,16 @@ func requestRepository(args []string) string {
 	return owner + "/" + name
 }
 
-func inventoryResponse(t *testing.T, args []string, respond func(repo string) []byte) []byte {
-	t.Helper()
-	if repos, _, ok := batchedRepositories(args); ok {
-		data, _ := combineInventories(t, repos, func(repo string) ([]byte, error) { return respond(repo), nil })
-		return data
-	}
-	return respond(requestRepository(args))
-}
-
 func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	chunks := 2 * inventoryConcurrency
-	started := make(chan string, chunks)
+	started := make(chan string, 8)
 	first, second := make(chan struct{}), make(chan struct{})
 	var active, maximum, calls, finished atomic.Int32
 	runner := batchRunnerFunc(func(ctx context.Context, _ string, args ...string) ([]byte, error) {
 		repo := requestRepository(args)
 		if hasPair(args, "-f", "query="+filesQuery) {
-			if finished.Load() != int32(chunks) {
+			if finished.Load() != 8 {
 				t.Error("files requested before all inventories completed")
 			}
 			return repoFiles(t, repo, pendingPR(1), []*rawFile{file("last.go", "ADDED")}, 2, false, "").data, nil
@@ -55,19 +45,17 @@ func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 		if calls.Add(1) > inventoryConcurrency {
 			gate = second
 		}
-		started <- "batch"
+		started <- repo
 		select {
 		case <-gate:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 		finished.Add(1)
-		return inventoryResponse(t, args, func(repo string) []byte {
-			return repoSummaries(t, repo, []*rawPR{pendingPR(1)}, 1, false, "").data
-		}), nil
+		return repoSummaries(t, repo, []*rawPR{pendingPR(1)}, 1, false, "").data, nil
 	})
 	var requests []RepositoryRequest
-	for i := range chunks * inventoryBatchSize(false) {
+	for i := range 8 {
 		requests = append(requests, RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)})
 	}
 	done := make(chan []Result, 1)
@@ -93,15 +81,10 @@ func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 	close(second)
 	select {
 	case results := <-done:
-		inventories := 0
 		for i, result := range results {
-			inventories += result.InventoryRequests
-			if result.Repo != requests[i].Repo || !result.Complete || result.Err != nil || result.FileRequests != 1 || !result.PRs[0].FilesComplete {
+			if result.Repo != requests[i].Repo || !result.Complete || result.Err != nil || result.InventoryRequests != 1 || result.FileRequests != 1 || !result.PRs[0].FilesComplete {
 				t.Fatalf("result order or coverage changed: %+v", results)
 			}
-		}
-		if inventories != chunks {
-			t.Fatalf("inventory requests = %d", inventories)
 		}
 	case <-ctx.Done():
 		t.Fatal("workers did not join")
@@ -131,7 +114,7 @@ func TestConcurrentAliasCompleteEvidenceWinsAndRequestsCountOnce(t *testing.T) {
 	}))
 	done := make(chan []Result, 1)
 	go func() {
-		done <- p.FetchAll(ctx, []RepositoryRequest{{Repo: "acme/old-name"}, {Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}, {Repo: "ACME/REPO"}})
+		done <- p.FetchAll(ctx, []RepositoryRequest{{Repo: "acme/old-name"}, {Repo: "acme/repo"}, {Repo: "ACME/REPO"}})
 	}()
 	for range 2 {
 		select {
@@ -187,12 +170,10 @@ func TestConcurrentInventoryCannotExceedRefreshBudget(t *testing.T) {
 	var calls atomic.Int32
 	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		calls.Add(1)
-		return inventoryResponse(t, args, func(repo string) []byte {
-			return repoSummaries(t, repo, nil, 0, false, "").data
-		}), nil
+		return repoSummaries(t, requestRepository(args), nil, 0, false, "").data, nil
 	}))
 	var requests []RepositoryRequest
-	for i := range 8 * inventoryBatchSize(false) {
+	for i := range 30 {
 		requests = append(requests, RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)})
 	}
 	complete, count := 0, 0
@@ -204,7 +185,7 @@ func TestConcurrentInventoryCannotExceedRefreshBudget(t *testing.T) {
 			t.Fatalf("missing limit explanation: %+v", result)
 		}
 	}
-	if complete != 7*inventoryBatchSize(false) || count != 7 || calls.Load() != 7 || RequestCount(ctx) != 7 {
+	if complete != 7 || count != 7 || calls.Load() != 7 || RequestCount(ctx) != 7 {
 		t.Fatalf("budget exceeded: complete=%d count=%d calls=%d", complete, count, calls.Load())
 	}
 }

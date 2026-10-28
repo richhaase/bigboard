@@ -20,6 +20,7 @@ const (
 	contextPageSize      = 50
 	inventoryConcurrency = 4
 	inventoryBatchNodes  = 50_000
+	leanInventoryBytes   = 128 * 1024
 )
 
 // Provider is safe for concurrent independent repository fetches. It retains no
@@ -166,6 +167,7 @@ type repositoryFetch struct {
 	rows      map[int]*fetchedPR
 	canonical *repositoryFetch
 	lean      bool
+	fetched   bool
 }
 
 func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryRequest) []Result {
@@ -205,7 +207,7 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 			inline = append(inline, batch)
 		}
 	}
-	chunks := append(inventoryChunks(inline, inventoryBatchSize(false)), inventoryChunks(lean, inventoryBatchSize(true))...)
+	chunks := append(inventoryChunks(inline, 1), inventoryChunks(lean, inventoryBatchSize())...)
 	queue := make(chan []*repositoryFetch)
 	var workers sync.WaitGroup
 	for range min(inventoryConcurrency, len(chunks)) {
@@ -230,7 +232,7 @@ func (p *Provider) FetchAll(ctx context.Context, repositories []RepositoryReques
 		counted[batch] = true
 		owner := batch.canonical
 		requests[owner] += batch.session.requests
-		if batch != owner && batch.session.requests == 0 {
+		if batch != owner && !batch.fetched {
 			continue
 		}
 		if winner := winners[owner]; winner == nil || batch.result.Complete && !winner.result.Complete ||
@@ -342,12 +344,9 @@ func reusableFiles(current, previous PullRequest) bool {
 		current.FileCount == previous.FileCount && len(previous.Files) == current.FileCount
 }
 
-func inventoryBatchSize(lean bool) int {
-	nested := 2*contextPageSize + 1
-	if !lean {
-		nested += filePageSize
-	}
-	return max(1, inventoryBatchNodes/(prPageSize*(1+nested)))
+func inventoryBatchSize() int {
+	nodes := prPageSize * (2 + 2*contextPageSize)
+	return max(1, min(inventoryBatchNodes/nodes, MaxOutputBytes/2/leanInventoryBytes))
 }
 
 func inventoryChunks(jobs []*repositoryFetch, size int) [][]*repositoryFetch {
@@ -405,13 +404,17 @@ func (p *Provider) fetchFirstInventories(ctx context.Context, registry *inventor
 		return
 	}
 	session := fetchSession{provider: p, ctx: ctx, registry: registry, aliases: true, allowances: allowances}
-	response, requestErr := session.request(inventoryBatchQuery(repos, batches[members[0]].lean), "", "", 0)
+	response, requestErr := session.request(inventoryBatchQuery(repos), "", "", 0)
 	batches[members[0]].session.requests += session.requests
+	if errors.Is(requestErr, ErrOutputLimit) {
+		return
+	}
 	aliases := make(map[string]int, len(members))
 	for i := range members {
 		aliases[fmt.Sprintf("repo%d", i)] = i
 	}
 	owned := make([][]apiError, len(members))
+	var shared []apiError
 	scoped := response.Data != nil && (requestErr == nil || probeFieldErrors(requestErr))
 	for _, problem := range response.Errors {
 		var alias string
@@ -421,13 +424,14 @@ func (p *Provider) fetchFirstInventories(ctx context.Context, registry *inventor
 		member, ok := aliases[alias]
 		if !ok {
 			scoped = false
+			shared = append(shared, problem)
 			continue
 		}
 		problem.Path = append([]any{"repository"}, problem.Path[1:]...)
 		owned[member] = append(owned[member], problem)
 	}
 	for i, index := range members {
-		memberResponse, memberErr := apiResponse{Errors: owned[i]}, requestErr
+		memberResponse, memberErr := apiResponse{Errors: append(owned[i], shared...)}, requestErr
 		if scoped {
 			memberErr = nil
 			for _, problem := range owned[i] {
@@ -475,6 +479,9 @@ func (p *Provider) acceptInventoryPage(batch *repositoryFetch, state *inventoryP
 	result := &batch.result
 	rows := batch.rows
 	state.done = true
+	if response.Data != nil && response.Data.Repository != nil {
+		batch.fetched = true
+	}
 	if fileFieldErrors(response, requestErr) {
 		result.FilesErr = joinError(result.FilesErr, requestErr)
 		requestErr = nil
@@ -1050,11 +1057,7 @@ const summaryQuery = summaryQueryPrefix + inlineInventoryFields + summaryQuerySu
 
 const leanSummaryQuery = summaryQueryPrefix + leanInventoryFields + summaryQuerySuffix
 
-func inventoryBatchQuery(repositories []string, lean bool) string {
-	fields := inlineInventoryFields
-	if lean {
-		fields = leanInventoryFields
-	}
+func inventoryBatchQuery(repositories []string) string {
 	var query strings.Builder
 	query.WriteString("query BigBoardOpenPullRequestBatch($cursor: String) {\n")
 	for i, repo := range repositories {
@@ -1062,7 +1065,7 @@ func inventoryBatchQuery(repositories []string, lean bool) string {
 		fmt.Fprintf(&query, "  repo%d: repository(owner: %q, name: %q) { ...BigBoardOpenPullRequests }\n", i, owner, name)
 	}
 	query.WriteString("  rateLimit { remaining resetAt }\n}\nfragment BigBoardOpenPullRequests on Repository {\n")
-	query.WriteString(fields)
+	query.WriteString(leanInventoryFields)
 	query.WriteString("}")
 	return query.String()
 }

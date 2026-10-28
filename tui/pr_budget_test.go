@@ -7,7 +7,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richhaase/bigboard/git"
 	gh "github.com/richhaase/bigboard/github"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -84,9 +83,7 @@ func TestPRExcludedRemotesNeverResolveOrFetch(t *testing.T) {
 }
 
 // This runner returns real provider envelopes but never executes gh or git.
-type budgetRunner struct{ calls, repositories atomic.Int32 }
-
-var budgetBatchAlias = regexp.MustCompile(`(repo\d+): repository\(owner: "org", name: "([^"]+)"\)`)
+type budgetRunner struct{ calls atomic.Int32 }
 
 func (r *budgetRunner) Run(_ context.Context, cmd string, args ...string) ([]byte, error) {
 	if cmd == "git" {
@@ -102,31 +99,20 @@ func (r *budgetRunner) Run(_ context.Context, cmd string, args ...string) ([]byt
 			return []byte(`{"data":{"viewer":{"login":"viewer"},"rateLimit":{"remaining":5000}}}`), nil
 		}
 	}
-	inventory := func(name string) string {
-		r.repositories.Add(1)
-		return fmt.Sprintf(`{"nameWithOwner":"org/%s","pullRequests":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}`, name)
-	}
 	var name string
-	var fields []string
 	for _, a := range args {
 		if strings.HasPrefix(a, "name=") {
 			name = strings.TrimPrefix(a, "name=")
 		}
-		for _, match := range budgetBatchAlias.FindAllStringSubmatch(a, -1) {
-			fields = append(fields, fmt.Sprintf("%q:%s", match[1], inventory(match[2])))
-		}
 	}
-	if len(fields) == 0 {
-		fields = append(fields, `"repository":`+inventory(name))
-	}
-	return []byte(`{"data":{` + strings.Join(fields, ",") + `,"rateLimit":{"remaining":5000}}}`), nil
+	return []byte(fmt.Sprintf(`{"data":{"repository":{"nameWithOwner":"org/%s","pullRequests":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}},"rateLimit":{"remaining":5000}}}`, name)), nil
 }
 func TestPRGlobalBudgetWithRealProvider(t *testing.T) {
 	m := awarenessFixture()
 	r := &budgetRunner{}
 	m.prProvider = gh.NewProvider(r)
 	m.local.repositories = nil
-	for i := 0; i < 16*gh.MaxRefreshRequests; i++ {
+	for i := 0; i < gh.MaxRefreshRequests+5; i++ {
 		path := fmt.Sprintf("/repo%d", i)
 		m.local.repositories = append(m.local.repositories, git.Repository{ID: path, Path: path})
 	}
@@ -143,7 +129,7 @@ func TestPRGlobalBudgetWithRealProvider(t *testing.T) {
 			}
 		}
 	}
-	if partial == 0 || partial != len(msg.results)-int(r.repositories.Load()) || msg.accountRequests != 1 || msg.inventoryRequests != gh.MaxRefreshRequests-1 {
+	if partial != 6 || msg.accountRequests != 1 || msg.inventoryRequests != gh.MaxRefreshRequests-1 {
 		t.Fatal(partial)
 	}
 }
