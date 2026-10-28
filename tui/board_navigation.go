@@ -7,6 +7,7 @@ type prContextState struct {
 }
 
 func (m Model) switchBoard(key string) Model {
+	m.prUI.sortOpen = false
 	m.identityMerge = identityMergeState{}
 	if m.viewMode == ViewRepoOverlay {
 		m.closeRepositoryControls(false)
@@ -81,6 +82,7 @@ func (m *Model) openContextPRs(repoID string) {
 	m.prUI.repoID, m.prUI.query, m.prUI.row, m.prUI.offset = repoID, "", 0, 0
 	m.prUI.searching = false
 	m.prUI.browserError = ""
+	m.prUI.previewFocus, m.prUI.previewOffset = false, 0
 }
 
 func (m *Model) closeContextPRs(returnToOrigin bool) {

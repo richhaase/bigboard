@@ -111,6 +111,9 @@ func (m Model) boardFiltersLabel(width int) string {
 		parts = append(parts, "Find: "+displayText(query))
 	}
 	if len(parts) == 0 {
+		if m.showPRs && width >= 90 {
+			return ansi.Truncate("Filters: none · m attention · M mine · n review requests · f edit", max(1, width-4), "…")
+		}
 		return "Filters: none · f edit"
 	}
 	label := "Filters: " + strings.Join(parts, " · ")

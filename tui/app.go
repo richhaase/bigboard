@@ -458,6 +458,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.width < 70 || m.height < 24 {
+			m.prUI.previewFocus = false
+		}
 		m.clampScroll()
 		if m.viewMode == ViewOperative {
 			m.clampStatDetailScroll()
@@ -579,6 +582,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.showScanErrors {
 		return m.handleScanErrorKey(msg)
+	}
+	if m.showPRs && m.prUI.sortOpen {
+		return m.handlePRSort(msg)
 	}
 	if m.identityMerge.open {
 		return m.handleIdentityMergeKey(msg)

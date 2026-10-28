@@ -65,6 +65,19 @@ not that every merge requirement is satisfied. Drafts use `◇`; open non-drafts
 `●`. The selected preview keeps the full repository and title visible. Enter
 opens details and `o` opens the PR in a browser.
 
+Your highlighted username identifies your own PRs. Press `m` for Needs my
+attention, `M` for your PRs, or `n` for review requests to you; repeat a shortcut
+to clear its Mine filter.
+Attention includes your failing checks, requested changes, and approved
+non-draft PRs with passing checks, plus PRs awaiting your review or updated
+since your review. Other filters and shared scope still apply.
+
+`A` groups PRs by author A–Z with newest PRs first per author. `z` opens a direct
+sort picker. Tab expands the selected preview into scrollable PR details; Tab
+or Esc returns focus to the list. The compact preview adds conflicts, file
+counts and requested reviewers when space permits. These controls are newer
+than the screenshot above.
+
 The shared date range uses **PR last-updated time** here. `s` includes Attention,
 which starts with review requests to you, failing checks, changes requested,
 approved PRs, then other PRs. Direction is shown as **priority first** or

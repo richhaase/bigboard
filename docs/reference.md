@@ -165,16 +165,26 @@ modal; `o` opens the selected PR in a browser. `/` searches repository, title,
 author, or number. `u`, `v`, `k`, and `d` open Authors, Review, Checks, and State
 options in Filters.
 
-Mine offers Authored by me, Review requested from me, and Updated since my
-review. The first two match your signed-in GitHub login; team membership is not
+Mine offers Needs my attention, Authored by me, Review requested from me, and
+Updated since my review. `m` toggles Needs my attention, `M` toggles Authored by
+me, and `n` toggles Review requested from me directly from the list or details.
+These shortcuts replace only the Mine facet; shared scope, other facets and
+search still apply. Repeating the same shortcut clears the Mine facet.
+Needs my attention includes your PRs with failing/error checks or requested
+changes, your approved non-draft PRs with passing checks, PRs with an individual
+review requested from you, and other authors' PRs updated since your review.
+Approval and passing checks alone do not establish merge readiness.
+Authored by me and review requests match your signed-in GitHub login; team membership is not
 inferred. Updated since my review means any PR activity after your latest known
 submitted review, independently of the Since last look bookmark. Missing review
 timestamps do not match. Bounded reviewer coverage can omit matches; Data status
 and PR details report that limitation. If the account cannot be resolved, selected
 Mine filters show no results and explain why.
 
-`s` cycles Updated, Repository, Author, Title, and Attention; `S` reverses the
-order. Updated starts newest first. Attention starts with review requests to
+`A` sorts directly by author A–Z, newest PRs first within each author. `z` opens
+a sort picker: `1`–`5` applies a sort directly, or use arrows and Enter. Esc
+cancels. `s` still cycles Updated, Repository, Author, Title, and Attention; `S`
+reverses the order. Updated starts newest first. Attention starts with review requests to
 you, then failing checks, changes requested, approved open PRs, and other PRs.
 Within each category, oldest updates come first and unknown dates follow dated
 PRs. Reverse reverses the entire order. Labels describe the direction explicitly.
@@ -183,6 +193,14 @@ PRs. Reverse reverses the entire order. Labels describe the direction explicitly
 or passing reported checks; it is not a branch-protection or merge-readiness
 verdict. An amber `!` on age marks no update for at least 14 days at the snapshot
 check time. `+` marks an update since your bookmark. Both differ from stale data.
+
+Your username is highlighted in the author column, including the selected row.
+At 70×24 or larger, the selected preview adds conflict, file-count and requested
+reviewer information when space permits. Tab expands and focuses the preview;
+arrows, page keys and Home/End scroll its full PR details without changing the
+selected row. Tab or Esc returns to the list. The preview reserves at least
+three list rows and is hidden below 70×24. Enter still opens the detail
+modal. Unknown or partial reviewer/file evidence remains labeled.
 
 ## Refresh, coverage, and bookmarks
 
