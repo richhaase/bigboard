@@ -143,7 +143,6 @@ func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, in
 	repo, author := displayText(repoLabel), githubIdentity(pr.Author)
 	authorStyle := StyleDimWhite
 	if prOwnedBy(pr, m.prState.login) {
-		author = "YOU " + author
 		authorStyle = StyleCyan.Bold(true)
 	}
 	review, checks := prReviewLabel(pr.ReviewDecision), prCheckLabel(pr.CheckState)

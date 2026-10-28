@@ -65,8 +65,9 @@ not that every merge requirement is satisfied. Drafts use `◇`; open non-drafts
 `●`. The selected preview keeps the full repository and title visible. Enter
 opens details and `o` opens the PR in a browser.
 
-`YOU` marks your own PRs. Press `m` for Needs my attention, `M` for your PRs, or
-`n` for review requests to you; repeat a shortcut to clear its Mine filter.
+Your highlighted username identifies your own PRs. Press `m` for Needs my
+attention, `M` for your PRs, or `n` for review requests to you; repeat a shortcut
+to clear its Mine filter.
 Attention includes your failing checks, requested changes, and approved
 non-draft PRs with passing checks, plus PRs awaiting your review or updated
 since your review. Other filters and shared scope still apply.

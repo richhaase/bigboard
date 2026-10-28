@@ -8,7 +8,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 	gh "github.com/richhaase/bigboard/github"
 )
 
@@ -74,25 +76,34 @@ func TestPRQuickFiltersPreserveScopeAndOtherFacets(t *testing.T) {
 	}
 }
 
-func TestPROwnershipMarkerSurvivesSelectionAndResponsiveRows(t *testing.T) {
+func TestPROwnershipHighlightSurvivesSelectionAndResponsiveRows(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(previous)
+	lipgloss.SetColorProfile(termenv.TrueColor)
 	m := mineFixture()
 	pr := m.prState.snapshots["org/repo"].prs[0]
 	for _, width := range []int{40, 70, 80, 110, 180} {
 		for _, selected := range []bool{false, true} {
+			m.prState.login = "Viewer"
 			rows := m.prTableRow(pr, "repo", selected, 0, width)
-			if !strings.Contains(ansi.Strip(strings.Join(rows, "\n")), "YOU @viewer") {
-				t.Fatalf("%d selected=%v lost ownership marker", width, selected)
+			highlighted := strings.Join(rows, "\n")
+			m.prState.login = "other"
+			ordinary := strings.Join(m.prTableRow(pr, "repo", selected, 0, width), "\n")
+			if highlighted == ordinary || ansi.Strip(highlighted) != ansi.Strip(ordinary) || !strings.Contains(ansi.Strip(highlighted), "@viewer") {
+				t.Fatalf("%d selected=%v should distinguish ownership through styling alone", width, selected)
 			}
 			for _, row := range rows {
 				if ansi.StringWidth(row) > width {
-					t.Fatal("ownership marker overflowed the row")
+					t.Fatal("ownership highlight overflowed the row")
 				}
 			}
 		}
 	}
 	m.prState.login = ""
-	if strings.Contains(ansi.Strip(strings.Join(m.prTableRow(pr, "repo", false, 0, 120), "\n")), "YOU") {
-		t.Fatal("ownership marker guessed an unavailable account")
+	unknown := strings.Join(m.prTableRow(pr, "repo", false, 0, 120), "\n")
+	m.prState.login = "other"
+	if unknown != strings.Join(m.prTableRow(pr, "repo", false, 0, 120), "\n") {
+		t.Fatal("ownership highlight guessed an unavailable account")
 	}
 }
 

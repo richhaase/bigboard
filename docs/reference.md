@@ -194,7 +194,7 @@ or passing reported checks; it is not a branch-protection or merge-readiness
 verdict. An amber `!` on age marks no update for at least 14 days at the snapshot
 check time. `+` marks an update since your bookmark. Both differ from stale data.
 
-`YOU` marks your own PRs in the author column, including the selected row.
+Your username is highlighted in the author column, including the selected row.
 At 70×24 or larger, the selected preview adds conflict, file-count and requested
 reviewer information when space permits. Tab expands and focuses the preview;
 arrows, page keys and Home/End scroll its full PR details without changing the
