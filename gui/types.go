@@ -133,10 +133,11 @@ type IdentityRequest struct {
 }
 type ControlledRepository struct {
 	Repository
-	Included  bool `json:"included"`
-	Listed    bool `json:"listed"`
-	Cached    bool `json:"cached"`
-	CanRemove bool `json:"canRemove"`
+	Included   bool `json:"included"`
+	Selectable bool `json:"selectable"`
+	Listed     bool `json:"listed"`
+	Cached     bool `json:"cached"`
+	CanRemove  bool `json:"canRemove"`
 }
 type RepositoryControls struct {
 	Repositories []ControlledRepository `json:"repositories"`

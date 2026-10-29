@@ -218,3 +218,45 @@ func TestSavedExclusionsAllowNewRepositoriesOnRefresh(t *testing.T) {
 		t.Fatal("all-unchecked settings accepted")
 	}
 }
+
+func TestLegacySettingsDiscoveryIgnoresGroupAndSessionScope(t *testing.T) {
+	s, _, provider := testService(t, "live")
+	s.provider = &changingDiscovery{fakeProvider: provider, repositories: []gh.DiscoveredRepository{
+		{Name: "example/engine", DefaultBranch: "main"},
+		{Name: "example/hidden", DefaultBranch: "main"},
+		{Name: "example/new", DefaultBranch: "main"},
+		{Name: "example/excluded", DefaultBranch: "main"},
+	}}
+	s.analysis.Groups = map[string][]string{"core": {"example/engine"}}
+	s.analysis.Exclude = []string{"excluded"}
+	s.group = "core"
+	s.sessionExcluded = map[string]bool{"example/hidden": true}
+	settings := s.Snapshot().Settings
+	choices, err := s.Discover(settings)
+	if err != nil || len(choices) != 4 {
+		t.Fatalf("legacy discovery: %+v %v", choices, err)
+	}
+	settings.ExcludedRepositories = []string{}
+	for _, repo := range choices {
+		if repo.Included != (repo.ID != "example/excluded") {
+			t.Fatalf("temporary scope replaced saved selection: %+v", repo)
+		}
+		if repo.Included {
+			settings.Repositories = append(settings.Repositories, repo.ID)
+		} else {
+			settings.ExcludedRepositories = append(settings.ExcludedRepositories, repo.ID)
+		}
+	}
+	if _, err := s.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.SelectGroup("")
+	if err != nil || len(result.Repositories) != 3 {
+		t.Fatalf("saved workspace lost repositories outside the old scope: %+v %v", result.Repositories, err)
+	}
+	for _, repo := range result.Repositories {
+		if repo.ID == "example/excluded" {
+			t.Fatal("legacy exclusion was lost")
+		}
+	}
+}

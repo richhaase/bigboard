@@ -1,5 +1,5 @@
 {
-  "name": "bigboard-desktop-prototype",
+  "name": "bigboard-desktop",
   "private": true,
   "type": "module",
   "scripts": {

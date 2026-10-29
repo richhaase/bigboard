@@ -11,8 +11,8 @@
   },
   "info": {
     "productName": "Bigboard",
-    "productVersion": "0.1.0",
-    "comments": "GUI prototype for exploring repository activity",
+    "productVersion": "0.0.0",
+    "comments": "Explore repository activity with Bigboard",
     "copyright": "Copyright \u00a9 Rich Haase"
   }
 }

@@ -14,10 +14,10 @@ const binary=path.join(temporary,'bigboard');
 execFileSync('go',['build','-o',binary,'.'],{cwd:root,stdio:'inherit'});
 const server=spawn(binary,['--serve','--addr','127.0.0.1:0'],{env:{...process.env,XDG_CONFIG_HOME:path.join(temporary,'config'),XDG_CACHE_HOME:path.join(temporary,'cache')},stdio:['ignore','pipe','pipe']});
 const address=await new Promise((resolve,reject)=>{
- const timer=setTimeout(()=>reject(new Error('Preview failed to start')),15000);
+ const timer=setTimeout(()=>reject(new Error('Test server failed to start')),15000);
  server.stdout.on('data',chunk=>{const match=chunk.toString().match(/http:\/\/127\.0\.0\.1:\d+/);if(match){clearTimeout(timer);resolve(match[0]);}});
  server.once('error',reject);
- server.once('exit',code=>{clearTimeout(timer);reject(new Error(`Preview exited ${code}`));});
+ server.once('exit',code=>{clearTimeout(timer);reject(new Error(`Test server exited ${code}`));});
  server.stderr.on('data',chunk=>process.stderr.write(chunk));
 });
 let browser;
@@ -33,7 +33,7 @@ try {
  const discoverSettings=async()=>{await click('[data-action="discover"]');await page.getByRole('button',{name:'Discover repositories',exact:true}).waitFor();};
  const now=new Date().toISOString();
  const earlier=new Date(Date.now()-86400000).toISOString();
- const settings={mode:'live',personalAccount:'',organizations:['test-org'],repositories:[],excludedRepositories:[]};
+ const settings={mode:'live',personalAccount:'',organizations:['test-org'],repositories:[],excludedRepositories:null};
  const repositories=['test-org/alpha','test-org/beta'].map(id=>({id,name:id.split('/')[1],branch:'main',revision:'a'.repeat(40),stale:false,error:'',pushedAt:now,scannedAt:now,prCheckedAt:now,prInventoryComplete:true,prFilesComplete:true,prReviewersComplete:true}));
  let discoveryRepositories=repositories.map(r=>({...r,included:true}));
  const commits=Array.from({length:210},(_,i)=>({id:i.toString(16).padStart(40,'0'),repo:repositories[i<205?0:1].id,author:`Contributor ${i%3+1}`,email:`contributor${i%3+1}@example.test`,date:now,subject:`Change ${i+1}`,added:10,removed:3,ai:i%3===0,bot:false,linesUnknown:false,files:[{path:'src/app.go',added:10,removed:3}]}));
@@ -47,7 +47,7 @@ try {
  let identitySaves=0;
  let settingsSaves=0;
  let removedCaches=0;
- let controls=[...repositories.map(r=>({...r,included:true,listed:true,cached:true,canRemove:false})),{id:'test-org/retired',name:'retired',included:false,listed:false,cached:true,canRemove:true}];
+ let controls=[...repositories.map(r=>({...r,included:true,selectable:true,listed:true,cached:true,canRemove:false})),{id:'test-org/retired',name:'retired',included:false,selectable:false,listed:false,cached:true,canRemove:true}];
  await page.route('**/api/**',async route=>{
   const endpoint=new URL(route.request().url()).pathname;
   const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
@@ -62,7 +62,10 @@ try {
    snapshot={...loaded,settings:snapshot.settings,mode:snapshot.settings.mode,pullRequests:snapshot.settings.mode==='cache'?[]:pullRequests};
    return send(snapshot);
   }
-  if(endpoint==='/api/discover')return send(discoveryRepositories);
+  if(endpoint==='/api/discover'){
+   const draft=route.request().postDataJSON();
+   return send(discoveryRepositories.map(r=>({...r,included:Array.isArray(draft.excludedRepositories)?!draft.excludedRepositories.includes(r.id):draft.repositories?.length?draft.repositories.includes(r.id):r.included!==false})));
+  }
   if(endpoint==='/api/export')return send(JSON.stringify({contributors:[{email:'contributor1@example.test',commits:70}]}));
   if(endpoint==='/api/identities')return send({identities:[1,2,3].map(i=>({email:`contributor${i}@example.test`,name:`Contributor ${i}`,aliases:[]}))});
   if(endpoint==='/api/identity'){
@@ -72,10 +75,10 @@ try {
    snapshot={...loaded,settings:snapshot.settings};return send(snapshot);
   }
   if(endpoint==='/api/repository-controls'){
-   if(route.request().method()==='GET')return send({repositories:controls,cacheBytes:1048576,cachePath:'/test/cache',errors:[]});
+   if(route.request().method()==='GET')return send({repositories:snapshot.mode==='cache'?controls.filter(r=>r.listed).map(r=>({...r,listed:false,canRemove:false})):controls,cacheBytes:1048576,cachePath:'/test/cache',errors:[]});
    const selection=route.request().postDataJSON().included;
    controls=controls.map(r=>({...r,included:selection.includes(r.id)}));
-   snapshot={...loaded,repositories:loaded.repositories.filter(r=>selection.includes(r.id)),commits:loaded.commits.filter(c=>selection.includes(c.repo)),pullRequests:loaded.pullRequests.filter(p=>selection.includes(p.repo))};
+   snapshot={...loaded,...snapshot,repositories:loaded.repositories.filter(r=>selection.includes(r.id)),commits:loaded.commits.filter(c=>selection.includes(c.repo)),pullRequests:snapshot.mode==='cache'?[]:loaded.pullRequests.filter(p=>selection.includes(p.repo))};
    return send(snapshot);
   }
   if(endpoint==='/api/remove-cache'){
@@ -235,6 +238,20 @@ try {
  await page.keyboard.press('F1');
  await page.getByRole('dialog').waitFor();
  await page.keyboard.press('Escape');
+ await page.getByLabel('Repository group').selectOption('backend');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-row="activity"]').length===1);
+ discoveryRepositories=[...repositories.map(r=>({...r,included:true})),{...repositories[0],id:'test-org/new',name:'new',included:true},{...repositories[0],id:'test-org/excluded',name:'excluded',included:false}];
+ await click('.sidebar [data-action="settings"].nav-item');
+ assert.equal(await page.locator('[data-settings-repo]:checked').count(),1);
+ await discoverSettings();
+ for(const id of ['alpha','beta','new'])assert.equal(await page.locator(`[data-settings-repo="test-org/${id}"]`).isChecked(),true,`legacy discovery includes ${id} independently of the current group`);
+ assert.equal(await page.locator('[data-settings-repo="test-org/excluded"]').isChecked(),false,'legacy configured exclusion remains unchecked');
+ await click('[data-action="save-settings"]');
+ assert.equal(await page.locator('[data-action="save-settings"]').innerText(),'Save workspace');
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.getByLabel('Repository group').selectOption('');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-row="activity"]').length===2);
+ discoveryRepositories=repositories.map(r=>({...r,included:true}));
  await click('.sidebar [data-action="settings"].nav-item');
  assert.deepEqual(await page.locator('[data-action="settings-mode"]').evaluateAll(items=>items.map(x=>x.dataset.value)),['live','cache']);
  assert.equal(await page.locator('[data-settings-repo]:checked').count(),2,'included repositories begin checked');
@@ -262,6 +279,17 @@ try {
  await click('[data-action="save-settings"]');
  await page.getByText('Cached history',{exact:true}).waitFor();
  await page.reload();
+ await page.getByText('Cached history',{exact:true}).waitFor();
+ await click('.sidebar [data-action="controls"]');
+ assert.equal(await page.locator('[data-control-repo="test-org/beta"]').isEnabled(),true,'cached repositories are selectable without live discovery');
+ assert.equal(await page.locator('[data-action="confirm-remove-cache"]').count(),0,'offline tracking does not permit cache removal');
+ await page.locator('[data-control-repo="test-org/beta"]').uncheck();
+ await click('[data-action="apply-controls"]');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-row="activity"]').length===1);
+ await click('.sidebar [data-action="controls"]');
+ await page.locator('[data-control-repo="test-org/beta"]').check();
+ await click('[data-action="apply-controls"]');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-row="activity"]').length===2);
  await page.getByText('Cached history',{exact:true}).waitFor();
  await click('[data-action="board"][data-value="prs"]');
  await page.getByText('PR context is unavailable offline',{exact:true}).waitFor();

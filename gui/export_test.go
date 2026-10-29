@@ -35,7 +35,7 @@ func TestExportMatchesCanonicalAllTimeSchemaWithoutNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	if actual != string(expected)+"\n" {
-		t.Fatalf("export differs from terminal schema/counts:\n%s\n%s", actual, expected)
+		t.Fatalf("export differs from the contributor schema/counts:\n%s\n%s", actual, expected)
 	}
 	if provider.calls != 0 || cache.refreshes != 0 {
 		t.Fatal("export performed remote work")

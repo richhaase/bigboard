@@ -165,7 +165,7 @@ func TestFailedDiscoveryRetainsEvidenceAndReportsPartialScope(t *testing.T) {
 	}
 }
 
-func TestSettingsSaveValidatesAndPersistsWithoutTouchingCLIConfig(t *testing.T) {
+func TestSettingsSaveValidatesAndPersistsWithoutChangingAnalysisConfig(t *testing.T) {
 	s, _, _ := testService(t, "cache")
 	cliPath := filepath.Join(filepath.Dir(s.path), "config.json")
 	cli := []byte(`{"organizations":["example"],"sort":"commits"}`)
@@ -199,7 +199,7 @@ func TestSettingsSaveValidatesAndPersistsWithoutTouchingCLIConfig(t *testing.T) 
 	}
 	data, _ = os.ReadFile(cliPath)
 	if string(data) != string(cli) {
-		t.Fatal("CLI configuration changed")
+		t.Fatal("analysis configuration changed")
 	}
 	if err := os.WriteFile(s.path, []byte(`{"mode":"demo"}`), 0600); err != nil {
 		t.Fatal(err)

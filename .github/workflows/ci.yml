@@ -17,6 +17,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Check formatting
       run: |
         unformatted=$(gofmt -l .)
@@ -36,6 +37,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run tests with coverage
       run: go test -coverprofile=coverage.out ./...
     - name: Upload coverage
@@ -54,6 +56,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run tests with race detector
       run: go test -race ./...
 
@@ -67,8 +70,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run lint
-      run: make lint
+      run: make lint-core
 
   staticcheck:
     name: Staticcheck
@@ -80,8 +84,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run staticcheck
-      run: make staticcheck
+      run: make staticcheck-core
 
   vet:
     name: Vet
@@ -93,8 +98,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run vet
-      run: make vet
+      run: make vet-core
 
   govulncheck:
     name: Vulnerability Check
@@ -106,5 +112,58 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run govulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  desktop:
+    name: Desktop
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'desktop/go.mod'
+        cache-dependency-path: 'desktop/go.sum'
+    - name: Setup Node with fnm
+      run: |
+        command -v fnm >/dev/null || brew install fnm
+        fnm install "$(cat .node-version)"
+    - name: Install frontend test dependencies
+      working-directory: desktop
+      run: fnm exec --using ../.node-version npm ci
+    - name: Test desktop with race detection
+      working-directory: desktop
+      run: go test -race -coverprofile=coverage.out ./...
+    - name: Vet desktop
+      run: make vet-desktop
+    - name: Lint desktop
+      run: make lint-desktop
+    - name: Staticcheck desktop
+      run: make staticcheck-desktop
+    - name: Test frontend models
+      run: make test-frontend
+    - name: Test release packaging scripts
+      run: python3 -B -m unittest discover -s scripts -p '*_test.py'
+    - name: Build native application
+      run: fnm exec --using .node-version make build
+    - name: Install browser for smoke tests
+      working-directory: desktop
+      run: fnm exec --using ../.node-version npx playwright install chromium
+    - name: Test browser workflows
+      working-directory: desktop
+      run: fnm exec --using ../.node-version npm run test:e2e
+    - name: Upload desktop coverage
+      uses: actions/upload-artifact@v7
+      with:
+        name: desktop-coverage
+        path: desktop/coverage.out
+    - name: Upload browser failure screenshots
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: desktop-browser-failure
+        path: desktop/build/screenshots
+        if-no-files-found: ignore

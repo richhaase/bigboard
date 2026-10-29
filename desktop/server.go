@@ -35,7 +35,7 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 				return err
 			}
 			if err := decoder.Decode(new(any)); err != io.EOF {
-				return errors.New("Expected one JSON object")
+				return errors.New("expected one JSON object")
 			}
 			return nil
 		}
@@ -64,7 +64,7 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 					return
 				}
 				if err := decoder.Decode(new(any)); err != io.EOF {
-					fail(400, errors.New("Expected one JSON object"))
+					fail(400, errors.New("expected one JSON object"))
 					return
 				}
 			}
@@ -105,11 +105,11 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 					result, err = app.OpenPath(request)
 				}
 			default:
-				fail(404, errors.New("Unknown operation"))
+				fail(404, errors.New("unknown operation"))
 				return
 			}
 		} else {
-			fail(405, errors.New("Method not allowed"))
+			fail(405, errors.New("method not allowed"))
 			return
 		}
 		if err != nil {
@@ -121,7 +121,7 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 	mux.Handle("/", http.FileServer(http.FS(frontend)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != host || (r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "http://"+host) {
-			http.Error(w, "Local origin required", 403)
+			http.Error(w, "Local origin required", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -136,7 +136,7 @@ func servePreview(address string, frontend fs.FS, app *App) error {
 		return err
 	}
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-		return errors.New("Preview must bind to a loopback IP address")
+		return errors.New("preview must bind to a loopback IP address")
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {

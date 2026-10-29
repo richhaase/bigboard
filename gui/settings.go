@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -104,11 +105,12 @@ func normalizeSettings(settings Settings) (Settings, error) {
 
 func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
 	analysis := analysisConfig{PRRequestBudget: gh.MaxRefreshRequests, Since: "14d", Sort: "total"}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "config.json"))
+	files := os.DirFS(filepath.Dir(path))
+	data, err := fs.ReadFile(files, "config.json")
 	if err == nil {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
-			return Settings{}, analysis, nil, errors.New("Bigboard configuration must be a JSON object")
+			return Settings{}, analysis, nil, errors.New("configuration must be a JSON object")
 		}
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
@@ -132,7 +134,7 @@ func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
 	}
 	settings := initial
 	settings.Organizations = slices.Clone(initial.Organizations)
-	data, err = os.ReadFile(path)
+	data, err = fs.ReadFile(files, filepath.Base(path))
 	if err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return Settings{}, analysis, nil, fmt.Errorf("reading desktop settings: %w", err)

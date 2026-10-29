@@ -1,47 +1,16 @@
 version: 2
 
-before:
-  hooks:
-    - go mod tidy
-    - go test ./...
+project_name: bigboard
 
 builds:
   - id: bigboard
-    main: ./cmd/bigboard
-    binary: bigboard
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
-      - -X main.builtBy=goreleaser
-
-archives:
-  - id: bigboard-archive
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- .Version }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-    formats:
-      - tar.gz
-    files:
-      - README.md
-      - LICENSE
+    skip: true
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: checksums.txt
   algorithm: sha256
+  extra_files:
+    - glob: desktop/build/bin/Bigboard_{{ .Version }}_darwin_universal.zip
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
@@ -76,10 +45,12 @@ release:
   draft: false
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
+  extra_files:
+    - glob: desktop/build/bin/Bigboard_{{ .Version }}_darwin_universal.zip
   header: |
     ## Big Board v{{.Version}}
 
-    Terminal dashboard for exploring work areas, contributors, and commit evidence across Git repositories.
+    Bigboard for macOS: explore work areas, contributors, and commit evidence across GitHub repositories.
   footer: |
     ---
 
@@ -93,43 +64,8 @@ release:
     ```
 
     ### Direct Download
-    Download the appropriate archive from the assets below and extract the `bigboard` binary.
-
-    ### From Source
-    ```bash
-    go install github.com/richhaase/bigboard/cmd/bigboard@v{{ .Version }}
-    ```
-
-homebrew_casks:
-  - name: bigboard
-    repository:
-      owner: richhaase
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/richhaase/bigboard"
-    description: "Terminal dashboard for contributor activity across Git repositories"
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-    commit_msg_template: "Cask update for {{ .ProjectName }} version {{ .Tag }}"
-    skip_upload: auto
-    dependencies:
-      - formula: git
-
-notarize:
-  macos:
-    - enabled: '{{ isEnvSet "QUILL_SIGN_P12" }}'
-      ids:
-        - bigboard
-      sign:
-        certificate: "{{ .Env.QUILL_SIGN_P12 }}"
-        password: "{{ .Env.QUILL_SIGN_PASSWORD }}"
-      notarize:
-        issuer_id: "{{ .Env.QUILL_NOTARY_ISSUER }}"
-        key_id: "{{ .Env.QUILL_NOTARY_KEY_ID }}"
-        key: "{{ .Env.QUILL_NOTARY_KEY }}"
-        wait: true
-        timeout: 20m
+    Download the universal macOS archive, extract it, and move Bigboard.app to Applications.
+    Git and an authenticated GitHub CLI are required for live data.
 
 announce:
   skip: true

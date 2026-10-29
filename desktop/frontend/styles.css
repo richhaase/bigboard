@@ -219,13 +219,13 @@ nav {
   padding-top:8px;
   padding-bottom:8px;
 }
-.prototype {
+.app-edition {
   font:8px var(--mono);
   color:#6e8096;
   letter-spacing:1px;
   padding:18px 10px 0;
 }
-.prototype span {
+.app-edition span {
   display:block;
   letter-spacing:1.5px;
   margin-top:5px;
@@ -1804,7 +1804,7 @@ select {
   .brand {
     padding:0;
   }
-  .brand>div:last-child,.workspace,.nav-label,.nav-item>span:nth-child(2),.nav-item kbd,.prototype {
+  .brand>div:last-child,.workspace,.nav-label,.nav-item>span:nth-child(2),.nav-item kbd,.app-edition {
     display:none;
   }
   .brand-mark {

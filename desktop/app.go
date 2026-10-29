@@ -42,7 +42,7 @@ func (a *App) OpenPath(request gui.PathRequest) (string, error) { return a.servi
 func (a *App) ExportJSON() (string, error)                      { return a.service.ExportJSON() }
 func (a *App) SaveExportJSON() (string, error) {
 	if a.ctx == nil {
-		return "", errors.New("Use the preview download action to export")
+		return "", errors.New("use the preview download action to export")
 	}
 	data, err := a.ExportJSON()
 	if err != nil {
@@ -59,17 +59,17 @@ func (a *App) SaveExportJSON() (string, error) {
 }
 func (a *App) OpenURL(raw string) error {
 	if !validExternalURL(raw) {
-		return errors.New("Only GitHub repository links can be opened")
+		return errors.New("only GitHub repository links can be opened")
 	}
 	if a.ctx == nil {
-		return errors.New("Open links directly in the preview")
+		return errors.New("open links directly in the preview")
 	}
 	runtime.BrowserOpenURL(a.ctx, raw)
 	return nil
 }
 func (a *App) CopyText(text string) error {
 	if a.ctx == nil {
-		return errors.New("Use your browser's clipboard in the preview")
+		return errors.New("use your browser's clipboard in the preview")
 	}
 	return runtime.ClipboardSetText(a.ctx, text)
 }

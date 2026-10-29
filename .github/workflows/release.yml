@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  macos:
+    runs-on: macos-15
     steps:
       - name: Check release secrets
         env:
@@ -36,8 +36,27 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
-      - name: Run GoReleaser
+          go-version-file: go.mod
+          cache-dependency-path: desktop/go.sum
+      - name: Test backend
+        run: go test ./...
+      - name: Test desktop
+        working-directory: desktop
+        run: go test ./...
+      - name: Build universal macOS application
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash scripts/build-macos.sh "${RELEASE_TAG#v}"
+      - name: Sign and notarize application
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
+        run: bash scripts/sign-macos.sh desktop/build/bin/Bigboard.app "desktop/build/bin/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip"
+      - name: Publish GitHub release
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
@@ -45,9 +64,26 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
-          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
-          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
-          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
-          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
+      - name: Checkout Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: actions/checkout@v7
+        with:
+          repository: richhaase/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+      - name: Update Homebrew cask
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p homebrew-tap/Casks
+          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "desktop/build/bin/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
+          ruby -c homebrew-tap/Casks/bigboard.rb
+          git -C homebrew-tap config user.name goreleaserbot
+          git -C homebrew-tap config user.email bot@goreleaser.com
+          git -C homebrew-tap add Casks/bigboard.rb
+          if git -C homebrew-tap diff --cached --quiet; then
+            exit 0
+          fi
+          git -C homebrew-tap commit -m "Cask update for Bigboard version $RELEASE_TAG"
+          git -C homebrew-tap push

@@ -20,6 +20,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
+        cache: false
     - name: Run govulncheck
       run: |
         echo "Checking for vulnerabilities in dependencies..."
@@ -32,3 +33,23 @@ jobs:
     - name: Summary
       if: always()
       run: echo "Security checks completed. Review any findings above."
+
+  desktop-security:
+    name: Desktop Security Scan
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'desktop/go.mod'
+        cache-dependency-path: 'desktop/go.sum'
+    - name: Run govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+    - name: Run gosec
+      run: go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude=G104,G204,G304 ./...
+      continue-on-error: ${{ github.event_name == 'schedule' }}

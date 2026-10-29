@@ -152,17 +152,42 @@ func TestIdentityMergeUsesCanonicalEmailAndPreservesExistingAliases(t *testing.T
 }
 
 func TestSessionRepositoryControlsDoNotPersistAndCanReinclude(t *testing.T) {
-	s, _, _ := testService(t, "cache")
+	s, cache, provider := testService(t, "cache")
+	cache.repositories = append(cache.repositories, git.Repository{ID: "outside/other", Name: "outside/other", DefaultBranch: "main"})
+	checkControls := func(included bool) {
+		t.Helper()
+		controls, err := s.RepositoryControls()
+		if err != nil || len(controls.Repositories) != 2 {
+			t.Fatalf("cached controls: %+v %v", controls, err)
+		}
+		for _, repo := range controls.Repositories {
+			if repo.Listed || repo.CanRemove {
+				t.Fatalf("offline controls claimed live discovery: %+v", repo)
+			}
+			if repo.Selectable != (repo.ID == "example/engine") || repo.Included != (included && repo.ID == "example/engine") {
+				t.Fatalf("cached tracking availability: %+v", repo)
+			}
+		}
+	}
 	if _, err := s.Refresh(); err != nil {
 		t.Fatal(err)
+	}
+	checkControls(true)
+	if _, err := s.RemoveCachedRepository("example/engine"); err == nil {
+		t.Fatal("offline selection made a cache removable")
 	}
 	result, err := s.ApplyRepositoryControls(RepositorySelection{Included: []string{}})
 	if err != nil || len(result.Repositories) != 0 {
 		t.Fatalf("exclusion failed: %+v %v", result, err)
 	}
+	checkControls(false)
 	result, err = s.ApplyRepositoryControls(RepositorySelection{Included: []string{"example/engine"}})
 	if err != nil || len(result.Repositories) != 1 {
 		t.Fatalf("reinclusion failed: %+v %v", result, err)
+	}
+	checkControls(true)
+	if provider.calls != 0 || cache.refreshes != 0 {
+		t.Fatal("cached tracking attempted network access")
 	}
 	if _, err := os.Stat(s.path); !os.IsNotExist(err) {
 		t.Fatal("session selection persisted settings")
