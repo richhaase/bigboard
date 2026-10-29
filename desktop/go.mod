@@ -1,6 +1,6 @@
 module github.com/richhaase/bigboard/desktop
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/richhaase/bigboard v0.0.0

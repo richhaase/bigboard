@@ -13,7 +13,7 @@ fi
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo_root/desktop"
-GOTOOLCHAIN=go1.26.9 go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0 build -platform darwin/universal -skipbindings -s -m -ldflags "-X main.version=$release_version"
+GOTOOLCHAIN="go$(awk '$1 == "go" { print $2; exit }' go.mod)" go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0 build -platform darwin/universal -skipbindings -s -m -ldflags "-X main.version=$release_version"
 app_path="$repo_root/desktop/build/bin/Bigboard.app"
 bundle_version=${release_version%%-*}
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $bundle_version" "$app_path/Contents/Info.plist"
