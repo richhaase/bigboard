@@ -51,7 +51,7 @@ func (m Model) canCopyMarkdown() bool {
 		return false
 	}
 	if m.showPRs {
-		return !m.prUI.detail
+		return !m.prUI.detail && !m.prUI.sortOpen
 	}
 	if m.viewMode == ViewAggregate {
 		return true

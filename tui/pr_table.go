@@ -141,6 +141,10 @@ func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, in
 		state, titleStyle = "◇", StyleDimWhite
 	}
 	repo, author := displayText(repoLabel), githubIdentity(pr.Author)
+	authorStyle := StyleDimWhite
+	if prOwnedBy(pr, m.prState.login) {
+		authorStyle = StyleCyan.Bold(true)
+	}
 	review, checks := prReviewLabel(pr.ReviewDecision), prCheckLabel(pr.CheckState)
 	age := m.prUpdatedAge(pr)
 	cursor := glanceCursor(selected) + " "
@@ -150,14 +154,14 @@ func (m Model) prTableRow(pr gh.PullRequest, repoLabel string, selected bool, in
 	var lines []string
 	if width >= 110 {
 		l := resolvePRTable(width)
-		lines = []string{cursor + StyleDimWhite.Render(padCells(repo, l.repo)) + " " + padCells(number, l.number) + " " + StyleDimWhite.Render(padCells(state, l.state)) + " " + StyleDimWhite.Render(padCells(author, l.author)) + " " + titleStyle.Render(padCells(title, l.title)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, l.review)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, l.checks)) + " " + rightCells(age, l.updated)}
+		lines = []string{cursor + StyleDimWhite.Render(padCells(repo, l.repo)) + " " + padCells(number, l.number) + " " + StyleDimWhite.Render(padCells(state, l.state)) + " " + authorStyle.Render(padCells(author, l.author)) + " " + titleStyle.Render(padCells(title, l.title)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, l.review)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, l.checks)) + " " + rightCells(age, l.updated)}
 	} else if width >= 70 {
 		inner := width - 4
 		metaWidth := max(1, inner-2-13-9-7-3)
-		metadata := "  " + StyleDimWhite.Render(prRepositoryAuthor(repo, author, metaWidth)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
+		metadata := "  " + authorStyle.Render(prRepositoryAuthor(repo, author, metaWidth)) + " " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
 		lines = []string{cursor + state + " " + padCells(number, 7) + " " + titleStyle.Render(title), metadata}
 	} else {
-		metadata := "  " + prRepositoryAuthor(repo, author, width-6)
+		metadata := "  " + authorStyle.Render(prRepositoryAuthor(repo, author, width-6))
 		status := "  " + prReviewStyle(pr.ReviewDecision).Render(padCells(review, 13)) + " " + prCheckStyle(pr.CheckState).Render(padCells(checks, 9)) + " " + rightCells(age, 7)
 		lines = []string{cursor + state + " " + padCells(number, 7) + " " + titleStyle.Render(title), metadata, status}
 	}
@@ -179,15 +183,14 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 	if len(prs) == 0 || width < 70 || m.height < 24 {
 		return nil
 	}
-	budget := m.height - screenHeaderRows - screenFooterRows - 2 - 3*m.prListRowHeight()
-	if m.prUI.browserError != "" {
-		budget--
-	}
-	budget = min(10, budget)
+	budget := m.prPreviewBudget()
 	if budget < 5 {
 		return nil
 	}
 	pr := prs[max(0, min(m.prUI.row, len(prs)-1))]
+	if m.prUI.previewFocus {
+		return m.prExpandedPreview(pr, width, budget)
+	}
 	var notices []string
 	if m.sinceLastLook(pr.UpdatedAt) {
 		notices = append(notices, StyleCyan.Render("  + updated since last look"))
@@ -196,8 +199,15 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		notices = append(notices, StyleAmber.Render("  ! Inactive · no PR update for 14+ days"))
 	}
 	inner := max(1, width-4)
-	identity := wrapGlanceText(fmt.Sprintf("SELECTED  %s #%d", displayText(pr.Repo), pr.Number), inner)
-	identityBudget := max(1, budget-4-len(notices))
+	var extra []string
+	if budget >= 6+len(notices) {
+		extra = append(extra, "  "+ansi.Truncate(prPreviewMetadata(pr), inner, "…"))
+	}
+	if reasons := prAttentionReasons(pr, m.prState.login); len(reasons) > 0 && budget >= 7+len(notices) {
+		extra = append(extra, StyleCyan.Render("  "+ansi.Truncate(strings.Join(reasons, " · "), inner, "…")))
+	}
+	identity := wrapGlanceText(fmt.Sprintf("SELECTED  %s #%d · Tab expand", displayText(pr.Repo), pr.Number), inner)
+	identityBudget := max(1, budget-4-len(notices)-len(extra))
 	if len(identity) > identityBudget {
 		identity = identity[:identityBudget]
 		identity[identityBudget-1] = "  " + ansi.Truncate(strings.TrimPrefix(identity[identityBudget-1], "  ")+"…", inner, "…")
@@ -207,7 +217,7 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 		author = githubIdentity(pr.Author) + " · ◇ Draft"
 	}
 	title := wrapGlanceText(displayText(pr.Title), inner)
-	titleBudget := max(1, budget-len(identity)-3-len(notices))
+	titleBudget := max(1, budget-len(identity)-3-len(notices)-len(extra))
 	if len(title) > titleBudget {
 		title = title[:titleBudget]
 		suffix := "… · Enter full detail"
@@ -219,7 +229,75 @@ func (m Model) prSelectedPreview(prs []gh.PullRequest, width int) []string {
 	}
 	lines = append(lines, title...)
 	lines = append(lines, notices...)
+	lines = append(lines, extra...)
 	lines = append(lines, StyleDimWhite.Render("  "+author), "  Review: "+prReviewStyle(pr.ReviewDecision).Render(prReviewLabel(pr.ReviewDecision))+" · Checks: "+prCheckStyle(pr.CheckState).Render(prCheckLabel(pr.CheckState)))
+	return lines
+}
+
+func (m Model) prPreviewBudget() int {
+	available := m.height - screenHeaderRows - screenFooterRows - 2 - 3*m.prListRowHeight()
+	if m.prUI.browserError != "" {
+		available--
+	}
+	if m.prUI.previewFocus {
+		return min(available, min(24, max(10, (m.height-screenHeaderRows-screenFooterRows-2)/2)))
+	}
+	return min(10, available)
+}
+
+func prPreviewMetadata(pr gh.PullRequest) string {
+	reviewers := "none requested"
+	if len(pr.RequestedReviewers) > 0 {
+		var names []string
+		for _, reviewer := range pr.RequestedReviewers {
+			names = append(names, githubIdentity(reviewer))
+		}
+		reviewers = strings.Join(names, ", ")
+	}
+	if !pr.RequestedReviewersComplete {
+		if len(pr.RequestedReviewers) == 0 {
+			reviewers = "unknown"
+		} else {
+			reviewers += " (partial)"
+		}
+	}
+	files := fmt.Sprintf("%d", max(pr.FileCount, len(pr.Files)))
+	if !pr.FilesComplete {
+		if pr.FileCount == 0 && len(pr.Files) == 0 {
+			files = "unknown"
+		} else {
+			files += " (paths partial)"
+		}
+	}
+	conflicts := "unknown"
+	switch pr.Mergeable {
+	case "MERGEABLE":
+		conflicts = "none reported"
+	case "CONFLICTING":
+		conflicts = "reported"
+	}
+	return "Conflicts: " + conflicts + " · Files: " + files + " · Reviewers: " + reviewers
+}
+
+func (m Model) prPreviewLineCount() int {
+	prs := m.visiblePRs()
+	if len(prs) == 0 {
+		return 0
+	}
+	return len(m.prDetailLines(prs[max(0, min(m.prUI.row, len(prs)-1))], m.width))
+}
+
+func (m Model) prExpandedPreview(pr gh.PullRequest, width, budget int) []string {
+	inner := max(1, width-4)
+	content := m.prDetailLines(pr, width)
+	page := max(1, budget-2)
+	offset := max(0, min(m.prUI.previewOffset, len(content)-page))
+	end := min(len(content), offset+page)
+	heading := fmt.Sprintf("SELECTED  %s #%d · %d–%d/%d · Tab list", displayText(pr.Repo), pr.Number, offset+1, end, len(content))
+	lines := []string{"  " + worklistRule.Render(strings.Repeat("─", inner)), "  " + StyleTitle.Render(ansi.Truncate(heading, inner, "…"))}
+	for _, line := range content[offset:end] {
+		lines = append(lines, "  "+line)
+	}
 	return lines
 }
 
@@ -228,6 +306,9 @@ func (m Model) prFooter(prs []gh.PullRequest) footerHints {
 		return searchFooter()
 	}
 	var local []footerHint
+	if m.prUI.previewFocus && !m.prUI.detail {
+		local = append(local, footerHint{"Tab", "list"}, footerHint{"↑↓", "scroll"})
+	}
 	if m.prUI.detail || m.prContext.active {
 		local = append(local, footerHint{"Esc", "back"})
 	}
@@ -268,7 +349,11 @@ func (m Model) renderPRBoardRows(prs []gh.PullRequest, width int) []string {
 	selected := max(0, min(m.prUI.row, len(prs)-1))
 	start := max(0, min(selected-budget/2, len(prs)-budget))
 	end := min(len(prs), start+budget)
-	lines := []string{boardListHeading("OPEN PRs", m.prSortLabel(), nil, start, end, len(prs), width), prTableColumns(width)}
+	var sortHints []string
+	if width >= 110 {
+		sortHints = []string{"A author", "z sort"}
+	}
+	lines := []string{boardListHeading("OPEN PRs", m.prSortLabel(), sortHints, start, end, len(prs), width), prTableColumns(width)}
 	if len(prs) == 0 {
 		empty := "No PRs to display in this snapshot."
 		if m.prUI.query != "" || !m.prUI.filters.empty() {

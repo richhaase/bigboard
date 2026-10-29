@@ -7,6 +7,36 @@ import (
 	gh "github.com/richhaase/bigboard/github"
 )
 
+func prOwnedBy(pr gh.PullRequest, login string) bool {
+	return login != "" && strings.EqualFold(pr.Author, login)
+}
+
+func prAttentionReasons(pr gh.PullRequest, login string) []string {
+	if login == "" {
+		return nil
+	}
+	var reasons []string
+	if prOwnedBy(pr, login) {
+		if pr.CheckState == "FAILURE" || pr.CheckState == "ERROR" {
+			reasons = append(reasons, "Your checks need attention")
+		}
+		if pr.ReviewDecision == "CHANGES_REQUESTED" {
+			reasons = append(reasons, "Changes requested on your PR")
+		}
+		if !pr.Draft && pr.ReviewDecision == "APPROVED" && pr.CheckState == "SUCCESS" {
+			reasons = append(reasons, "Your PR is approved with passing checks")
+		}
+	} else {
+		if prReviewRequestedFrom(pr, login) {
+			reasons = append(reasons, "Your review is requested")
+		}
+		if prUpdatedSinceReview(pr, login) {
+			reasons = append(reasons, "Updated since your review")
+		}
+	}
+	return reasons
+}
+
 func prReviewRequestedFrom(pr gh.PullRequest, login string) bool {
 	if login == "" {
 		return false

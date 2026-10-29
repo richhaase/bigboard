@@ -8,19 +8,23 @@ import (
 )
 
 type prUIState struct {
-	filters      prFilters
-	repoID       string
-	query        string
-	searchBefore string
-	searching    bool
-	filterKind   string
-	filterQuery  string
-	sort         int
-	reverse      bool
-	row          int
-	detail       bool
-	offset       int
-	browserError string
+	filters       prFilters
+	repoID        string
+	query         string
+	searchBefore  string
+	searching     bool
+	filterKind    string
+	filterQuery   string
+	sort          int
+	reverse       bool
+	row           int
+	detail        bool
+	offset        int
+	browserError  string
+	previewFocus  bool
+	previewOffset int
+	sortOpen      bool
+	sortRow       int
 }
 
 func (s prUIState) clone() prUIState {
@@ -46,6 +50,22 @@ func (m *Model) selectPR(key string) {
 			m.prUI.row = i
 			break
 		}
+	}
+	if m.selectedPRKey() != key {
+		m.prUI.previewOffset = 0
+	}
+}
+
+func (m *Model) togglePRMine(value string) {
+	selected := m.selectedPRKey()
+	if len(m.prUI.filters.mine) == 1 && m.prUI.filters.mine[0] == value {
+		m.prUI.filters.mine = nil
+	} else {
+		m.prUI.filters.mine = filterValues{value}
+	}
+	m.selectPR(selected)
+	if m.prUI.detail && m.selectedPRKey() != selected {
+		m.prUI.detail, m.prUI.offset = false, 0
 	}
 }
 
