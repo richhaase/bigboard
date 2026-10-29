@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -72,12 +71,8 @@ func NewService() (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: gh.NewProvider(nil), cachePath: cache.Root, path: path, source: source, analysis: analysis, now: time.Now}
 	s.snapshot = emptySnapshot(settings, cache.Root)
-	if settings.Mode == "demo" {
-		s.snapshot = demoSnapshot(s.now(), settings)
-	} else {
-		s.snapshot.Status.Phase = "initial"
-		s.snapshot.Status.Message = "Ready to load your repositories. Choose Refresh to load this data source."
-	}
+	s.snapshot.Status.Phase = "initial"
+	s.snapshot.Status.Message = "Loading your repository history…"
 	return s, nil
 }
 
@@ -99,9 +94,20 @@ func (s *Service) Snapshot() Snapshot {
 }
 
 func cloneSnapshot(snapshot Snapshot) Snapshot {
-	data, _ := json.Marshal(snapshot)
-	var result Snapshot
-	_ = json.Unmarshal(data, &result)
+	result := snapshot
+	result.Repositories = slices.Clone(snapshot.Repositories)
+	result.Commits = slices.Clone(snapshot.Commits)
+	for i := range result.Commits {
+		result.Commits[i].Files = slices.Clone(snapshot.Commits[i].Files)
+	}
+	result.PullRequests = slices.Clone(snapshot.PullRequests)
+	for i := range result.PullRequests {
+		result.PullRequests[i].Files = slices.Clone(snapshot.PullRequests[i].Files)
+		result.PullRequests[i].Reviewers = slices.Clone(snapshot.PullRequests[i].Reviewers)
+	}
+	result.Settings.Organizations = slices.Clone(snapshot.Settings.Organizations)
+	result.Settings.Repositories = slices.Clone(snapshot.Settings.Repositories)
+	result.Status.Errors = slices.Clone(snapshot.Status.Errors)
 	return result
 }
 
@@ -172,10 +178,6 @@ func (s *Service) Discover(settings Settings) ([]Repository, error) {
 	if err != nil {
 		return nil, err
 	}
-	if settings.Mode == "demo" {
-		settings.Repositories = nil
-		return demoSnapshot(s.now(), settings).Repositories, nil
-	}
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 	repositories, err := s.discover(ctx, settings)
@@ -191,12 +193,19 @@ func (s *Service) Discover(settings Settings) ([]Repository, error) {
 
 func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 	defer s.workers.Done()
-	result := previous
-	if previous.Settings.Mode == "demo" {
-		result = demoSnapshot(s.now(), previous.Settings)
-	} else {
-		result = s.refreshRepositories(previous)
+	if previous.Settings.Mode == "live" && previous.GeneratedAt == "" {
+		cached := s.refreshRepositories(previous, true)
+		cached.Status.Phase = "refreshing"
+		cached.Status.Message = "Loading GitHub repositories…"
+		if len(cached.Commits) > 0 {
+			cached.Status.Message = "Cached history loaded; refreshing GitHub…"
+		}
+		s.mu.Lock()
+		s.snapshot = cloneSnapshot(cached)
+		s.mu.Unlock()
+		previous = cached
 	}
+	result := s.refreshRepositories(previous, false)
 	s.mu.Lock()
 	s.snapshot = result
 	s.busy = false
@@ -206,9 +215,6 @@ func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 }
 
 func (s *Service) retainSelected(previous Snapshot) Snapshot {
-	if previous.Mode == "demo" {
-		return previous
-	}
 	keep := map[string]bool{}
 	repositories := []Repository{}
 	for _, repo := range previous.Repositories {
@@ -230,12 +236,9 @@ func (s *Service) retainSelected(previous Snapshot) Snapshot {
 
 func (s *Service) discover(ctx context.Context, settings Settings) ([]git.Repository, error) {
 	var repositories []git.Repository
+	var inventoryErr error
 	if settings.Mode == "cache" {
-		var err error
-		repositories, err = s.cache.CachedRepositories()
-		if err != nil {
-			return nil, err
-		}
+		repositories, inventoryErr = s.cache.CachedRepositories()
 	} else {
 		var discovered []gh.DiscoveredRepository
 		if len(settings.Organizations) > 0 {
@@ -273,7 +276,7 @@ func (s *Service) discover(ctx context.Context, settings Settings) ([]git.Reposi
 		}
 	}
 	slices.SortFunc(result, func(a, b git.Repository) int { return strings.Compare(a.ID, b.ID) })
-	return result, nil
+	return result, inventoryErr
 }
 
 func (s *Service) included(settings Settings, id string) bool {
@@ -290,17 +293,23 @@ func (s *Service) included(settings Settings, id string) bool {
 	return true
 }
 
-func (s *Service) refreshRepositories(previous Snapshot) Snapshot {
+func (s *Service) refreshRepositories(previous Snapshot, offline bool) Snapshot {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
 	defer cancel()
 	settings := previous.Settings
 	result := emptySnapshot(settings, s.cachePath)
+	if offline {
+		settings.Mode = "cache"
+	}
 	result.GeneratedAt = s.now().Format(time.RFC3339)
 	repositories, err := s.discover(ctx, settings)
-	if err != nil {
+	if err != nil && len(repositories) == 0 {
 		result = previous
 		result.Status.Phase = "partial"
 		result.Status.Message = "Repository discovery failed; retained evidence is stale. Check Settings and try Refresh."
+		if len(result.Repositories) == 0 {
+			result.Status.Message = "Could not load repositories. Check Settings and GitHub access, then refresh."
+		}
 		result.Status.Errors = []string{err.Error()}
 		for i := range result.Repositories {
 			result.Repositories[i].Stale = true
@@ -309,6 +318,9 @@ func (s *Service) refreshRepositories(previous Snapshot) Snapshot {
 			result.PullRequests[i].Complete = false
 		}
 		return result
+	}
+	if err != nil {
+		result.Status.Errors = append(result.Status.Errors, "Repository cache inventory: "+err.Error())
 	}
 	selected := []git.Repository{}
 	for _, repo := range repositories {
@@ -418,6 +430,10 @@ func (s *Service) refreshRepositories(previous Snapshot) Snapshot {
 	}
 	if len(result.Repositories) == 0 && len(result.Status.Errors) == 0 {
 		result.Status.Message = "No repositories in this selection. Open Settings to choose a source or change repository selection."
+		if settings.Mode == "cache" && settings.PersonalAccount == "" && len(settings.Organizations) == 0 {
+			result.Status.Phase = "setup"
+			result.Status.Message = "No cached repositories found. Open Settings to connect your GitHub account or organization."
+		}
 	}
 	return result
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,13 +20,16 @@ type fakeCache struct {
 	repositories []git.Repository
 	records      []git.CommitRecord
 	scanErr      error
+	inventoryErr error
 	refreshErr   error
 	refreshes    int
 	wait         chan struct{}
 	started      chan struct{}
 }
 
-func (c *fakeCache) CachedRepositories() ([]git.Repository, error) { return c.repositories, nil }
+func (c *fakeCache) CachedRepositories() ([]git.Repository, error) {
+	return c.repositories, c.inventoryErr
+}
 func (c *fakeCache) Repository(id, branch string) (git.Repository, error) {
 	return git.Repository{ID: id, Name: id, DefaultBranch: branch}, nil
 }
@@ -52,10 +56,22 @@ type fakeProvider struct {
 	calls        int
 	discoveryErr error
 	results      []gh.Result
+	started      chan struct{}
+	wait         chan struct{}
 }
 
-func (p *fakeProvider) DiscoverRepositories(context.Context, []string) ([]gh.DiscoveredRepository, error) {
+func (p *fakeProvider) DiscoverRepositories(ctx context.Context, _ []string) ([]gh.DiscoveredRepository, error) {
 	p.calls++
+	if p.started != nil {
+		close(p.started)
+	}
+	if p.wait != nil {
+		select {
+		case <-p.wait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return []gh.DiscoveredRepository{{Name: "example/engine", DefaultBranch: "main"}}, p.discoveryErr
 }
 func (p *fakeProvider) DiscoverPersonalRepositories(context.Context, string) ([]gh.DiscoveredRepository, error) {
@@ -146,7 +162,7 @@ func TestFailedDiscoveryRetainsEvidenceAndMarksItStale(t *testing.T) {
 }
 
 func TestSettingsSaveValidatesAndPersistsWithoutTouchingCLIConfig(t *testing.T) {
-	s, _, _ := testService(t, "demo")
+	s, _, _ := testService(t, "cache")
 	cliPath := filepath.Join(filepath.Dir(s.path), "config.json")
 	cli := []byte(`{"organizations":["example"],"sort":"commits"}`)
 	if err := os.WriteFile(cliPath, cli, 0600); err != nil {
@@ -202,7 +218,7 @@ func TestBusyRefreshAndShutdown(t *testing.T) {
 	if _, err := s.Refresh(); err == nil {
 		t.Fatal("overlapping refresh accepted")
 	}
-	if _, err := s.SaveSettings(Settings{Mode: "demo"}); err == nil {
+	if _, err := s.SaveSettings(Settings{Mode: "cache"}); err == nil {
 		t.Fatal("settings changed during refresh")
 	}
 	s.Close()
@@ -219,34 +235,6 @@ func TestBusyRefreshAndShutdown(t *testing.T) {
 	}
 }
 
-func TestDemoIsDeterministicRichAndSynthetic(t *testing.T) {
-	s, cache, provider := testService(t, "demo")
-	first, err := s.Refresh()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, _ := s.Refresh()
-	if !reflect.DeepEqual(first, second) {
-		t.Fatal("demo is nondeterministic for a fixed clock")
-	}
-	if len(first.Repositories) < 5 || len(first.Commits) < 100 || len(first.PullRequests) < 8 {
-		t.Fatal("demo does not exercise all boards")
-	}
-	if !strings.Contains(first.Status.Message, "Synthetic") || provider.calls != 0 || cache.refreshes != 0 {
-		t.Fatal("demo is not isolated and labeled")
-	}
-	for _, commit := range first.Commits {
-		added, removed := 0, 0
-		for _, file := range commit.Files {
-			added += file.Added
-			removed += file.Removed
-		}
-		if added != commit.Added || removed != commit.Removed {
-			t.Fatal("demo path totals disagree with commit totals")
-		}
-	}
-}
-
 func TestImportedExclusionsAndExplicitSelection(t *testing.T) {
 	s, _, _ := testService(t, "cache")
 	s.analysis.Exclude = []string{"engine"}
@@ -257,31 +245,6 @@ func TestImportedExclusionsAndExplicitSelection(t *testing.T) {
 	result, err := s.SaveSettings(Settings{Mode: "cache", Repositories: []string{"example/engine"}})
 	if err != nil || len(result.Repositories) != 1 {
 		t.Fatalf("explicit selection failed: %v", err)
-	}
-}
-
-func TestDemoSelectionFiltersEvidenceButDiscoveryListsAll(t *testing.T) {
-	s, _, _ := testService(t, "demo")
-	result, err := s.SaveSettings(Settings{Mode: "demo", Repositories: []string{"northstar/atlas"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Repositories) != 1 || len(result.Commits) == 0 || len(result.PullRequests) == 0 {
-		t.Fatalf("invalid selection: %+v", result)
-	}
-	for _, commit := range result.Commits {
-		if commit.Repo != "northstar/atlas" {
-			t.Fatal("out-of-scope commit retained")
-		}
-	}
-	for _, pr := range result.PullRequests {
-		if pr.Repo != "northstar/atlas" {
-			t.Fatal("out-of-scope PR retained")
-		}
-	}
-	choices, err := s.Discover(result.Settings)
-	if err != nil || len(choices) != 6 {
-		t.Fatalf("discovery hid unselected repositories: %d, %v", len(choices), err)
 	}
 }
 
@@ -297,7 +260,7 @@ func TestChangedSettingsCannotRetainOutOfScopeEvidenceOnFailure(t *testing.T) {
 	}
 }
 
-func TestNewServiceStartsInDemoAndImportsSources(t *testing.T) {
+func TestNewServiceStartsWithRealImportedSources(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -313,10 +276,130 @@ func TestNewServiceStartsInDemoAndImportsSources(t *testing.T) {
 	}
 	defer s.Close()
 	result := s.Snapshot()
-	if result.Mode != "demo" || result.Settings.PersonalAccount != "example" || len(result.Commits) == 0 {
+	if result.Mode != "live" || result.Settings.PersonalAccount != "example" || len(result.Commits) != 0 || result.Status.Phase != "initial" {
 		t.Fatalf("bad startup: %+v", result)
 	}
 	if _, err := os.Stat(filepath.Join(root, "bigboard", "desktop.json")); !os.IsNotExist(err) {
 		t.Fatal("startup wrote settings")
+	}
+}
+
+func TestObsoleteSavedModeMigratesToRealSourcesWithoutWriting(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprint(configured), func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", root)
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			configDir := filepath.Join(root, "bigboard")
+			if err := os.MkdirAll(configDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if configured {
+				if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"organizations":["example"]}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			obsolete := []byte(`{"mode":"demo","organizations":["synthetic"],"repositories":["synthetic/project"]}`)
+			path := filepath.Join(configDir, "desktop.json")
+			if err := os.WriteFile(path, obsolete, 0600); err != nil {
+				t.Fatal(err)
+			}
+			s, err := NewService()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			settings := s.Snapshot().Settings
+			expectedMode := "cache"
+			if configured {
+				expectedMode = "live"
+			}
+			if settings.Mode != expectedMode || len(settings.Repositories) != 0 || (configured && !reflect.DeepEqual(settings.Organizations, []string{"example"})) || (!configured && len(settings.Organizations) != 0) {
+				t.Fatalf("obsolete settings were not replaced by real sources: %+v", settings)
+			}
+			data, _ := os.ReadFile(path)
+			if string(data) != string(obsolete) {
+				t.Fatal("startup edited the settings file")
+			}
+		})
+	}
+}
+
+func TestExistingRealSettingsArePreserved(t *testing.T) {
+	for _, mode := range []string{"cache", "live"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "desktop.json")
+			settings := Settings{Mode: mode, PersonalAccount: "example", Organizations: []string{"sample"}, Repositories: []string{"sample/engine"}}
+			data, _ := json.Marshal(settings)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, _, _, err := loadSettings(path)
+			if err != nil || !reflect.DeepEqual(loaded, settings) {
+				t.Fatalf("saved settings changed: %+v %v", loaded, err)
+			}
+		})
+	}
+}
+
+func TestSyntheticModeIsRejected(t *testing.T) {
+	s, _, provider := testService(t, "cache")
+	settings := Settings{Mode: "demo"}
+	if _, err := s.SaveSettings(settings); err == nil {
+		t.Fatal("synthetic mode accepted for saving")
+	}
+	if _, err := s.Discover(settings); err == nil {
+		t.Fatal("synthetic mode accepted for discovery")
+	}
+	if provider.calls != 0 || len(s.Snapshot().Commits) != 0 {
+		t.Fatal("rejected mode loaded data")
+	}
+}
+
+func TestStartupPublishesRealCacheBeforeNetworkAndRetainsOnFailure(t *testing.T) {
+	s, _, provider := testService(t, "live")
+	provider.started = make(chan struct{})
+	provider.wait = make(chan struct{})
+	provider.discoveryErr = errors.New("network unavailable")
+	done := make(chan error, 1)
+	go func() { _, err := s.Refresh(); done <- err }()
+	<-provider.started
+	cached := s.Snapshot()
+	if cached.Mode != "live" || cached.Settings.Mode != "live" || cached.Status.Phase != "refreshing" || len(cached.Commits) != 1 || cached.Commits[0].ID != "abc" || cached.GeneratedAt == "" {
+		t.Fatalf("cached evidence was not published before remote access: %+v", cached)
+	}
+	close(provider.wait)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	final := s.Snapshot()
+	if final.Status.Phase != "partial" || !final.Repositories[0].Stale || !reflect.DeepEqual(final.Commits, cached.Commits) {
+		t.Fatalf("cached evidence lost after network failure: %+v", final)
+	}
+}
+
+func TestFreshUnconfiguredServiceUsesRealCacheAndRequestsSetupWhenEmpty(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s, err := NewService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.Snapshot().Mode != "cache" {
+		t.Fatal("fresh settings did not select real cache")
+	}
+	result, err := s.Refresh()
+	if err != nil || result.Status.Phase != "setup" || len(result.Repositories) != 0 || len(result.Commits) != 0 {
+		t.Fatalf("empty cache did not request setup: %+v, %v", result, err)
+	}
+}
+
+func TestPartialCacheInventoryKeepsUsableRepositories(t *testing.T) {
+	s, cache, provider := testService(t, "cache")
+	cache.inventoryErr = errors.New("another cache entry is unavailable")
+	result, err := s.Refresh()
+	if err != nil || len(result.Commits) != 1 || len(result.Repositories) != 1 || result.Status.Phase != "partial" || provider.calls != 0 {
+		t.Fatalf("partial cache inventory discarded usable history: %+v, %v", result, err)
 	}
 }

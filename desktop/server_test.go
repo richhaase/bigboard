@@ -64,3 +64,18 @@ func TestExternalLinks(t *testing.T) {
 		}
 	}
 }
+
+func TestDesktopToolPathPreservesUserOrderAndSupportsFinder(t *testing.T) {
+	initial := "/usr/bin:/bin:/usr/sbin:/sbin"
+	got := desktopToolPath(initial)
+	if got != initial+":/opt/homebrew/bin:/usr/local/bin" {
+		t.Fatalf("unexpected desktop search path: %s", got)
+	}
+	custom := "/custom/bin:/opt/homebrew/bin:/usr/bin:/usr/local/bin"
+	if desktopToolPath(custom) != custom {
+		t.Fatal("changed the user's command precedence")
+	}
+	if desktopToolPath("") != got {
+		t.Fatal("empty PATH should include standard command directories")
+	}
+}

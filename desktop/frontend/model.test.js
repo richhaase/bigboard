@@ -200,3 +200,42 @@ test('unknown line counts do not become measured volume in totals or the timelin
   assert.equal(today.added,9);
   assert.equal(today.removed,3);
 });
+
+let largeHistory;
+function historyBeyondArgumentLimit() {
+  if (!largeHistory) {
+    const base=makeCommit();
+    largeHistory=Array.from({length:160001},(_,index)=>({...base,id:`history-${index}`}));
+    largeHistory[largeHistory.length-1]={...largeHistory.at(-1),date:'2026-10-28T12:00:00Z'};
+  }
+  return largeHistory;
+}
+
+test('repository activity supports histories larger than the JavaScript argument limit', () => {
+  const history=historyBeyondArgumentLimit();
+  const [repository]=activityRows(history,[{id:'sample/api',name:'api'}]);
+  assert.equal(repository.commits,history.length);
+  assert.equal(repository.latest,now);
+  assert.equal(repository.added,history.length*120);
+  assert.equal(repository.removed,history.length*30);
+});
+
+test('contributor aggregation supports one contributor with more than 150k commits', () => {
+  const history=historyBeyondArgumentLimit();
+  const contributors=people(history);
+  assert.equal(contributors.length,1);
+  assert.equal(contributors[0].commits,history.length);
+  assert.equal(contributors[0].latest,now);
+  assert.deepEqual(contributors[0].repos,['sample/api']);
+});
+
+test('directory activity supports a path changed by more than 150k commits', () => {
+  const history=historyBeyondArgumentLimit();
+  const rows=activityRows(history,[],{repo:'sample/api'});
+  assert.equal(rows.length,2);
+  const source=rows.find(row=>row.path==='src');
+  assert.equal(source.commits,history.length);
+  assert.equal(source.latest,now);
+  assert.equal(source.added,history.length*80);
+  assert.equal(source.removed,history.length*20);
+});

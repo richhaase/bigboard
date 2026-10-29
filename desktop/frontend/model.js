@@ -20,7 +20,7 @@ export function totals(commits) {
 export function people(commits) {
   const grouped = new Map();
   for (const c of commits) { const id = identity(c); if (!grouped.has(id)) grouped.set(id,{id,name:c.author || c.email || 'Unknown contributor',email:c.email,bot:c.bot,records:[]}); grouped.get(id).records.push(c); }
-  return [...grouped.values()].map(p=>({...p,...totals(p.records),latest:Math.max(...p.records.map(c=>dateValue(c.date))),repos:[...new Set(p.records.map(c=>c.repo))]})).sort((a,b)=>(b.added+b.removed)-(a.added+a.removed)||a.name.localeCompare(b.name));
+  return [...grouped.values()].map(p=>({...p,...totals(p.records),latest:p.records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0),repos:[...new Set(p.records.map(c=>c.repo))]})).sort((a,b)=>(b.added+b.removed)-(a.added+a.removed)||a.name.localeCompare(b.name));
 }
 export function scopedCommits(commits, scope) {
   if (!scope.repo) return commits;
@@ -32,7 +32,11 @@ export function scopedCommits(commits, scope) {
   });
 }
 export function activityRows(commits, repositories, scope={}) {
-  if (!scope.repo) return repositories.map(repo=>{const records=commits.filter(c=>c.repo===repo.id); return {...repo,label:repo.name || repo.id.split('/').pop(),kind:'repository',records,...totals(records),latest:Math.max(0,...records.map(c=>dateValue(c.date)))};});
+  if (!scope.repo) {
+    const recordsByRepo=new Map();
+    for(const commit of commits){if(!recordsByRepo.has(commit.repo))recordsByRepo.set(commit.repo,[]);recordsByRepo.get(commit.repo).push(commit);}
+    return repositories.map(repo=>{const records=recordsByRepo.get(repo.id)||[];return {...repo,label:repo.name || repo.id.split('/').pop(),kind:'repository',records,...totals(records),latest:records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0)};});
+  }
   const grouped=new Map(); const prefix=scope.path ? `${scope.path}/` : '';
   for (const c of commits.filter(c=>c.repo===scope.repo)) {
     for (const file of c.files||[]) {
@@ -43,7 +47,7 @@ export function activityRows(commits, repositories, scope={}) {
       const row=grouped.get(path); row.added+=c.linesUnknown?0:file.added||0; row.removed+=c.linesUnknown?0:file.removed||0; row.records.set(c.id,c);
     }
   }
-  return [...grouped.values()].map(row=>{const records=[...row.records.values()]; return {...row,records,commits:records.length,people:new Set(records.map(identity)).size,latest:Math.max(0,...records.map(c=>dateValue(c.date))),unknown:records.some(c=>c.linesUnknown)};});
+  return [...grouped.values()].map(row=>{const records=[...row.records.values()]; return {...row,records,commits:records.length,people:new Set(records.map(identity)).size,latest:records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0),unknown:records.some(c=>c.linesUnknown)};});
 }
 export function sortRows(rows, sort='change', reverse=false) {
   const compare={change:(a,b)=>(b.added+b.removed)-(a.added+a.removed),commits:(a,b)=>b.commits-a.commits,name:(a,b)=>(a.label||a.name).localeCompare(b.label||b.name),recent:(a,b)=>b.latest-a.latest}[sort]||(()=>0);

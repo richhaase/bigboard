@@ -17,8 +17,8 @@ Go and your platform's Wails prerequisites are required: Xcode command line
 tools on macOS, WebView2 on Windows, or GTK3 and WebKitGTK development packages
 on Linux. See [Wails installation](https://v2.wails.io/docs/gettingstarted/installation/).
 Linux systems with WebKitGTK 4.1 need the `webkit2_41` build tag.
-Git and a signed-in `gh` CLI are needed for live data. Launching from a terminal
-also supplies their PATH to the app.
+Git and a signed-in `gh` CLI are needed for live data. On macOS, the app also
+searches the standard Homebrew locations when launched from Finder.
 
 To build a native application bundle:
 
@@ -36,19 +36,23 @@ bindings rather than an HTTP listener.
 
 ## Data sources
 
-The initial launch uses **Demo**: synthetic repositories, people, commits, and
-PRs. All boards and filters work, and sample links do not open fabricated GitHub
-resources. Demo refresh regenerates the example relative to the current date.
+The application loads your existing Bigboard configuration on launch. When an
+account or organizations are configured, it starts in **Live GitHub** mode,
+shows available cached history first, and refreshes default-branch history and
+open PRs using your existing signed-in `gh` CLI. Your configured repository
+exclusions and contributor identity rules apply automatically.
 
-Use **Settings** to choose a source:
+**Settings** offers two real data sources:
 
-- **Cached history** reads Bigboard's existing owned repository cache without
-  network requests. PR context is unavailable in this mode.
-- **Live GitHub** discovers repositories from the selected personal account and
-  organizations through the existing signed-in `gh` CLI. Discover repositories,
-  select the ones to track, and save. Refresh fetches default-branch history into
-  Bigboard's owned cache and loads bounded PR metadata. Developer checkouts are
-  never scanned or modified.
+- **Cached history** reads Bigboard's owned repository cache without network
+  requests. PR context is unavailable in this mode.
+- **Live GitHub** discovers repositories from your personal account and
+  organizations, refreshes the owned cache, and loads bounded PR metadata.
+
+When no account is configured, Bigboard loads any existing cached repositories
+and offers setup guidance. It never substitutes sample records for missing or
+unavailable data. Settings from the earlier sample-data prototype migrate to
+your existing account/organization configuration on launch.
 
 Settings are stored separately in `$XDG_CONFIG_HOME/bigboard/desktop.json`
 (default `~/.config/bigboard/desktop.json`). Existing terminal configuration
@@ -104,4 +108,4 @@ fnm exec --using $(cat ../.node-version) npm run test:e2e
 
 These checks build a local preview with temporary configuration/cache directories,
 exercise the boards and dialogs, and write screenshots to
-`desktop/build/screenshots`. They never use your normal GitHub configuration.
+`desktop/build/screenshots`. They use test-only API fixtures and never use your normal GitHub configuration.

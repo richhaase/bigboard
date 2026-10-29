@@ -26,8 +26,8 @@ type analysisConfig struct {
 }
 
 func normalizeSettings(settings Settings) (Settings, error) {
-	if settings.Mode != "demo" && settings.Mode != "cache" && settings.Mode != "live" {
-		return Settings{}, errors.New("choose demo, cache, or live data")
+	if settings.Mode != "cache" && settings.Mode != "live" {
+		return Settings{}, errors.New("choose cached history or live GitHub data")
 	}
 	owner := func(value string) (string, error) {
 		value = strings.TrimSpace(value)
@@ -95,7 +95,12 @@ func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
 	if analysis.PRRequestBudget < 1 {
 		analysis.PRRequestBudget = gh.MaxRefreshRequests
 	}
-	settings := Settings{Mode: "demo", PersonalAccount: analysis.PersonalAccount, Organizations: analysis.Organizations}
+	initial := Settings{Mode: "cache", PersonalAccount: analysis.PersonalAccount, Organizations: analysis.Organizations}
+	if initial.PersonalAccount != "" || len(initial.Organizations) > 0 {
+		initial.Mode = "live"
+	}
+	settings := initial
+	settings.Organizations = slices.Clone(initial.Organizations)
 	data, err = os.ReadFile(path)
 	if err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
@@ -103,6 +108,9 @@ func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
 		}
 	} else if !os.IsNotExist(err) {
 		return Settings{}, analysis, nil, err
+	}
+	if settings.Mode == "demo" {
+		settings = initial
 	}
 	settings, err = normalizeSettings(settings)
 	return settings, analysis, data, err

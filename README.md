@@ -65,8 +65,8 @@ shortcut letters enter text; use `F1` for help and `Ctrl+C` to quit.
 ## Desktop prototype
 
 A native GUI prototype is available on this branch. Run `make gui` for the desktop
-app or `make gui-build` to package it. It starts with synthetic demo data and can
-load cached history or live GitHub repositories. See the [desktop guide](desktop/README.md)
+app or `make gui-build` to package it. It loads your existing Bigboard configuration,
+shows cached history first, and refreshes live GitHub repositories. See the [desktop guide](desktop/README.md)
 for setup, supported workflows, and verification.
 
 ## Learn more

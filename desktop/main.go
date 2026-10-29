@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"runtime"
+	"strings"
 
 	"github.com/richhaase/bigboard/gui"
 	"github.com/wailsapp/wails/v2"
@@ -14,7 +16,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"runtime"
 )
 
 //go:embed frontend/index.html frontend/app.js frontend/model.js frontend/styles.css
@@ -31,6 +32,11 @@ func main() {
 }
 
 func run(serve bool, address string) error {
+	if runtime.GOOS == "darwin" {
+		if err := os.Setenv("PATH", desktopToolPath(os.Getenv("PATH"))); err != nil {
+			return err
+		}
+	}
 	service, err := gui.NewService()
 	if err != nil {
 		return err
@@ -59,4 +65,24 @@ func run(serve bool, address string) error {
 		Bind:             []interface{}{app},
 		Mac:              &mac.Options{TitleBar: mac.TitleBarDefault(), Appearance: mac.NSAppearanceNameDarkAqua},
 	})
+}
+
+func desktopToolPath(current string) string {
+	paths := strings.Split(current, string(os.PathListSeparator))
+	if current == "" {
+		paths = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	}
+	for _, directory := range []string{"/opt/homebrew/bin", "/usr/local/bin"} {
+		found := false
+		for _, existing := range paths {
+			if existing == directory {
+				found = true
+				break
+			}
+		}
+		if !found {
+			paths = append(paths, directory)
+		}
+	}
+	return strings.Join(paths, string(os.PathListSeparator))
 }
