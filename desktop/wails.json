@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Bigboard",
+  "outputfilename": "Bigboard",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "author": {
+    "name": "Rich Haase"
+  },
+  "info": {
+    "productName": "Bigboard",
+    "productVersion": "0.1.0",
+    "comments": "GUI prototype for exploring repository activity",
+    "copyright": "Copyright \u00a9 Rich Haase"
+  }
+}

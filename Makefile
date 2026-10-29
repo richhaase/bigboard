@@ -92,3 +92,19 @@ staticcheck:
 	@echo "Staticcheck passed!"
 
 check: fmt-check lint vet staticcheck test
+
+.PHONY: gui gui-build gui-preview gui-test
+
+gui:
+	cd desktop && go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0 dev -s -skipbindings
+
+gui-build:
+	cd desktop && go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0 build -skipbindings -s -m
+
+gui-preview:
+	cd desktop && go run . --serve
+
+gui-test:
+	go test ./gui
+	cd desktop && go test ./...
+	fnm exec --using $$(cat .node-version) node --test desktop/frontend/*.test.js
