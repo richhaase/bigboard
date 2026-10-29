@@ -28,7 +28,16 @@ make gui-build
 
 On macOS the output is `desktop/build/bin/Bigboard.app`. This development bundle
 is locally signed; release signing, notarization, installers, and automatic
-updates are outside this prototype.
+updates are outside this prototype. The Go service and frontend assets are
+embedded in the executable inside that bundle. Users do not need Node, Go,
+or a separate web server. Finder presents the `.app` as one application.
+
+Wails uses the platform webview instead of shipping a browser engine. This
+fits Bigboard's existing Go backend and produces one GUI application, but
+the current application still invokes installed Git and the authenticated
+`gh` CLI. A distribution with no separately installed tools would need those
+dependencies bundled or replaced; switching to Electron would not remove them.
+See [Wails packaging](https://v2.wails.io/docs/introduction/).
 
 For an optional local web preview, run `make gui-preview` and open
 `http://127.0.0.1:34115`. It binds only to loopback. The native app uses Wails
@@ -58,8 +67,11 @@ Settings are stored separately in `$XDG_CONFIG_HOME/bigboard/desktop.json`
 (default `~/.config/bigboard/desktop.json`). Existing terminal configuration
 provides initial account/organization sources and analysis rules, including
 identity aliases, generated-file exclusions, bot/AI identities, and PR request
-budget. The GUI does not overwrite `config.json`. Conflicting external edits
-cause a settings save to fail rather than overwrite them.
+budget. Workspace preferences do not overwrite `config.json`. Contributor
+identity edits update only its `identities` field so the terminal and desktop
+use the same mapping. Conflicting external edits cause a settings save to fail
+rather than overwrite them. Saving repository choices stores exclusions, so
+newly discovered repositories remain eligible on later refreshes.
 
 Refresh is manual after startup. Failures keep prior evidence where possible,
 mark it stale, and surface diagnostics in **Data status**. Dates filter Git
@@ -70,8 +82,9 @@ not productivity. PR check/review badges are evidence, not merge authorization.
 
 - **Activity:** compare repositories, open directories and files, inspect the
   commits and contributors behind the selected scope.
-- **Contributors:** inspect a person's repository distribution, daily history,
-  activity calendar, and commits.
+- **Contributors:** inspect a person's repository distribution, history,
+  activity calendar, and commits. Export all-time contributor statistics as JSON
+  using the same schema and aggregation as the terminal.
 - **Pull requests:** search and filter by author, draft state, reviews, checks,
   and work authored by or requesting review from the signed-in account. Open
   details and follow real PRs to GitHub.
@@ -79,10 +92,26 @@ not productivity. PR check/review badges are evidence, not merge authorization.
   and filters are retained when switching. Settings controls data collection;
   repository scope only controls what is visible.
 
-This prototype covers those workflows. It does not yet port the terminal's
-identity merge editor, named-group launcher, last-look bookmarks, related-area
-overlap lenses, or owned-cache deletion controls. Identity aliases already
-configured in the terminal are honored.
+The initial range is **14 days**, or the existing configuration's `since` value.
+The toolbar includes 1, 7, 14, 30, 90, and 365 days plus All time. Custom days
+(1–3650) and Since last look are available in the date dialog. Shared scope and
+board filters can be staged together, applied, or canceled.
+
+Activity includes Commits, People, and Related lenses, contributor overlap,
+named work areas, verified links at the retained scan revision, and temporary
+repository PR views. Contributor timelines switch between daily, weekly, and
+monthly buckets; identity rename and merge use a review step before saving.
+PR triage includes Needs my attention, Authored by me, Review requested from me,
+and Updated since my review, with full sort/reverse and coverage details.
+
+Repository controls change tracking for the current session and show cache
+usage. Only caches no longer listed by a successful discovery can be removed,
+after explicit confirmation. Configured named groups are available in the
+scope toolbar. Last-look bookmarks share the terminal's state file, remain
+fixed during the session, and advance on normal native-app exit only after a
+usable fetched snapshot. Offline scans and identity rescans do not advance them.
+
+See the [parity checklist](parity.md) for the comparison and verification scope.
 
 ## Verify
 

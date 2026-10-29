@@ -55,7 +55,7 @@ func run(serve bool, address string) error {
 		appMenu.Append(menu.AppMenu())
 		appMenu.Append(menu.EditMenu())
 	}
-	return wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Menu:  appMenu,
 		Title: "Bigboard", Width: 1360, Height: 900, MinWidth: 760, MinHeight: 560,
 		BackgroundColour: options.NewRGB(19, 28, 41),
@@ -65,6 +65,11 @@ func run(serve bool, address string) error {
 		Bind:             []interface{}{app},
 		Mac:              &mac.Options{TitleBar: mac.TitleBarDefault(), Appearance: mac.NSAppearanceNameDarkAqua},
 	})
+	if err != nil {
+		return err
+	}
+	service.Close()
+	return service.SaveBookmark()
 }
 
 func desktopToolPath(current string) string {

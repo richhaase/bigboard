@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 )
 
 type fakeCache struct {
+	mu           sync.Mutex
 	repositories []git.Repository
 	records      []git.CommitRecord
 	scanErr      error
@@ -34,6 +36,8 @@ func (c *fakeCache) Repository(id, branch string) (git.Repository, error) {
 	return git.Repository{ID: id, Name: id, DefaultBranch: branch}, nil
 }
 func (c *fakeCache) Refresh(context.Context, git.Repository) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.refreshes++
 	return c.refreshErr
 }
@@ -151,12 +155,12 @@ func TestFailedPRInventoryRetainsStalePRsAndCompleteEmptyClears(t *testing.T) {
 	}
 }
 
-func TestFailedDiscoveryRetainsEvidenceAndMarksItStale(t *testing.T) {
+func TestFailedDiscoveryRetainsEvidenceAndReportsPartialScope(t *testing.T) {
 	s, _, provider := testService(t, "live")
 	first, _ := s.Refresh()
 	provider.discoveryErr = errors.New("unavailable")
 	second, err := s.Refresh()
-	if err != nil || len(second.Commits) != len(first.Commits) || !second.Repositories[0].Stale || second.Status.Phase != "partial" {
+	if err != nil || len(second.Commits) != len(first.Commits) || second.Repositories[0].Stale || second.Status.Phase != "partial" {
 		t.Fatalf("unexpected result: %+v %v", second, err)
 	}
 }
@@ -357,7 +361,8 @@ func TestSyntheticModeIsRejected(t *testing.T) {
 }
 
 func TestStartupPublishesRealCacheBeforeNetworkAndRetainsOnFailure(t *testing.T) {
-	s, _, provider := testService(t, "live")
+	s, cache, provider := testService(t, "live")
+	cache.refreshErr = errors.New("network unavailable")
 	provider.started = make(chan struct{})
 	provider.wait = make(chan struct{})
 	provider.discoveryErr = errors.New("network unavailable")

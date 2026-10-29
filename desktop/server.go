@@ -28,8 +28,28 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 		}
 		var result any
 		var err error
-		if r.URL.Path == "/api/snapshot" && r.Method == http.MethodGet {
-			result = app.Snapshot()
+		decode := func(target any) error {
+			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(target); err != nil {
+				return err
+			}
+			if err := decoder.Decode(new(any)); err != io.EOF {
+				return errors.New("Expected one JSON object")
+			}
+			return nil
+		}
+		if r.Method == http.MethodGet && (r.URL.Path == "/api/snapshot" || r.URL.Path == "/api/identities" || r.URL.Path == "/api/repository-controls" || r.URL.Path == "/api/export") {
+			switch r.URL.Path {
+			case "/api/snapshot":
+				result = app.Snapshot()
+			case "/api/identities":
+				result = app.IdentityOptions()
+			case "/api/repository-controls":
+				result, err = app.RepositoryControls()
+			case "/api/export":
+				result, err = app.ExportJSON()
+			}
 		} else if r.Method == http.MethodPost {
 			if r.Header.Get("Content-Type") != "application/json" {
 				fail(415, errors.New("JSON content type required"))
@@ -55,6 +75,35 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 				result, err = app.SaveSettings(settings)
 			case "/api/discover":
 				result, err = app.Discover(settings)
+			case "/api/identity":
+				var request gui.IdentityRequest
+				if err = decode(&request); err == nil {
+					result, err = app.SaveIdentity(request)
+				}
+			case "/api/repository-controls":
+				var request gui.RepositorySelection
+				if err = decode(&request); err == nil {
+					result, err = app.ApplyRepositoryControls(request)
+				}
+			case "/api/remove-cache":
+				var request struct {
+					ID string `json:"id"`
+				}
+				if err = decode(&request); err == nil {
+					result, err = app.RemoveCachedRepository(request.ID)
+				}
+			case "/api/group":
+				var request struct {
+					Name string `json:"name"`
+				}
+				if err = decode(&request); err == nil {
+					result, err = app.SelectGroup(request.Name)
+				}
+			case "/api/path":
+				var request gui.PathRequest
+				if err = decode(&request); err == nil {
+					result, err = app.OpenPath(request)
+				}
 			default:
 				fail(404, errors.New("Unknown operation"))
 				return

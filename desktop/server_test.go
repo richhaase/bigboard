@@ -37,6 +37,14 @@ func TestPreviewOriginAndRoutes(t *testing.T) {
 		{"GET", "/api/refresh", "127.0.0.1:34115", "", "", "", 405},
 		{"POST", "/api/settings", "127.0.0.1:34115", "", "application/json", "{} {}", 400},
 		{"POST", "/api/settings", "127.0.0.1:34115", "", "application/json", "{\"mode\":\"invalid\"}", 400},
+		{"GET", "/api/identities", "127.0.0.1:34115", "", "", "", 200},
+		{"GET", "/api/repository-controls", "127.0.0.1:34115", "", "", "", 200},
+		{"POST", "/api/identity", "127.0.0.1:34115", "", "application/json", `{"primaryEmail":"invalid","emails":[],"name":"Name"}`, 400},
+		{"POST", "/api/repository-controls", "127.0.0.1:34115", "", "application/json", `{"included":["missing/repository"]}`, 400},
+		{"POST", "/api/remove-cache", "127.0.0.1:34115", "", "application/json", `{"id":"missing/repository"}`, 400},
+		{"POST", "/api/group", "127.0.0.1:34115", "", "application/json", `{"name":"missing"}`, 400},
+		{"POST", "/api/path", "127.0.0.1:34115", "", "application/json", `{"repo":"missing/repository","path":"src","revision":"main"}`, 400},
+		{"POST", "/api/identity", "127.0.0.1:34115", "https://attacker.example", "application/json", `{"primaryEmail":"person@example.test"}`, 403},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path+tc.host+tc.origin+tc.body, func(t *testing.T) {

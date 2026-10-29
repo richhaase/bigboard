@@ -12,17 +12,28 @@ import (
 
 	"github.com/richhaase/bigboard/git"
 	gh "github.com/richhaase/bigboard/github"
+	"github.com/richhaase/bigboard/stats"
 )
 
 type analysisConfig struct {
-	PersonalAccount string                  `json:"personal_account"`
-	Organizations   []string                `json:"organizations"`
-	Exclude         []string                `json:"exclude"`
-	AllFiles        bool                    `json:"all_files"`
-	AIIdentities    []string                `json:"ai_identities"`
-	BotIdentities   []string                `json:"bot_identities"`
-	Identities      map[string]git.Identity `json:"identities"`
-	PRRequestBudget int                     `json:"pr_request_budget"`
+	PersonalAccount string                          `json:"personal_account"`
+	Organizations   []string                        `json:"organizations"`
+	Exclude         []string                        `json:"exclude"`
+	AllFiles        bool                            `json:"all_files"`
+	AIIdentities    []string                        `json:"ai_identities"`
+	BotIdentities   []string                        `json:"bot_identities"`
+	Identities      map[string]git.Identity         `json:"identities"`
+	PRRequestBudget int                             `json:"pr_request_budget"`
+	Since           string                          `json:"since"`
+	Sort            string                          `json:"sort"`
+	Groups          map[string][]string             `json:"groups"`
+	WorkAreas       map[string][]stats.WorkAreaRule `json:"work_areas"`
+	Theme           string                          `json:"theme"`
+	Fuzzy           bool                            `json:"fuzzy"`
+	GitHub          *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"github"`
+	source []byte
 }
 
 func normalizeSettings(settings Settings) (Settings, error) {
@@ -75,25 +86,45 @@ func normalizeSettings(settings Settings) (Settings, error) {
 		}
 	}
 	settings.Repositories = repositories
+	if settings.ExcludedRepositories != nil {
+		excluded := []string{}
+		for _, id := range settings.ExcludedRepositories {
+			canonical, err := gh.CanonicalRepo(strings.TrimSpace(id))
+			if err != nil {
+				return Settings{}, fmt.Errorf("excluded repository %q must use owner/name", id)
+			}
+			if !slices.Contains(excluded, canonical) {
+				excluded = append(excluded, canonical)
+			}
+		}
+		settings.ExcludedRepositories = excluded
+	}
 	return settings, nil
 }
 
 func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
-	analysis := analysisConfig{PRRequestBudget: gh.MaxRefreshRequests}
+	analysis := analysisConfig{PRRequestBudget: gh.MaxRefreshRequests, Since: "14d", Sort: "total"}
 	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "config.json"))
 	if err == nil {
-		if err := json.Unmarshal(data, &analysis); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+			return Settings{}, analysis, nil, errors.New("Bigboard configuration must be a JSON object")
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&analysis); err != nil {
 			return Settings{}, analysis, nil, fmt.Errorf("reading existing Bigboard configuration: %w", err)
 		}
 		analysis.Identities, err = git.NormalizeIdentities(analysis.Identities)
 		if err != nil {
 			return Settings{}, analysis, nil, err
 		}
+		analysis.source = slices.Clone(data)
 	} else if !os.IsNotExist(err) {
 		return Settings{}, analysis, nil, err
 	}
-	if analysis.PRRequestBudget < 1 {
-		analysis.PRRequestBudget = gh.MaxRefreshRequests
+	if err := validateAnalysis(&analysis); err != nil {
+		return Settings{}, analysis, nil, err
 	}
 	initial := Settings{Mode: "cache", PersonalAccount: analysis.PersonalAccount, Organizations: analysis.Organizations}
 	if initial.PersonalAccount != "" || len(initial.Organizations) > 0 {
@@ -114,6 +145,48 @@ func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
 	}
 	settings, err = normalizeSettings(settings)
 	return settings, analysis, data, err
+}
+
+func validateAnalysis(cfg *analysisConfig) error {
+	cfg.Since = strings.ToLower(strings.TrimSpace(cfg.Since))
+	if cfg.Since == "" {
+		cfg.Since = "14d"
+	}
+	if !slices.Contains([]string{"1d", "7d", "14d", "30d", "90d", "1y", "all"}, cfg.Since) {
+		return fmt.Errorf("invalid since %q", cfg.Since)
+	}
+	cfg.Sort = strings.ToLower(strings.TrimSpace(cfg.Sort))
+	if cfg.Sort == "" || cfg.Sort == "impact" {
+		cfg.Sort = "total"
+	}
+	if !slices.Contains([]string{"commits", "added", "removed", "net", "ai", "total"}, cfg.Sort) {
+		return fmt.Errorf("invalid contributor sort %q", cfg.Sort)
+	}
+	if cfg.PRRequestBudget < 1 {
+		return errors.New("pr_request_budget must be positive")
+	}
+	for name, members := range cfg.Groups {
+		for i, id := range members {
+			canonical, err := gh.CanonicalRepo(id)
+			if err != nil {
+				return fmt.Errorf("groups.%s must contain owner/name repositories", name)
+			}
+			owner, _, _ := strings.Cut(canonical, "/")
+			if !strings.EqualFold(owner, cfg.PersonalAccount) && !slices.ContainsFunc(cfg.Organizations, func(org string) bool { return strings.EqualFold(org, owner) }) {
+				return fmt.Errorf("groups.%s contains a repository outside configured sources", name)
+			}
+			cfg.Groups[name][i] = canonical
+		}
+	}
+	for repo, rules := range cfg.WorkAreas {
+		if strings.TrimSpace(repo) == "" {
+			return errors.New("work_areas repository cannot be empty")
+		}
+		if err := stats.ValidateWorkAreaRules(rules); err != nil {
+			return fmt.Errorf("work_areas %s: %w", repo, err)
+		}
+	}
+	return nil
 }
 
 func saveSettings(path string, settings Settings, expected []byte) ([]byte, error) {

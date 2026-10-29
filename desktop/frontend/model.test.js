@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL,
+  activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL, ranges, identity, timelineSeries, relatedScopes, classifyWorkArea,
   scopedCommits, selectCommits, sortRows, totals, uniqueCommits,
 } from './model.js';
 
@@ -20,7 +20,8 @@ const makePR = (overrides = {}) => ({
 });
 
 test('date filtering retains future commits and requires known dates for bounded ranges', () => {
-  assert.equal(inRange('2026-10-21T12:00:00Z',7,now),true);
+  assert.equal(inRange('2026-10-21T12:00:00Z',7,now),false);
+  assert.equal(inRange('2026-10-21T12:00:00.001Z',7,now),true);
   assert.equal(inRange('2026-10-21T11:59:59Z',7,now),false);
   assert.equal(inRange('2027-01-01T00:00:00Z',7,now),true);
   assert.equal(inRange('not a date',7,now),false);
@@ -32,12 +33,30 @@ test('repository, date, and bot selection compose before global commit deduplica
     makeCommit({repo:'sample/api'}),
     makeCommit({repo:'sample/web'}),
     makeCommit({id:'old',date:'2026-01-01T00:00:00Z'}),
-    makeCommit({id:'bot',bot:true}),
+    makeCommit({id:'bot',bot:true,email:'automation@example.test'}),
   ]};
   const selected = selectCommits(snapshot,{repos:['sample/web'],days:7,hideBots:true},now);
   assert.equal(selected.length,1);
   assert.equal(selected[0].repo,'sample/web');
   assert.equal(totals(selectCommits(snapshot,{days:7,hideBots:true},now)).commits,1);
+});
+
+test('hiding bots excludes every selected commit of an identity marked as a bot', () => {
+  const snapshot={commits:[
+    makeCommit({id:'bot',bot:true}),
+    makeCommit({id:'human',bot:false}),
+    makeCommit({id:'other',email:'human@example.test'}),
+  ]};
+  assert.deepEqual(selectCommits(snapshot,{days:7,hideBots:true},now).map(c=>c.id),['other']);
+  assert.equal(people(snapshot.commits).find(p=>p.email==='alex@example.test').bot,true);
+});
+
+test('canonical contributor names use unique-commit frequency then longest name and codepoint order', () => {
+  const frequent=[makeCommit({id:'one',author:'Alex'}),makeCommit({id:'two',author:'Alex'}),makeCommit({id:'three',author:'Alex Example'})];
+  assert.equal(people(frequent)[0].name,'Alex');
+  assert.equal(people([makeCommit({id:'one',author:'Alex'}),makeCommit({id:'two',author:'Alex Example'})])[0].name,'Alex Example');
+  assert.equal(people([makeCommit({id:'one',author:'Blex'}),makeCommit({id:'two',author:'Alex'})])[0].name,'Alex');
+  assert.equal(people([...frequent,makeCommit({id:'three',author:'Alex Example',repo:'sample/web'}),makeCommit({id:'three',author:'Alex Example',repo:'sample/tools'})])[0].name,'Alex');
 });
 
 test('deduplication always prefers known counts regardless of record order or magnitude', () => {
@@ -238,4 +257,170 @@ test('directory activity supports a path changed by more than 150k commits', () 
   assert.equal(source.latest,now);
   assert.equal(source.added,history.length*80);
   assert.equal(source.removed,history.length*20);
+});
+
+test('commit identity matches normalized email semantics', () => {
+  const contributors=people([
+    makeCommit({id:'one',email:' Alex@Example.Test '}),
+    makeCommit({id:'two',email:'alex@example.test'}),
+  ]);
+  assert.equal(contributors.length,1);
+  assert.equal(contributors[0].commits,2);
+});
+
+test('same-commit attribution follows deterministic complete repository copy rather than largest volume', () => {
+  const first=makeCommit({repo:'example/a',email:'canonical@example.test',added:3,removed:1});
+  const second=makeCommit({repo:'example/z',email:'other@example.test',added:300,removed:100});
+  assert.deepEqual(uniqueCommits([second,first]),[first]);
+  assert.deepEqual(uniqueCommits([first,second]),[first]);
+});
+
+test('conflicting mailmaps for one commit produce one canonical contributor with every repository association', () => {
+  const first=makeCommit({repo:'example/a',email:'canonical@example.test',added:3,removed:1});
+  const second=makeCommit({repo:'example/z',email:'other@example.test',added:300,removed:100});
+  const contributors=people([second,first]);
+  assert.equal(contributors.length,1);
+  assert.equal(contributors[0].email,'canonical@example.test');
+  assert.equal(contributors[0].commits,1);
+  assert.equal(contributors[0].added,3);
+  assert.deepEqual([...contributors[0].repos].sort(),['example/a','example/z']);
+});
+
+test('records without object IDs remain distinct even when all visible fields match', () => {
+  const record=makeCommit({id:''});
+  assert.equal(uniqueCommits([record,{...record}]).length,2);
+  assert.equal(totals([record,{...record}]).commits,2);
+});
+
+test('since-last-look applies an exact exclusive timestamp boundary independently of range presets', () => {
+  const since='2026-10-27T12:00:00Z';
+  const snapshot={commits:[
+    makeCommit({id:'before',date:'2026-10-27T11:59:59Z'}),
+    makeCommit({id:'equal',date:since}),
+    makeCommit({id:'after',date:'2026-10-27T12:00:01Z'}),
+  ],pullRequests:[
+    makePR({number:1,updatedAt:since}),
+    makePR({number:2,updatedAt:'2026-10-27T12:00:01Z'}),
+  ]};
+  assert.deepEqual(selectCommits(snapshot,{days:0,since},now).map(c=>c.id),['after']);
+  assert.deepEqual(filterPRs(snapshot,{days:0,since},now).map(p=>p.number),[2]);
+});
+
+test('PR facets match any selected value within a category and every selected category', () => {
+  const snapshot={viewer:'alex',pullRequests:[
+    makePR({number:1,author:'alex',review:'APPROVED',checks:'SUCCESS'}),
+    makePR({number:2,author:'sam',review:'CHANGES_REQUESTED',checks:'ERROR'}),
+    makePR({number:3,author:'sam',review:'REVIEW_REQUIRED',checks:'PENDING'}),
+    makePR({number:4,author:'jules',review:'APPROVED',checks:'SUCCESS'}),
+  ]};
+  assert.deepEqual(filterPRs(snapshot,{author:['alex','sam'],review:['APPROVED','CHANGES_REQUESTED'],checks:['SUCCESS','ERROR']},now).map(p=>p.number).sort(),[1,2]);
+});
+
+test('needs-my-attention matches the complete TUI triage contract', () => {
+  const oldReview={author:'ALEX',submittedAt:'2026-10-26T12:00:00Z'};
+  const snapshot={viewer:'alex',pullRequests:[
+    makePR({number:1,author:'ALEX',checks:'FAILURE'}),
+    makePR({number:2,author:'alex',review:'CHANGES_REQUESTED'}),
+    makePR({number:3,author:'alex',review:'APPROVED',checks:'SUCCESS'}),
+    makePR({number:4,author:'alex',review:'APPROVED',checks:'SUCCESS',draft:true}),
+    makePR({number:5,author:'alex',checks:'PENDING'}),
+    makePR({number:6,author:'sam',reviewers:['ALEX']}),
+    makePR({number:7,author:'sam',reviews:[oldReview]}),
+    makePR({number:8,author:'sam',reviewers:['sample/alex']}),
+    makePR({number:9,author:'sam',checks:'FAILURE'}),
+    makePR({number:10,author:'alex',checks:'ERROR'}),
+    makePR({number:11,author:'alex',reviews:[oldReview],checks:'PENDING'}),
+    makePR({number:12,author:'alex',reviewers:['alex'],checks:'PENDING'}),
+  ]};
+  assert.deepEqual(filterPRs(snapshot,{mine:'attention'},now).map(p=>p.number).sort((a,b)=>a-b),[1,2,3,6,7,10]);
+});
+
+test('updated-since-review compares against the latest known submitted review and excludes missing dates', () => {
+  const snapshot={viewer:'alex',pullRequests:[
+    makePR({number:1,reviews:[{author:'alex',submittedAt:'2026-10-26T12:00:00Z'}]}),
+    makePR({number:2,reviews:[{author:'alex',submittedAt:'2026-10-26T12:00:00Z'},{author:'ALEX',submittedAt:'2026-10-28T12:00:00Z'}]}),
+    makePR({number:3,reviews:[{author:'alex',submittedAt:'0001-01-01T00:00:00Z'}]}),
+    makePR({number:4,reviews:[{author:'sam',submittedAt:'2026-10-26T12:00:00Z'}]}),
+    makePR({number:5,reviews:[{author:'alex',submittedAt:'2026-10-27T12:00:00Z'}]}),
+  ]};
+  assert.deepEqual(filterPRs(snapshot,{mine:'updated'},now).map(p=>p.number),[1]);
+});
+
+test('PR author sorting is case insensitive with newest updates first and supports whole-order reversal', () => {
+  const snapshot={pullRequests:[
+    makePR({number:1,author:'zora',title:'Bravo'}),
+    makePR({number:2,author:'alex',title:'Zulu',updatedAt:'2026-10-26T12:00:00Z'}),
+    makePR({number:3,author:'Alex',title:'alpha',updatedAt:'2026-10-28T12:00:00Z'}),
+  ]};
+  assert.deepEqual(filterPRs(snapshot,{sort:'author'},now).map(p=>p.number),[3,2,1]);
+  assert.deepEqual(filterPRs(snapshot,{sort:'author',reverse:true},now).map(p=>p.number),[1,2,3]);
+  assert.deepEqual(filterPRs(snapshot,{sort:'title'},now).map(p=>p.number),[3,1,2]);
+});
+
+
+test('date presets include the existing one-day and fourteen-day windows', () => {
+  assert.deepEqual(ranges.map(r=>r.value),[1,7,14,30,90,365,0]);
+});
+
+test('Activity contributor filtering keeps canonical shared-commit repository evidence', () => {
+  const canonical=makeCommit({repo:'example/a',email:'canonical@example.test'});
+  const copy=makeCommit({repo:'example/z',email:'different@example.test'});
+  const other=makeCommit({id:'other',email:'other@example.test'});
+  const selected=selectCommits({commits:[copy,canonical,other]},{people:[identity(canonical)]},now);
+  assert.deepEqual(selected.map(c=>c.repo).sort(),['example/a','example/z']);
+  assert.equal(totals(selected).commits,1);
+});
+
+test('timeline switches daily, Sunday-aligned weekly, and monthly buckets without losing selected counts', () => {
+  const localNoon=new Date(2026,9,28,12);
+  const records=[makeCommit({date:localNoon.toISOString()})];
+  const daily=timelineSeries(records,14,localNoon.getTime());
+  const weekly=timelineSeries(records,90,localNoon.getTime());
+  const monthly=timelineSeries(records,365,localNoon.getTime());
+  assert.ok(daily.length>=14&&daily.length<=15);
+  assert.ok(weekly.length>=13&&weekly.length<=14);
+  assert.ok(weekly.every(row=>new Date(row.date).getDay()===0));
+  assert.equal(monthly.length,12);
+  assert.ok(monthly.every(row=>new Date(row.date).getDate()===1));
+  for(const rows of [daily,weekly,monthly])assert.equal(rows.reduce((sum,row)=>sum+row.commits,0),1);
+});
+
+test('related evidence distinguishes exact shared commit IDs from contributor overlap', () => {
+  const source=makeCommit({repo:'example/a'});
+  const shared=makeCommit({repo:'example/b'});
+  const overlap=makeCommit({id:'unrelated',repo:'example/c'});
+  const anonymous=makeCommit({id:'',repo:'example/d',email:'someone@example.test'});
+  const records=[source,shared,overlap,anonymous];
+  assert.deepEqual(relatedScopes(records,{repo:'example/a',path:''},'commits').map(r=>r.repo),['example/b']);
+  assert.deepEqual(relatedScopes(records,{repo:'example/a',path:''},'people').map(r=>r.repo),['example/b','example/c']);
+});
+
+test('named work areas choose the longest literal prefix and retain only scoped file volume', () => {
+  const rules=[{name:'Backend',paths:['src/']},{name:'Auth',paths:['src/auth']},{name:'Token',paths:['src/auth/token.go']},{name:'Literal',paths:['literal*']}];
+  assert.equal(classifyWorkArea('src/auth/token.go',rules),'Token');
+  assert.equal(classifyWorkArea('src/auth/login.go',rules),'Auth');
+  assert.equal(classifyWorkArea('src/authentication/check.go',rules),'Backend');
+  assert.equal(classifyWorkArea('literal*/file',rules),'Literal');
+  assert.equal(classifyWorkArea('literal-other/file',rules),'');
+  const records=[makeCommit({files:[{path:'src/auth/login.go',added:4,removed:2},{path:'src/auth/token.go',added:8,removed:1},{path:'docs/auth.md',added:3,removed:0}]})];
+  const scoped=scopedCommits(records,{repo:'sample/api',areaName:'Auth',areaRules:rules});
+  assert.equal(totals(scoped).added,4);
+  assert.equal(totals(scoped).removed,2);
+  assert.deepEqual(relatedScopes(records,{repo:'sample/api',areaName:'Auth',areaRules:rules},'commits',{'sample/api':rules}).filter(r=>r.areaName).map(r=>r.areaName),['Token']);
+});
+
+test('PR author facets compare GitHub logins case insensitively', () => {
+  const snapshot={pullRequests:[makePR({author:'Alex'})]};
+  assert.equal(filterPRs(snapshot,{author:['alex']},now).length,1);
+});
+
+test('range-aware timelines retain future-dated selected commits consistently with totals', () => {
+  const current=new Date(2026,9,28,12);
+  const future=new Date(2026,10,5,12);
+  const records=[makeCommit({date:future.toISOString()})];
+  for(const days of [14,90,365]){
+    const selected=selectCommits({commits:records},{days},current.getTime());
+    assert.equal(totals(selected).commits,1);
+    assert.equal(timelineSeries(selected,days,current.getTime()).reduce((sum,row)=>sum+row.commits,0),1);
+  }
 });
