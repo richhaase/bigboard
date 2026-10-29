@@ -74,6 +74,11 @@ and cache directories, intercepts test-only API fixtures, and writes screenshots
 to `desktop/build/screenshots`. It does not access the user’s normal GitHub
 configuration. Backend tests use fake providers and temporary storage.
 
+Documentation screenshots in `docs/images` use real data from the public
+`richhaase/bigboard` repository with isolated configuration and cache directories.
+They are separate from the browser harness’s fixture-based failure screenshots;
+see the [workflow guide](../docs/visual-guide.md) for the published captures.
+
 ## Release packaging
 
 The tag workflow in [release.yml](../.github/workflows/release.yml) is the
@@ -81,7 +86,8 @@ release authority. It builds a universal macOS app, signs with Developer ID,
 notarizes and staples it, then publishes
 `Bigboard_<version>_darwin_universal.zip` and `checksums.txt`. The
 `richhaase/tap/bigboard` cask installs the app and declares Git and GitHub CLI as
-dependencies. Users launch Bigboard from Finder, Spotlight, or the Dock.
+dependencies. The app requires macOS 13 Ventura or newer. Users launch Bigboard
+from Finder, Spotlight, or the Dock.
 
 This branch prepares that distribution; it does not claim a GUI release has
 already been published. No Windows or Linux application package is distributed

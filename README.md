@@ -8,6 +8,11 @@ Bigboard reads default-branch history and open PRs into three connected boards.
 It maintains its own Git cache, leaving developer checkouts and working branches
 untouched. Available cached history appears before the startup refresh finishes.
 
+![Bigboard Activity board showing repository change volume and scoped contributors](docs/images/activity.png)
+
+*Live data from the public [richhaase/bigboard](https://github.com/richhaase/bigboard)
+repository. See the [workflow guide](docs/visual-guide.md) for the other boards.*
+
 ## Try this branch locally
 
 The GUI-only application on this branch has not been released yet. On macOS,
