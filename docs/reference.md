@@ -32,6 +32,8 @@ session. Neither changes the saved workspace.
 Select **Activity**, **Contributors**, or **Pull requests** in the sidebar.
 Each board remembers its search, filters, sort direction, selection, and position.
 Activity also retains its drill-down location. Back preserves applied filters.
+If shared repository scope excludes that location, Activity returns to the
+repository ranking for the new selection.
 
 | Control | Action |
 | --- | --- |
@@ -84,7 +86,10 @@ return to broader scopes. Long file histories load additional commits in batches
 
 The **Commits**, **People**, and **Related** tabs show evidence for the current
 scope; `1`, `2`, and `3` select them, and `4` returns to the ranking. People opens
-a person’s scoped commits. Related switches between exact shared commits and
+a person’s scoped commits. Search matches contributor names/emails in the People
+list, and commit subjects or author names/emails in Commits and a selected
+person’s commit detail. Matching commits are filtered before pagination.
+Related switches between exact shared commits and
 historical contributor overlap, including configured named work areas. Open a
 result to inspect the matching commits or people. Overlap is not ownership or
 online presence.
@@ -143,7 +148,9 @@ Author, review, checks, and draft-state facets combine with Mine:
 `m`, `M`, and `n` toggle attention, authored, and requested respectively. Repeating
 a shortcut clears that Mine selection; other filters remain. If account lookup
 fails, Mine filters cannot match. Partial reviewer or review history can omit
-matches and is identified in the coverage information.
+matches and is identified in the coverage information. **Awaiting your review**
+uses shared date/repository scope and any temporary repository PR context.
+Incomplete reviewer evidence shows `?`, or a known lower bound such as `1 + ?`.
 
 Sort by Updated, Repository, Author, Title, or Attention; `S` reverses the whole
 order. `A` selects author order and `z` opens the sort picker. Updated starts
