@@ -18,6 +18,9 @@ type App struct {
 
 func (a *App) Snapshot() gui.Snapshot         { return a.service.Snapshot() }
 func (a *App) Refresh() (gui.Snapshot, error) { return a.service.Refresh() }
+func (a *App) SnapshotStatus() gui.SnapshotStatus {
+	return a.service.SnapshotStatus()
+}
 func (a *App) SaveSettings(settings gui.Settings) (gui.Snapshot, error) {
 	return a.service.SaveSettings(settings)
 }

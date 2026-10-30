@@ -138,11 +138,12 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 				return nil, err
 			}
 		}
-		countPath := filter.shouldCount(path)
 		record := &records[len(records)-1]
-		change := PathChange{Path: path, PreviousPath: previousPath, Generated: !countPath}
+		change := PathChange{Path: path, PreviousPath: previousPath}
 		if fields[0] == "-" || fields[1] == "-" {
 			change.Binary = true
+			change.Exclusion = filter.exclusion(path, 0, 0, false)
+			change.Generated = change.Exclusion != ""
 			record.Changes = append(record.Changes, change)
 			continue
 		}
@@ -152,8 +153,10 @@ func parseLog(scanner *bufio.Scanner, repo Repository, filter pathFilter, ai aiM
 			return nil, fmt.Errorf("invalid line counts %q", token)
 		}
 		change.Added, change.Removed, change.LinesKnown = added, removed, true
+		change.Exclusion = filter.exclusion(path, added, removed, true)
+		change.Generated = change.Exclusion != ""
 		record.Changes = append(record.Changes, change)
-		if countPath {
+		if !change.Generated {
 			record.Added += added
 			record.Removed += removed
 		}

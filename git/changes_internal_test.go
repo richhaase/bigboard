@@ -18,9 +18,9 @@ func TestRetainedChangesLiteralPaths(t *testing.T) {
 	want := []PathChange{
 		{Path: "\nleading\tline.go", Added: 2, Removed: 1, LinesKnown: true},
 		{Path: "image\twith\nlines.png", Binary: true},
-		{Path: "vendor/generated\tfile.go", Generated: true, Added: 9, LinesKnown: true},
+		{Path: "vendor/generated\tfile.go", Generated: true, Exclusion: ExclusionPath, Added: 9, LinesKnown: true},
 		{Path: "new\nname.go", PreviousPath: "old\tname.go", LinesKnown: true},
-		{Path: "vendor/copied\tbinary.png", PreviousPath: "old\nbinary.png", Generated: true, Binary: true},
+		{Path: "vendor/copied\tbinary.png", PreviousPath: "old\nbinary.png", Generated: true, Exclusion: ExclusionPath, Binary: true},
 	}
 	for _, includeGenerated := range []bool{false, true} {
 		scanner := bufio.NewScanner(strings.NewReader(out))
@@ -31,7 +31,7 @@ func TestRetainedChangesLiteralPaths(t *testing.T) {
 		}
 		if includeGenerated {
 			for i := range want {
-				want[i].Generated = false
+				want[i].Generated, want[i].Exclusion = false, ""
 			}
 		}
 		if len(records) != 2 || !reflect.DeepEqual(records[0].Changes, want) {
@@ -68,7 +68,7 @@ func TestRetainedLineCountsStayWithEachFile(t *testing.T) {
 		{Path: "client/view.go", Added: 2, Removed: 1, LinesKnown: true},
 		{Path: "legacy/removed.go", Removed: 7, LinesKnown: true},
 		{Path: "new/component.go", PreviousPath: "old/component.go", Added: 4, Removed: 2, LinesKnown: true},
-		{Path: "vendor/generated.go", Added: 90, Removed: 80, LinesKnown: true, Generated: true},
+		{Path: "vendor/generated.go", Added: 90, Removed: 80, LinesKnown: true, Generated: true, Exclusion: ExclusionPath},
 	}
 	if len(records) != 1 || !reflect.DeepEqual(records[0].Changes, want) {
 		t.Fatalf("file-specific measurements lost: %+v", records)

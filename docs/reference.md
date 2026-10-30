@@ -264,7 +264,7 @@ restart to load them rather than overwriting them.
 | `groups` | Named `owner/name` lists, selected through the group picker; only members from active sources are shown |
 | `since` | Startup preset: `1d`, `7d`, `14d` (default), `30d`, `90d`, `1y`, or `all` |
 | `sort` | Contributors: `commits`, `added`, `removed`, `net`, `ai`, or `total` (default); `impact` aliases `total` |
-| `all_files` | Include generated/vendored paths in line counts; default false |
+| `all_files` | Include generated, vendored, `.gitattributes`-marked, and bulk data changes in line counts; default false |
 | `pr_request_budget` | Positive cap per remote refresh; default 128; does not bypass cooldowns |
 | `ai_identities` | Additional AI author/co-author emails or `@domain` suffixes |
 | `bot_identities` | Additional bot emails, `@domain` suffixes, or exact author names |
@@ -307,8 +307,23 @@ named areas do not replace Activity’s directory hierarchy.
 
 ## Counting and troubleshooting
 
-Git totals cover default-branch history and exclude merge commits. Generated and
-vendored line changes are excluded by default. Unknown line counts still count
+Git totals cover default-branch history and exclude merge commits. By default,
+line changes are excluded from totals for three reasons:
+
+- **Generated or vendored paths:** dependency directories, build output,
+  lockfiles, minified files, and similar built-in patterns.
+- **`.gitattributes`:** paths marked `linguist-generated` or `linguist-vendored`
+  in the repository’s root `.gitattributes` at the scanned revision.
+  `linguist-generated=false` keeps a path counted even when another rule would
+  exclude it. Nested `.gitattributes` files are not read.
+- **Bulk data:** a single change of 2,000 or more lines to a data file (JSON,
+  NDJSON, YAML, CSV/TSV, XML, PO/POT, or SVG), such as a regenerated registry,
+  snapshot, seed, or translation export. Smaller edits to the same file count.
+
+Excluded files are omitted from directory and file views, but their commits
+still count. Activity notes how many lines were excluded for the repository
+scope and why, and Data status shows each repository’s excluded total. Set
+`all_files` to count everything. Unknown line counts still count
 as commits without becoming measured lines. Shared Git object IDs count once
 globally; repository associations and directory subtotals can overlap. Future
 author dates remain included. AI percentages describe detected authors/co-authors,

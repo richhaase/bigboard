@@ -24,6 +24,11 @@ export function totals(commits) {
   const items = uniqueCommits(commits);
   return {commits:items.length,added:items.reduce((n,c)=>n+(c.linesUnknown?0:c.added||0),0),removed:items.reduce((n,c)=>n+(c.linesUnknown?0:c.removed||0),0),people:new Set(items.map(identity)).size,ai:items.filter(c=>c.ai).length,unknown:items.some(c=>c.linesUnknown)};
 }
+export function excludedLines(commits) {
+  const items=uniqueCommits(commits);
+  const path=items.reduce((n,c)=>n+(c.excludedPathLines||0),0),attribute=items.reduce((n,c)=>n+(c.excludedAttributeLines||0),0),bulk=items.reduce((n,c)=>n+(c.excludedBulkLines||0),0);
+  return {path,attribute,bulk,total:path+attribute+bulk};
+}
 export function filterByCanonicalIdentity(commits,identities,canonicalRecords=commits) {
   const allowed=new Set(identities);
   const canonical=new Map(uniqueCommits(canonicalRecords).filter(c=>c.id).map(c=>[c.id,c]));

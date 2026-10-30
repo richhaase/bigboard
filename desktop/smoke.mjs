@@ -54,15 +54,17 @@ try {
  let pathRequests=0;
  let refreshCount=0;
  let snapshotReads=0;
+ let statusReads=0;
  let identitySaves=0;
  let settingsSaves=0;
  let removedCaches=0;
  let controls=[...repositories.map(r=>({...r,included:true,selectable:true,listed:true,cached:true,canRemove:false})),{id:'test-org/retired',name:'retired',included:false,selectable:false,listed:false,cached:true,canRemove:true}];
  await page.route('**/api/**',async route=>{
   const endpoint=new URL(route.request().url()).pathname;
-  if(endpoint!=='/api/repository-controls')assert.equal(route.request().method(),['/api/snapshot','/api/export','/api/identities'].includes(endpoint)?'GET':'POST');
+  if(endpoint!=='/api/repository-controls')assert.equal(route.request().method(),['/api/snapshot','/api/snapshot-status','/api/export','/api/identities'].includes(endpoint)?'GET':'POST');
   const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
   if(endpoint==='/api/snapshot'){snapshotReads++;return send(snapshot);}
+  if(endpoint==='/api/snapshot-status'){statusReads++;return send({generatedAt:snapshot.generatedAt,phase:snapshot.status.phase,message:snapshot.status.message,commits:snapshot.commits.length,repositories:snapshot.repositories.length,pullRequests:snapshot.pullRequests.length});}
   if(endpoint==='/api/refresh'){
    refreshCount++;
    if(failRefresh)return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test refresh failure'})});
@@ -133,6 +135,10 @@ try {
  assert.equal(await page.locator('[data-action="refresh"]').isDisabled(),true,'cached history appears before remote refresh completes');
  await page.getByText('Cached history loaded; refreshing GitHub…',{exact:true}).waitFor();
  await page.getByText('Loading pull requests from GitHub…',{exact:true}).waitFor();
+ const pendingSnapshotReads=snapshotReads;
+ await page.waitForTimeout(2200);
+ assert.ok(statusReads>0,'pending refresh polls the lightweight status');
+ assert.equal(snapshotReads,pendingSnapshotReads,'unchanged status does not re-read the full snapshot');
  await click('[data-action="board"][data-value="prs"]');
  await page.getByRole('heading',{name:'Loading pull requests',exact:true}).waitFor();
  assert.equal(await page.locator('.pr-context > div').first().locator('strong').innerText(),'—');
@@ -148,9 +154,9 @@ try {
  assert.equal(await page.locator('#personalAccount').inputValue(),'staged-account','refresh completion preserves the open settings draft');
  await page.getByRole('button',{name:'Cancel',exact:true}).click();
  assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','default period is fourteen days');
- const settledReads=snapshotReads;
+ const settledReads=snapshotReads+statusReads;
  await page.waitForTimeout(1600);
- assert.equal(snapshotReads,settledReads,'snapshot polling stops after refresh completion');
+ assert.equal(snapshotReads+statusReads,settledReads,'snapshot polling stops after refresh completion');
  await page.clock.install({time:new Date(now)});
  await page.clock.setFixedTime(new Date(Date.parse(now)+30*86400000));
  await click('[data-action="board"][data-value="people"]');
@@ -497,9 +503,9 @@ try {
  await page.getByText('Refresh failed; showing retained data.',{exact:true}).waitFor();
  assert.equal(await page.getByText('Refreshing updated cached history…',{exact:true}).count(),0,'failed polling cannot leave Data status reporting an active refresh');
  await page.getByRole('button',{name:'Done',exact:true}).click();
- const failedReads=snapshotReads;
+ const failedReads=snapshotReads+statusReads;
  await page.waitForTimeout(1600);
- assert.equal(snapshotReads,failedReads,'snapshot polling stops after refresh failure');
+ assert.equal(snapshotReads+statusReads,failedReads,'snapshot polling stops after refresh failure');
  failAfterInterim=false;
  await click('[data-action="dismiss-error"]');
  for(const width of [860,390]){
@@ -556,6 +562,12 @@ try {
  assert.equal(await page.locator('.commit').count(),1);
  assert.equal(await page.locator('.commit .delta').textContent(),'+80−20');
  assert.ok((await page.locator('.commit').innerText()).includes('Canonical contributor'));
+ snapshot={...loaded,commits:[{...commits[0],id:'bulk-data',excludedBulkLines:2500,excludedAttributeLines:7}]};
+ await page.reload();
+ await page.getByText('2,507 changed lines in the selected repositories are excluded from these totals: 2,500 in bulk data files, 7 in files marked generated or vendored in .gitattributes. Their commits still count.',{exact:true}).waitFor();
+ await click('.sidebar [data-action="status"]');
+ await page.getByText(/2\.5K lines excluded \(all time\)/).waitFor();
+ await page.getByRole('button',{name:'Done',exact:true}).click();
  snapshot={...loaded,commits:[{...commits[0],id:'known-path'},{...commits[0],id:'unknown-path',pathsUnknown:true,linesUnknown:true,files:[]}]};
  await page.reload();
  await page.getByText(/File paths are unavailable for 1 commit/).waitFor();

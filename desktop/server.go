@@ -39,10 +39,12 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 			}
 			return nil
 		}
-		if r.Method == http.MethodGet && (r.URL.Path == "/api/snapshot" || r.URL.Path == "/api/identities" || r.URL.Path == "/api/repository-controls" || r.URL.Path == "/api/export") {
+		if r.Method == http.MethodGet && (r.URL.Path == "/api/snapshot" || r.URL.Path == "/api/snapshot-status" || r.URL.Path == "/api/identities" || r.URL.Path == "/api/repository-controls" || r.URL.Path == "/api/export") {
 			switch r.URL.Path {
 			case "/api/snapshot":
 				result = app.Snapshot()
+			case "/api/snapshot-status":
+				result = app.SnapshotStatus()
 			case "/api/identities":
 				result = app.IdentityOptions()
 			case "/api/repository-controls":

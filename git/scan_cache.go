@@ -17,7 +17,7 @@ import (
 
 const scanCacheFile = "bigboard-scan"
 const scanCacheSchema = 1
-const scanCountingVersion = 1
+const scanCountingVersion = 2
 
 type scanCacheHeader struct {
 	Schema  int
