@@ -89,8 +89,8 @@ paths remain visible at repository scope; a coverage notice explains why they
 cannot be assigned to individual directories. Breadcrumbs and Back return to
 broader scopes. Long file histories load additional commits in batches.
 
-The **Commits**, **People**, and **Related** tabs show evidence for the current
-scope; `1`, `2`, and `3` select them, and `4` returns to the ranking. People opens
+The **Commits**, **People**, **Related**, and **Heat** tabs show evidence for the
+current scope; `1`, `2`, `3`, and `5` select them, and `4` returns to the ranking. People opens
 a person’s scoped commits. Search matches contributor names/emails in the People
 list, and commit subjects or author names/emails in Commits and a selected
 person’s commit detail. Matching commits are filtered before pagination.
@@ -98,6 +98,20 @@ Related switches between exact shared commits and historical contributor overlap
 (`m` toggles the mode), including configured named work areas. Open a
 result to inspect the matching commits or people. Overlap is not ownership or
 online presence.
+
+**Heat** shows the current scope and its repositories or directories as weekly
+tiles for the last 26 weeks. Each week is colored against the same row’s average
+over the 12 weeks before it: amber is busier than usual, blue is quieter, and
+cream marks activity after 12 quiet weeks. Choose Lines, Commits, or People.
+**Change** compares the last 4 weeks with the 12 before them, and badges flag new,
+rising (2× or more), falling (half or less), and quiet rows. Heat ignores the
+shared date range so the baseline is always available; repository, group,
+contributor, and bot filters still apply. Exploring a row stays in Heat, and Back
+returns to the broader scope. Directories with no activity in the last 38 weeks
+are omitted; quiet tracked repositories remain listed. Long lists show the 25
+most active rows; **Show more** reveals the rest and says how many of them are
+rising or new. Search and `y` always cover every row. Changes under 0.1× display as `<0.1×`. Heat describes change
+relative to a row’s own history, not productivity or importance.
 
 **Open path on GitHub** (or `o`) verifies the path in the local cache at the
 retained scan revision before opening it. Missing or deleted paths report an

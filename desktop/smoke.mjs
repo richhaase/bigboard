@@ -270,6 +270,14 @@ try {
  await click('[data-action="lens"][data-value="related"]');
  await click('[data-action="related-mode"][data-value="people"]');
  assert.equal(await page.locator('.related-row').count(),1);
+ await click('[data-action="lens"][data-value="heat"]');
+ await page.locator('.heat-row.scope').waitFor();
+ assert.ok(await page.locator('.heat-row[data-row="activity"]').count()>0,'heat lists the current scope children');
+ assert.ok(await page.locator('.heat-row.scope .heat-tile.first').count()>0,'activity after a quiet stretch is marked rather than ranked as hot');
+ assert.equal(await page.locator('.heat-row.scope .heat-tile').count(),26,'heat shows twenty-six weekly tiles');
+ await click('[data-action="heat-metric"][data-value="commits"]');
+ assert.equal(await page.locator('[data-action="heat-metric"][data-value="commits"]').getAttribute('aria-pressed'),'true');
+ await click('[data-action="heat-metric"][data-value="lines"]');
  await click('[data-action="lens"][data-value="ranking"]');
  let depth=0;
  while(await page.locator('[data-action="explore"]').count()&&depth++<8){await page.locator('[data-action="explore"]').first().click();}
@@ -562,6 +570,14 @@ try {
  assert.equal(await page.locator('.commit').count(),1);
  assert.equal(await page.locator('.commit .delta').textContent(),'+80−20');
  assert.ok((await page.locator('.commit').innerText()).includes('Canonical contributor'));
+ snapshot={...loaded,commits:Array.from({length:30},(_,i)=>[11,8,5,1].map(weeks=>({...commits[0],id:`steady-${i}-${weeks}`,date:new Date(Date.parse(now)-weeks*7*86400000).toISOString(),added:40-i,removed:0,files:[{path:`area-${String(i).padStart(2,'0')}/a.go`,added:40-i,removed:0}]}))).flat()};
+ await page.reload();
+ await click('[data-action="explore"][data-value="test-org/alpha"]');
+ await click('[data-action="lens"][data-value="heat"]');
+ assert.equal(await page.locator('.heat-row[data-row="activity"]').count(),25,'long heat lists show the most active rows first');
+ await click('[data-action="heat-more"]');
+ assert.equal(await page.locator('.heat-row[data-row="activity"]').count(),30,'Show more reveals the remaining rows');
+ assert.equal(await page.locator('[data-action="heat-more"]').count(),0);
  snapshot={...loaded,commits:[{...commits[0],id:'bulk-data',excludedBulkLines:2500,excludedAttributeLines:7}]};
  await page.reload();
  await page.getByText('2,507 changed lines in the selected repositories are excluded from these totals: 2,500 in bulk data files, 7 in files marked generated or vendored in .gitattributes. Their commits still count.',{exact:true}).waitFor();

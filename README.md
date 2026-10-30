@@ -42,7 +42,7 @@ are substituted when data is missing.
 
 | Board | Explore |
 | --- | --- |
-| Activity | Compare repositories, drill into directories and files, and inspect scoped commits, contributors, and related work. |
+| Activity | Compare repositories, drill into directories and files, see which areas are busier or quieter than usual, and inspect scoped commits, contributors, and related work. |
 | Contributors | Select a person to see repository distribution, timelines, the activity calendar, and recent commits. |
 | Pull requests | Filter open PRs by author, review, checks, draft state, and work needing your attention. |
 

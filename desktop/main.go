@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
-//go:embed frontend/index.html frontend/app.js frontend/model.js frontend/styles.css
+//go:embed frontend/index.html frontend/app.js frontend/model.js frontend/styles.css frontend/brand.png
 var assets embed.FS
 
 var version = "development"
