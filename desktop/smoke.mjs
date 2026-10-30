@@ -54,15 +54,17 @@ try {
  let pathRequests=0;
  let refreshCount=0;
  let snapshotReads=0;
+ let statusReads=0;
  let identitySaves=0;
  let settingsSaves=0;
  let removedCaches=0;
  let controls=[...repositories.map(r=>({...r,included:true,selectable:true,listed:true,cached:true,canRemove:false})),{id:'test-org/retired',name:'retired',included:false,selectable:false,listed:false,cached:true,canRemove:true}];
  await page.route('**/api/**',async route=>{
   const endpoint=new URL(route.request().url()).pathname;
-  if(endpoint!=='/api/repository-controls')assert.equal(route.request().method(),['/api/snapshot','/api/export','/api/identities'].includes(endpoint)?'GET':'POST');
+  if(endpoint!=='/api/repository-controls')assert.equal(route.request().method(),['/api/snapshot','/api/snapshot-status','/api/export','/api/identities'].includes(endpoint)?'GET':'POST');
   const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
   if(endpoint==='/api/snapshot'){snapshotReads++;return send(snapshot);}
+  if(endpoint==='/api/snapshot-status'){statusReads++;return send({generatedAt:snapshot.generatedAt,phase:snapshot.status.phase,message:snapshot.status.message,commits:snapshot.commits.length,repositories:snapshot.repositories.length,pullRequests:snapshot.pullRequests.length});}
   if(endpoint==='/api/refresh'){
    refreshCount++;
    if(failRefresh)return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test refresh failure'})});
@@ -133,6 +135,10 @@ try {
  assert.equal(await page.locator('[data-action="refresh"]').isDisabled(),true,'cached history appears before remote refresh completes');
  await page.getByText('Cached history loaded; refreshing GitHub…',{exact:true}).waitFor();
  await page.getByText('Loading pull requests from GitHub…',{exact:true}).waitFor();
+ const pendingSnapshotReads=snapshotReads;
+ await page.waitForTimeout(2200);
+ assert.ok(statusReads>0,'pending refresh polls the lightweight status');
+ assert.equal(snapshotReads,pendingSnapshotReads,'unchanged status does not re-read the full snapshot');
  await click('[data-action="board"][data-value="prs"]');
  await page.getByRole('heading',{name:'Loading pull requests',exact:true}).waitFor();
  assert.equal(await page.locator('.pr-context > div').first().locator('strong').innerText(),'—');
@@ -148,9 +154,9 @@ try {
  assert.equal(await page.locator('#personalAccount').inputValue(),'staged-account','refresh completion preserves the open settings draft');
  await page.getByRole('button',{name:'Cancel',exact:true}).click();
  assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','default period is fourteen days');
- const settledReads=snapshotReads;
+ const settledReads=snapshotReads+statusReads;
  await page.waitForTimeout(1600);
- assert.equal(snapshotReads,settledReads,'snapshot polling stops after refresh completion');
+ assert.equal(snapshotReads+statusReads,settledReads,'snapshot polling stops after refresh completion');
  await page.clock.install({time:new Date(now)});
  await page.clock.setFixedTime(new Date(Date.parse(now)+30*86400000));
  await click('[data-action="board"][data-value="people"]');
@@ -264,6 +270,14 @@ try {
  await click('[data-action="lens"][data-value="related"]');
  await click('[data-action="related-mode"][data-value="people"]');
  assert.equal(await page.locator('.related-row').count(),1);
+ await click('[data-action="lens"][data-value="heat"]');
+ await page.locator('.heat-row.scope').waitFor();
+ assert.ok(await page.locator('.heat-row[data-row="activity"]').count()>0,'heat lists the current scope children');
+ assert.ok(await page.locator('.heat-row.scope .heat-tile.first').count()>0,'activity after a quiet stretch is marked rather than ranked as hot');
+ assert.equal(await page.locator('.heat-row.scope .heat-tile').count(),26,'heat shows twenty-six weekly tiles');
+ await click('[data-action="heat-metric"][data-value="commits"]');
+ assert.equal(await page.locator('[data-action="heat-metric"][data-value="commits"]').getAttribute('aria-pressed'),'true');
+ await click('[data-action="heat-metric"][data-value="lines"]');
  await click('[data-action="lens"][data-value="ranking"]');
  let depth=0;
  while(await page.locator('[data-action="explore"]').count()&&depth++<8){await page.locator('[data-action="explore"]').first().click();}
@@ -497,9 +511,9 @@ try {
  await page.getByText('Refresh failed; showing retained data.',{exact:true}).waitFor();
  assert.equal(await page.getByText('Refreshing updated cached history…',{exact:true}).count(),0,'failed polling cannot leave Data status reporting an active refresh');
  await page.getByRole('button',{name:'Done',exact:true}).click();
- const failedReads=snapshotReads;
+ const failedReads=snapshotReads+statusReads;
  await page.waitForTimeout(1600);
- assert.equal(snapshotReads,failedReads,'snapshot polling stops after refresh failure');
+ assert.equal(snapshotReads+statusReads,failedReads,'snapshot polling stops after refresh failure');
  failAfterInterim=false;
  await click('[data-action="dismiss-error"]');
  for(const width of [860,390]){
@@ -556,6 +570,20 @@ try {
  assert.equal(await page.locator('.commit').count(),1);
  assert.equal(await page.locator('.commit .delta').textContent(),'+80−20');
  assert.ok((await page.locator('.commit').innerText()).includes('Canonical contributor'));
+ snapshot={...loaded,commits:Array.from({length:30},(_,i)=>[11,8,5,1].map(weeks=>({...commits[0],id:`steady-${i}-${weeks}`,date:new Date(Date.parse(now)-weeks*7*86400000).toISOString(),added:40-i,removed:0,files:[{path:`area-${String(i).padStart(2,'0')}/a.go`,added:40-i,removed:0}]}))).flat()};
+ await page.reload();
+ await click('[data-action="explore"][data-value="test-org/alpha"]');
+ await click('[data-action="lens"][data-value="heat"]');
+ assert.equal(await page.locator('.heat-row[data-row="activity"]').count(),25,'long heat lists show the most active rows first');
+ await click('[data-action="heat-more"]');
+ assert.equal(await page.locator('.heat-row[data-row="activity"]').count(),30,'Show more reveals the remaining rows');
+ assert.equal(await page.locator('[data-action="heat-more"]').count(),0);
+ snapshot={...loaded,commits:[{...commits[0],id:'bulk-data',excludedBulkLines:2500,excludedAttributeLines:7}]};
+ await page.reload();
+ await page.getByText('2,507 changed lines in the selected repositories are excluded from these totals: 2,500 in bulk data files, 7 in files marked generated or vendored in .gitattributes. Their commits still count.',{exact:true}).waitFor();
+ await click('.sidebar [data-action="status"]');
+ await page.getByText(/2\.5K lines excluded \(all time\)/).waitFor();
+ await page.getByRole('button',{name:'Done',exact:true}).click();
  snapshot={...loaded,commits:[{...commits[0],id:'known-path'},{...commits[0],id:'unknown-path',pathsUnknown:true,linesUnknown:true,files:[]}]};
  await page.reload();
  await page.getByText(/File paths are unavailable for 1 commit/).waitFor();
@@ -622,11 +650,18 @@ try {
  snapshot=emptyAuthSnapshot();
  let authRefreshes=0;
  let accessOpens=0;
+ let authSnapshotReads=0;
+ let holdAuthRefresh=false;
+ let releaseAuthRefresh;
+ let releaseAuthStatus;
+ let authStatusStarted;
+ let authStatusReady=new Promise(resolve=>{authStatusStarted=resolve;});
  let authDiscovery=repositories.map(r=>({...r,included:true}));
  await page.route('**/api/**',async route=>{
   const endpoint=new URL(route.request().url()).pathname;
   const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
-  if(endpoint==='/api/snapshot')return send(snapshot);
+  if(endpoint==='/api/snapshot'){authSnapshotReads++;return send(snapshot);}
+  if(endpoint==='/api/snapshot-status'){const captured=structuredClone(snapshot);if(holdAuthRefresh){authStatusStarted();await new Promise(resolve=>{releaseAuthStatus=resolve;});}return send({generatedAt:captured.generatedAt,phase:captured.status.phase,message:captured.status.message,commits:captured.commits.length,repositories:captured.repositories.length,pullRequests:captured.pullRequests.length,auth:captured.auth});}
   if(endpoint==='/api/auth')return send(authState);
   if(endpoint==='/api/sign-in'){authState={...authState,pending:true,error:''};return send(authState);}
   if(endpoint==='/api/cancel-sign-in'){authState={...authState,pending:false};return send(authState);}
@@ -634,7 +669,7 @@ try {
   if(endpoint==='/api/manage-access'){accessOpens++;return send(null);}
   if(endpoint==='/api/discover')return send(authDiscovery);
   if(endpoint==='/api/settings'){const draft=route.request().postDataJSON();snapshot={...loaded,auth:authState,settings:draft,repositories:repositories.filter(r=>draft.repositories.includes(r.id)),commits:commits.filter(c=>draft.repositories.includes(c.repo)),pullRequests:pullRequests.filter(p=>draft.repositories.includes(p.repo))};return send(snapshot);}
-  if(endpoint==='/api/refresh'){authRefreshes++;return send(snapshot);}
+  if(endpoint==='/api/refresh'){authRefreshes++;const captured=structuredClone(snapshot);if(holdAuthRefresh)await new Promise(resolve=>{releaseAuthRefresh=resolve;});return send(captured);}
   throw new Error(`Unexpected auth-test endpoint ${endpoint}`);
  });
  await page.reload();
@@ -662,10 +697,18 @@ try {
  await page.getByRole('heading',{name:'Repository activity',exact:true}).waitFor();
  assert.equal(await page.locator('[data-row="activity"]').count(),1,'the signed-in selection is used');
  await page.locator('[data-board="activity"][data-field="query"]').fill('remember-this-filter');
+ holdAuthRefresh=true;
+ await click('[data-action="refresh"]');
+ await authStatusReady;
+ const snapshotReadsBeforeSignOut=authSnapshotReads;
  await click('[data-action="settings"]');
  await click('[data-action="sign-out"]');
  await page.getByRole('button',{name:'Sign in with GitHub',exact:true}).waitFor();
  assert.equal(await page.locator('.sidebar').count(),0,'sign out removes the workspace immediately');
+ holdAuthRefresh=false;releaseAuthStatus();releaseAuthRefresh();
+ await page.waitForTimeout(1100);
+ assert.equal(authSnapshotReads,snapshotReadsBeforeSignOut,'late status does not fetch a prior-account full snapshot');
+ assert.equal(await page.locator('.sidebar').count(),0,'late refresh data cannot reopen the signed-out workspace');
  assert.equal(await page.locator('body').innerText().then(text=>text.includes('first-test-account')),false,'sign out removes the prior account label');
  await click('[data-action="sign-in"]');
  authState={configured:true,signedIn:true,login:'second-test-account',accountId:'42',pending:false,error:''};
@@ -676,9 +719,9 @@ try {
  snapshot={...snapshot,auth:authState,status:{...loaded.status,phase:'setup',errors:[]}};
  await click('[data-action="retry-access"]');
  await page.getByText('Signed in as second-test-account',{exact:true}).waitFor();
- await click('[data-action="close-modal"]');
+ await page.getByRole('button',{name:'Close dialog',exact:true}).click();
  assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','account changes restore the default range');
- await click('[data-action="settings"]');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
  await click('[data-action="sign-out"]');
  authState={configured:false,signedIn:false,login:'',accountId:'',pending:false,error:''};
  snapshot=emptyAuthSnapshot();

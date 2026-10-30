@@ -1,6 +1,7 @@
 package git_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,7 +37,7 @@ func TestCollectRetainedChanges(t *testing.T) {
 	}
 	writeAndCommit(t, dir, "vendor/binary\nfile.bin", "\x00\x01\x02", "binary generated")
 	binary := scanFixture(t, dir)[0]
-	if !reflect.DeepEqual(binary.Changes, []git.PathChange{{Path: "vendor/binary\nfile.bin", Generated: true, Binary: true}}) || binary.Added != 0 || binary.Removed != 0 {
+	if !reflect.DeepEqual(binary.Changes, []git.PathChange{{Path: "vendor/binary\nfile.bin", Generated: true, Exclusion: git.ExclusionPath, Binary: true}}) || binary.Added != 0 || binary.Removed != 0 {
 		t.Fatalf("binary/generated paths: %+v", binary)
 	}
 	gitOutput(t, dir, "commit", "--allow-empty", "-m", "empty")
@@ -70,5 +71,36 @@ func TestShallowRetainedPathsUnknown(t *testing.T) {
 	full := scanFixture(t, source)
 	if full[1].PathsUnknown || !reflect.DeepEqual(full[1].Changes, []git.PathChange{{Path: "added.go", Added: 1, LinesKnown: true}}) {
 		t.Fatalf("full boundary diff: %+v", full[1])
+	}
+}
+
+func TestCollectExclusionReasons(t *testing.T) {
+	dir := t.TempDir()
+	makeTestRepo(t, dir)
+	writeAndCommit(t, dir, ".gitattributes", "snapshots/*.json linguist-generated\n", "attributes")
+	if err := os.Mkdir(filepath.Join(dir, "snapshots"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommit(t, dir, "snapshots/status.json", "{}\n", "snapshot")
+	writeAndCommit(t, dir, "registry.json", strings.Repeat("{}\n", 2000), "bulk")
+	writeAndCommit(t, dir, "small.json", strings.Repeat("{}\n", 10), "small")
+	records := scanFixture(t, dir)
+	want := map[string]string{"small.json": "", "registry.json": git.ExclusionBulk, "snapshots/status.json": git.ExclusionAttribute, ".gitattributes": ""}
+	for _, record := range records {
+		for _, change := range record.Changes {
+			if change.Exclusion != want[change.Path] || change.Generated != (want[change.Path] != "") {
+				t.Errorf("%s: %+v", change.Path, change)
+			}
+		}
+		if record.Subject == "bulk" && (record.Added != 0 || record.Removed != 0) {
+			t.Errorf("bulk lines counted: %+v", record)
+		}
+	}
+	all, err := git.ScanRepository(context.Background(), git.NewRepositories([]string{dir})[0], git.CollectOptions{IncludeGenerated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[1].Subject != "bulk" || all[1].Added != 2000 || all[1].Changes[0].Generated {
+		t.Fatalf("IncludeGenerated should count bulk data: %+v", all[1])
 	}
 }

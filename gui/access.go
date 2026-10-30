@@ -70,7 +70,7 @@ func (s *Service) checkAccess(ctx context.Context) error {
 	rows, err := reader.DiscoverAccessibleRepositories(ctx)
 	if err != nil {
 		if accessDenied(err) {
-			_ = s.replaceAccess(ctx, map[string]git.Repository{})
+			err = errors.Join(err, s.replaceAccess(context.WithoutCancel(ctx), map[string]git.Repository{}))
 		}
 		return err
 	}

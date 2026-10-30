@@ -213,8 +213,11 @@ func TestRefreshPersistenceFailureDoesNotReuseSpentRefreshToken(t *testing.T) {
 	seed(t, m, old)
 	calls := 0
 	m.client.Transport = transportFunc(func(*http.Request) (*http.Response, error) { calls++; return reply(200, tokenReply()), nil })
-	if token, err := m.Token(t.Context()); token != "" || !errors.Is(err, github.ErrAuthentication) {
+	if token, err := m.Token(t.Context()); token != "" || err != github.ErrRequest {
 		t.Fatal("unpersisted token was exposed")
+	}
+	if token, err := m.Token(t.Context()); token != "" || err != github.ErrRequest || calls != 1 {
+		t.Fatal("pending storage failure was treated as revoked access or repeated rotation")
 	}
 	store.saveErr = nil
 	if token, err := m.Token(t.Context()); token != "fixture-access" || err != nil || calls != 1 || store.saves != 1 {
@@ -222,10 +225,83 @@ func TestRefreshPersistenceFailureDoesNotReuseSpentRefreshToken(t *testing.T) {
 	}
 }
 
+func TestTransientExpiredTokenRefreshPreservesGrantAndErrorType(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		transport transportFunc
+		want      error
+	}{
+		{name: "offline", transport: func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("private diagnostic")
+		}, want: github.ErrUnavailable},
+		{name: "rate limited", transport: func(*http.Request) (*http.Response, error) {
+			response := reply(http.StatusTooManyRequests, "private diagnostic")
+			response.Header.Set("Retry-After", "120")
+			return response, nil
+		}, want: github.ErrRateLimited},
+		{name: "provider unavailable", transport: func(*http.Request) (*http.Response, error) {
+			return reply(http.StatusServiceUnavailable, "private diagnostic"), nil
+		}, want: github.ErrRequest},
+		{name: "malformed response", transport: func(*http.Request) (*http.Response, error) {
+			return reply(http.StatusOK, `{"access_token":"private diagnostic"}`), nil
+		}, want: github.ErrRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &memoryStore{}
+			m := testManager(t, store)
+			old := savedCredentials(m)
+			old.ExpiresAt = m.now().Add(-time.Minute)
+			seed(t, m, old)
+			m.client.Transport = tc.transport
+			if token, err := m.Token(t.Context()); token != "" || err != tc.want {
+				t.Fatalf("error = %v; want safe transient failure %v", err, tc.want)
+			}
+			if status := m.Status(t.Context()); !status.SignedIn || status.AccountID != old.AccountID || strings.Contains(status.Error, "private diagnostic") {
+				t.Fatal("transient refresh lost the account or exposed provider diagnostics")
+			}
+			if store.saves != 0 || m.credentials != old || m.unsaved != nil {
+				t.Fatal("transient refresh changed the stored grant")
+			}
+			if tc.want == github.ErrRateLimited {
+				clock := m.retryAt.Add(time.Second)
+				m.now = func() time.Time { return clock }
+			}
+			m.client.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+				return reply(http.StatusOK, tokenReply()), nil
+			})
+			if token, err := m.Token(t.Context()); token != "fixture-access" || err != nil || store.saves != 1 {
+				t.Fatal("transient failure prevented retrying the retained grant")
+			}
+		})
+	}
+}
+
+func TestExpiredTokenRefreshCancellationPreservesGrant(t *testing.T) {
+	m := testManager(t, &memoryStore{})
+	old := savedCredentials(m)
+	old.ExpiresAt = m.now()
+	seed(t, m, old)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	m.client.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+		cancel()
+		return nil, context.Canceled
+	})
+	if token, err := m.Token(ctx); token != "" || err != context.Canceled || m.credentials != old {
+		t.Fatal("canceled refresh invalidated the grant")
+	}
+	if !m.Status(t.Context()).SignedIn {
+		t.Fatal("canceled refresh signed out the account")
+	}
+}
+
 func TestStorageAndAuthFailuresAreOpaque(t *testing.T) {
 	m := testManager(t, &memoryStore{loadErr: errors.New("private diagnostic")})
 	if status := m.Status(t.Context()); status.Error != ErrStorage.Error() || status.SignedIn {
 		t.Fatal("storage diagnostics escaped")
+	}
+	if token, err := m.Token(t.Context()); token != "" || err != github.ErrRequest {
+		t.Fatal("storage failure was treated as revoked access")
 	}
 	m = testManager(t, &memoryStore{})
 	u := begin(t, m)
@@ -328,7 +404,7 @@ func TestAuthRefreshRespectsRetryAfterWithoutRepeatedRequests(t *testing.T) {
 		return r, nil
 	})
 	for range 2 {
-		if _, err := m.Token(t.Context()); !errors.Is(err, github.ErrAuthentication) {
+		if _, err := m.Token(t.Context()); err != github.ErrRateLimited {
 			t.Fatal("limited refresh produced a token")
 		}
 	}
@@ -379,7 +455,7 @@ func TestAuthRefreshBacksOffOnHeaderlessSecondaryLimit(t *testing.T) {
 	})
 	for attempt := range 7 {
 		for range 2 {
-			if token, err := m.Token(t.Context()); token != "" || !errors.Is(err, github.ErrAuthentication) {
+			if token, err := m.Token(t.Context()); token != "" || err != github.ErrRateLimited {
 				t.Fatal("rate-limited refresh produced credentials")
 			}
 		}

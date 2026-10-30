@@ -70,10 +70,11 @@ func TestCacheFetchRequiresAuthenticationWithoutAffectingLocalReads(t *testing.T
 		name  string
 		token string
 		err   error
+		want  error
 	}{
-		{name: "missing"},
-		{name: "provider failure", err: errors.New("fixture-secret-provider-error")},
-		{name: "invalid token", token: "fixture\ncredential"},
+		{name: "missing", want: github.ErrAuthentication},
+		{name: "provider failure", err: errors.New("fixture-secret-provider-error"), want: github.ErrRequest},
+		{name: "invalid token", token: "fixture\ncredential", want: github.ErrAuthentication},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -81,7 +82,7 @@ func TestCacheFetchRequiresAuthenticationWithoutAffectingLocalReads(t *testing.T
 				calls++
 				return tc.token, tc.err
 			}
-			if _, err := cache.git(context.Background(), "", "fetch", "https://github.com/example/project.git"); err != github.ErrAuthentication {
+			if _, err := cache.git(context.Background(), "", "fetch", "https://github.com/example/project.git"); err != tc.want {
 				t.Fatalf("authentication failure was not opaque: %v", err)
 			}
 			if _, err := cache.git(context.Background(), "", "--version"); err != nil || calls != 1 {
@@ -97,6 +98,20 @@ func TestCacheFetchRequiresAuthenticationWithoutAffectingLocalReads(t *testing.T
 	}
 	if _, err := cache.git(ctx, "", "fetch"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled fetch: %v", err)
+	}
+}
+
+func TestCacheFetchPreservesSafeTokenFailuresWithoutDiagnostics(t *testing.T) {
+	cacheAuthGit(t, "exit 87\n")
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded, github.ErrUnavailable, github.ErrRateLimited, github.ErrRequest, github.ErrResponse, github.ErrAuthentication, github.ErrPermission} {
+		t.Run(want.Error(), func(t *testing.T) {
+			cache := &RepositoryCache{TokenSource: func(context.Context) (string, error) {
+				return "", errors.Join(want, errors.New("fixture-secret-provider-error"))
+			}}
+			if _, err := cache.git(t.Context(), "", "fetch", "https://github.com/example/project.git"); err != want {
+				t.Fatalf("error = %v; want safe typed failure %v", err, want)
+			}
+		})
 	}
 }
 

@@ -114,6 +114,28 @@ func (s *Service) Snapshot() Snapshot {
 	return cloneSnapshot(s.restrictAccess(s.snapshot))
 }
 
+func (s *Service) SnapshotStatus() SnapshotStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := SnapshotStatus{GeneratedAt: s.snapshot.GeneratedAt, Phase: s.snapshot.Status.Phase, Message: s.snapshot.Status.Message}
+	for _, repo := range s.snapshot.Repositories {
+		if s.accountAllows(repo.ID) {
+			result.Repositories++
+		}
+	}
+	for _, commit := range s.snapshot.Commits {
+		if s.accountAllows(commit.Repo) {
+			result.Commits++
+		}
+	}
+	for _, pr := range s.snapshot.PullRequests {
+		if s.accountAllows(pr.Repo) {
+			result.PullRequests++
+		}
+	}
+	return result
+}
+
 func cloneSnapshot(snapshot Snapshot) Snapshot {
 	result := snapshot
 	result.Repositories = slices.Clone(snapshot.Repositories)
@@ -453,11 +475,13 @@ func retainedCommits(snapshot Snapshot, id string) []Commit {
 
 func (s *Service) commit(record git.CommitRecord) Commit {
 	files := []File{}
+	excluded := map[string]int{}
 	for _, change := range record.Changes {
 		if change.Generated && !s.analysis.AllFiles {
+			excluded[change.Exclusion] += change.Added + change.Removed
 			continue
 		}
 		files = append(files, File{Path: change.Path, Added: change.Added, Removed: change.Removed})
 	}
-	return Commit{ID: record.CommitID, Repo: record.RepoID, Author: record.Author, Email: record.Email, Date: record.Date.Format(time.RFC3339), Subject: record.Subject, Added: record.Added, Removed: record.Removed, AI: record.AIAssisted, Bot: stats.IsBotIdentity(record.Author, record.Email, s.analysis.BotIdentities), LinesUnknown: record.LinesUnknown, PathsUnknown: record.PathsUnknown, Files: files}
+	return Commit{ExcludedPathLines: excluded[git.ExclusionPath], ExcludedAttributeLines: excluded[git.ExclusionAttribute], ExcludedBulkLines: excluded[git.ExclusionBulk], ID: record.CommitID, Repo: record.RepoID, Author: record.Author, Email: record.Email, Date: record.Date.Format(time.RFC3339), Subject: record.Subject, Added: record.Added, Removed: record.Removed, AI: record.AIAssisted, Bot: stats.IsBotIdentity(record.Author, record.Email, s.analysis.BotIdentities), LinesUnknown: record.LinesUnknown, PathsUnknown: record.PathsUnknown, Files: files}
 }

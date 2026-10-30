@@ -26,8 +26,8 @@ open desktop/build/bin/Bigboard.app
 Git 2.31 or newer is required for repository history. Bigboard connects directly
 to GitHub; GitHub CLI is not required. Open **Settings** and choose **Sign in with
 GitHub**. Authorize Bigboard in your browser, then use **Manage repository access**
-to select the repositories it may read. Choose your personal account,
-organizations, or both, click **Discover repositories**, and save your selection.
+to select the repositories it may read. Click **Discover repositories**, choose
+what to track, and save your selection. Account and organization filters are optional.
 Organization approval and access policies still apply.
 
 Local builds need the publisher's GitHub App build settings to enable sign-in;
@@ -41,7 +41,7 @@ are substituted when data is missing.
 
 | Board | Explore |
 | --- | --- |
-| Activity | Compare repositories, drill into directories and files, and inspect scoped commits, contributors, and related work. |
+| Activity | Compare repositories, drill into directories and files, see which areas are busier or quieter than usual, and inspect scoped commits, contributors, and related work. |
 | Contributors | Select a person to see repository distribution, timelines, the activity calendar, and recent commits. |
 | Pull requests | Filter open PRs by author, review, checks, draft state, and work needing your attention. |
 

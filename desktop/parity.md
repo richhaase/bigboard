@@ -10,7 +10,7 @@ is documented in the [user reference](../docs/reference.md).
 | Board state | Separate search, bot visibility, sort/reverse, selection, navigation, and scroll; Back preserves applied filters |
 | Filters | Draft/apply/cancel; OR within categories, AND between them; independent board/shared resets |
 | Activity | Repository → directory → file → commits; scoped counts and contributors; quiet repositories remain visible |
-| Secondary evidence | Commits, People, and Related lenses; shared commits, contributor overlap, and configured named work areas |
+| Secondary evidence | Commits, People, Related, and Heat lenses; shared commits, contributor overlap, and configured named work areas |
 | Repository links | Verify paths against the retained scan revision before opening GitHub |
 | Contextual PRs | Repository PR view temporarily omits saved PR facets, then restores the normal PR board |
 | Contributors | Canonical identities; metric sorts; repository distribution; daily/weekly/monthly timeline; calendar; AI/net/churn metrics |

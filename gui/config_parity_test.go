@@ -215,3 +215,36 @@ func TestCommitSnapshotPreservesUnknownPathsIndependently(t *testing.T) {
 		t.Fatalf("unknown path JSON contract missing: %s %v", data, err)
 	}
 }
+
+func TestCommitSnapshotReportsExcludedLinesByReason(t *testing.T) {
+	s, _, _ := testService(t, "cache")
+	record := git.CommitRecord{CommitID: "excluded", RepoID: "example/engine", Added: 5, Removed: 1, Changes: []git.PathChange{
+		{Path: "src/main.go", Added: 5, Removed: 1, LinesKnown: true},
+		{Path: "data/registry.json", Added: 2400, Removed: 100, LinesKnown: true, Generated: true, Exclusion: git.ExclusionBulk},
+		{Path: "snapshots/a.json", Added: 7, LinesKnown: true, Generated: true, Exclusion: git.ExclusionAttribute},
+		{Path: "package-lock.json", Added: 40, Removed: 2, LinesKnown: true, Generated: true, Exclusion: git.ExclusionPath},
+		{Path: "vendor/logo.png", Binary: true, Generated: true, Exclusion: git.ExclusionPath},
+	}}
+	commit := s.commit(record)
+	if len(commit.Files) != 1 || commit.Added != 5 || commit.ExcludedBulkLines != 2500 || commit.ExcludedAttributeLines != 7 || commit.ExcludedPathLines != 42 {
+		t.Fatalf("excluded evidence: %+v", commit)
+	}
+	data, err := json.Marshal(s.commit(git.CommitRecord{CommitID: "plain", RepoID: "example/engine"}))
+	if err != nil || strings.Contains(string(data), "excluded") {
+		t.Fatalf("zero exclusions should be omitted: %s %v", data, err)
+	}
+	s.analysis.AllFiles = true
+	if all := s.commit(record); len(all.Files) != 5 || all.ExcludedBulkLines != 0 {
+		t.Fatalf("all_files must ship every path without exclusions: %+v", all)
+	}
+}
+
+func TestSnapshotStatusMatchesSnapshot(t *testing.T) {
+	s, _, _ := testService(t, "cache")
+	s.snapshot.Commits = []Commit{{ID: "a"}, {ID: "b"}}
+	s.snapshot.Status.Phase, s.snapshot.Status.Message, s.snapshot.GeneratedAt = "refreshing", "Scanning", "2026-10-29T00:00:00Z"
+	status, full := s.SnapshotStatus(), s.Snapshot()
+	if status.Commits != 2 || status.Phase != full.Status.Phase || status.Message != full.Status.Message || status.GeneratedAt != full.GeneratedAt || status.Repositories != len(full.Repositories) || status.PullRequests != len(full.PullRequests) {
+		t.Fatalf("status %+v does not describe snapshot", status)
+	}
+}

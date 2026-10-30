@@ -25,9 +25,10 @@ authorization.
 
 Open **Settings** in the sidebar or press `,`. Choose **GitHub** for live data or
 **Cached history** to read existing owned repositories without network requests.
-Enter a personal account, organizations, or both for live discovery. Personal
-repositories must belong to the signed-in account; non-archived repositories from the selected organizations are included only
-when both your account and the Bigboard installation can access them.
+Discover the repositories authorized for your GitHub sign-in, then choose what
+to track. Optional personal-account and organization filters narrow that list.
+Repositories appear only when both your account and the Bigboard installation
+can access them. Archived repositories are excluded.
 
 Click **Discover repositories** to load the full list for the current sources.
 Repositories are ordered by last push, newest first; this can include activity
@@ -103,8 +104,8 @@ paths remain visible at repository scope; a coverage notice explains why they
 cannot be assigned to individual directories. Breadcrumbs and Back return to
 broader scopes. Long file histories load additional commits in batches.
 
-The **Commits**, **People**, and **Related** tabs show evidence for the current
-scope; `1`, `2`, and `3` select them, and `4` returns to the ranking. People opens
+The **Commits**, **People**, **Related**, and **Heat** tabs show evidence for the
+current scope; `1`, `2`, `3`, and `5` select them, and `4` returns to the ranking. People opens
 a person’s scoped commits. Search matches contributor names/emails in the People
 list, and commit subjects or author names/emails in Commits and a selected
 person’s commit detail. Matching commits are filtered before pagination.
@@ -112,6 +113,20 @@ Related switches between exact shared commits and historical contributor overlap
 (`m` toggles the mode), including configured named work areas. Open a
 result to inspect the matching commits or people. Overlap is not ownership or
 online presence.
+
+**Heat** shows the current scope and its repositories or directories as weekly
+tiles for the last 26 weeks. Each week is colored against the same row’s average
+over the 12 weeks before it: amber is busier than usual, blue is quieter, and
+cream marks activity after 12 quiet weeks. Choose Lines, Commits, or People.
+**Change** compares the last 4 weeks with the 12 before them, and badges flag new,
+rising (2× or more), falling (half or less), and quiet rows. Heat ignores the
+shared date range so the baseline is always available; repository, group,
+contributor, and bot filters still apply. Exploring a row stays in Heat, and Back
+returns to the broader scope. Directories with no activity in the last 38 weeks
+are omitted; quiet tracked repositories remain listed. Long lists show the 25
+most active rows; **Show more** reveals the rest and says how many of them are
+rising or new. Search and `y` always cover every row. Changes under 0.1× display as `<0.1×`. Heat describes change
+relative to a row’s own history, not productivity or importance.
 
 **Open path on GitHub** (or `o`) verifies the path in the local cache at the
 retained scan revision before opening it. Missing or deleted paths report an
@@ -223,6 +238,7 @@ the open-PR list.
 | --- | --- |
 | Settings, analysis rules, and identities | `~/.config/bigboard/config.json` |
 | Owned repository caches | `~/.cache/bigboard/accounts/<GitHub ID>/repos/github.com/owner/name.git` |
+| Last verified repository access | `~/.cache/bigboard/accounts/<GitHub ID>/repos/access.json` |
 | Last-look bookmarks | `~/.local/state/bigboard/last-seen.json` |
 
 `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME` override the respective
@@ -279,13 +295,12 @@ restart to load them rather than overwriting them.
 | `groups` | Named `owner/name` lists, selected through the group picker; only members from active sources are shown |
 | `since` | Startup preset: `1d`, `7d`, `14d` (default), `30d`, `90d`, `1y`, or `all` |
 | `sort` | Contributors: `commits`, `added`, `removed`, `net`, `ai`, or `total` (default); `impact` aliases `total` |
-| `all_files` | Include generated/vendored paths in line counts; default false |
+| `all_files` | Include generated, vendored, `.gitattributes`-marked, and bulk data changes in line counts; default false |
 | `pr_request_budget` | Positive cap per remote refresh; default 128; does not bypass cooldowns |
 | `ai_identities` | Additional AI author/co-author emails or `@domain` suffixes |
 | `bot_identities` | Additional bot emails, `@domain` suffixes, or exact author names |
 | `identities` | Canonical emails, aliases, and optional display names |
 | `work_areas` | Named literal file/directory prefixes for related evidence |
-| `theme`, `fuzzy`, `github` | Accepted for compatibility; they do not control GUI appearance or data mode. `github` accepts an object with an `enabled` boolean. |
 
 Saving Settings does not discard `exclude` patterns. For example, `vendor-*`
 continues to exclude newly discovered matching repositories; explicitly checking
@@ -322,8 +337,23 @@ named areas do not replace Activity’s directory hierarchy.
 
 ## Counting and troubleshooting
 
-Git totals cover default-branch history and exclude merge commits. Generated and
-vendored line changes are excluded by default. Unknown line counts still count
+Git totals cover default-branch history and exclude merge commits. By default,
+line changes are excluded from totals for three reasons:
+
+- **Generated or vendored paths:** dependency directories, build output,
+  lockfiles, minified files, and similar built-in patterns.
+- **`.gitattributes`:** paths marked `linguist-generated` or `linguist-vendored`
+  in the repository’s root `.gitattributes` at the scanned revision.
+  `linguist-generated=false` keeps a path counted even when another rule would
+  exclude it. Nested `.gitattributes` files are not read.
+- **Bulk data:** a single change of 2,000 or more lines to a data file (JSON,
+  NDJSON, YAML, CSV/TSV, XML, PO/POT, or SVG), such as a regenerated registry,
+  snapshot, seed, or translation export. Smaller edits to the same file count.
+
+Excluded files are omitted from directory and file views, but their commits
+still count. Activity notes how many lines were excluded for the repository
+scope and why, and Data status shows each repository’s excluded total. Set
+`all_files` to count everything. Unknown line counts still count
 as commits without becoming measured lines. Shared Git object IDs count once
 globally; repository associations and directory subtotals can overlap. Future
 author dates remain included. AI percentages describe detected authors/co-authors,

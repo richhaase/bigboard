@@ -25,6 +25,11 @@ type DesktopSnapshot struct {
 	Auth *auth.Status `json:"auth,omitempty"`
 }
 
+type DesktopSnapshotStatus struct {
+	gui.SnapshotStatus
+	Auth *auth.Status `json:"auth,omitempty"`
+}
+
 type sessionState struct {
 	mu            sync.Mutex
 	connecting    sync.Mutex
@@ -162,6 +167,28 @@ func (a *App) Snapshot() DesktopSnapshot {
 		return signedOutSnapshot(status)
 	}
 	return a.wrapSnapshot(service, service.Snapshot())
+}
+
+func (a *App) SnapshotStatus() DesktopSnapshotStatus {
+	service, err := a.currentService()
+	if err != nil {
+		status := a.AuthStatus()
+		if status.SignedIn {
+			status.Error = err.Error()
+		}
+		snapshot := signedOutSnapshot(status)
+		return DesktopSnapshotStatus{SnapshotStatus: gui.SnapshotStatus{Phase: snapshot.Status.Phase, Message: snapshot.Status.Message}, Auth: &status}
+	}
+	result := service.SnapshotStatus()
+	if a.auth == nil {
+		return DesktopSnapshotStatus{SnapshotStatus: result}
+	}
+	status := a.AuthStatus()
+	if !a.sessionCurrent(service) {
+		snapshot := signedOutSnapshot(status)
+		result = gui.SnapshotStatus{Phase: snapshot.Status.Phase, Message: snapshot.Status.Message}
+	}
+	return DesktopSnapshotStatus{SnapshotStatus: result, Auth: &status}
 }
 
 func (a *App) withSnapshot(operation func(*gui.Service) (gui.Snapshot, error)) (DesktopSnapshot, error) {

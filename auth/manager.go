@@ -177,19 +177,19 @@ func (m *Manager) Token(ctx context.Context) (string, error) {
 	}
 	defer m.release()
 	if !m.configured() {
-		return "", github.ErrAuthentication
+		return "", github.ErrRequest
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := m.load(); err != nil {
 		m.message = err.Error()
-		return "", github.ErrAuthentication
+		return "", github.ErrRequest
 	}
 	if m.unsaved != nil {
 		if err := m.save(*m.unsaved); err != nil {
 			m.message = err.Error()
-			return "", github.ErrAuthentication
+			return "", github.ErrRequest
 		}
 		m.unsaved = nil
 		m.message = ""
@@ -209,14 +209,23 @@ func (m *Manager) Token(ctx context.Context) (string, error) {
 		m.message = err.Error()
 		if errors.Is(err, ErrReauthorize) {
 			m.credentials.RefreshExpiresAt = time.Time{}
+			return "", github.ErrAuthentication
 		}
-		return "", github.ErrAuthentication
+		for _, known := range []error{context.Canceled, context.DeadlineExceeded, github.ErrRateLimited} {
+			if errors.Is(err, known) {
+				return "", known
+			}
+		}
+		if errors.Is(err, ErrConnection) {
+			return "", github.ErrUnavailable
+		}
+		return "", github.ErrRequest
 	}
 	next.Login, next.AccountID = m.credentials.Login, m.credentials.AccountID
 	if err := m.save(next); err != nil {
 		m.unsaved = &next
 		m.message = err.Error()
-		return "", github.ErrAuthentication
+		return "", github.ErrRequest
 	}
 	m.message = ""
 	return next.AccessToken, nil

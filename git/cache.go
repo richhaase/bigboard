@@ -635,7 +635,16 @@ func (c *RepositoryCache) git(ctx context.Context, dir string, args ...string) (
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		if err != nil || token == "" || strings.ContainsAny(token, "\x00\r\n") {
+		if err != nil {
+			for _, known := range []error{context.Canceled, context.DeadlineExceeded, github.ErrUnavailable, github.ErrRateLimited,
+				github.ErrAuthentication, github.ErrPermission, github.ErrResponse, github.ErrRequest} {
+				if errors.Is(err, known) {
+					return "", known
+				}
+			}
+			return "", github.ErrRequest
+		}
+		if token == "" || strings.ContainsAny(token, "\x00\r\n") {
 			return "", github.ErrAuthentication
 		}
 		return runCacheGitWithToken(ctx, dir, token, args...)

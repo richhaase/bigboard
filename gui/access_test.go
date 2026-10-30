@@ -63,6 +63,10 @@ func TestAccountAccessFiltersSnapshotsSettingsAndIdentities(t *testing.T) {
 	s.snapshot.Commits = []Commit{{Repo: "example/engine", Email: "visible@example.test"}, {Repo: "other/private", Email: "hidden@example.test"}}
 	s.snapshot.PullRequests = []PR{{Repo: "other/private"}}
 	s.snapshot.Status.Errors = []string{"other/private: unavailable"}
+	status := s.SnapshotStatus()
+	if status.Commits != 1 || status.Repositories != 1 || status.PullRequests != 0 {
+		t.Fatal("lightweight status exposed unauthorized counts")
+	}
 	snapshot := s.Snapshot()
 	if len(snapshot.Repositories) != 1 || len(snapshot.Commits) != 1 || len(snapshot.PullRequests) != 0 || len(snapshot.Status.Errors) != 0 {
 		t.Fatal("unauthorized evidence remained visible")
@@ -203,5 +207,88 @@ func TestCachedAccessRejectsOtherAccountsAndSymlinks(t *testing.T) {
 	}
 	if err := s.saveAccess(context.Background(), map[string]git.Repository{}); err == nil {
 		t.Fatal("symlinked access inventory was replaced")
+	}
+}
+
+type deniedAccessProvider struct {
+	*accessProvider
+	probeErr error
+}
+
+func (p *deniedAccessProvider) ProbeAll(context.Context, []string) []gh.RepositoryProbe {
+	return []gh.RepositoryProbe{{Err: p.probeErr}}
+}
+
+func TestAuthoritativeDenialDuringRefreshRemovesPersistedAccess(t *testing.T) {
+	for _, phase := range []string{"probe", "inventory", "git"} {
+		t.Run(phase, func(t *testing.T) {
+			s, cache, base := testService(t, "live")
+			s.accountID = "41"
+			s.snapshot.Settings.Repositories = []string{"example/engine"}
+			provider := &deniedAccessProvider{accessProvider: &accessProvider{fakeProvider: base, rows: []gh.DiscoveredRepository{{Name: "example/engine", DefaultBranch: "main"}}}}
+			switch phase {
+			case "probe":
+				provider.probeErr = gh.ErrPermission
+			case "git":
+				cache.refreshErr = gh.ErrAuthentication
+				cache.started = make(chan struct{})
+				s.snapshot.GeneratedAt = "2026-10-28T00:00:00Z"
+			default:
+				base.results = []gh.Result{{Repo: "example/engine", Err: gh.ErrPermission}}
+			}
+			s.provider = provider
+			result, err := s.Refresh()
+			if err != nil || len(result.Commits) != 0 || len(result.Repositories) != 0 || len(result.PullRequests) != 0 || result.Status.Phase != "partial" {
+				t.Fatal("authoritative denial retained evidence")
+			}
+			if phase == "probe" && cache.refreshes != 0 {
+				t.Fatal("denied repository reached Git refresh")
+			}
+			if phase == "git" {
+				select {
+				case <-cache.started:
+					t.Fatal("denied Git repository was scanned")
+				default:
+				}
+			}
+			s.authorized = nil
+			if err := s.restoreAccess(); err != nil || len(s.authorized) != 0 {
+				t.Fatal("denied repository access returned on restart")
+			}
+		})
+	}
+}
+
+func TestTransientTokenRefreshFailuresRetainCachedEvidenceAndGrants(t *testing.T) {
+	for _, failure := range []error{gh.ErrUnavailable, gh.ErrRateLimited} {
+		for _, phase := range []string{"access", "git"} {
+			t.Run(phase+failure.Error(), func(t *testing.T) {
+				s, cache, base := testService(t, "cache")
+				s.accountID = "41"
+				s.snapshot.Settings.Repositories = []string{"example/engine"}
+				if err := s.replaceAccess(context.Background(), map[string]git.Repository{"example/engine": {ID: "example/engine", DefaultBranch: "main"}}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Refresh(); err != nil {
+					t.Fatal(err)
+				}
+				s.snapshot.Mode, s.snapshot.Settings.Mode = "live", "live"
+				provider := &accessProvider{fakeProvider: base, rows: []gh.DiscoveredRepository{{Name: "example/engine", DefaultBranch: "main"}}}
+				if phase == "access" {
+					provider.err = failure
+				} else {
+					cache.refreshErr = failure
+				}
+				s.provider = provider
+				result, err := s.Refresh()
+				if err != nil || len(result.Commits) != 1 || !result.Repositories[0].Stale || result.Status.Phase != "partial" {
+					t.Fatal("transient token refresh failure discarded cached evidence")
+				}
+				s.authorized = nil
+				if err := s.restoreAccess(); err != nil || len(s.authorized) != 1 {
+					t.Fatal("transient token refresh failure removed saved grants")
+				}
+			})
+		}
 	}
 }

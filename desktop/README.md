@@ -42,8 +42,8 @@ must succeed for the current sources before the user can review and save at
 least one checked repository. New repositories follow the configured exclusion
 patterns; explicitly checking a repository can override a pattern exclusion.
 **Repository controls** changes tracking for the session; the shared repository
-picker only narrows the view. Existing `config.json`, cache, and last-look state
-remain compatible. Identity edits update only `config.json`’s `identities` field.
+picker only narrows the view. Configuration stays in `config.json`; repository evidence and last-look state
+are scoped to the signed-in GitHub account. Identity edits update only `config.json`’s `identities` field.
 
 The [user reference](../docs/reference.md) describes the three boards, filters,
 export, coverage, bookmarks, and configuration. The [workflow coverage](parity.md)

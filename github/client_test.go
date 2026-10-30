@@ -128,13 +128,14 @@ func TestHTTPClientSanitizesCredentialAndTransportFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		token TokenSource
+		want  error
 	}{
-		{name: "missing source"},
-		{name: "source error", token: func(context.Context) (string, error) { return "", errors.New("fixture-secret-provider-error") }},
-		{name: "empty token", token: func(context.Context) (string, error) { return "", nil }},
-		{name: "control characters", token: func(context.Context) (string, error) { return "fixture\ncredential", nil }},
-		{name: "whitespace", token: func(context.Context) (string, error) { return "fixture credential", nil }},
-		{name: "oversized token", token: func(context.Context) (string, error) { return strings.Repeat("x", 4097), nil }},
+		{name: "missing source", want: ErrAuthentication},
+		{name: "source error", token: func(context.Context) (string, error) { return "", errors.New("fixture-secret-provider-error") }, want: ErrRequest},
+		{name: "empty token", token: func(context.Context) (string, error) { return "", nil }, want: ErrAuthentication},
+		{name: "control characters", token: func(context.Context) (string, error) { return "fixture\ncredential", nil }, want: ErrAuthentication},
+		{name: "whitespace", token: func(context.Context) (string, error) { return "fixture credential", nil }, want: ErrAuthentication},
+		{name: "oversized token", token: func(context.Context) (string, error) { return strings.Repeat("x", 4097), nil }, want: ErrAuthentication},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := clientFixture(func(*http.Request) (*http.Response, error) {
@@ -142,7 +143,7 @@ func TestHTTPClientSanitizesCredentialAndTransportFailures(t *testing.T) {
 				return nil, nil
 			})
 			client.token = tc.token
-			if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Endpoint: "user"}); err != ErrAuthentication {
+			if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Endpoint: "user"}); err != tc.want {
 				t.Fatalf("credential failure was not sanitized: %v", err)
 			}
 		})
@@ -152,6 +153,23 @@ func TestHTTPClientSanitizesCredentialAndTransportFailures(t *testing.T) {
 	})
 	if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Endpoint: "user"}); err != ErrUnavailable {
 		t.Fatalf("transport failure was not sanitized: %v", err)
+	}
+}
+
+func TestHTTPClientPreservesSafeTokenFailuresWithoutDiagnostics(t *testing.T) {
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded, ErrUnavailable, ErrRateLimited, ErrRequest, ErrResponse, ErrAuthentication, ErrPermission} {
+		t.Run(want.Error(), func(t *testing.T) {
+			client := clientFixture(func(*http.Request) (*http.Response, error) {
+				t.Fatal("failed token source reached the API")
+				return nil, nil
+			})
+			client.token = func(context.Context) (string, error) {
+				return "", errors.Join(want, errors.New("fixture-secret-provider-error"))
+			}
+			if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Endpoint: "user"}); err != want {
+				t.Fatalf("error = %v; want safe typed failure %v", err, want)
+			}
+		})
 	}
 }
 

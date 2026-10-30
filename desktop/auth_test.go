@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/richhaase/bigboard/auth"
 	"github.com/richhaase/bigboard/gui"
@@ -166,5 +169,36 @@ func TestUnsolicitedNativeCallbackDoesNotResetWorkspace(t *testing.T) {
 	a.handleAuthURL(auth.CallbackURI + "?code=unexpected&state=unexpected")
 	if a.service != before || manager.completed != "" {
 		t.Fatal("unsolicited callback changed the session")
+	}
+}
+
+func TestSnapshotStatusDoesNotExposeSignedOutOrChangedAccountData(t *testing.T) {
+	a, manager := authenticatedTestApp(t)
+	status := a.SnapshotStatus()
+	if status.Auth == nil || status.Auth.AccountID != "41" {
+		t.Fatal("status omitted the signed-in account")
+	}
+	manager.mu.Lock()
+	manager.status = auth.Status{Configured: true, SignedIn: true, Login: "second", AccountID: "42"}
+	manager.mu.Unlock()
+	a.connect = func(context.Context, string, func(context.Context) (string, error)) (*gui.Service, error) {
+		return nil, errors.New("access verification failed")
+	}
+	status = a.SnapshotStatus()
+	if status.Auth.AccountID != "42" || status.Phase != "access" || status.Commits != 0 || status.Repositories != 0 || status.PullRequests != 0 {
+		t.Fatal("changed account exposed previous status")
+	}
+	if _, err := a.SignOut(); err != nil {
+		t.Fatal(err)
+	}
+	handler := previewHandler(fstest.MapFS{"index.html": {Data: []byte("Bigboard")}}, a, "127.0.0.1:34115")
+	request := httptest.NewRequest("GET", "http://127.0.0.1:34115/api/snapshot-status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &status) != nil {
+		t.Fatal("status route failed")
+	}
+	if status.Auth.SignedIn || status.Phase != "signin" || status.Commits != 0 || status.Repositories != 0 || status.PullRequests != 0 {
+		t.Fatal("signed-out status leaked counts")
 	}
 }

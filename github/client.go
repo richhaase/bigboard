@@ -67,7 +67,10 @@ func (c *HTTPClient) Do(ctx context.Context, request Request) (Response, error) 
 	if ctx.Err() != nil {
 		return Response{}, ctx.Err()
 	}
-	if err != nil || !validToken(token) {
+	if err != nil {
+		return Response{}, safeRequestError(err)
+	}
+	if !validToken(token) {
 		return Response{}, ErrAuthentication
 	}
 	req, err := http.NewRequestWithContext(ctx, request.Method, "https://api.github.com/"+request.Endpoint, bytes.NewReader(request.Body))
