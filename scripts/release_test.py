@@ -1,4 +1,5 @@
 import base64
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -23,10 +24,23 @@ with Path(os.environ["TEST_LOG"]).open("a") as log:
     log.write(json.dumps([name, *args]) + "\\n")
 if name == "uname":
     print("Darwin")
+elif name == "security" and args[0] == "list-keychains":
+    state = Path(os.environ["TEST_KEYCHAINS"])
+    if "-s" in args:
+        state.write_text(json.dumps(args[args.index("-s") + 1:]))
+    else:
+        for keychain in json.loads(state.read_text()):
+            print("    " + json.dumps(keychain))
 elif name == "security" and args[0] == "find-identity":
     print('1) ' + 'A' * 40 + ' "Developer ID Application: Test Fixture"')
 elif name == "openssl":
     print("fixture-password")
+elif name == "codesign" and "--sign" in args:
+    keychains = json.loads(Path(os.environ["TEST_KEYCHAINS"]).read_text())
+    keychain = args[args.index("--keychain") + 1]
+    if keychain not in keychains or os.environ.get("TEST_CODESIGN_FAILURE"):
+        print("error: The specified item could not be found in the keychain.", file=sys.stderr)
+        raise SystemExit(1)
 elif name == "xcrun" and args[:2] == ["notarytool", "submit"]:
     print(json.dumps({"status": os.environ.get("TEST_NOTARY_STATUS", "Accepted")}))
 elif name == "xcrun" and args[:2] == ["stapler", "staple"]:
@@ -49,6 +63,13 @@ class ReleaseTests(unittest.TestCase):
             self.env.pop(key, None)
         self.env["TMPDIR"] = str(self.root)
         self.env["TEST_LOG"] = str(self.root / "commands.jsonl")
+        self.original_keychains = [
+            str(self.root / "Keychain fixtures/login.keychain-db"),
+            str(self.root / "Keychain fixtures/Shared Signing.keychain-db"),
+        ]
+        self.keychain_state = self.root / "keychains.json"
+        self.keychain_state.write_text(json.dumps(self.original_keychains))
+        self.env["TEST_KEYCHAINS"] = str(self.keychain_state)
         self.env["QUILL_SIGN_P12"] = base64.b64encode(b"fixture certificate").decode()
         self.env["QUILL_SIGN_PASSWORD"] = "fixture certificate password"
         encoded_key = base64.b64encode(b"fixture notary key" * 32).decode()
@@ -67,8 +88,22 @@ class ReleaseTests(unittest.TestCase):
         return subprocess.run(["bash", str(SCRIPTS / name), *map(str, args)], env=self.env, capture_output=True, text=True)
 
     def commands(self):
-        import json
         return [json.loads(line) for line in Path(self.env["TEST_LOG"]).read_text().splitlines()]
+
+    def assert_search_list_restored(self, commands):
+        created = next(command for command in commands if command[:2] == ["security", "create-keychain"])
+        keychain = created[-1]
+        capture = ["security", "list-keychains", "-d", "user"]
+        registered = [*capture, "-s", keychain, *self.original_keychains]
+        restored = [*capture, "-s", *self.original_keychains]
+        deleted = ["security", "delete-keychain", keychain]
+        signing = next(command for command in commands if command[0] == "codesign" and "--sign" in command)
+        self.assertLess(commands.index(capture), commands.index(created))
+        self.assertLess(commands.index(registered), commands.index(signing))
+        self.assertLess(commands.index(signing), commands.index(restored))
+        self.assertLess(commands.index(restored), commands.index(deleted))
+        self.assertEqual(json.loads(self.keychain_state.read_text()), self.original_keychains)
+        self.assertFalse(list(self.root.glob("bigboard-sign.*")))
 
     def test_archive_contains_stapled_app_and_temporary_keychain_is_removed(self):
         result = self.run_script("sign-macos.sh", self.app, self.archive)
@@ -81,6 +116,22 @@ class ReleaseTests(unittest.TestCase):
         signing = next(command for command in commands if command[0] == "codesign" and "--sign" in command)
         self.assertIn("runtime", signing)
         self.assertIn("--timestamp", signing)
+        self.assert_search_list_restored(commands)
+
+    def test_signing_failure_restores_search_list_without_exposing_secrets(self):
+        self.env["TEST_CODESIGN_FAILURE"] = "1"
+        result = self.run_script("sign-macos.sh", self.app, self.archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Signing failed during: sign application", result.stderr)
+        output = result.stdout + result.stderr
+        for name in SECRET_NAMES:
+            self.assertNotIn(self.env[name], output)
+        self.assertNotIn("fixture-password", output)
+        self.assertFalse(self.archive.exists())
+        commands = self.commands()
+        self.assertFalse(any(command[0] == "ditto" for command in commands))
+        self.assertFalse(any(command[0] == "xcrun" for command in commands))
+        self.assert_search_list_restored(commands)
 
     def test_long_unwrapped_base64_key_is_not_treated_as_a_path(self):
         self.env["QUILL_NOTARY_KEY"] = "".join(self.env["QUILL_NOTARY_KEY"].split())
