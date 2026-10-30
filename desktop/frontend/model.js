@@ -185,3 +185,8 @@ export function heatRows(commits,repositories,scope={},metric='lines',now=Date.n
   const measured=rows.map(row=>({id:row.id,label:row.label,kind:row.kind,...heatSeries(row.records,metric,now)})).filter(row=>row.kind==='repository'||row.total>0||row.prior>0);
   return {scope:heatSeries(scopedCommits(commits,scope),metric,now),rows:measured.sort((a,b)=>b.total-a.total||a.label.localeCompare(b.label))};
 }
+export const heatRatio=ratio=>ratio<0.1?'<0.1×':`${ratio.toFixed(1)}×`;
+export function heatVisible(rows,limit=25){
+  const hidden=rows.slice(limit);
+  return {shown:rows.slice(0,limit),hidden,flagged:hidden.filter(row=>row.status==='up'||row.status==='new').length};
+}

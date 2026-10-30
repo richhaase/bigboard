@@ -108,7 +108,9 @@ rising (2× or more), falling (half or less), and quiet rows. Heat ignores the
 shared date range so the baseline is always available; repository, group,
 contributor, and bot filters still apply. Exploring a row stays in Heat, and Back
 returns to the broader scope. Directories with no activity in the last 38 weeks
-are omitted; quiet tracked repositories remain listed. Heat describes change
+are omitted; quiet tracked repositories remain listed. Long lists show the 25
+most active rows; **Show more** reveals the rest and says how many of them are
+rising or new. Search and `y` always cover every row. Changes under 0.1× display as `<0.1×`. Heat describes change
 relative to a row’s own history, not productivity or importance.
 
 **Open path on GitHub** (or `o`) verifies the path in the local cache at the

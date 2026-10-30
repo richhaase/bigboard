@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL, ranges, identity, timelineSeries, relatedScopes, classifyWorkArea,
   scopedCommits, selectCommits, sortRows, totals, uniqueCommits, filterByCanonicalIdentity, excludedLines,
-  HEAT, heatLevel, heatSeries, heatRows,
+  HEAT, heatLevel, heatSeries, heatRows, heatRatio, heatVisible,
 } from './model.js';
 
 const now = Date.parse('2026-10-28T12:00:00Z');
@@ -557,4 +557,23 @@ test('heat rows follow the Activity scope and keep quiet repositories visible', 
   assert.deepEqual(repo.rows.map(r => [r.id, r.total]), [['src',100],['docs',50]], 'directories outside the window are omitted');
   assert.equal(repo.scope.total, 150);
   assert.equal(heatRows(commits, repositories, {repo:'sample/api', path:'src'}, 'lines', now).rows[0].id, 'src/api');
+});
+
+test('heat caps long lists and counts the rising or new rows it hides', () => {
+  const rows = Array.from({length:30}, (_, i) => ({id:`dir-${i}`, status:''}));
+  rows[3].status = 'up';
+  rows[27].status = 'up';
+  rows[28].status = 'new';
+  rows[29].status = 'down';
+  const {shown, hidden, flagged} = heatVisible(rows, 25);
+  assert.deepEqual(shown.map(r => r.id), rows.slice(0, 25).map(r => r.id));
+  assert.deepEqual(hidden.map(r => r.id), ['dir-25', 'dir-26', 'dir-27', 'dir-28', 'dir-29']);
+  assert.equal(flagged, 2);
+  assert.equal(heatVisible(rows.slice(0, 3), 25).hidden.length, 0);
+});
+
+test('heat ratios never round a nonzero change down to zero', () => {
+  assert.equal(heatRatio(0.04), '<0.1×');
+  assert.equal(heatRatio(0.1), '0.1×');
+  assert.equal(heatRatio(3.46), '3.5×');
 });
