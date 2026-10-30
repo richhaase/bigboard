@@ -1,316 +1,245 @@
-# Big Board user reference
+# Bigboard user reference
 
-[README](../README.md) · [Visual guide](visual-guide.md)
+[README](../README.md) · [Workflow guide](visual-guide.md)
 
 ## Setup and settings
 
-Run `bigboard` with Git and the signed-in `gh` CLI available. First-run setup
-lets you select your personal GitHub account, organizations, or both, then
-repositories. Review and save to create the configuration. Personal-only
-selection is supported; it must match the signed-in account. Discovery includes
-accessible public and private repositories owned by those sources, omitting
-archived repositories. It does not include repositories merely shared with the
-personal account by another owner.
+Open Bigboard from Finder, Spotlight, or the Dock. Git 2.31 or newer is required
+for repository history. Live GitHub data also needs GitHub CLI (`gh`) installed
+and signed in. Run `gh auth login` to authenticate, then return to Bigboard;
+the app uses that authentication rather than providing a separate sign-in flow.
 
-Press `,` on any board for Settings. Space toggles choices; Enter advances to
-review and then saves; Esc returns or cancels. You can add an organization by
-name. Repositories are listed by last push, newest first, with unknown dates
-last. Last push covers activity across branches; the boards use default-branch
-history. Saving reloads repository selection and preserves unrelated settings.
-A discovery error leaves setup open with a retry action.
+Open **Settings** in the sidebar or press `,`. Choose **GitHub** for live data or
+**Cached history** to read existing owned repositories without network requests.
+Enter a personal account, organizations, or both for live discovery. Personal
+repositories must belong to the signed-in account; accessible non-archived
+repositories from the selected organizations are also included.
 
-Settings saves account, organizations, and repository exclusions for future
-sessions. Ordinary board filters and Repository controls are session-only.
-Settings and contributor identity saves reject external configuration edits
-made during the session, leaving the draft available to correct or cancel.
+Click **Discover repositories** to load the full list for the current sources.
+Repositories are ordered by last push, newest first; this can include activity
+on branches outside the default-branch history shown on the boards. Select at
+least one repository, choose **Review workspace**, then **Save workspace**.
+Discovery is required each time Settings is opened and after changing sources.
+Errors preserve the draft. Cancel closes the dialog without saving.
 
-## Navigation and common controls
+Settings saves sources and exclusions for later sessions. Newly discovered
+repositories remain eligible unless excluded. The repository viewing picker
+only narrows the boards; **Repository controls** changes tracking for this
+session. Neither changes the saved workspace.
 
-Lowercase `a`, `c`, and `p` resume Activity, Contributors, and PRs. Each remembers
-its filters, sort, selection, scroll, and drill-down location. Switching boards
-closes temporary dialogs and cancels unapplied edits. Back preserves applied
-filters; at a board root it stays there.
+## Navigation and scope
 
-| Key | Action |
+Select **Activity**, **Contributors**, or **Pull requests** in the sidebar.
+Each board remembers its search, filters, sort direction, selection, and position.
+Activity also retains its drill-down location. Back preserves applied filters.
+If shared repository scope excludes that location, Activity returns to the
+repository ranking for the new selection.
+
+| Control | Action |
 | --- | --- |
-| `↑` / `↓` | Select a row or scroll detail |
-| `PgUp` / `PgDn`, `Home` / `End` | Page, or go to the first/last entry |
-| `Enter` / `→` | Open the selected item or drill down |
-| `Esc` / `←` | Close or return one level |
-| `/` | Edit the current list's search |
-| `s` / `S` | Cycle sort / reverse order where available |
-| `f` / `t` | Open Filters / Date range options |
-| `x` | Clear this board's filters and search; keep shared scope and location |
-| `r` | Refresh Git history and PR context without leaving your location |
-| `e` | Open Data status; `d` there reveals diagnostics |
-| `i` | Repository controls: session inclusion and unlisted-cache removal |
-| `,` | Settings: saved repository selection |
-| `y` | Copy a supported current list as Markdown using terminal OSC 52 clipboard support |
-| `?` / `F1` | Contextual help |
-| `q` / `Ctrl+C` | Quit outside text entry; Ctrl+C always quits |
+| `a`, `c`, `p` | Activity, Contributors, Pull requests |
+| `/` | Focus the current board’s search |
+| `f`, `t` | Filters, date range |
+| `s`, `S` | Cycle sort, reverse order |
+| `x` | Reset this board’s filters/search while keeping shared scope |
+| `r` | Refresh repositories and PR evidence |
+| `e`, `i` | Data status, Repository controls |
+| `,` | Workspace Settings |
+| `y` | Copy the current view as Markdown |
+| `?`, F1 | Keyboard guide; F1 also works while typing |
+| Tab / Shift+Tab | Move between controls |
+| Arrows, Page Up/Down, Home/End | Navigate board rows |
+| Enter / right arrow | Explore a focused Activity row |
+| Esc / left arrow | Go back in Activity; Esc also closes dialogs |
 
-During text entry, letters and `?` enter text. Enter accepts the edit; Esc
-restores its previous value; Backspace edits; Ctrl+U clears the buffer. F1 opens
-help. Long input keeps the cursor and editable tail visible. If a dialog cannot
-fit, enlarge the terminal before continuing edits or confirmation.
+Letters enter text while an input is focused. In board search, Enter accepts
+and leaves the field; Esc restores the value from before editing. Quit through
+the application menu or Command-Q on macOS.
 
-Help presents commands before explanatory legends. Arrows, page keys, and
-Home/End scroll it; Esc, Enter, `?`, or F1 closes it while preserving the screen
-underneath. Board keys can leave help directly. Uppercase `R` remains a refresh
-compatibility alias, and `l` remains an alias for Contributors. Current help uses
-`r` and `c`.
+Shared viewing scope is **date plus repositories**. The default range is
+**14 days**, unless `config.json` specifies another startup range. Presets are
+1, 7, 14, 30, 90, and 365 days plus All time. **Custom…** accepts 1–3650 days and
+provides **Since last look** when a saved bookmark exists. A configured group
+appears in the group picker and changes the tracked repository set. Group
+definitions survive source changes; members outside active sources stay hidden
+until those sources are restored.
 
-## Filters and date ranges
+**Filters** stages shared scope and current-board facets together. Multiple
+values within a category match any selected value; categories combine with AND.
+An empty facet means All. Choose **Apply filters** or **Cancel**. Enter activates
+the focused dialog button; Enter in Custom days applies the draft.
+**Reset this board** clears its filters and search; **Reset shared** stages All
+time and all tracked repositories. These resets apply with the rest of the draft.
 
-`f` opens a category overview grouped into Shared scope and the current board.
-`t` opens Date range options directly. Wide layouts show categories beside
-options; narrow layouts show the focused pane.
-
-| Control | In Filters |
-| --- | --- |
-| `Tab` / `Shift+Tab` | Change pane focus |
-| `←` / `→` | Focus categories / options |
-| Arrows, page keys, `Home` / `End` | Move within the focused pane |
-| `Space` | Open a category's options, or stage an option |
-| `/` | Find options |
-| `Enter` | Apply the entire draft from either pane |
-| `Esc` | Cancel the draft |
-| `x` / `X` | Stage Reset this board / Reset shared; Enter still applies |
-
-Selection summaries describe each category; `*` marks pending edits. Multiple
-values within one category match any selected value; categories combine with
-AND. No selection means All. While editing a search or custom range, Enter
-stages only that edit and Esc cancels only that edit. Apply the whole draft
-with Enter after leaving the editor.
-
-Shared scope is **date plus repository viewing selection**. It affects every
-board without changing which repositories refresh. Reset shared selects All
-time and all tracked repositories. Reset this board clears that board's filters
-and search without changing shared scope or navigation.
-
-Date presets are 1d, 7d, 14d, 30d, 90d, 1y, and All time; Custom days accepts
-1–3650. Since last look is available when there is a saved bookmark. Activity
-and Contributors use Git author dates; PRs use last-updated time. Unknown PR
-dates appear only in All time. Filtering is in memory, with no scans or requests.
-
-Activity has Git contributor and bot filters. Contributors has independent bot
-visibility and name search. PRs has Mine, GitHub author, review, checks, state,
-and search filters. Git contributor identities and GitHub accounts are separate.
+Activity and Contributors filter Git author dates; PRs filter update times.
+The lower date boundary is exclusive. Unknown dates match only All time.
+Filtering uses the retained snapshot time and makes no network requests.
 
 ## Activity
 
-Activity ranks repositories by added + removed lines in the selected period.
-The bars split added and removed lines. `s` cycles lines changed, commits,
-recency, and name; changing sort does not change what the bars measure. Quiet
-repositories remain visible. Short repository labels omit an unambiguous owner;
-repository identity and filter behavior remain unchanged.
+Activity ranks repositories by added plus removed lines. Its split bars always
+show additions and removals, even when sorted by commits, recency, or name.
+Quiet tracked repositories remain visible. Search, contributor selection, and
+bot visibility apply to this board independently of Contributors.
 
-Enter follows repositories → directories → files → commits. Directory line
-counts include only the files inside that directory. The lower contributor
-pane follows the highlighted repository, directory, or file. Tab or Shift+Tab
-moves focus between the ranking and contributor pane; arrows, paging, and
-Home/End browse that pane. Esc/left returns focus to the ranking before moving
-back. A highlighted heading and side marker identify the focused pane. In very
-small windows only the ranking is shown.
+Select a row to inspect its contributors and recent activity. Use the row arrow,
+double-click, or Enter to follow repository → directory → file → commits.
+Directory counts include only files inside that directory. Commits with unknown
+paths remain visible at repository scope; a coverage notice explains why they
+cannot be assigned to individual directories. Breadcrumbs and Back return to
+broader scopes. Long file histories load additional commits in batches.
 
-With the ranking focused, `o` opens the selected repository on GitHub, or the
-selected directory/file at the retained scan revision. Paths are checked in the
-local cache first; deleted or unavailable paths show a message without opening
-a page. These links stay at the scan revision even if the local branch moves.
+The **Commits**, **People**, and **Related** tabs show evidence for the current
+scope; `1`, `2`, and `3` select them, and `4` returns to the ranking. People opens
+a person’s scoped commits. Search matches contributor names/emails in the People
+list, and commit subjects or author names/emails in Commits and a selected
+person’s commit detail. Matching commits are filtered before pagination.
+Related switches between exact shared commits and historical contributor overlap
+(`m` toggles the mode), including configured named work areas. Open a
+result to inspect the matching commits or people. Overlap is not ownership or
+online presence.
 
-`1`, `2`, and `3` open Commits, People, and Related evidence for the current
-scope; `4` returns to its directory ranking. Tab cycles these detail lenses.
-People opens a contributor's scoped commits. Related shows shared commits;
-`m` switches to contributor overlap, where Enter opens matching people and
-their evidence. Shared contributors indicate historical overlap, not ownership
-or online presence. `o` opens a selected commit on GitHub where available.
+**Open path on GitHub** (or `o`) verifies the path in the local cache at the
+retained scan revision before opening it. Missing or deleted paths report an
+error. Commit links open their specific GitHub commit.
 
-`v` opens PRs for the selected repository using shared scope, temporarily
-omitting saved PR-board filters. Back from that list returns to Activity and
-restores the normal PR view; `p` resumes the normal PR board directly.
-
-Activity PR columns show open, failing-check, and changes-requested counts when
-space allows. Narrower views show only open counts or omit the columns. A muted
-dash means no open PRs; blank warning cells mean zero. Failing checks and changes
-requested can overlap. `?` means incomplete/stale evidence; directory counts
-also require complete current file lists for relevant PRs. Counts follow shared
-scope and are independent of Activity's Git contributor filters and saved PR
-board filters. They do not change commit totals or ranking.
+PR counts follow shared dates/repositories, independently of Git contributor
+filters. Failing checks and changes requested can overlap. `?` means evidence is
+incomplete or stale; loading is shown separately from a completed zero. Directory
+associations also need complete changed-file evidence. **View repository PRs**
+(or `v`) temporarily omits the normal PR board’s facets. **Back to Activity**
+restores them, as does Esc; `p` resumes the normal PR board directly.
 
 ## Contributors and identities
 
-Contributors starts with who; Enter shows where that contributor worked, their
-timeline, activity matrix, and derived metrics. Detail uses daily timeline
-buckets through 30 days, weekly through 180 days, and monthly for longer ranges.
-Calendar displays use local time and include quiet dates in the selected window.
-Paging scrolls the detail while retaining its frame. `b` toggles bots on this
-board independently of Activity.
+Select a contributor to inspect repository distribution, a timeline, a calendar,
+derived metrics, and recent commits. Sort by lines changed, commits, additions,
+removals, net lines, AI share, name, or recency. Bot visibility is independent of
+Activity; `b` toggles it here. The repository breakdown links back to Activity.
 
-`m` on the Contributors list opens all collected identities, independently of
-view filters. With one identity selected, `n` sets a display name without
-merging; a blank name restores automatic naming. To merge a person's emails,
-Space stages additional identities, `k` chooses the primary email, and `n`
-sets the resulting display name. `/` finds names or emails. Enter reviews the
-change; a second Enter saves. Esc returns or cancels.
+Timelines use daily buckets through 30 days, weekly through 180 days, and monthly
+for longer ranges. Calendar grouping uses local time and includes quiet dates.
+Longer-range calendars show the latest year while totals retain the selected
+range. AI share, net lines, and churn describe the selected evidence.
 
-Names never automatically merge people. Git's `.mailmap` is applied first,
-then saved email aliases. Saving rescans cached history without fetching and
-keeps the mapping for future sessions. A failed save preserves the draft and
-existing identities. Missing/invalid emails cannot be saved as identity mappings.
+Choose **Identities** (or `m`) to search all collected email identities. Select
+one email to rename it, or several to merge them. Choose the primary email and
+an optional display name; blank uses automatic naming. **Review changes** shows
+the proposal before **Save identity**. Names alone never merge people.
+
+Git’s `.mailmap` applies before saved aliases. Saving updates the mapping and
+rescans cached history without fetching. Failed saves preserve the draft.
+External configuration edits are rejected rather than overwritten; restart to
+load the changed file before saving again.
 
 ## Pull requests
 
-PRs lists currently open PRs updated within shared scope. Enter opens a detail
-modal; `o` opens the selected PR in a browser. `/` searches repository, title,
-author, or number. `u`, `v`, `k`, and `d` open Authors, Review, Checks, and State
-options in Filters.
+Pull requests lists currently open PRs updated within shared scope. Search by
+repository, title, author, or number. Select a row for its details and use
+**Open on GitHub** (or `o`) to open the PR. Review/check badges and reported
+merge conflicts are evidence, not branch-protection or merge authorization.
 
-Mine offers Needs my attention, Authored by me, Review requested from me, and
-Updated since my review. `m` toggles Needs my attention, `M` toggles Authored by
-me, and `n` toggles Review requested from me directly from the list or details.
-These shortcuts replace only the Mine facet; shared scope, other facets and
-search still apply. Repeating the same shortcut clears the Mine facet.
-Needs my attention includes your PRs with failing/error checks or requested
-changes, your approved non-draft PRs with passing checks, PRs with an individual
-review requested from you, and other authors' PRs updated since your review.
-Approval and passing checks alone do not establish merge readiness.
-Authored by me and review requests match your signed-in GitHub login; team membership is not
-inferred. Updated since my review means any PR activity after your latest known
-submitted review, independently of the Since last look bookmark. Missing review
-timestamps do not match. Bounded reviewer coverage can omit matches; Data status
-and PR details report that limitation. If the account cannot be resolved, selected
-Mine filters show no results and explain why.
+Author, review, checks, and draft-state facets combine with Mine:
 
-`A` sorts directly by author A–Z, newest PRs first within each author. `z` opens
-a sort picker: `1`–`5` applies a sort directly, or use arrows and Enter. Esc
-cancels. `s` still cycles Updated, Repository, Author, Title, and Attention; `S`
-reverses the order. Updated starts newest first. Attention starts with review requests to
-you, then failing checks, changes requested, approved open PRs, and other PRs.
-Within each category, oldest updates come first and unknown dates follow dated
-PRs. Reverse reverses the entire order. Labels describe the direction explicitly.
+- **Needs my attention:** your PRs with failing/error checks or requested changes,
+  plus your approved non-draft PRs with passing checks; for other authors, an
+  individual review request or activity since your latest submitted review.
+- **Authored by me:** PRs authored by the signed-in GitHub login.
+- **Review requested from me:** individual requests matching that login; team
+  membership is not inferred.
+- **Updated since my review:** activity after the latest known submitted review,
+  independent of the last-look bookmark. Missing review timestamps do not match.
 
-`◇` marks a draft and `●` an open non-draft PR. Green means an approved review
-or passing reported checks; it is not a branch-protection or merge-readiness
-verdict. An amber `!` on age marks no update for at least 14 days at the snapshot
-check time. `+` marks an update since your bookmark. Both differ from stale data.
+`u`, `v`, `k`, and `d` also open the PR Filters dialog.
+`m`, `M`, and `n` toggle attention, authored, and requested respectively. Repeating
+a shortcut clears that Mine selection; other filters remain. If account lookup
+fails, Mine filters cannot match. Partial reviewer or review history can omit
+matches and is identified in the coverage information. **Awaiting your review**
+uses shared date/repository scope and any temporary repository PR context.
+Incomplete reviewer evidence shows `?`, or a known lower bound such as `1 + ?`.
 
-Your username is highlighted in the author column, including the selected row.
-At 70×24 or larger, the selected preview adds conflict, file-count and requested
-reviewer information when space permits. Tab expands and focuses the preview;
-arrows, page keys and Home/End scroll its full PR details without changing the
-selected row. Tab or Esc returns to the list. The preview reserves at least
-three list rows and is hidden below 70×24. Enter still opens the detail
-modal. Unknown or partial reviewer/file evidence remains labeled.
+Sort by Updated, Repository, Author, Title, or Attention; `S` reverses the whole
+order. `A` selects author order and `z` opens the sort picker, where `1`–`5`
+choose an order. Updated starts
+newest first. Attention puts requested reviews first, then failing checks,
+requested changes, approved open PRs, and other PRs; older updates come first
+within a category, with unknown dates last.
+
+Your author login is highlighted. A `!` beside the age means no update for at
+least 14 days at the recorded check time. A `+` marks updates since last look.
+These markers differ from stale data. Details include requested reviewers,
+changed files, merge-conflict evidence, and completeness qualifications.
 
 ## Refresh, coverage, and bookmarks
 
-Startup discovers repositories, scans existing cached Git history, then fetches
-in the background and rescans changed revisions. With no cache, initial cloning
-must finish before data is shown. The spinner indicates working; Git progress
-also reports completed/total repositories where space permits. Each scan pass
-publishes a complete snapshot. There is no periodic refresh; use `r`. Cache clones
-and fetches authenticate only through `gh`; other Git credential helpers are
-ignored.
+Live startup loads existing cached history while GitHub refresh is pending.
+Without a usable cache, history appears after the first clone and scan. Later
+refreshes are manual through **Refresh** or `r`; there is no periodic polling of
+GitHub. Refresh rediscovers sources so new repositories become eligible and
+repositories no longer listed stop being tracked. Discovery failure preserves
+the existing set where possible and appears in Data status.
 
-`r` also repeats repository discovery before fetching, so repositories created
-during a session appear and repositories no longer listed (deleted, archived, or
-inaccessible) stop being tracked. Groups, exclusions, Settings, and this
-session's Repository controls choices still apply, and an untracked cache stays
-as an unlisted entry until you remove it. Discovery requests send the ETag of the
-previous response for the same page (kept in memory only); an unchanged page
-returns `304 Not Modified`, which does not use core rate limit. If rediscovery
-fails, the current repositories stay tracked, the refresh continues, and the Git
-status and Data status report the failure.
+Verified branch/revision probes can avoid unchanged Git fetches. Parsed scans
+and unchanged PR file lists are reused when their inputs still match. PR data
+is retained in memory with a one-minute reuse window, not persisted as an
+offline PR cache. Rate limits pause further requests; no automatic retry runs.
 
-Before the startup network pass and each `r`, a bounded GitHub probe checks the
-default branch name/revision and open-PR count for up to 100 repositories per
-request. A matching branch/revision skips Git fetch only when the owned cache
-passes its ownership and layout checks and holds exactly the expected
-default-branch refs at that revision; any other refs force a normal refresh.
-Missing caches and caches that fail these checks still use the normal
-clone/repair path. Git fetch checks the objects it receives. When a Git scan
-fails because objects were later lost or corrupted, the cache is marked damaged
-and its parsed scan is discarded; the repository is reported stale, and the next
-startup fetch pass or `r` rebuilds it with a fresh clone even when the probe
-matches. `--export` reports the damage without repairing it.
-Unknown probe results fall back to normal refresh behavior.
-Parsed Git scans retain their existing fingerprint checks, including on `r`.
-When a PR refresh is admitted, an explicit zero count clears retained PRs without
-an inventory request. Positive counts still refresh PR checks and reviews even
-when the branch revision has not changed. The existing one-minute reuse and
-in-flight coalescing rules still apply.
+**Data status** shows retained timestamps, request counts, errors, cache details,
+and bookmark state. Failed refreshes preserve usable evidence and mark it stale
+or partial. Inventory, changed files, and reviewer coverage are separate:
+missing files can make directory associations unknown even with a complete PR
+list. Unknown evidence is never a complete zero. Cached history mode has no PR
+context.
 
-The shared Git/PR status row describes all tracked repositories, independently
-of viewing filters. Failed refreshes retain last-good evidence where available
-and remain visibly stale/partial. `e` shows timestamps, startup progress, cache
-location/size, unlisted repositories, bookmark state, and coverage. `d` adds
-diagnostics. Home-directory paths are displayed with `~` for readability.
+PR collection is bounded to 200 open PRs per repository and 1,000 current file
+paths per PR, with a shared request budget (default 128) and bounded request
+deadlines. Bodies, comments, diffs, and check logs are not fetched. Git history
+uses Bigboard-owned caches, authenticated through `gh` for remote operations.
 
-PR refreshes reuse completed in-memory snapshots for at least one minute and
-join in-flight work. Up to four repository inventories run concurrently; all
-inventories finish before additional file pages are fetched newest-PR-first.
-The first refresh inlines each PR's first page of changed files. Later refreshes
-request only file counts and reuse file lists for PRs whose update time,
-head/base revisions, and file count are unchanged; first pages for the remaining
-PRs are fetched together, up to 50 PRs per request for each repository.
-Results retain repository order. Rate limits pause further requests until the
-reported cooldown; no automatic retry runs. There is no persistent PR cache. Inventory
-coverage is separate from file/reviewer coverage: missing files can make
-**directory associations** incomplete without making the list of PRs incomplete.
-Data status reports these separately, along with requests spent on probes, the
-account lookup, inventories, and file pages. Probes share `pr_request_budget` and
-the provider cooldown with PR work. Unknown evidence is never reported as zero.
-Inventories are bounded to 200 open PRs per repository and 1,000 current file
-paths per PR. A repository can use at most half the configured request budget
-(minimum one request). Its 90-second allowance counts active request time,
-excluding time queued behind other repositories, within the two-minute overall
-refresh deadline. Individual requests remain limited to 15 seconds. Canonical
-repository aliases share allowances and preserve complete inventory evidence;
-already-started alias lookups count toward the budget. Reviewer lists are also
-bounded. PR bodies, comments, diffs, and check logs are not requested.
+Last-look bookmarks are separate for all repositories and each named group.
+Their baseline stays fixed during a session. Normal native-app exit advances
+eligible bookmarks after a fetched snapshot with usable history. Offline scans,
+identity rescans, and export do not advance them. Since last look is an exclusive
+timestamp filter, not a full PR event history; closed/merged PRs are absent from
+the open-PR list.
 
-Big Board saves the time of the last fetched snapshot you saw, separately for
-the full view and each `--group`. The bookmark advances on normal exit after a
-fetch pass publishes usable history. Offline-only scans, canceled startup, and
-export do not advance it. First visits have no bookmark; `e` explains the state.
-Since last look in Date range uses the saved timestamp as its lower bound. This
-is not a full PR event history: merged/closed PRs are not part of the open-PR list.
+## Storage and export
 
-## Repository controls and storage
+| Data | Default location |
+| --- | --- |
+| Settings, analysis rules, and identities | `~/.config/bigboard/config.json` |
+| Owned repository caches | `~/.cache/bigboard/repos/github.com/owner/name.git` |
+| Last-look bookmarks | `~/.local/state/bigboard/last-seen.json` |
 
-Settings (`,`) saves repository choices. Filters (`f`) only narrow the view.
-Repository controls (`i`) instead changes this session's tracking and refresh
-coverage. Space stages inclusion, Enter applies, Esc/left cancels. Excluding a
-repository here does not delete its cache or write configuration.
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME` override the respective
+base directories. Existing configurations, caches, and bookmark timestamps are
+reused. Full bare caches cover default-branch history; developer checkouts are
+not scanned or modified. Disposable parsed scans are rebuilt when their inputs
+change or their files are damaged.
 
-Big Board owns full bare caches of default-branch history under
-`$XDG_CACHE_HOME/bigboard/repos/github.com/owner/name.git` (default cache home
-`~/.cache`). Developer checkouts are never scanned or modified. Each verified
-repository also stores disposable parsed Git records in `bigboard-scan`. Later
-launches reuse them when the branch revision, analysis options, identities,
-mailmap inputs, Git configuration/version, and object-store metadata match.
-Schema or counting changes invalidate them; missing or damaged scan files and
-cache-write failures fall back to a full local scan. A `GIT_ATTR_SOURCE` override
-also uses a full scan. The file is removed with
-its repository cache. Reuse does not certify remote freshness or advance the
-last-look bookmark; the remote verification/fetch pass still runs. Cached repositories
-no longer listed by discovery are retained. Select one in Repository controls,
-press `d`, then Enter to explicitly confirm removal after refresh has finished.
-A rebuilt cache deletes the previous copy once the replacement is published;
-leftover temporary copies from interrupted refreshes are removed automatically.
-A group selection or exclusion does not make a listed repository removable.
+**Repository controls** stages session inclusion, then **Apply tracking** applies
+it. Excluding a repository does not remove its cache. A cache can be removed
+only after a successful live GitHub refresh no longer lists its repository.
+Discover in Settings alone does not authorize removal, and Cached history mode
+cannot remove caches. **Remove cache** requires a separate confirmation; group
+selection or filtering alone does not make a cache removable.
 
-Configuration defaults to `$XDG_CONFIG_HOME/bigboard/config.json`, or
-`~/.config/bigboard/config.json`. Bookmarks live at
-`$XDG_STATE_HOME/bigboard/last-seen.json`, or
-`~/.local/state/bigboard/last-seen.json`. Bookmarks contain timestamps only.
+The copy button (or `y`) copies the current view as Markdown. **Export JSON** on
+Contributors opens a native Save dialog for all-time contributor statistics in
+the currently loaded tracked snapshot. Viewing dates, search, and facets do not
+limit it. Export makes no network requests and contains no PR data; partial
+source evidence stays partial. The JSON includes contributor totals, date
+bounds, AI/bot classification, and repository subtotals. Date bounds alone cannot
+reconstruct shorter-period totals.
 
 ## Configuration reference
 
-Use Settings and the contributor identity dialog for routine configuration.
-Advanced preferences are read from JSON at startup. Invalid JSON, unknown
-fields, and unsupported values report errors. External edits during a session
-are rejected by later Settings/identity saves rather than overwritten.
+Settings and Identities edit the same `config.json` that Bigboard reads at
+startup: `$XDG_CONFIG_HOME/bigboard/config.json`, defaulting to
+`~/.config/bigboard/config.json`. Settings preserves advanced analysis fields;
+Identity editing updates only `identities`. Invalid JSON, unknown fields, and
+unsupported values report an error. External edits are detected before saving;
+restart to load them rather than overwriting them.
 
 ```json
 {
@@ -327,78 +256,70 @@ are rejected by later Settings/identity saves rather than overwritten.
 
 | Field | Meaning |
 | --- | --- |
-| `personal_account` | Owned repositories of the signed-in GitHub account; optional if organizations are configured |
-| `organizations` | Organizations to discover; optional if a personal account is configured |
-| `exclude` | Basename, `owner/name`, or glob patterns; Settings replaces them with exact unchecked identities |
-| `groups` | Named lists of `owner/name` identities within the configured sources; select with `--group` |
+| `mode` | `live` for GitHub refreshes or `cache` for owned local history; when omitted, sources imply `live`, otherwise `cache` |
+| `personal_account`, `organizations` | Active discovery sources, edited in Settings |
+| `repositories` | Explicitly checked `owner/name` IDs; these override matching exclusion patterns |
+| `excluded_repositories` | Exact `owner/name` exclusions; these win over explicit inclusions |
+| `exclude` | Basename, `owner/name`, or glob exclusions applied to repositories without an explicit choice |
+| `groups` | Named `owner/name` lists, selected through the group picker; only members from active sources are shown |
 | `since` | Startup preset: `1d`, `7d`, `14d` (default), `30d`, `90d`, `1y`, or `all` |
 | `sort` | Contributors: `commits`, `added`, `removed`, `net`, `ai`, or `total` (default); `impact` aliases `total` |
-| `theme` | `auto`, `light`, or `dark` terminal-background hint; Activity retains its high-contrast canvas |
 | `all_files` | Include generated/vendored paths in line counts; default false |
-| `pr_request_budget` | Positive request cap per remote refresh; default 128; does not bypass cooldowns |
+| `pr_request_budget` | Positive cap per remote refresh; default 128; does not bypass cooldowns |
 | `ai_identities` | Additional AI author/co-author emails or `@domain` suffixes |
 | `bot_identities` | Additional bot emails, `@domain` suffixes, or exact author names |
-| `identities` | Canonical emails with alias lists and optional display names, managed by `m` on Contributors |
-| `work_areas` | Optional named cross-directory groups, used in secondary related evidence |
-| `fuzzy` | Accepted for compatibility; does not change contributor aggregation |
+| `identities` | Canonical emails, aliases, and optional display names |
+| `work_areas` | Named literal file/directory prefixes for related evidence |
+| `theme`, `fuzzy`, `github` | Accepted for compatibility; they do not control GUI appearance or data mode. `github` accepts an object with an `enabled` boolean. |
 
-Identity mapping example:
+Saving Settings does not discard `exclude` patterns. For example, `vendor-*`
+continues to exclude newly discovered matching repositories; explicitly checking
+one in Settings includes that repository. Exact `excluded_repositories` entries
+take precedence over checked inclusions. Repositories without an explicit choice
+or matching exclusion pattern are included automatically.
+
+Repository IDs use `owner/name`, and live selections must belong to an active
+account or organization. Discover current sources before reviewing and saving.
+Group definitions remain intact when sources change; their visible members are
+limited to active sources.
+
+### Identities and work areas
+
+Identity example:
 
 ```json
 {"identities":{"dev@example.com":{"aliases":["dev@personal.example"],"name":"Example Developer"}}}
 ```
 
-Emails are trimmed/lowercased and must be unique across the mapping. Aliases apply
-after `.mailmap`, before AI/bot classification, across boards and JSON export.
-Prefer the in-app dialog so names and emails can be reviewed before saving.
+Emails are trimmed/lowercased and must be unique across the mapping. Aliases
+apply after `.mailmap`, before AI/bot classification. Missing-email identities
+remain repository-scoped. Names never merge otherwise distinct identities.
 
-Named work areas use literal repository-relative file/directory prefixes:
+Named work-area example:
 
 ```json
 {"work_areas":{"example-org/api":[{"name":"Authentication","paths":["services/auth","apps/web/auth"]}]}}
 ```
 
-The longest matching prefix wins; unmatched paths keep automatic groups. Names
-must be unique per repository and a prefix cannot belong to multiple areas.
-Named areas do not replace Activity's literal directory hierarchy.
+The longest literal prefix wins. Names must be unique per repository and a
+prefix cannot belong to multiple areas. Unmatched paths retain automatic groups;
+named areas do not replace Activity’s directory hierarchy.
 
-## Counting and interpretation
+## Counting and troubleshooting
 
-- Git data covers default-branch history, excluding merge commits and developer-only branches.
-- Added/removed lines exclude generated and vendored files by default. Binary changes can be activity without line counts.
-- Directory line counts belong to files inside the directory. Commit counts can overlap across directories.
-- Shared Git object IDs count once across selected repositories; repository subtotals retain associations and can overlap.
-- Contributor identity is based on canonical email, never similar names. Missing-email identities remain repository-scoped.
-- AI percentages describe detected authors/co-authors, not inferred tool usage. Bots are included by default and can be hidden per board.
-- Dates use your local timezone. Future-dated commits remain counted. Ages reflect retained snapshot times, not live polling.
-- `?`, STALE, and PARTIAL qualify incomplete evidence. Inspect Data status before treating a count as complete.
+Git totals cover default-branch history and exclude merge commits. Generated and
+vendored line changes are excluded by default. Unknown line counts still count
+as commits without becoming measured lines. Shared Git object IDs count once
+globally; repository associations and directory subtotals can overlap. Future
+author dates remain included. AI percentages describe detected authors/co-authors,
+not inferred tool use. Bots are included unless hidden on the current board.
 
-## Command line
-
-```bash
-bigboard
-bigboard --config ./bigboard.json
-bigboard --group backend
-bigboard --export > board.json
-bigboard --version
-```
-
-These are the four supported flags. Positional repository paths and the old
-`paths`/`depth` configuration fields are unsupported. First-run setup can create
-a missing explicit `--config` file only after confirmation.
-
-`--export` requires valid existing configuration and a populated cache. It does
-no discovery, clone, or fetch; it exports all-time contributor statistics as JSON,
-using the same identity/counting rules and no PR data or session filters. It may
-reuse or populate the disposable parsed Git scan cache. First
-and last commit dates do not let you reconstruct shorter-range totals from that
-aggregate export.
-
-## Troubleshooting
-
-- **Repository discovery fails:** check `gh auth status` and repository access, then retry in setup.
-- **No rows after filtering:** inspect Shared and Filters; `x` clears only this board, while Filters → Reset shared restores All time/all tracked repos.
-- **Data is stale or partial:** open `e`, then `d`; refresh with `r` after resolving the reported problem or cooldown.
-- **A shortcut types a letter:** finish or cancel the active text editor. F1 still opens help.
-- **A dialog asks for more room:** resize it before editing or confirming; its pending choices are preserved.
-- **A save reports an external change:** another process edited the configuration. Cancel and restart to load it before saving again.
+- **Discovery or authentication fails:** run `gh auth status`, sign in if needed,
+  check access, then retry Discover or Refresh.
+- **No matching rows:** inspect shared scope and board filters. Reset this board
+  preserves dates/repositories; Reset shared restores All time/all tracked repos.
+- **Stale or partial data:** inspect Data status and refresh after resolving the
+  reported failure or cooldown.
+- **A shortcut enters text:** finish or leave the input field. F1 still opens help.
+- **An external-edit error blocks saving:** cancel and restart to load the changed
+  configuration before editing again.

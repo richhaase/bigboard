@@ -1,136 +1,91 @@
-# Big Board visual guide
+# Bigboard workflow guide
 
-[README](../README.md) · [Controls and configuration](reference.md)
+[README](../README.md) · [User reference](reference.md)
 
-Start with `bigboard`, complete setup, and use `a`, `c`, and `p` to move between
-Activity, Contributors, and PRs. The examples below show the current terminal
-renderer with **synthetic data**, not a live organization's activity.
+Screenshots show live data from the public
+[richhaase/bigboard](https://github.com/richhaase/bigboard) repository, captured on
+October 29, 2026. The selected date range is visible in each board.
 
-## Compare activity across repositories
+## Start with a question
 
-![Activity ranking at 120 columns with short repository names and contributors below](images/activity.png)
+| Question | Where to start |
+| --- | --- |
+| Where did change happen? | Activity |
+| What did one person contribute? | Contributors |
+| Which open PRs need attention? | Pull requests |
 
-*120 × 36. Repositories are ranked by added + removed lines. The selected row's
-contributor breakdown appears below it.*
+The sidebar switches boards. Date and repository controls at the top apply to
+all three, while each board keeps its own search, sort, filters, and selection.
+The initial date range is 14 days unless your configuration specifies another.
 
-Bars always show added and removed lines. Commits, people, and latest activity
-provide other dimensions; `s` changes the sorting and `S` reverses it. Sort
-headings describe the direction, such as **Lines +/- · most first**. Unambiguous
-repository names omit the owner in the list; the selected scope retains its
-full identity. The final row carries date/counting coverage, while static marker
-explanations live in help.
+## Follow activity into its evidence
 
-Tab moves focus to the contributor pane so you can scroll beyond its first few
-entries. The bright heading and left-side marker follow focus. Tab or Esc returns
-to the repository ranking.
+![Activity board with repository change bars and a scoped contributor inspector](images/activity.png)
 
-## Drill into directories and files
+On **Activity**, select a repository to inspect its contributors and recent
+history. Use the row’s arrow, double-click, or Enter to explore directories and
+files. Added and removed lines share one split bar; sorting by commits or recency
+does not change what the bar measures.
 
-![Directory ranking with file-scoped line counts and contributors](images/directories.png)
+![Directory activity with file-scoped change totals and contributor evidence](images/directories.png)
 
-*120 × 36. Enter on a repository opens its literal directories and files.*
+The **Commits**, **People**, and **Related** tabs show evidence for the current
+scope. People opens a contributor’s scoped commits. Related can compare exact
+shared commits or historical contributor overlap; open a result to see its
+matching evidence. Breadcrumbs return to broader scopes without clearing filters.
 
-Each directory's lines belong only to files under that directory. Its contributor
-pane answers who made those changes. Enter continues to child directories or a
-file's commits; Esc/left returns to the parent. Commit counts can overlap across
-directories, so they should not be summed.
+The inspector includes related open PRs and links to GitHub. **View repository
+PRs** temporarily opens that repository’s PR view; **Back to Activity** restores
+the normal PR filters. A `?` count means missing or stale evidence, not zero.
 
-With the ranking focused, `o` opens the selected repository, directory, or file
-on GitHub. Directory/file links use the retained scan revision and require the
-path to exist there; deleted or unavailable paths show a message.
+## Inspect a contributor
 
-The `1`, `2`, and `3` keys open Commits, People, and Related evidence for the current
-scope; `4` returns to the ranking. `v` opens PRs for the selected repository and
-Back returns to Activity.
+![Contributors board with repository distribution, timeline, and activity calendar](images/contributors.png)
 
-## Start with a contributor
+On **Contributors**, select a person from the list. The detail pane shows totals,
+repository distribution, contribution rhythm, a calendar, and recent commits.
+Use the repository breakdown to jump into Activity. Bot visibility is separate
+from Activity’s bot filter.
 
-![Contributors board with commit totals and added/removed bars](images/contributors.png)
+**Identities** lets you review a display-name change or merge email identities.
+**Export JSON** saves all-time statistics for the currently tracked repositories;
+the visible date and search filters do not limit that export. The copy button
+instead copies the current view as Markdown.
 
-*120 × 36. Contributors is the other direction through the same scoped history.*
+## Triage pull requests
 
-Press `c`, select a contributor, and Enter to inspect their repository breakdown,
-timeline, and calendar activity. The shared range carries across boards. `m` on
-the list opens the identity dialog to set a display name or merge email identities
-after review; names alone never merge people.
+![Pull requests board with review and check evidence beside the selected PR](images/pull-requests.png)
 
-## Inspect open pull requests
+On **Pull requests**, select a row to inspect checks, reviews, changed files,
+requested reviewers, and merge-conflict evidence. **Open on GitHub** opens the
+actual PR. Search and facets narrow the list; the Mine filter offers attention,
+authored, review-requested, and updated-since-my-review views.
 
-![PR board with author before title and separate review and check columns](images/pull-requests.png)
+Sort by Updated, Repository, Author, Title, or Attention and use the arrow button
+to reverse it. Your author login is highlighted. An age marked `!` has no update
+for at least 14 days at the recorded check time; `+` means updated since your
+last-look bookmark. Neither marker means the data itself is stale.
 
-*160 × 36. Authors, titles, review decisions, and checks have their own columns.*
+## Adjust scope and inspect gaps
 
-Press `p` for the normal PR board. Green review/check fields mean approved/passing,
-not that every merge requirement is satisfied. Drafts use `◇`; open non-drafts use
-`●`. The selected preview keeps the full repository and title visible. Enter
-opens details and `o` opens the PR in a browser.
+![Filters dialog with shared viewing scope and board-specific choices](images/filters.png)
 
-Your highlighted username identifies your own PRs. Press `m` for Needs my
-attention, `M` for your PRs, or `n` for review requests to you; repeat a shortcut
-to clear its Mine filter.
-Attention includes your failing checks, requested changes, and approved
-non-draft PRs with passing checks, plus PRs awaiting your review or updated
-since your review. Other filters and shared scope still apply.
+**Filters** stages shared dates/repositories alongside the current board’s
+facets. Choose **Apply filters** or **Cancel**. **Custom…** adds custom days and
+Since last look. **Reset this board** and **Reset shared** affect different parts
+of the draft.
 
-`A` groups PRs by author A–Z with newest PRs first per author. `z` opens a direct
-sort picker. Tab expands the selected preview into scrollable PR details; Tab
-or Esc returns focus to the list. The compact preview adds conflicts, file
-counts and requested reviewers when space permits. These controls are newer
-than the screenshot above.
+![Data status showing refresh coverage, storage, and bookmark information](images/data-status.png)
 
-The shared date range uses **PR last-updated time** here. `s` includes Attention,
-which starts with review requests to you, failing checks, changes requested,
-approved PRs, then other PRs. Direction is shown as **priority first** or
-**priority last**. `+` on an age means updated since your saved bookmark; `!`
-means no update for at least 14 days at the snapshot time.
+**Data status** explains refresh failures, coverage, cache storage, and bookmarks.
+Use **Refresh** after resolving a problem; there is no periodic remote refresh.
+**Settings** saves collection choices, while **Repository controls** changes
+tracking only for this session. The shared repository picker only changes what
+you see.
 
-## Stage filters, then apply
+## Find keyboard controls
 
-![Filter modal with shared scope and PR-specific categories](images/filters.png)
+![Bigboard keyboard guide](images/help.png)
 
-*100 × 30. Shared scope appears above the board-specific categories.*
-
-`f` opens this overview and `t` opens Date range directly. Tab/right moves to
-options; left returns to categories. Space stages choices, Enter applies the
-whole draft, and Esc cancels. Changes in several categories can be applied
-together. `x` stages a board reset; `X` stages a shared-scope reset. Both still
-require Enter. Narrow terminals show one focused pane at a time.
-
-Shared scope affects every board. Board-specific filters stay with that board.
-Filtering changes what you see, not which repositories refresh. Use Settings
-(`,`) for saved repository choices or Repository controls (`i`) for this session's
-tracking choices.
-
-## Read freshness and coverage
-
-![Data status showing shortened storage paths, bookmarks and PR coverage](images/data-status.png)
-
-*100 × 30. `e` opens Data status; `d` there adds diagnostics.*
-
-The shared status row remains compact. This modal shows retained timestamps,
-bookmarks, cache location and size, and separate PR inventory/file/reviewer
-coverage. Paths under your home directory display as `~`. Stale or partial
-evidence remains labeled; a missing file list can make directory associations
-unknown even when the PR inventory itself is complete.
-
-## Find the current controls
-
-![Contextual help with navigation and actions before explanatory legends](images/help.png)
-
-*100 × 30. Help opens over the current screen and keeps its selection intact.*
-
-`?` or F1 opens help. Commands come first, with explanatory legends afterward.
-Arrows and page keys scroll. Esc closes help; F1 also works while entering search
-text, when `?` is a literal character. The footer shows a small set of useful
-commands rather than repeating the full help list.
-
-## About these captures
-
-These seven images were generated on October 27, 2026 from the readability
-preview based on v0.19.2. They use Big Board's `Model.View()` and normal key-update
-path with the existing `boardLayoutFixture` sample repositories, contributors,
-and PRs. Per-file counts and snapshot times are supplied as synthetic fixtures;
-no private repositories, credentials, network requests, or user configuration
-are used. Snapshot time is October 27, 2026 at 12:00 UTC, displayed in
-America/Denver. PNGs are rasterized from the renderer's ANSI text using Menlo.
-They are renderer captures, not designed mockups or claims about real activity.
+Use the keyboard guide (`?` or F1) for shortcuts. Normal Tab navigation and
+buttons work throughout the app; F1 also works while typing.

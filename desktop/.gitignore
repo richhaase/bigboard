@@ -1,0 +1,7 @@
+/build/bin/
+/frontend/wailsjs/
+/Bigboard
+/build/screenshots/
+/node_modules/
+
+/build/darwin/Info.dev.plist

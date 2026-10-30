@@ -1,0 +1,12 @@
+{
+  "name": "bigboard-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test frontend/*.test.js",
+    "test:e2e": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
