@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL, ranges, identity, timelineSeries, relatedScopes, classifyWorkArea,
-  scopedCommits, selectCommits, sortRows, totals, uniqueCommits,
+  scopedCommits, selectCommits, sortRows, totals, uniqueCommits, filterByCanonicalIdentity,
 } from './model.js';
 
 const now = Date.parse('2026-10-28T12:00:00Z');
@@ -128,6 +128,40 @@ test('scope selection respects path component boundaries and narrows contributio
   assert.deepEqual(scoped[0].files.map(f=>f.path),['src/queue.go']);
   assert.equal(records[0].files.length,3);
   assert.equal(scopedCommits(records,{repo:'sample/api',path:'missing'}).length,0);
+});
+
+test('directory rankings retain every id-less record while deduplicating identified copies', () => {
+  const missing=makeCommit({id:'',files:[{path:'src/one.go',added:4,removed:1},{path:'src/two.go',added:6,removed:2}]});
+  const other={...missing,id:undefined,author:'Taylor',email:'taylor@example.test'};
+  const identified={...missing,id:'known'};
+  const records=[missing,missing,other,identified,identified];
+  const [directory]=activityRows(records,[],{repo:'sample/api'});
+  assert.equal(directory.commits,4);
+  assert.equal(directory.records.length,4);
+  assert.equal(directory.people,2);
+  assert.equal(directory.added,40);
+  assert.equal(directory.removed,12);
+  const files=activityRows(records,[],{repo:'sample/api',path:'src'});
+  assert.ok(files.every(row=>row.commits===4));
+  assert.equal(totals(scopedCommits(records,{repo:'sample/api',path:'src'})).commits,4);
+});
+
+test('unknown paths remain repository evidence without inventing directory associations', () => {
+  const unknown=makeCommit({id:'unknown-paths',pathsUnknown:true,linesUnknown:true,files:[]});
+  const unknownWithUntrustedFiles={...unknown,id:'unknown-with-files',files:[{path:'src/guessed.go',added:999,removed:999}]};
+  const knownPath=makeCommit({id:'unknown-lines',linesUnknown:true,files:[{path:'src/known.go',added:999,removed:999}]});
+  const records=[unknown,unknownWithUntrustedFiles,knownPath];
+  const repository=scopedCommits(records,{repo:'sample/api'});
+  assert.equal(totals(repository).commits,3);
+  assert.equal(totals(repository).unknown,true);
+  const scoped=scopedCommits(records,{repo:'sample/api',path:'src'});
+  assert.deepEqual(scoped.map(c=>c.id),['unknown-lines']);
+  const [directory]=activityRows(records,[],{repo:'sample/api'});
+  assert.equal(directory.commits,1);
+  assert.equal(directory.unknown,true);
+  assert.equal(directory.added,0);
+  assert.equal(directory.removed,0);
+  assert.equal(activityRows([unknown,unknownWithUntrustedFiles],[],{repo:'sample/api'}).length,0);
 });
 
 test('daily series fills quiet calendar days and deduplicates shared commits', () => {
@@ -393,6 +427,41 @@ test('related evidence distinguishes exact shared commit IDs from contributor ov
   const records=[source,shared,overlap,anonymous];
   assert.deepEqual(relatedScopes(records,{repo:'example/a',path:''},'commits').map(r=>r.repo),['example/b']);
   assert.deepEqual(relatedScopes(records,{repo:'example/a',path:''},'people').map(r=>r.repo),['example/b','example/c']);
+});
+
+test('related contributor overlap uses canonical identities while retaining repository copies', () => {
+  const canonical=makeCommit({repo:'example/a',author:'Canonical',email:'canonical@example.test'});
+  const alias={...canonical,repo:'example/z',author:'Alias',email:'alias@example.test'};
+  const overlap={...canonical,id:'other',repo:'example/b'};
+  const aliasOnly={...alias,id:'alias-only',repo:'example/c'};
+  const records=[alias,canonical,overlap,aliasOnly];
+  for(const ordered of [records,[...records].reverse()]){
+    const related=relatedScopes(ordered,{repo:'example/z',path:''},'people');
+    assert.deepEqual(related.map(r=>r.repo),['example/a','example/b']);
+    assert.ok(related.every(r=>r.count===1&&r.evidence[0]===identity(canonical)));
+    assert.deepEqual(related.find(r=>r.repo==='example/a').records,[canonical]);
+    const reverse=relatedScopes(ordered,{repo:'example/a',path:''},'people');
+    assert.deepEqual(reverse.find(r=>r.repo==='example/z').records,[alias]);
+  }
+});
+
+test('related contributor drill retains scoped counts with canonical author attribution', () => {
+  const canonical=makeCommit({repo:'example/a',author:'Canonical',email:'canonical@example.test',added:999,removed:999});
+  const alias=makeCommit({repo:'example/z',author:'Alias',email:'alias@example.test'});
+  const records=[alias,canonical];
+  const scoped=scopedCommits(records,{repo:'example/z',path:'src'});
+  const selected=filterByCanonicalIdentity(scoped,[identity(canonical)],records);
+  assert.deepEqual(selected,scoped);
+  assert.equal(filterByCanonicalIdentity(scoped,[identity(alias)],records).length,0);
+  const [person]=people(selected,records);
+  assert.equal(person.id,identity(canonical));
+  assert.equal(person.name,'Canonical');
+  assert.equal(person.commits,1);
+  assert.equal(person.added,80);
+  assert.equal(person.removed,20);
+  assert.deepEqual(person.repos,['example/z']);
+  assert.deepEqual(person.records[0].files.map(f=>f.path),['src/queue.go']);
+  assert.equal(alias.author,'Alias');
 });
 
 test('named work areas choose the longest literal prefix and retain only scoped file volume', () => {

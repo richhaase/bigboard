@@ -219,7 +219,7 @@ func TestSavedExclusionsAllowNewRepositoriesOnRefresh(t *testing.T) {
 	}
 }
 
-func TestLegacySettingsDiscoveryIgnoresGroupAndSessionScope(t *testing.T) {
+func TestSettingsDiscoveryIgnoresGroupAndSessionScope(t *testing.T) {
 	s, _, provider := testService(t, "live")
 	s.provider = &changingDiscovery{fakeProvider: provider, repositories: []gh.DiscoveredRepository{
 		{Name: "example/engine", DefaultBranch: "main"},
@@ -234,7 +234,7 @@ func TestLegacySettingsDiscoveryIgnoresGroupAndSessionScope(t *testing.T) {
 	settings := s.Snapshot().Settings
 	choices, err := s.Discover(settings)
 	if err != nil || len(choices) != 4 {
-		t.Fatalf("legacy discovery: %+v %v", choices, err)
+		t.Fatalf("settings discovery: %+v %v", choices, err)
 	}
 	settings.ExcludedRepositories = []string{}
 	for _, repo := range choices {
@@ -256,7 +256,7 @@ func TestLegacySettingsDiscoveryIgnoresGroupAndSessionScope(t *testing.T) {
 	}
 	for _, repo := range result.Repositories {
 		if repo.ID == "example/excluded" {
-			t.Fatal("legacy exclusion was lost")
+			t.Fatal("configured exclusion was lost")
 		}
 	}
 }

@@ -17,21 +17,24 @@ import (
 )
 
 type analysisConfig struct {
-	PersonalAccount string                          `json:"personal_account"`
-	Organizations   []string                        `json:"organizations"`
-	Exclude         []string                        `json:"exclude"`
-	AllFiles        bool                            `json:"all_files"`
-	AIIdentities    []string                        `json:"ai_identities"`
-	BotIdentities   []string                        `json:"bot_identities"`
-	Identities      map[string]git.Identity         `json:"identities"`
-	PRRequestBudget int                             `json:"pr_request_budget"`
-	Since           string                          `json:"since"`
-	Sort            string                          `json:"sort"`
-	Groups          map[string][]string             `json:"groups"`
-	WorkAreas       map[string][]stats.WorkAreaRule `json:"work_areas"`
-	Theme           string                          `json:"theme"`
-	Fuzzy           bool                            `json:"fuzzy"`
-	GitHub          *struct {
+	Mode                 string                          `json:"mode"`
+	Repositories         []string                        `json:"repositories"`
+	ExcludedRepositories []string                        `json:"excluded_repositories"`
+	PersonalAccount      string                          `json:"personal_account"`
+	Organizations        []string                        `json:"organizations"`
+	Exclude              []string                        `json:"exclude"`
+	AllFiles             bool                            `json:"all_files"`
+	AIIdentities         []string                        `json:"ai_identities"`
+	BotIdentities        []string                        `json:"bot_identities"`
+	Identities           map[string]git.Identity         `json:"identities"`
+	PRRequestBudget      int                             `json:"pr_request_budget"`
+	Since                string                          `json:"since"`
+	Sort                 string                          `json:"sort"`
+	Groups               map[string][]string             `json:"groups"`
+	WorkAreas            map[string][]stats.WorkAreaRule `json:"work_areas"`
+	Theme                string                          `json:"theme"`
+	Fuzzy                bool                            `json:"fuzzy"`
+	GitHub               *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"github"`
 	source []byte
@@ -87,66 +90,60 @@ func normalizeSettings(settings Settings) (Settings, error) {
 		}
 	}
 	settings.Repositories = repositories
-	if settings.ExcludedRepositories != nil {
-		excluded := []string{}
-		for _, id := range settings.ExcludedRepositories {
-			canonical, err := gh.CanonicalRepo(strings.TrimSpace(id))
-			if err != nil {
-				return Settings{}, fmt.Errorf("excluded repository %q must use owner/name", id)
-			}
-			if !slices.Contains(excluded, canonical) {
-				excluded = append(excluded, canonical)
-			}
+	excluded := []string{}
+	for _, id := range settings.ExcludedRepositories {
+		canonical, err := gh.CanonicalRepo(strings.TrimSpace(id))
+		if err != nil {
+			return Settings{}, fmt.Errorf("excluded repository %q must use owner/name", id)
 		}
-		settings.ExcludedRepositories = excluded
+		if !slices.Contains(excluded, canonical) {
+			excluded = append(excluded, canonical)
+		}
 	}
+	settings.ExcludedRepositories = excluded
 	return settings, nil
 }
 
-func loadSettings(path string) (Settings, analysisConfig, []byte, error) {
+func loadSettings(path string) (Settings, analysisConfig, error) {
 	analysis := analysisConfig{PRRequestBudget: gh.MaxRefreshRequests, Since: "14d", Sort: "total"}
-	files := os.DirFS(filepath.Dir(path))
-	data, err := fs.ReadFile(files, "config.json")
+	data, err := fs.ReadFile(os.DirFS(filepath.Dir(path)), "config.json")
+	hasMode := false
 	if err == nil {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
-			return Settings{}, analysis, nil, errors.New("configuration must be a JSON object")
+			return Settings{}, analysis, errors.New("configuration must be a JSON object")
 		}
+		for _, key := range []string{"paths", "depth"} {
+			if _, exists := fields[key]; exists {
+				return Settings{}, analysis, fmt.Errorf("legacy %s is no longer supported; Bigboard uses its own GitHub repository cache; remove paths/depth and configure personal_account or organizations instead", key)
+			}
+		}
+		_, hasMode = fields["mode"]
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&analysis); err != nil {
-			return Settings{}, analysis, nil, fmt.Errorf("reading existing Bigboard configuration: %w", err)
+			return Settings{}, analysis, fmt.Errorf("reading Bigboard configuration: %w", err)
 		}
 		analysis.Identities, err = git.NormalizeIdentities(analysis.Identities)
 		if err != nil {
-			return Settings{}, analysis, nil, err
+			return Settings{}, analysis, err
 		}
 		analysis.source = slices.Clone(data)
 	} else if !os.IsNotExist(err) {
-		return Settings{}, analysis, nil, err
+		return Settings{}, analysis, err
 	}
 	if err := validateAnalysis(&analysis); err != nil {
-		return Settings{}, analysis, nil, err
+		return Settings{}, analysis, err
 	}
-	initial := Settings{Mode: "cache", PersonalAccount: analysis.PersonalAccount, Organizations: analysis.Organizations}
-	if initial.PersonalAccount != "" || len(initial.Organizations) > 0 {
-		initial.Mode = "live"
-	}
-	settings := initial
-	settings.Organizations = slices.Clone(initial.Organizations)
-	data, err = fs.ReadFile(files, filepath.Base(path))
-	if err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return Settings{}, analysis, nil, fmt.Errorf("reading desktop settings: %w", err)
+	settings := Settings{Mode: analysis.Mode, PersonalAccount: analysis.PersonalAccount, Organizations: slices.Clone(analysis.Organizations), Repositories: slices.Clone(analysis.Repositories), ExcludedRepositories: slices.Clone(analysis.ExcludedRepositories)}
+	if !hasMode {
+		settings.Mode = "cache"
+		if settings.PersonalAccount != "" || len(settings.Organizations) > 0 {
+			settings.Mode = "live"
 		}
-	} else if !os.IsNotExist(err) {
-		return Settings{}, analysis, nil, err
-	}
-	if settings.Mode == "demo" {
-		settings = initial
 	}
 	settings, err = normalizeSettings(settings)
-	return settings, analysis, data, err
+	return settings, analysis, err
 }
 
 func validateAnalysis(cfg *analysisConfig) error {
@@ -173,10 +170,6 @@ func validateAnalysis(cfg *analysisConfig) error {
 			if err != nil {
 				return fmt.Errorf("groups.%s must contain owner/name repositories", name)
 			}
-			owner, _, _ := strings.Cut(canonical, "/")
-			if !strings.EqualFold(owner, cfg.PersonalAccount) && !slices.ContainsFunc(cfg.Organizations, func(org string) bool { return strings.EqualFold(org, owner) }) {
-				return fmt.Errorf("groups.%s contains a repository outside configured sources", name)
-			}
 			cfg.Groups[name][i] = canonical
 		}
 	}
@@ -189,38 +182,4 @@ func validateAnalysis(cfg *analysisConfig) error {
 		}
 	}
 	return nil
-}
-
-func saveSettings(path string, settings Settings, expected []byte) ([]byte, error) {
-	current, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	if !bytes.Equal(current, expected) {
-		return nil, errors.New("desktop settings changed outside this window; restart Bigboard before saving")
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return nil, err
-	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".desktop-*.json")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(file.Name())
-	if _, err = file.Write(data); err != nil {
-		file.Close()
-		return nil, err
-	}
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		return nil, err
-	}
-	return data, nil
 }

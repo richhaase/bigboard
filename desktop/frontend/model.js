@@ -24,14 +24,20 @@ export function totals(commits) {
   const items = uniqueCommits(commits);
   return {commits:items.length,added:items.reduce((n,c)=>n+(c.linesUnknown?0:c.added||0),0),removed:items.reduce((n,c)=>n+(c.linesUnknown?0:c.removed||0),0),people:new Set(items.map(identity)).size,ai:items.filter(c=>c.ai).length,unknown:items.some(c=>c.linesUnknown)};
 }
-export function people(commits) {
+export function filterByCanonicalIdentity(commits,identities,canonicalRecords=commits) {
+  const allowed=new Set(identities);
+  const canonical=new Map(uniqueCommits(canonicalRecords).filter(c=>c.id).map(c=>[c.id,c]));
+  return commits.filter(c=>allowed.has(identity(canonical.get(c.id)||c)));
+}
+export function people(commits,canonicalRecords=commits) {
   const canonical=new Map(uniqueCommits(commits).filter(c=>c.id).map(c=>[c.id,c]));
+  const attribution=canonicalRecords===commits?canonical:new Map(uniqueCommits(canonicalRecords).filter(c=>c.id).map(c=>[c.id,c]));
   const grouped=new Map();
   for(const c of commits){
-    const preferred=canonical.get(c.id)||c;const id=identity(preferred);
-    if(!grouped.has(id))grouped.set(id,{id,name:preferred.author||preferred.email||'Unknown contributor',email:preferred.email,bot:preferred.bot,records:[]});
+    const preferred=canonical.get(c.id)||c;const author=attribution.get(c.id)||preferred;const id=identity(author);
+    if(!grouped.has(id))grouped.set(id,{id,name:author.author||author.email||'Unknown contributor',email:author.email,bot:preferred.bot,records:[]});
     grouped.get(id).bot=grouped.get(id).bot||preferred.bot;
-    grouped.get(id).records.push({...c,author:preferred.author,email:preferred.email,added:preferred.added,removed:preferred.removed,ai:preferred.ai,bot:preferred.bot,linesUnknown:preferred.linesUnknown});
+    grouped.get(id).records.push({...c,author:author.author,email:author.email,added:preferred.added,removed:preferred.removed,ai:preferred.ai,bot:preferred.bot,linesUnknown:preferred.linesUnknown});
   }
   return [...grouped.values()].map(p=>{const names=new Map();for(const c of uniqueCommits(p.records))names.set(c.author,(names.get(c.author)||0)+1);const name=[...names].sort((a,b)=>b[1]-a[1]||[...b[0]].length-[...a[0]].length||(a[0]<b[0]?-1:a[0]>b[0]?1:0))[0]?.[0]||p.name;return {...p,name,...totals(p.records),latest:p.records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0),repos:[...new Set(p.records.map(c=>c.repo))]};}).sort((a,b)=>(b.added+b.removed)-(a.added+a.removed)||b.commits-a.commits||a.name.localeCompare(b.name));
 }
@@ -40,6 +46,7 @@ export function scopedCommits(commits, scope) {
   const selected = commits.filter(c=>c.repo===scope.repo);
   if (!scope.path&&!scope.areaName) return selected;
   return selected.flatMap(c=>{
+    if(c.pathsUnknown)return [];
     const files=(c.files||[]).filter(f=>scope.areaName?classifyWorkArea(f.path,scope.areaRules||[])===scope.areaName:f.path===scope.path||f.path.startsWith(`${scope.path}/`));
     return files.length ? [{...c,files,added:files.reduce((n,f)=>n+(f.added||0),0),removed:files.reduce((n,f)=>n+(f.removed||0),0)}] : [];
   });
@@ -51,13 +58,14 @@ export function activityRows(commits, repositories, scope={}) {
     return repositories.map(repo=>{const records=recordsByRepo.get(repo.id)||[];return {...repo,label:repo.name || repo.id.split('/').pop(),kind:'repository',records,...totals(records),latest:records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0)};});
   }
   const grouped=new Map(); const prefix=scope.path ? `${scope.path}/` : '';
-  for (const c of commits.filter(c=>c.repo===scope.repo)) {
+  for (const [index,c] of uniqueCommits(commits.filter(c=>c.repo===scope.repo)).entries()) {
+    if(c.pathsUnknown)continue;
     for (const file of c.files||[]) {
       if (!file.path.startsWith(prefix)) continue;
       const remainder=file.path.slice(prefix.length); const first=remainder.split('/')[0]; if (!first) continue;
       const path=prefix+first; const kind=remainder.includes('/')?'directory':'file';
       if (!grouped.has(path)) grouped.set(path,{id:path,label:first,path,kind,records:new Map(),added:0,removed:0});
-      const row=grouped.get(path); row.added+=c.linesUnknown?0:file.added||0; row.removed+=c.linesUnknown?0:file.removed||0; row.records.set(c.id,c);
+      const row=grouped.get(path); row.added+=c.linesUnknown?0:file.added||0; row.removed+=c.linesUnknown?0:file.removed||0; row.records.set(index,c);
     }
   }
   return [...grouped.values()].map(row=>{const records=[...row.records.values()]; return {...row,records,commits:records.length,people:new Set(records.map(identity)).size,latest:records.reduce((latest,c)=>Math.max(latest,dateValue(c.date)),0),unknown:records.some(c=>c.linesUnknown)};});
@@ -123,13 +131,16 @@ export function classifyWorkArea(path,rules){
 }
 export function relatedScopes(commits,scope,mode='commits',workAreas={}){
   const source=scopedCommits(commits,scope);
-  const keys=new Set(source.map(c=>mode==='people'?identity(c):c.id).filter(Boolean));
+  const canonical=new Map(mode==='people'?uniqueCommits(commits).filter(c=>c.id).map(c=>[c.id,c]):[]);
+  const evidenceFor=c=>mode==='people'?identity(canonical.get(c.id)||c):c.id;
+  const keys=new Set(source.map(evidenceFor).filter(Boolean));
   const grouped=new Map();
   for(const c of commits){
-    const evidence=mode==='people'?identity(c):c.id;
+    const evidence=evidenceFor(c);
     if(!keys.has(evidence))continue;
-    const targets=scope.path?new Set((c.files||[]).map(f=>({repo:c.repo,path:f.path.includes('/')?f.path.split('/').slice(0,-1).join('/'):'',file:false})).map(s=>JSON.stringify(s))):new Set([JSON.stringify({repo:c.repo,path:'',file:false})]);
-    for(const file of c.files||[]){const areaName=classifyWorkArea(file.path,workAreas[c.repo]||[]);if(areaName&&!(scope.repo===c.repo&&scope.areaName===areaName))targets.add(JSON.stringify({repo:c.repo,path:'',file:false,areaName}));}
+    const files=c.pathsUnknown?[]:c.files||[];
+    const targets=scope.path?new Set(files.map(f=>({repo:c.repo,path:f.path.includes('/')?f.path.split('/').slice(0,-1).join('/'):'',file:false})).map(s=>JSON.stringify(s))):new Set([JSON.stringify({repo:c.repo,path:'',file:false})]);
+    for(const file of files){const areaName=classifyWorkArea(file.path,workAreas[c.repo]||[]);if(areaName&&!(scope.repo===c.repo&&scope.areaName===areaName))targets.add(JSON.stringify({repo:c.repo,path:'',file:false,areaName}));}
     for(const raw of targets){const target=JSON.parse(raw);if(!target.areaName&&target.repo===scope.repo&&(target.path===scope.path||!scope.path)&&!scope.areaName)continue;if(!grouped.has(raw))grouped.set(raw,{...target,evidence:new Set(),records:[]});const row=grouped.get(raw);row.evidence.add(evidence);row.records.push(c);}
   }
   return [...grouped.values()].map(r=>({...r,count:r.evidence.size,evidence:[...r.evidence]})).sort((a,b)=>b.count-a.count||a.repo.localeCompare(b.repo)||a.path.localeCompare(b.path));

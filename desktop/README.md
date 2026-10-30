@@ -36,9 +36,11 @@ mode publishes available cached history while the remote refresh is pending;
 Cached history reads owned repositories without network requests and has no PR
 context. Later refreshes are manual. Missing sources open setup guidance.
 
-**Settings** saves sources and repository exclusions in `desktop.json`. Discovery
+**Settings** edits sources and repository choices in the same XDG `config.json`
+that supplies analysis rules. It preserves unrelated fields. Discovery
 must succeed for the current sources before the user can review and save at
-least one checked repository. New repositories remain eligible unless excluded.
+least one checked repository. New repositories follow the configured exclusion
+patterns; explicitly checking a repository can override a pattern exclusion.
 **Repository controls** changes tracking for the session; the shared repository
 picker only narrows the view. Existing `config.json`, cache, and last-look state
 remain compatible. Identity edits update only `config.json`’s `identities` field.

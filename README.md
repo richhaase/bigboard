@@ -33,6 +33,8 @@ gh auth login
 
 Open **Settings**, choose your personal account, organizations, or both, then
 click **Discover repositories**. Select at least one repository, review, and save.
+Settings edits `$XDG_CONFIG_HOME/bigboard/config.json` (default
+`~/.config/bigboard/config.json`), preserving advanced analysis preferences.
 You can also use **Cached history** without network requests. No sample records
 are substituted when data is missing.
 
@@ -66,6 +68,11 @@ brew install --cask richhaase/tap/bigboard
 Until that release is published, use the local build above to try this version.
 Launch the app from Finder, Spotlight, or the Dock. The GUI distribution installs
 no `bigboard` command and needs no Go, Node, or separate web server at runtime.
+
+This replaces the terminal product and its Linux downloads. Homebrew upgrades
+replace the old command with the app; scripts using `bigboard --export` must move
+to **Export JSON** on Contributors. Existing configuration, caches, and bookmarks
+remain available to the app.
 
 ## Development and documentation
 

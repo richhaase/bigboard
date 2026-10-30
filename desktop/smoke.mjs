@@ -38,15 +38,20 @@ try {
  const discoverSettings=async()=>{await click('[data-action="discover"]');await page.getByRole('button',{name:'Discover repositories',exact:true}).waitFor();};
  const now=new Date().toISOString();
  const earlier=new Date(Date.now()-86400000).toISOString();
- const settings={mode:'live',personalAccount:'',organizations:['test-org'],repositories:[],excludedRepositories:null};
+ const settings={mode:'live',personalAccount:'',organizations:['test-org'],repositories:[],excludedRepositories:[]};
  const repositories=['test-org/alpha','test-org/beta'].map(id=>({id,name:id.split('/')[1],branch:'main',revision:'a'.repeat(40),stale:false,error:'',pushedAt:now,scannedAt:now,prCheckedAt:now,prInventoryComplete:true,prFilesComplete:true,prReviewersComplete:true}));
  let discoveryRepositories=repositories.map(r=>({...r,included:true}));
+ const configuredIncluded=(draft,repo)=>!draft.excludedRepositories.includes(repo.id)&&(draft.repositories.includes(repo.id)||repo.included!==false);
  const commits=Array.from({length:210},(_,i)=>({id:i.toString(16).padStart(40,'0'),repo:repositories[i<205?0:1].id,author:`Contributor ${i%3+1}`,email:`contributor${i%3+1}@example.test`,date:now,subject:`Change ${i+1}`,added:10,removed:3,ai:i%3===0,bot:false,linesUnknown:false,files:[{path:'src/app.go',added:10,removed:3}]}));
  commits.at(-1).date=earlier;
  const pullRequests=[{repo:repositories[0].id,number:12,title:'Improve loading feedback',author:'contributor1',review:'REVIEW_REQUIRED',checks:'FAILURE',files:['src/app.go']},{repo:repositories[0].id,number:13,title:'Refine settings',author:'contributor2',review:'APPROVED',checks:'SUCCESS',files:['settings.go']},{repo:repositories[1].id,number:14,title:'Refresh history',author:'contributor3',review:'REVIEW_REQUIRED',checks:'PENDING',files:['history.go']}].map(p=>({...p,url:`https://github.com/${p.repo}/pull/${p.number}`,updatedAt:p.number===14?earlier:now,checkedAt:now,draft:false,complete:p.number!==12,reviewers:p.number===13?['contributor1']:[],reviews:p.number===14?[]:[{author:'contributor1',state:'COMMENTED',submittedAt:earlier}],mergeable:p.number===12?'CONFLICTING':'MERGEABLE',fileCount:p.number===12?3:p.files.length,inventoryComplete:true,filesComplete:p.number!==12,reviewersComplete:true,reviewsComplete:true}));
  const loaded={mode:'live',generatedAt:now,viewer:'contributor1',preferences:{since:'14d',sort:'total'},groups:{backend:[repositories[0].id]},activeGroup:'',workAreas:{},bookmark:{seenAt:earlier,eligibleAt:now,message:'Previous fetched snapshot',path:'/test/state/last-seen.json'},settings,repositories,commits,pullRequests,status:{phase:'ready',message:'Workspace ready',errors:[],cachePath:'/test/cache'}};
  let snapshot={...loaded,generatedAt:'',repositories:[],commits:[],pullRequests:[],status:{...loaded.status,phase:'initial',message:'Loading repository history…'}};
  let failRefresh=false;
+ let failAfterInterim=false;
+ let failDiscover=false;
+ let failSave=false;
+ let pathRequests=0;
  let refreshCount=0;
  let snapshotReads=0;
  let identitySaves=0;
@@ -55,11 +60,17 @@ try {
  let controls=[...repositories.map(r=>({...r,included:true,selectable:true,listed:true,cached:true,canRemove:false})),{id:'test-org/retired',name:'retired',included:false,selectable:false,listed:false,cached:true,canRemove:true}];
  await page.route('**/api/**',async route=>{
   const endpoint=new URL(route.request().url()).pathname;
+  if(endpoint!=='/api/repository-controls')assert.equal(route.request().method(),['/api/snapshot','/api/export','/api/identities'].includes(endpoint)?'GET':'POST');
   const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
   if(endpoint==='/api/snapshot'){snapshotReads++;return send(snapshot);}
   if(endpoint==='/api/refresh'){
    refreshCount++;
    if(failRefresh)return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test refresh failure'})});
+   if(failAfterInterim){
+    snapshot={...snapshot,status:{...snapshot.status,phase:'refreshing',message:'Refreshing updated cached history…'}};
+    await new Promise(resolve=>{releaseRefresh=resolve;});
+    return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test failure after cached history'})});
+   }
    if(refreshCount===1){
     snapshot={...loaded,pullRequests:[],status:{...loaded.status,phase:'refreshing',message:'Cached history loaded; refreshing GitHub…'}};
     await new Promise(resolve=>{releaseRefresh=resolve;});
@@ -69,7 +80,9 @@ try {
   }
   if(endpoint==='/api/discover'){
    const draft=route.request().postDataJSON();
-   return send(discoveryRepositories.map(r=>({...r,included:Array.isArray(draft.excludedRepositories)?!draft.excludedRepositories.includes(r.id):draft.repositories?.length?draft.repositories.includes(r.id):r.included!==false})));
+   assert.deepEqual(Object.keys(draft).sort(),['excludedRepositories','mode','organizations','personalAccount','repositories']);
+   if(failDiscover)return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test discovery failure'})});
+   return send(discoveryRepositories.map(r=>({...r,included:configuredIncluded(draft,r)})));
   }
   if(endpoint==='/api/export')return send(JSON.stringify({contributors:[{email:'contributor1@example.test',commits:70}]}));
   if(endpoint==='/api/identities')return send({identities:[1,2,3].map(i=>({email:`contributor${i}@example.test`,name:`Contributor ${i}`,aliases:[]}))});
@@ -97,15 +110,17 @@ try {
    return send(snapshot);
   }
   if(endpoint==='/api/path'){
-   const target=route.request().postDataJSON();assert.equal(target.revision,'a'.repeat(40));
+   const target=route.request().postDataJSON();assert.deepEqual(target,{repo:'test-org/alpha',path:'src',revision:'a'.repeat(40)});pathRequests++;
    return send(`https://github.com/${target.repo}/tree/${target.revision}/${target.path}`);
   }
 
   if(endpoint==='/api/settings'){
    settingsSaves++;
    const updated=route.request().postDataJSON();
+   assert.deepEqual(Object.keys(updated).sort(),['excludedRepositories','mode','organizations','personalAccount','repositories']);
+   if(failSave)return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test settings failure'})});
    assert.ok(updated.repositories.length>0,'settings never submits an empty selection');
-   const included=id=>!(updated.excludedRepositories||[]).includes(id);
+   const included=id=>configuredIncluded(updated,discoveryRepositories.find(r=>r.id===id)||{id});
    snapshot={...loaded,settings:updated,mode:updated.mode,repositories:repositories.filter(r=>included(r.id)),commits:loaded.commits.filter(c=>included(c.repo)),pullRequests:updated.mode==='cache'?[]:pullRequests.filter(p=>included(p.repo))};
    return send(snapshot);
   }
@@ -122,8 +137,16 @@ try {
  await page.getByRole('heading',{name:'Loading pull requests',exact:true}).waitFor();
  assert.equal(await page.locator('.pr-context > div').first().locator('strong').innerText(),'—');
  await click('[data-action="board"][data-value="activity"]');
+ await click('.sidebar [data-action="settings"].nav-item');
+ assert.equal(await page.locator('[data-action="discover"]').isDisabled(),true);
+ assert.equal(await page.locator('[data-action="save-settings"]').isDisabled(),true);
+ await page.locator('#personalAccount').fill('staged-account');
  releaseRefresh();
  await page.waitForFunction(()=>!document.querySelector('[data-action="refresh"]').disabled);
+ assert.equal(await page.locator('[data-action="discover"]').isEnabled(),true,'settings actions recover when the pending refresh finishes');
+ assert.equal(await page.locator('[data-action="save-settings"]').isEnabled(),true);
+ assert.equal(await page.locator('#personalAccount').inputValue(),'staged-account','refresh completion preserves the open settings draft');
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
  assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','default period is fourteen days');
  const settledReads=snapshotReads;
  await page.waitForTimeout(1600);
@@ -141,12 +164,21 @@ try {
  await page.screenshot({path:path.join(screenshots,'activity.png'),fullPage:true});
  await click('[data-action="dates"]');
  await page.locator('input[name="rangeChoice"][value="custom"]').check();
+ await page.locator('#customDays').fill('21');
+ await page.locator('[data-action="draft-reset-shared"]').press('Enter');
+ assert.equal(await page.getByRole('dialog').isVisible(),true,'Enter activates Reset shared without applying the dialog');
+ assert.equal(await page.locator('input[name="rangeChoice"][value="0"]').isChecked(),true);
+ await page.getByRole('button',{name:'Cancel',exact:true}).press('Enter');
+ assert.equal(await page.getByRole('dialog').count(),0,'Enter activates the focused Cancel button');
+ assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','cancelled date drafts leave the applied range intact');
+ await click('[data-action="dates"]');
+ await page.locator('input[name="rangeChoice"][value="custom"]').check();
  await page.locator('#customDays').fill('0');
- await click('[data-action="apply-filters"]');
+ await page.locator('#customDays').press('Enter');
  await page.getByRole('alert').waitFor();
  await page.locator('input[name="rangeChoice"][value="custom"]').check();
  await page.locator('#customDays').fill('21');
- await click('[data-action="apply-filters"]');
+ await page.locator('#customDays').press('Enter');
  assert.equal(await page.locator('[data-action="dates"]').innerText(),'21 days');
  await click('[data-action="dates"]');
  await page.locator('input[name="rangeChoice"][value="bookmark"]').check();
@@ -158,7 +190,11 @@ try {
  await click('[data-action="board"][data-value="activity"]');
  await click('[data-action="filters"]');
  await page.locator('[data-facet="people"]').first().check();
- await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.locator('[data-action="draft-reset-board"]').press('Enter');
+ assert.equal(await page.getByRole('dialog').isVisible(),true,'Enter resets the focused board draft without applying it');
+ assert.equal(await page.locator('[data-facet="people"]:checked').count(),0);
+ await page.locator('[data-facet="people"]').first().check();
+ await page.getByRole('button',{name:'Cancel',exact:true}).press('Enter');
  assert.ok((await page.locator('.main-footer').innerText()).includes('210 commits in scope'),'cancelled facets do not alter applied scope');
  await click('[data-action="filters"]');
  await page.locator('[data-facet="people"]').first().check();
@@ -245,6 +281,22 @@ try {
  const download=await downloadPromise;
  assert.equal(download.suggestedFilename(),'bigboard-contributors.json');
  assert.deepEqual(JSON.parse(await readFile(await download.path(),'utf8')),{contributors:[{email:'contributor1@example.test',commits:70}]});
+ await page.evaluate(()=>{window.__nativeCalls=[];window.go={main:{App:{CopyText:async text=>window.__nativeCalls.push(['copy',text]),SaveExportJSON:async()=>{window.__nativeCalls.push(['export']);return '/test/contributors.json';},OpenURL:async url=>window.__nativeCalls.push(['open',url])}}};});
+ await click('[data-action="copy-view"]');
+ await click('[data-action="export-json"]');
+ await click('[data-action="board"][data-value="prs"]');
+ await click('[data-action="select-pr"][data-value="test-org/alpha#12"]');
+ await click('[data-action="open-url"]');
+ await click('[data-action="board"][data-value="activity"]');
+ await click('[data-action="activity-root"]');
+ await click('[data-action="explore"][data-value="test-org/alpha"]');
+ await click('[data-action="open-path"][data-value="src"]');
+ await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call[0]==='open').length===2);
+ const nativeCalls=await page.evaluate(()=>window.__nativeCalls);
+ assert.ok(nativeCalls[0][1].startsWith('## Contributors'));
+ assert.deepEqual(nativeCalls.slice(1),[['export'],['open','https://github.com/test-org/alpha/pull/12'],['open',`https://github.com/test-org/alpha/tree/${'a'.repeat(40)}/src`]]);
+ assert.equal(pathRequests,1,'path opening uses the preview API with the retained revision');
+ await page.evaluate(()=>{delete window.go;delete window.__nativeCalls;});
  await click('[data-action="board"][data-value="prs"]');
  assert.equal(await page.locator('.pr-row').count(),3);
  await page.getByLabel('Any checks',{exact:true}).selectOption('FAILURE');
@@ -290,15 +342,22 @@ try {
  await page.getByLabel('Search activity').blur();
  await page.keyboard.press('F1');
  await page.getByRole('dialog').waitFor();
+ const guide=await page.getByRole('dialog').innerText();
+ for(const text of ['Contributors: manage identities','Contributors: toggle hiding bots','PR context: return to Activity','PRs: open Filters','PR sort picker: choose a sort','Related: toggle commits / contributor overlap','Select rows on any board','Move eight rows up / down','Select the first / last row','Activity / PRs: open selection on GitHub'])assert.ok(guide.includes(text),`keyboard guide includes ${text}`);
  await page.keyboard.press('Escape');
  await page.getByLabel('Repository group').selectOption('backend');
  await page.waitForFunction(()=>document.querySelectorAll('[data-row="activity"]').length===1);
- discoveryRepositories=[...repositories.map(r=>({...r,included:true})),{...repositories[0],id:'test-org/new',name:'new',included:true},{...repositories[0],id:'test-org/excluded',name:'excluded',included:false}];
+ discoveryRepositories=[...repositories.map(r=>({...r,included:true})),{...repositories[0],id:'test-org/new',name:'new',included:true},...['excluded','overridden','exact'].map(name=>({...repositories[0],id:`test-org/${name}`,name,included:false}))];
+ snapshot={...snapshot,settings:{...snapshot.settings,repositories:['test-org/alpha','test-org/overridden','test-org/exact'],excludedRepositories:['test-org/exact']}};
+ await page.reload();
+ await page.locator('[data-row="activity"]').first().waitFor();
  await click('.sidebar [data-action="settings"].nav-item');
  assert.equal(await page.locator('[data-settings-repo]:checked').count(),1);
  await discoverSettings();
- for(const id of ['alpha','beta','new'])assert.equal(await page.locator(`[data-settings-repo="test-org/${id}"]`).isChecked(),true,`legacy discovery includes ${id} independently of the current group`);
- assert.equal(await page.locator('[data-settings-repo="test-org/excluded"]').isChecked(),false,'legacy configured exclusion remains unchecked');
+ for(const id of ['alpha','beta','new'])assert.equal(await page.locator(`[data-settings-repo="test-org/${id}"]`).isChecked(),true,`discovery includes ${id} independently of the current group and explicit includes`);
+ assert.equal(await page.locator('[data-settings-repo="test-org/excluded"]').isChecked(),false,'configured pattern exclusion remains unchecked');
+ assert.equal(await page.locator('[data-settings-repo="test-org/overridden"]').isChecked(),true,'a saved explicit include overrides a pattern exclusion outside the visible group');
+ assert.equal(await page.locator('[data-settings-repo="test-org/exact"]').isChecked(),false,'an exact exclusion wins over an explicit include');
  await click('[data-action="save-settings"]');
  assert.equal(await page.locator('[data-action="save-settings"]').innerText(),'Save workspace');
  await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -319,6 +378,15 @@ try {
  assert.equal(await page.locator('[data-action="save-settings"]').innerText(),'Review workspace','editing repository sources invalidates discovery');
  assert.equal(settingsSaves,0);
  await page.locator('#organizations').fill('test-org');
+ await page.locator('[data-settings-repo="test-org/beta"]').uncheck();
+ failDiscover=true;
+ await discoverSettings();
+ await page.getByText('Test discovery failure',{exact:true}).waitFor();
+ assert.equal(await page.locator('#organizations').inputValue(),'test-org','failed discovery retains the source draft');
+ assert.equal(await page.locator('[data-settings-repo="test-org/beta"]').isChecked(),false,'failed discovery retains staged repository choices');
+ assert.equal(await page.locator('[data-action="save-settings"]').isEnabled(),true);
+ failDiscover=false;
+ await page.locator('[data-settings-repo="test-org/beta"]').check();
  await discoverSettings();
  for(const choice of await page.locator('[data-settings-repo]').all())await choice.uncheck();
  await click('[data-action="save-settings"]');
@@ -328,6 +396,16 @@ try {
  for(const choice of await page.locator('[data-settings-repo]').all())await choice.check();
  await click('[data-action="settings-mode"][data-value="cache"]');
  await discoverSettings();
+ await click('[data-action="save-settings"]');
+ failSave=true;
+ await click('[data-action="save-settings"]');
+ await page.getByText('Test settings failure',{exact:true}).waitFor();
+ assert.equal(await page.locator('[data-action="save-settings"]').isEnabled(),true,'failed saves can be retried');
+ await click('[data-action="edit-settings"]');
+ assert.equal(await page.locator('[data-action="settings-mode"][data-value="cache"]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#organizations').inputValue(),'test-org');
+ assert.equal(await page.locator('[data-settings-repo]:checked').count(),2,'failed save retains the selected repositories');
+ failSave=false;
  await click('[data-action="save-settings"]');
  await click('[data-action="save-settings"]');
  await page.getByText('Cached history',{exact:true}).waitFor();
@@ -394,6 +472,36 @@ try {
  assert.equal(await page.locator('[data-row="activity"]').count(),2,'failed refresh retains rendered snapshot');
  failRefresh=false;
  await click('[data-action="dismiss-error"]');
+ failAfterInterim=true;
+ await click('[data-action="refresh"]');
+ await page.getByText('Refreshing updated cached history…',{exact:true}).waitFor();
+ await click('[data-action="board"][data-value="people"]');
+ await click('[data-action="identities"]');
+ await page.locator('#identityPrimary').selectOption('contributor1@example.test');
+ await page.locator('#identityName').fill('Review during refresh');
+ await click('[data-action="review-identity"]');
+ assert.equal(await page.locator('[data-action="save-identity"]').isDisabled(),true);
+ const savesBeforePendingReview=identitySaves;
+ releaseRefresh();
+ await page.waitForFunction(()=>!document.querySelector('[data-action="save-identity"]').disabled);
+ assert.equal(await page.locator('[data-action="save-identity"]').isEnabled(),true,'identity review recovers when the pending refresh finishes');
+ assert.ok((await page.getByRole('dialog').innerText()).includes('Review during refresh'),'refresh completion retains the reviewed identity draft');
+ assert.equal(identitySaves,savesBeforePendingReview,'refresh completion does not save the pending identity review');
+ await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+ await click('[data-action="board"][data-value="activity"]');
+ await page.getByRole('alert').filter({hasText:'Test failure after cached history'}).waitFor();
+ assert.equal(await page.locator('[data-action="refresh"]').isEnabled(),true);
+ assert.equal(await page.locator('[data-row="activity"]').count(),2,'failed refresh preserves its interim cached history');
+ assert.equal(await page.locator('.loading-banner').count(),0);
+ await click('.sidebar [data-action="status"]');
+ await page.getByText('Refresh failed; showing retained data.',{exact:true}).waitFor();
+ assert.equal(await page.getByText('Refreshing updated cached history…',{exact:true}).count(),0,'failed polling cannot leave Data status reporting an active refresh');
+ await page.getByRole('button',{name:'Done',exact:true}).click();
+ const failedReads=snapshotReads;
+ await page.waitForTimeout(1600);
+ assert.equal(snapshotReads,failedReads,'snapshot polling stops after refresh failure');
+ failAfterInterim=false;
+ await click('[data-action="dismiss-error"]');
  for(const width of [860,390]){
   await page.setViewportSize({width,height:900});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`no page overflow at ${width}px`);
@@ -416,6 +524,11 @@ try {
  assert.equal(await page.locator('[data-settings-repo="test-org/beta"]').isChecked(),false,'discovery retains persisted exclusions');
  assert.equal(await page.locator('[data-settings-repo="test-org/new"]').isChecked(),true,'newly discovered repositories default selected despite the previous checked list');
  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ snapshot={...loaded,commits:Array.from({length:10},(_,i)=>[repositories[0],repositories[1]].map(repo=>({...commits[0],id:`recent-${i}`,repo:repo.id,subject:`Recent change ${i}`,date:new Date(Date.parse(now)-i*1000).toISOString()}))).flat()};
+ await page.reload();
+ await click('[data-action="board"][data-value="people"]');
+ assert.equal(await page.locator('.contributor-detail .commit').count(),8,'recent history shows eight unique commits despite shared repository copies');
+ assert.deepEqual(await page.locator('.contributor-detail .commit-title').allTextContents(),Array.from({length:8},(_,i)=>`Recent change ${i}`));
  const sharedCommit={...commits[0],subject:'Shared canonical change',author:'Canonical contributor',email:'canonical@example.test'};
  snapshot={...loaded,commits:[sharedCommit,{...sharedCommit,repo:repositories[1].id,author:'Secondary contributor',email:'secondary@example.test',added:900,removed:900,linesUnknown:true}]};
  await page.reload();
@@ -430,6 +543,31 @@ try {
  await page.getByLabel('Search activity').fill('');
  assert.equal(await page.locator('.commit').count(),1);
  assert.ok((await page.locator('.commit').innerText()).includes('Canonical contributor'));
+ snapshot={...loaded,commits:[{...sharedCommit,added:999,removed:999,files:[{path:'src/frontend.go',added:999,removed:999}]},{...sharedCommit,repo:repositories[1].id,author:'Secondary contributor',email:'secondary@example.test',added:80,removed:20,files:[{path:'src/backend.go',added:80,removed:20}]}]};
+ await page.reload();
+ await click('[data-action="explore"][data-value="test-org/alpha"]');
+ await click('[data-action="explore"][data-value="src"]');
+ await click('[data-action="lens"][data-value="related"]');
+ await click('[data-action="related-mode"][data-value="people"]');
+ await click('[data-action="related-open"][data-repo="test-org/beta"][data-value="src"]');
+ assert.equal(await page.locator('.scope-people .person-info strong').innerText(),'Canonical contributor','Related contributor drill uses the global canonical identity');
+ assert.equal(await page.locator('.scope-people .delta').textContent(),'+80−20','Related contributor drill retains the target directory volume');
+ await click('[data-action="lens-person"][data-value="canonical@example.test"]');
+ assert.equal(await page.locator('.commit').count(),1);
+ assert.equal(await page.locator('.commit .delta').textContent(),'+80−20');
+ assert.ok((await page.locator('.commit').innerText()).includes('Canonical contributor'));
+ snapshot={...loaded,commits:[{...commits[0],id:'known-path'},{...commits[0],id:'unknown-path',pathsUnknown:true,linesUnknown:true,files:[]}]};
+ await page.reload();
+ await page.getByText(/File paths are unavailable for 1 commit/).waitFor();
+ await click('[data-action="explore"][data-value="test-org/alpha"]');
+ await click('[data-action="lens"][data-value="commits"]');
+ assert.equal(await page.locator('.commit').count(),2,'repository history retains commits whose paths are unknown');
+ await click('[data-action="lens"][data-value="ranking"]');
+ assert.equal(await page.locator('[data-row="activity"]').count(),1,'unknown paths do not create a fabricated directory');
+ await click('[data-action="explore"][data-value="src"]');
+ await page.getByText(/Directory and file totals may be incomplete/).waitFor();
+ await click('[data-action="lens"][data-value="commits"]');
+ assert.equal(await page.locator('.commit').count(),1,'concrete paths contain only attributed commits');
  const reviewCount=()=>page.locator('.pr-context > div').nth(1).locator('strong').innerText();
  snapshot={...loaded,repositories:repositories.map(r=>({...r,prReviewersComplete:r.id!=='test-org/alpha'})),pullRequests:pullRequests.map(p=>({...p,reviewers:[]}))};
  await page.reload();

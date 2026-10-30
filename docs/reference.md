@@ -60,11 +60,14 @@ Shared viewing scope is **date plus repositories**. The default range is
 **14 days**, unless `config.json` specifies another startup range. Presets are
 1, 7, 14, 30, 90, and 365 days plus All time. **Custom…** accepts 1–3650 days and
 provides **Since last look** when a saved bookmark exists. A configured group
-appears in the group picker and changes the tracked repository set.
+appears in the group picker and changes the tracked repository set. Group
+definitions survive source changes; members outside active sources stay hidden
+until those sources are restored.
 
 **Filters** stages shared scope and current-board facets together. Multiple
 values within a category match any selected value; categories combine with AND.
-An empty facet means All. Choose **Apply filters** or **Cancel**.
+An empty facet means All. Choose **Apply filters** or **Cancel**. Enter activates
+the focused dialog button; Enter in Custom days applies the draft.
 **Reset this board** clears its filters and search; **Reset shared** stages All
 time and all tracked repositories. These resets apply with the rest of the draft.
 
@@ -81,16 +84,18 @@ bot visibility apply to this board independently of Contributors.
 
 Select a row to inspect its contributors and recent activity. Use the row arrow,
 double-click, or Enter to follow repository → directory → file → commits.
-Directory counts include only files inside that directory. Breadcrumbs and Back
-return to broader scopes. Long file histories load additional commits in batches.
+Directory counts include only files inside that directory. Commits with unknown
+paths remain visible at repository scope; a coverage notice explains why they
+cannot be assigned to individual directories. Breadcrumbs and Back return to
+broader scopes. Long file histories load additional commits in batches.
 
 The **Commits**, **People**, and **Related** tabs show evidence for the current
 scope; `1`, `2`, and `3` select them, and `4` returns to the ranking. People opens
 a person’s scoped commits. Search matches contributor names/emails in the People
 list, and commit subjects or author names/emails in Commits and a selected
 person’s commit detail. Matching commits are filtered before pagination.
-Related switches between exact shared commits and
-historical contributor overlap, including configured named work areas. Open a
+Related switches between exact shared commits and historical contributor overlap
+(`m` toggles the mode), including configured named work areas. Open a
 result to inspect the matching commits or people. Overlap is not ownership or
 online presence.
 
@@ -103,7 +108,7 @@ filters. Failing checks and changes requested can overlap. `?` means evidence is
 incomplete or stale; loading is shown separately from a completed zero. Directory
 associations also need complete changed-file evidence. **View repository PRs**
 (or `v`) temporarily omits the normal PR board’s facets. **Back to Activity**
-restores them; `p` resumes the normal PR board directly.
+restores them, as does Esc; `p` resumes the normal PR board directly.
 
 ## Contributors and identities
 
@@ -145,6 +150,7 @@ Author, review, checks, and draft-state facets combine with Mine:
 - **Updated since my review:** activity after the latest known submitted review,
   independent of the last-look bookmark. Missing review timestamps do not match.
 
+`u`, `v`, `k`, and `d` also open the PR Filters dialog.
 `m`, `M`, and `n` toggle attention, authored, and requested respectively. Repeating
 a shortcut clears that Mine selection; other filters remain. If account lookup
 fails, Mine filters cannot match. Partial reviewer or review history can omit
@@ -153,7 +159,8 @@ uses shared date/repository scope and any temporary repository PR context.
 Incomplete reviewer evidence shows `?`, or a known lower bound such as `1 + ?`.
 
 Sort by Updated, Repository, Author, Title, or Attention; `S` reverses the whole
-order. `A` selects author order and `z` opens the sort picker. Updated starts
+order. `A` selects author order and `z` opens the sort picker, where `1`–`5`
+choose an order. Updated starts
 newest first. Attention puts requested reviews first, then failing checks,
 requested changes, approved open PRs, and other PRs; older updates come first
 within a category, with unknown dates last.
@@ -200,8 +207,7 @@ the open-PR list.
 
 | Data | Default location |
 | --- | --- |
-| Analysis rules and initial sources | `~/.config/bigboard/config.json` |
-| Saved workspace | `~/.config/bigboard/desktop.json` |
+| Settings, analysis rules, and identities | `~/.config/bigboard/config.json` |
 | Owned repository caches | `~/.cache/bigboard/repos/github.com/owner/name.git` |
 | Last-look bookmarks | `~/.local/state/bigboard/last-seen.json` |
 
@@ -213,9 +219,10 @@ change or their files are damaged.
 
 **Repository controls** stages session inclusion, then **Apply tracking** applies
 it. Excluding a repository does not remove its cache. A cache can be removed
-only when a successful discovery no longer lists its repository. **Remove cache**
-requires a separate confirmation; group selection or filtering alone does not
-make a cache removable.
+only after a successful live GitHub refresh no longer lists its repository.
+Discover in Settings alone does not authorize removal, and Cached history mode
+cannot remove caches. **Remove cache** requires a separate confirmation; group
+selection or filtering alone does not make a cache removable.
 
 The copy button (or `y`) copies the current view as Markdown. **Export JSON** on
 Contributors opens a native Save dialog for all-time contributor statistics in
@@ -227,11 +234,12 @@ reconstruct shorter-period totals.
 
 ## Configuration reference
 
-Use Settings and Identities for routine changes. Advanced analysis preferences
-are loaded from `config.json` at startup. Invalid JSON, unknown fields, and
-unsupported values report an error. The saved workspace in `desktop.json`
-overrides initial sources without rewriting analysis rules. Identity editing
-updates only the `identities` field.
+Settings and Identities edit the same `config.json` that Bigboard reads at
+startup: `$XDG_CONFIG_HOME/bigboard/config.json`, defaulting to
+`~/.config/bigboard/config.json`. Settings preserves advanced analysis fields;
+Identity editing updates only `identities`. Invalid JSON, unknown fields, and
+unsupported values report an error. External edits are detected before saving;
+restart to load them rather than overwriting them.
 
 ```json
 {
@@ -248,9 +256,12 @@ updates only the `identities` field.
 
 | Field | Meaning |
 | --- | --- |
-| `personal_account`, `organizations` | Initial discovery sources before a workspace is saved |
-| `exclude` | Initial basename, `owner/name`, or glob exclusions; saved workspace choices use exact exclusions |
-| `groups` | Named `owner/name` lists within configured sources, selected through the group picker |
+| `mode` | `live` for GitHub refreshes or `cache` for owned local history; when omitted, sources imply `live`, otherwise `cache` |
+| `personal_account`, `organizations` | Active discovery sources, edited in Settings |
+| `repositories` | Explicitly checked `owner/name` IDs; these override matching exclusion patterns |
+| `excluded_repositories` | Exact `owner/name` exclusions; these win over explicit inclusions |
+| `exclude` | Basename, `owner/name`, or glob exclusions applied to repositories without an explicit choice |
+| `groups` | Named `owner/name` lists, selected through the group picker; only members from active sources are shown |
 | `since` | Startup preset: `1d`, `7d`, `14d` (default), `30d`, `90d`, `1y`, or `all` |
 | `sort` | Contributors: `commits`, `added`, `removed`, `net`, `ai`, or `total` (default); `impact` aliases `total` |
 | `all_files` | Include generated/vendored paths in line counts; default false |
@@ -259,7 +270,20 @@ updates only the `identities` field.
 | `bot_identities` | Additional bot emails, `@domain` suffixes, or exact author names |
 | `identities` | Canonical emails, aliases, and optional display names |
 | `work_areas` | Named literal file/directory prefixes for related evidence |
-| `theme`, `fuzzy` | Accepted for compatibility; they do not control GUI appearance or aggregation |
+| `theme`, `fuzzy`, `github` | Accepted for compatibility; they do not control GUI appearance or data mode. `github` accepts an object with an `enabled` boolean. |
+
+Saving Settings does not discard `exclude` patterns. For example, `vendor-*`
+continues to exclude newly discovered matching repositories; explicitly checking
+one in Settings includes that repository. Exact `excluded_repositories` entries
+take precedence over checked inclusions. Repositories without an explicit choice
+or matching exclusion pattern are included automatically.
+
+Repository IDs use `owner/name`, and live selections must belong to an active
+account or organization. Discover current sources before reviewing and saving.
+Group definitions remain intact when sources change; their visible members are
+limited to active sources.
+
+### Identities and work areas
 
 Identity example:
 

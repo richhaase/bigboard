@@ -30,15 +30,15 @@ func TestStartupPreferencesAndStrictConfiguration(t *testing.T) {
 		{"legacy", `{"paths":["/tmp"]}`, false, "", ""},
 		{"unknown", `{"typo":true}`, false, "", ""},
 		{"budget", `{"pr_request_budget":0}`, false, "", ""},
-		{"group", `{"organizations":["example"],"groups":{"other":["outside/engine"]}}`, false, "", ""},
+		{"group", `{"organizations":["example"],"groups":{"other":["outside/too/many"]}}`, false, "", ""},
 		{"areas", `{"work_areas":{"example/engine":[{"name":"Core","paths":["../escape"]}]}}`, false, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "desktop.json")
+			path := filepath.Join(t.TempDir(), "config.json")
 			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "config.json"), []byte(tc.body), 0600); err != nil {
 				t.Fatal(err)
 			}
-			_, analysis, _, err := loadSettings(path)
+			_, analysis, err := loadSettings(path)
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%v, err=%v", tc.valid, err)
 			}
@@ -102,6 +102,7 @@ func TestIdentitySaveRescansOfflinePreservesPRsAndConfigFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.analysis.source = original
+	base.repositories = append(base.repositories, git.Repository{ID: "example/new", Name: "example/new", DefaultBranch: "main"})
 	beforeCalls, beforeFetch := provider.calls, cache.refreshes
 	result, err := s.SaveIdentity(IdentityRequest{PrimaryEmail: "person@example.test", Emails: []string{"person@example.test"}, Name: "Renamed Person"})
 	if err != nil {
@@ -109,6 +110,9 @@ func TestIdentitySaveRescansOfflinePreservesPRsAndConfigFields(t *testing.T) {
 	}
 	if provider.calls != beforeCalls || cache.refreshes != beforeFetch {
 		t.Fatal("identity save performed remote work")
+	}
+	if len(result.Repositories) != len(first.Repositories) || result.Repositories[0].ID != first.Repositories[0].ID {
+		t.Fatal("identity rescan widened the tracked repository scope")
 	}
 	if result.Commits[0].Author != "Renamed Person" || cache.options.Identities["person@example.test"].Name != "Renamed Person" {
 		t.Fatal("identity mapping did not reach rescan")

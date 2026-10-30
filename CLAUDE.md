@@ -19,6 +19,10 @@ command-line product. See [README](README.md) for local startup and
 | `desktop/frontend/model.js` | Pure frontend projections; tested independently of the browser |
 | `desktop/frontend/styles.css` | Responsive GUI styling |
 | `desktop/server.go` | Development HTTP bridge; the native app does not use it |
+| `desktop/frontend/model.test.js`, `desktop/smoke.mjs` | Projection tests and isolated browser workflow regressions |
+| `scripts/*.sh`, `scripts/release_test.py` | Native build, signing, cask generation, and packaging regressions |
+| `.goreleaser.yaml`, `.github/workflows/release.yml` | Release artifacts, notes, and tag-driven publication |
+| `desktop/wails.json`, `desktop/build/darwin/Info.plist` | Desktop build configuration and macOS bundle metadata |
 
 The root Go module uses the standard library. `desktop` is a nested module with
 Wails dependencies and a local replacement for the root module. The frontend is
@@ -27,16 +31,16 @@ are Git and authenticated GitHub CLI, not Go, Node, or a hosted service.
 
 ## Data and state contracts
 
-- Startup reads `config.json` for analysis rules and initial sources, then
-  `desktop.json` for the saved workspace. Do not overwrite unrelated config
-  fields. Identity changes update only `identities`; reject conflicting external
-  file edits and preserve the user’s draft.
+- Startup, Settings, and Identities share `config.json` under the XDG config
+  directory. Settings updates workspace fields while preserving analysis rules;
+  identity changes update only `identities`. Use the same atomic writer for both,
+  reject conflicting external edits, and preserve the user’s draft.
 - Live startup publishes cached history before the network pass completes.
   Frontend snapshot polling runs only while an operation is pending. Later
   refreshes are explicit. Never fill runtime gaps with fabricated records.
 - Keep collection settings, session tracking, named groups, and viewing filters
-  distinct. Saved exclusions allow newly discovered repositories on later
-  refreshes. Settings must discover current sources before review/save.
+  distinct. Exact exclusions win over explicit inclusions, then config exclusion
+  patterns apply. Newly discovered repositories follow those same rules. Settings must discover current sources before review/save.
 - Preserve usable snapshots on failure and qualify stale/partial evidence.
   PR inventory coverage is independent of file and reviewer coverage. Unknown
   inventory with no rows is not a complete zero. PR loading is also distinct
@@ -56,7 +60,8 @@ are Git and authenticated GitHub CLI, not Go, Node, or a hosted service.
   ignoring viewing filters and making no network requests. Native export uses a
   Save dialog; the browser development harness uses a download.
 - Cache removal is ownership-checked and limited to unlisted repositories after
-  successful discovery. GitHub path links verify retained revisions locally.
+  a successful live GitHub refresh; Settings discovery and Cached history alone
+  do not authorize removal. GitHub path links verify retained revisions locally.
   Never scan or mutate developer checkouts.
 - Bookmarks share the existing timestamp file. Their baseline stays fixed during
   a session; normal native exit saves eligible fetched snapshots by global/group
@@ -76,7 +81,7 @@ consistently. No source comments should be added on Rich’s behalf.
 make build
 make dev
 make test
-make fmt-check lint vet staticcheck
+make check
 ```
 
 `make build` outputs `desktop/build/bin/Bigboard.app`; `make dev` runs native
@@ -84,7 +89,9 @@ development. `make preview` is a loopback development server, not deployment.
 The `gui`, `gui-build`, and `gui-preview` aliases remain available.
 
 `make test` covers both Go modules and frontend models; root `go test ./...`
-alone misses the nested desktop module. Use the `-core` and `-desktop` variants
+alone misses the nested desktop module. `make test-frontend` runs projection
+tests; `make check` combines formatting, lint, vet, staticcheck, and all tests.
+Use the `-core` and `-desktop` variants
 of test/lint/vet/staticcheck for focused checks. Use fnm with `.node-version`
 for Node commands. The browser harness is described in
 [desktop/README.md](desktop/README.md) and uses temporary storage and test-only

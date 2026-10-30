@@ -51,6 +51,11 @@ release:
     ## Big Board v{{.Version}}
 
     Bigboard for macOS: explore work areas, contributors, and commit evidence across GitHub repositories.
+
+    ### Upgrading from the terminal version
+    This is a GUI-only macOS application. Homebrew upgrades replace the terminal command with Bigboard.app.
+    Linux downloads and the `bigboard` command, including `bigboard --export`, are no longer distributed.
+    Use Export JSON on the Contributors board. Existing configuration, repository caches, and bookmarks are reused.
   footer: |
     ---
 

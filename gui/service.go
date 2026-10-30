@@ -38,7 +38,6 @@ type Service struct {
 	provider        provider
 	cachePath       string
 	path            string
-	source          []byte
 	analysis        analysisConfig
 	snapshot        Snapshot
 	busy            bool
@@ -68,8 +67,8 @@ func NewService() (*Service, error) {
 	if !filepath.IsAbs(root) {
 		return nil, errors.New("configuration directory must be absolute")
 	}
-	path := filepath.Join(root, "bigboard", "desktop.json")
-	settings, analysis, source, err := loadSettings(path)
+	path := filepath.Join(root, "bigboard", "config.json")
+	settings, analysis, err := loadSettings(path)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +77,8 @@ func NewService() (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: gh.NewProvider(nil), cachePath: cache.Root, path: path, source: source, analysis: analysis, now: time.Now}
-	s.configStore = newConfigStore(filepath.Join(root, "bigboard", "config.json"), analysis.source)
+	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: gh.NewProvider(nil), cachePath: cache.Root, path: path, analysis: analysis, now: time.Now}
+	s.configStore = newConfigStore(path, analysis.source)
 	s.loadBookmarks()
 	s.snapshot = emptySnapshot(settings, cache.Root)
 	s.snapshot.Status.Phase = "initial"
@@ -161,7 +160,7 @@ func (s *Service) SaveSettings(settings Settings) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if settings.ExcludedRepositories != nil && len(settings.Repositories) == 0 {
+	if len(settings.Repositories) == 0 {
 		return Snapshot{}, errors.New("select at least one repository before saving")
 	}
 	s.mu.Lock()
@@ -173,12 +172,18 @@ func (s *Service) SaveSettings(settings Settings) (Snapshot, error) {
 		s.mu.Unlock()
 		return Snapshot{}, err
 	}
-	source, err := saveSettings(s.path, settings, s.source)
-	if err != nil {
+	if s.configStore == nil {
+		s.configStore = newConfigStore(s.path, s.analysis.source)
+	}
+	if err := s.configStore.saveSettings(s.ctx, settings); err != nil {
 		s.mu.Unlock()
 		return Snapshot{}, err
 	}
-	s.source = source
+	s.analysis.Mode = settings.Mode
+	s.analysis.PersonalAccount = settings.PersonalAccount
+	s.analysis.Organizations = slices.Clone(settings.Organizations)
+	s.analysis.Repositories = slices.Clone(settings.Repositories)
+	s.analysis.ExcludedRepositories = slices.Clone(settings.ExcludedRepositories)
 	s.sessionExcluded = nil
 	s.eligible = make(map[string]time.Time)
 	s.inventoryReady = false
@@ -237,7 +242,7 @@ func (s *Service) Discover(settings Settings) ([]Repository, error) {
 func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 	defer s.workers.Done()
 	if previous.Settings.Mode == "live" && previous.GeneratedAt == "" {
-		cached := s.refreshRepositories(previous, true)
+		cached := s.refreshRepositories(previous, true, false)
 		cached.Status.Phase = "refreshing"
 		cached.Status.Message = "Loading GitHub repositories…"
 		if len(cached.Commits) > 0 {
@@ -249,7 +254,7 @@ func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 		s.mu.Unlock()
 		previous = cached
 	}
-	result := s.refreshRepositories(previous, false)
+	result := s.refreshRepositories(previous, false, false)
 	s.mu.Lock()
 	if result.Mode == "live" && s.ctx.Err() == nil && len(result.Commits) > 0 && slices.ContainsFunc(result.Repositories, func(repo Repository) bool { return repo.Fetched }) {
 		if s.eligible == nil {
@@ -342,11 +347,11 @@ func (s *Service) included(settings Settings, id string) bool {
 }
 
 func (s *Service) configuredIncluded(settings Settings, id string) bool {
-	if settings.ExcludedRepositories != nil {
-		return !slices.Contains(settings.ExcludedRepositories, id)
+	if slices.Contains(settings.ExcludedRepositories, id) {
+		return false
 	}
-	if len(settings.Repositories) > 0 {
-		return slices.Contains(settings.Repositories, id)
+	if slices.Contains(settings.Repositories, id) {
+		return true
 	}
 	for _, pattern := range s.analysis.Exclude {
 		for _, value := range []string{id, filepath.Base(id)} {
@@ -376,5 +381,5 @@ func (s *Service) commit(record git.CommitRecord) Commit {
 		}
 		files = append(files, File{Path: change.Path, Added: change.Added, Removed: change.Removed})
 	}
-	return Commit{ID: record.CommitID, Repo: record.RepoID, Author: record.Author, Email: record.Email, Date: record.Date.Format(time.RFC3339), Subject: record.Subject, Added: record.Added, Removed: record.Removed, AI: record.AIAssisted, Bot: stats.IsBotIdentity(record.Author, record.Email, s.analysis.BotIdentities), LinesUnknown: record.LinesUnknown, Files: files}
+	return Commit{ID: record.CommitID, Repo: record.RepoID, Author: record.Author, Email: record.Email, Date: record.Date.Format(time.RFC3339), Subject: record.Subject, Added: record.Added, Removed: record.Removed, AI: record.AIAssisted, Bot: stats.IsBotIdentity(record.Author, record.Email, s.analysis.BotIdentities), LinesUnknown: record.LinesUnknown, PathsUnknown: record.PathsUnknown, Files: files}
 }

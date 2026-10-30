@@ -2,7 +2,6 @@ package gui
 
 import (
 	"errors"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -69,7 +68,7 @@ func (s *Service) SaveIdentity(request IdentityRequest) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	if s.configStore == nil {
-		s.configStore = newConfigStore(filepath.Join(filepath.Dir(s.path), "config.json"), s.analysis.source)
+		s.configStore = newConfigStore(s.path, s.analysis.source)
 	}
 	if err := s.configStore.saveIdentities(identities); err != nil {
 		s.mu.Unlock()
@@ -83,15 +82,9 @@ func (s *Service) SaveIdentity(request IdentityRequest) (Snapshot, error) {
 	s.snapshot.Status.Message = "Rescanning cached history with saved contributor identities…"
 	s.mu.Unlock()
 	defer s.workers.Done()
-	local := cloneSnapshot(previous)
-	local.Settings.Repositories = []string{}
-	local.Settings.ExcludedRepositories = nil
-	for _, repo := range previous.Repositories {
-		local.Settings.Repositories = append(local.Settings.Repositories, repo.ID)
-	}
 	result := previous
-	if len(local.Settings.Repositories) > 0 {
-		result = s.refreshRepositories(local, true)
+	if len(previous.Repositories) > 0 {
+		result = s.refreshRepositories(previous, true, true)
 	}
 	result.Settings = previous.Settings
 	for _, old := range previous.Repositories {

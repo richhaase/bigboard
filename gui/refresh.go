@@ -11,7 +11,7 @@ import (
 	gh "github.com/richhaase/bigboard/github"
 )
 
-func (s *Service) refreshRepositories(previous Snapshot, offline bool) Snapshot {
+func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bool) Snapshot {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
 	defer cancel()
 	settings := previous.Settings
@@ -39,13 +39,8 @@ func (s *Service) refreshRepositories(previous Snapshot, offline bool) Snapshot 
 	}
 	selected := []git.Repository{}
 	for _, repo := range repositories {
-		if s.included(settings, repo.ID) {
+		if (!trackedOnly || slices.ContainsFunc(previous.Repositories, func(old Repository) bool { return old.ID == repo.ID })) && s.included(settings, repo.ID) {
 			selected = append(selected, repo)
-		}
-	}
-	for _, id := range settings.Repositories {
-		if settings.ExcludedRepositories == nil && !slices.ContainsFunc(repositories, func(repo git.Repository) bool { return repo.ID == id }) {
-			result.Status.Errors = append(result.Status.Errors, id+": selected repository is unavailable in this data source")
 		}
 	}
 	prCtx := gh.WithRequestBudget(ctx, s.analysis.PRRequestBudget)
@@ -74,7 +69,7 @@ func (s *Service) refreshRepositories(previous Snapshot, offline bool) Snapshot 
 		commits []Commit
 	}
 	outcomes := make([]scanned, len(selected))
-	semaphore := make(chan struct{}, 4)
+	semaphore := make(chan struct{}, 8)
 	var workers sync.WaitGroup
 	for i, repo := range selected {
 		workers.Add(1)

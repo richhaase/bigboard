@@ -46,6 +46,7 @@ type Commit struct {
 	AI           bool   `json:"ai"`
 	Bot          bool   `json:"bot"`
 	LinesUnknown bool   `json:"linesUnknown"`
+	PathsUnknown bool   `json:"pathsUnknown"`
 	Files        []File `json:"files"`
 }
 

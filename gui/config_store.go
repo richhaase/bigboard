@@ -42,6 +42,16 @@ func newConfigStore(path string, source []byte) *configStore {
 	return &configStore{path: path, target: target, targetErr: err, expected: slices.Clone(source)}
 }
 
+func (s *configStore) saveSettings(ctx context.Context, settings Settings) error {
+	return s.update(ctx, map[string]any{
+		"mode":                  settings.Mode,
+		"personal_account":      settings.PersonalAccount,
+		"organizations":         settings.Organizations,
+		"repositories":          settings.Repositories,
+		"excluded_repositories": settings.ExcludedRepositories,
+	})
+}
+
 func (s *configStore) saveIdentities(identities map[string]git.Identity) error {
 	normalized, err := git.NormalizeIdentities(identities)
 	if err != nil {

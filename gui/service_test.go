@@ -2,9 +2,7 @@ package gui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -95,7 +93,7 @@ func testService(t *testing.T, mode string) (*Service, *fakeCache, *fakeProvider
 	cache := &fakeCache{repositories: []git.Repository{{ID: "example/engine", Name: "example/engine", DefaultBranch: "main"}}, records: []git.CommitRecord{{CommitID: "abc", RepoID: "example/engine", Author: "Test Person", Email: "person@example.test", Date: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), Added: 20, Removed: 5, Changes: []git.PathChange{{Path: "src/main.go", Added: 20, Removed: 5, LinesKnown: true}}}}}
 	provider := &fakeProvider{results: []gh.Result{{Repo: "example/engine", Complete: true}}}
 	settings := Settings{Mode: mode, Organizations: []string{"example"}, Repositories: []string{}}
-	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: provider, cachePath: filepath.Join(t.TempDir(), "cache"), path: filepath.Join(t.TempDir(), "desktop.json"), now: func() time.Time { return time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC) }, analysis: analysisConfig{PRRequestBudget: 128}}
+	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: provider, cachePath: filepath.Join(t.TempDir(), "cache"), path: filepath.Join(t.TempDir(), "config.json"), now: func() time.Time { return time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC) }, analysis: analysisConfig{PRRequestBudget: 128}}
 	s.snapshot = emptySnapshot(settings, s.cachePath)
 	return s, cache, provider
 }
@@ -165,50 +163,6 @@ func TestFailedDiscoveryRetainsEvidenceAndReportsPartialScope(t *testing.T) {
 	}
 }
 
-func TestSettingsSaveValidatesAndPersistsWithoutChangingAnalysisConfig(t *testing.T) {
-	s, _, _ := testService(t, "cache")
-	cliPath := filepath.Join(filepath.Dir(s.path), "config.json")
-	cli := []byte(`{"organizations":["example"],"sort":"commits"}`)
-	if err := os.WriteFile(cliPath, cli, 0600); err != nil {
-		t.Fatal(err)
-	}
-	initial := s.Snapshot()
-	if _, err := s.SaveSettings(Settings{Mode: "live", Repositories: []string{"invalid"}}); err == nil {
-		t.Fatal("invalid settings accepted")
-	}
-	if !reflect.DeepEqual(initial, s.Snapshot()) {
-		t.Fatal("validation failure modified current data")
-	}
-	if _, err := os.Stat(s.path); !os.IsNotExist(err) {
-		t.Fatal("invalid settings persisted")
-	}
-	settings := Settings{Mode: "cache", Organizations: []string{" Example ", "example"}, Repositories: []string{"EXAMPLE/engine"}}
-	if _, err := s.SaveSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var saved Settings
-	if err := json.Unmarshal(data, &saved); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(saved.Organizations, []string{"example"}) || saved.Repositories[0] != "example/engine" {
-		t.Fatalf("not normalized: %+v", saved)
-	}
-	data, _ = os.ReadFile(cliPath)
-	if string(data) != string(cli) {
-		t.Fatal("analysis configuration changed")
-	}
-	if err := os.WriteFile(s.path, []byte(`{"mode":"demo"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SaveSettings(settings); err == nil || !strings.Contains(err.Error(), "outside this window") {
-		t.Fatal("external edit overwritten")
-	}
-}
-
 func TestBusyRefreshAndShutdown(t *testing.T) {
 	s, cache, _ := testService(t, "cache")
 	cache.wait = make(chan struct{})
@@ -258,7 +212,7 @@ func TestChangedSettingsCannotRetainOutOfScopeEvidenceOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.discoveryErr = errors.New("unavailable")
-	result, err := s.SaveSettings(Settings{Mode: "live", Organizations: []string{"different"}})
+	result, err := s.SaveSettings(Settings{Mode: "live", Organizations: []string{"different"}, Repositories: []string{"different/engine"}})
 	if err != nil || len(result.Commits) != 0 || len(result.Repositories) != 0 || result.Status.Phase != "partial" {
 		t.Fatalf("out-of-scope evidence survived source change: %+v, %v", result, err)
 	}
@@ -283,66 +237,8 @@ func TestNewServiceStartsWithRealImportedSources(t *testing.T) {
 	if result.Mode != "live" || result.Settings.PersonalAccount != "example" || len(result.Commits) != 0 || result.Status.Phase != "initial" {
 		t.Fatalf("bad startup: %+v", result)
 	}
-	if _, err := os.Stat(filepath.Join(root, "bigboard", "desktop.json")); !os.IsNotExist(err) {
-		t.Fatal("startup wrote settings")
-	}
-}
-
-func TestObsoleteSavedModeMigratesToRealSourcesWithoutWriting(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		t.Run(fmt.Sprint(configured), func(t *testing.T) {
-			root := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", root)
-			t.Setenv("XDG_CACHE_HOME", t.TempDir())
-			configDir := filepath.Join(root, "bigboard")
-			if err := os.MkdirAll(configDir, 0700); err != nil {
-				t.Fatal(err)
-			}
-			if configured {
-				if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"organizations":["example"]}`), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			obsolete := []byte(`{"mode":"demo","organizations":["synthetic"],"repositories":["synthetic/project"]}`)
-			path := filepath.Join(configDir, "desktop.json")
-			if err := os.WriteFile(path, obsolete, 0600); err != nil {
-				t.Fatal(err)
-			}
-			s, err := NewService()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer s.Close()
-			settings := s.Snapshot().Settings
-			expectedMode := "cache"
-			if configured {
-				expectedMode = "live"
-			}
-			if settings.Mode != expectedMode || len(settings.Repositories) != 0 || (configured && !reflect.DeepEqual(settings.Organizations, []string{"example"})) || (!configured && len(settings.Organizations) != 0) {
-				t.Fatalf("obsolete settings were not replaced by real sources: %+v", settings)
-			}
-			data, _ := os.ReadFile(path)
-			if string(data) != string(obsolete) {
-				t.Fatal("startup edited the settings file")
-			}
-		})
-	}
-}
-
-func TestExistingRealSettingsArePreserved(t *testing.T) {
-	for _, mode := range []string{"cache", "live"} {
-		t.Run(mode, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "desktop.json")
-			settings := Settings{Mode: mode, PersonalAccount: "example", Organizations: []string{"sample"}, Repositories: []string{"sample/engine"}}
-			data, _ := json.Marshal(settings)
-			if err := os.WriteFile(path, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-			loaded, _, _, err := loadSettings(path)
-			if err != nil || !reflect.DeepEqual(loaded, settings) {
-				t.Fatalf("saved settings changed: %+v %v", loaded, err)
-			}
-		})
+	if data, err := os.ReadFile(filepath.Join(root, "bigboard", "config.json")); err != nil || string(data) != `{"personal_account":"example","organizations":["sample"]}` {
+		t.Fatal("startup modified configuration")
 	}
 }
 
