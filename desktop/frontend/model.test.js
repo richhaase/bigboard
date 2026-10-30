@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL, ranges, identity, timelineSeries, relatedScopes, classifyWorkArea,
-  scopedCommits, selectCommits, sortRows, totals, uniqueCommits, filterByCanonicalIdentity,
+  scopedCommits, selectCommits, sortRows, totals, uniqueCommits, filterByCanonicalIdentity, excludedLines,
 } from './model.js';
 
 const now = Date.parse('2026-10-28T12:00:00Z');
@@ -492,4 +492,11 @@ test('range-aware timelines retain future-dated selected commits consistently wi
     assert.equal(totals(selected).commits,1);
     assert.equal(timelineSeries(selected,days,current.getTime()).reduce((sum,row)=>sum+row.commits,0),1);
   }
+});
+
+test('excluded lines are summed by reason once per shared commit', () => {
+  const shared = makeCommit({id:'shared', excludedBulkLines:2500, excludedPathLines:40});
+  const result = excludedLines([shared, {...shared, repo:'sample/web'}, makeCommit({id:'other', excludedAttributeLines:7}), makeCommit({id:'plain'})]);
+  assert.deepEqual(result, {path:40, attribute:7, bulk:2500, total:2547});
+  assert.deepEqual(excludedLines([]), {path:0, attribute:0, bulk:0, total:0});
 });

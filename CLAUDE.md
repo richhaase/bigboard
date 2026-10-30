@@ -36,7 +36,8 @@ are Git and authenticated GitHub CLI, not Go, Node, or a hosted service.
   identity changes update only `identities`. Use the same atomic writer for both,
   reject conflicting external edits, and preserve the user’s draft.
 - Live startup publishes cached history before the network pass completes.
-  Frontend snapshot polling runs only while an operation is pending. Later
+  Frontend polling reads the lightweight snapshot status only while an
+  operation is pending and fetches the full snapshot when it changes. Later
   refreshes are explicit. Never fill runtime gaps with fabricated records.
 - Keep collection settings, session tracking, named groups, and viewing filters
   distinct. Exact exclusions win over explicit inclusions, then config exclusion
@@ -52,6 +53,9 @@ are Git and authenticated GitHub CLI, not Go, Node, or a hosted service.
   preserving repository associations. Complete line counts beat unknown counts;
   remaining copy choice is deterministic, not the largest change volume.
   Names do not merge people. Apply mailmap then saved email mappings.
+- Generated paths, `.gitattributes` generated/vendored paths, and bulk data
+  changes are excluded from line totals unless `all_files` is set; report the
+  excluded volume by reason rather than dropping it silently.
 - Directory volume includes only scoped files. Unknown line counts contribute
   commits but not measured lines. Bars always represent additions/removals,
   regardless of sorting. Activity and PR evidence are not productivity or

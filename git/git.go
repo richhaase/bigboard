@@ -53,6 +53,39 @@ type pathFilter struct {
 	includeGenerated bool
 	ignoredDirs      []string
 	ignoredFileGlobs []string
+	attributes       []attributeRule
+}
+
+const (
+	ExclusionPath      = "path"
+	ExclusionAttribute = "attribute"
+	ExclusionBulk      = "bulk"
+
+	bulkChangeLines = 2000
+)
+
+var bulkDataExtensions = map[string]bool{
+	".json": true, ".ndjson": true, ".jsonl": true, ".yaml": true, ".yml": true,
+	".csv": true, ".tsv": true, ".xml": true, ".po": true, ".pot": true, ".svg": true,
+}
+
+func (f pathFilter) exclusion(path string, added, removed int, linesKnown bool) string {
+	if f.includeGenerated {
+		return ""
+	}
+	if generated := attributeGenerated(f.attributes, path); generated != nil {
+		if *generated {
+			return ExclusionAttribute
+		}
+		return ""
+	}
+	if !f.shouldCount(path) {
+		return ExclusionPath
+	}
+	if linesKnown && added+removed >= bulkChangeLines && bulkDataExtensions[strings.ToLower(filepath.Ext(path))] {
+		return ExclusionBulk
+	}
+	return ""
 }
 
 func defaultPathFilter(options CollectOptions) pathFilter {
@@ -105,8 +138,9 @@ type PathChange struct {
 	Removed      int
 	LinesKnown   bool
 	Binary       bool
-	// Generated is true when the current generated-path filter excludes Path.
+	// Generated is true when the current filter excludes Path from totals.
 	Generated bool
+	Exclusion string
 }
 
 // CommitRecord holds aggregated stats and changed paths for a single commit.
@@ -297,6 +331,10 @@ func collectRepository(ctx context.Context, repo Repository, ref string, filter 
 		}
 	}
 	shallow, err := shallowCommits(ctx, repo.Path)
+	if err != nil {
+		return nil, err
+	}
+	filter.attributes, err = readAttributes(ctx, repo.Path, ref, partial)
 	if err != nil {
 		return nil, err
 	}

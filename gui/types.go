@@ -48,6 +48,10 @@ type Commit struct {
 	LinesUnknown bool   `json:"linesUnknown"`
 	PathsUnknown bool   `json:"pathsUnknown"`
 	Files        []File `json:"files"`
+
+	ExcludedPathLines      int `json:"excludedPathLines,omitempty"`
+	ExcludedAttributeLines int `json:"excludedAttributeLines,omitempty"`
+	ExcludedBulkLines      int `json:"excludedBulkLines,omitempty"`
 }
 
 type PR struct {
@@ -116,6 +120,15 @@ type Snapshot struct {
 	ActiveGroup  string                          `json:"activeGroup"`
 	WorkAreas    map[string][]stats.WorkAreaRule `json:"workAreas"`
 	Bookmark     Bookmark                        `json:"bookmark"`
+}
+
+type SnapshotStatus struct {
+	GeneratedAt  string `json:"generatedAt"`
+	Phase        string `json:"phase"`
+	Message      string `json:"message"`
+	Commits      int    `json:"commits"`
+	Repositories int    `json:"repositories"`
+	PullRequests int    `json:"pullRequests"`
 }
 
 type IdentityOption struct {

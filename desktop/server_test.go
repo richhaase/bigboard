@@ -31,6 +31,8 @@ func TestPreviewOriginAndRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/snapshot", "127.0.0.1:34115", "", "", "", 200},
 		{"GET", "/api/snapshot", "attacker.example", "", "", "", 403},
+		{"GET", "/api/snapshot-status", "127.0.0.1:34115", "", "", "", 200},
+		{"GET", "/api/snapshot-status", "attacker.example", "", "", "", 403},
 		{"GET", "/api/snapshot", "127.0.0.1:34115", "https://attacker.example", "", "", 403},
 		{"POST", "/api/refresh", "127.0.0.1:34115", "", "text/plain", "", 415},
 		{"POST", "/api/refresh", "127.0.0.1:34115", "http://127.0.0.1:34115", "application/json", "{}", 200},
