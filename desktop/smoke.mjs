@@ -132,6 +132,8 @@ try {
  await page.getByText('Loading your repositories',{exact:true}).waitFor();
  await page.locator('[data-row="activity"]').first().waitFor();
  assert.equal(await page.locator('[data-row="activity"]').count(),2);
+ assert.deepEqual(await page.locator('[data-action="lens"]').evaluateAll(buttons=>buttons.map(b=>b.dataset.value)),['heat','ranking','commits','people','related'],'Heat is the first Activity tab, followed by Directories');
+ assert.equal(await page.locator('[data-action="lens"][data-value="heat"]').getAttribute('aria-pressed'),'true','Activity opens on Heat');
  assert.equal(await page.locator('[data-action="refresh"]').isDisabled(),true,'cached history appears before remote refresh completes');
  await page.getByText('Cached history loaded; refreshing GitHub…',{exact:true}).waitFor();
  await page.getByText('Loading pull requests from GitHub…',{exact:true}).waitFor();
@@ -625,6 +627,7 @@ try {
  snapshot={...loaded,repositories:loaded.repositories.map(r=>({...r,prInventoryComplete:false,prStale:true})),pullRequests:[]};
  await page.reload();
  await click('[data-action="board"][data-value="activity"]');
+ await click('[data-action="lens"][data-value="ranking"]');
  assert.equal(await page.locator('.activity-pr-counts').count(),2);
  assert.ok((await page.locator('.activity-pr-counts').allTextContents()).every(text=>text.includes('?')),'unavailable empty PR inventories are unknown in Activity');
  const openPRHeader=page.locator('.inspector .section-heading').filter({has:page.getByRole('heading',{name:'Open pull requests',exact:true})});

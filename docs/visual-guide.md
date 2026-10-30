@@ -29,11 +29,13 @@ does not change what the bar measures.
 
 ![Directory activity with file-scoped change totals and contributor evidence](images/directories.png)
 
-The **Commits**, **People**, **Related**, and **Heat** tabs show evidence for the
-current scope. Heat colors each of the last 26 weeks against that row’s own
-previous 12 weeks, so rising, falling, and new areas stand out. People opens a
-contributor’s scoped commits. Related can compare exact shared commits or
-historical contributor overlap; open a result to see its matching evidence. Breadcrumbs return to broader scopes without clearing filters.
+Activity opens on the **Heat** tab, followed by **Directories**, **Commits**,
+**People**, and **Related**, each showing evidence for the current scope. Heat
+colors each of the last 26 weeks against that row’s own previous 12 weeks, so
+rising, falling, and new areas stand out. People opens a contributor’s scoped
+commits. Related can compare exact shared commits or historical contributor
+overlap; open a result to see its matching evidence. Breadcrumbs return to
+broader scopes without clearing filters.
 
 The inspector includes related open PRs and links to GitHub. **View repository
 PRs** temporarily opens that repository’s PR view; **Back to Activity** restores
