@@ -270,6 +270,14 @@ try {
  await click('[data-action="lens"][data-value="related"]');
  await click('[data-action="related-mode"][data-value="people"]');
  assert.equal(await page.locator('.related-row').count(),1);
+ await click('[data-action="lens"][data-value="heat"]');
+ await page.locator('.heat-row.scope').waitFor();
+ assert.ok(await page.locator('.heat-row[data-row="activity"]').count()>0,'heat lists the current scope children');
+ assert.ok(await page.locator('.heat-row.scope .heat-tile.first').count()>0,'activity after a quiet stretch is marked rather than ranked as hot');
+ assert.equal(await page.locator('.heat-row.scope .heat-tile').count(),26,'heat shows twenty-six weekly tiles');
+ await click('[data-action="heat-metric"][data-value="commits"]');
+ assert.equal(await page.locator('[data-action="heat-metric"][data-value="commits"]').getAttribute('aria-pressed'),'true');
+ await click('[data-action="heat-metric"][data-value="lines"]');
  await click('[data-action="lens"][data-value="ranking"]');
  let depth=0;
  while(await page.locator('[data-action="explore"]').count()&&depth++<8){await page.locator('[data-action="explore"]').first().click();}

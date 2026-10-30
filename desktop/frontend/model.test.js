@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   activityRows, dailySeries, dateValue, filterPRs, inRange, people, safeURL, ranges, identity, timelineSeries, relatedScopes, classifyWorkArea,
   scopedCommits, selectCommits, sortRows, totals, uniqueCommits, filterByCanonicalIdentity, excludedLines,
+  HEAT, heatLevel, heatSeries, heatRows,
 } from './model.js';
 
 const now = Date.parse('2026-10-28T12:00:00Z');
@@ -499,4 +500,61 @@ test('excluded lines are summed by reason once per shared commit', () => {
   const result = excludedLines([shared, {...shared, repo:'sample/web'}, makeCommit({id:'other', excludedAttributeLines:7}), makeCommit({id:'plain'})]);
   assert.deepEqual(result, {path:40, attribute:7, bulk:2500, total:2547});
   assert.deepEqual(excludedLines([]), {path:0, attribute:0, bulk:0, total:0});
+});
+
+test('heat compares each week with the twelve weeks before it', () => {
+  const at = weeksAgo => new Date(now - weeksAgo * 7 * 86400000).toISOString();
+  const records = [];
+  for (let w = 37; w >= 4; w--) records.push(makeCommit({id:`steady-${w}`, date:at(w), added:10, removed:0}));
+  for (let i = 0; i < 4; i++) for (let w = 0; w < 4; w++) records.push(makeCommit({id:`burst-${w}-${i}`, date:at(w), added:10, removed:0}));
+  const heat = heatSeries(records, 'lines', now);
+  assert.equal(heat.series.length, HEAT.weeks);
+  assert.equal(heat.series.at(-5).value, 10);
+  assert.equal(heat.series.at(-5).usual, 10);
+  assert.equal(heat.series.at(-5).level, 'steady');
+  assert.equal(heat.series.at(-4).value, 40);
+  assert.equal(heat.series.at(-4).level, 'hot', 'the first burst week is four times its usual pace');
+  assert.equal(heat.series.at(-1).usual, 17.5, 'later burst weeks include earlier bursts in their baseline');
+  assert.equal(heat.series.at(-1).level, 'warm');
+  assert.equal(heat.prior, 10);
+  assert.equal(heat.recent, 40);
+  assert.equal(heat.ratio, 4);
+  assert.equal(heat.status, 'up');
+  assert.equal(heatSeries(records, 'commits', now).series.at(-1).value, 4);
+  assert.equal(heatSeries(records, 'people', now).series.at(-1).value, 1);
+});
+
+test('heat levels and statuses keep empty, new and quiet evidence distinct', () => {
+  assert.equal(heatLevel(0, 10), 'none');
+  assert.equal(heatLevel(5, 0), 'first');
+  assert.equal(heatLevel(30, 10), 'hot');
+  assert.equal(heatLevel(18, 10), 'warm');
+  assert.equal(heatLevel(10, 10), 'steady');
+  assert.equal(heatLevel(5, 10), 'cool');
+  assert.equal(heatLevel(2, 10), 'cold');
+  const at = weeksAgo => new Date(now - weeksAgo * 7 * 86400000).toISOString();
+  assert.equal(heatSeries([makeCommit({date:at(1)})], 'lines', now).status, 'new');
+  assert.equal(heatSeries([makeCommit({date:at(8)})], 'lines', now).status, 'quiet');
+  const unknown = heatSeries([makeCommit({date:at(1), linesUnknown:true})], 'lines', now);
+  assert.equal(unknown.series.at(-2).value, 0, 'unknown line counts do not become measured lines');
+  assert.equal(heatSeries([makeCommit({date:at(1), linesUnknown:true})], 'commits', now).series.at(-2).value, 1);
+  const future = heatSeries([makeCommit({date:'2027-01-01T00:00:00Z'})], 'lines', now);
+  assert.equal(future.future, 1);
+  assert.equal(future.total, 0);
+});
+
+test('heat rows follow the Activity scope and keep quiet repositories visible', () => {
+  const at = weeksAgo => new Date(now - weeksAgo * 7 * 86400000).toISOString();
+  const commits = [
+    makeCommit({id:'a', date:at(1), files:[{path:'src/api/queue.go',added:80,removed:20},{path:'docs/queue.md',added:40,removed:10}]}),
+    makeCommit({id:'b', date:at(60), files:[{path:'legacy/old.go',added:5,removed:5}], added:5, removed:5}),
+  ];
+  const repositories = [{id:'sample/api',name:'api'},{id:'sample/quiet',name:'quiet'}];
+  const org = heatRows(commits, repositories, {}, 'lines', now);
+  assert.deepEqual(org.rows.map(r => r.id), ['sample/api','sample/quiet']);
+  assert.equal(org.rows[1].total, 0);
+  const repo = heatRows(commits, repositories, {repo:'sample/api', path:''}, 'lines', now);
+  assert.deepEqual(repo.rows.map(r => [r.id, r.total]), [['src',100],['docs',50]], 'directories outside the window are omitted');
+  assert.equal(repo.scope.total, 150);
+  assert.equal(heatRows(commits, repositories, {repo:'sample/api', path:'src'}, 'lines', now).rows[0].id, 'src/api');
 });

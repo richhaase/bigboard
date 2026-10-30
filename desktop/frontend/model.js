@@ -153,3 +153,35 @@ export function relatedScopes(commits,scope,mode='commits',workAreas={}){
 export function safeURL(url) {
   try {const u=new URL(url);return u.protocol==='https:'&&u.host==='github.com'&&!u.username&&!u.password ? u.href : null;} catch {return null;}
 }
+export const HEAT={weeks:26,baseline:12,recent:4};
+const weekStart=time=>{const d=new Date(time);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay());return d.getTime();};
+export function heatLevel(value,usual){
+  if(!(value>0))return 'none';
+  if(!(usual>0))return 'first';
+  const ratio=Math.log2(value/usual);
+  return ratio>=1.5?'hot':ratio>=0.75?'warm':ratio<=-1.5?'cold':ratio<=-0.75?'cool':'steady';
+}
+export function heatSeries(records,metric='lines',now=Date.now(),{weeks=HEAT.weeks,baseline=HEAT.baseline,recent=HEAT.recent}={}){
+  const total=weeks+baseline;const end=new Date(weekStart(now));const starts=[];
+  for(let i=total-1;i>=0;i--){const d=new Date(end);d.setDate(d.getDate()-7*i);starts.push(d.getTime());}
+  const index=new Map(starts.map((start,i)=>[start,i]));const buckets=starts.map(()=>({commits:0,lines:0,people:new Set()}));let future=0;
+  for(const c of uniqueCommits(records)){
+    const time=dateValue(c.date);if(!time)continue;if(time>now){future++;continue;}
+    const bucket=buckets[index.get(weekStart(time))];if(!bucket)continue;
+    bucket.commits++;bucket.lines+=c.linesUnknown?0:(c.added||0)+(c.removed||0);bucket.people.add(identity(c));
+  }
+  const values=buckets.map(b=>metric==='commits'?b.commits:metric==='people'?b.people.size:b.lines);
+  const mean=list=>list.reduce((n,v)=>n+v,0)/Math.max(1,list.length);
+  const series=values.slice(baseline).map((value,i)=>{const usual=mean(values.slice(i,i+baseline));return {start:new Date(starts[i+baseline]).toISOString(),value,usual,level:heatLevel(value,usual)};});
+  const recentMean=mean(values.slice(-recent)),prior=mean(values.slice(-recent-baseline,-recent));
+  const ratio=prior>0?recentMean/prior:null;
+  const status=!(prior>0)?(recentMean>0?'new':''):!(recentMean>0)?'quiet':ratio>=2?'up':ratio<=0.5?'down':'';
+  return {series,recent:recentMean,prior,ratio,status,total:values.slice(baseline).reduce((n,v)=>n+v,0),future};
+}
+export function heatRows(commits,repositories,scope={},metric='lines',now=Date.now()){
+  const rows=scope.repo
+    ?activityRows(commits,[],scope).filter(row=>row.kind==='directory').map(row=>({id:row.id,label:row.label,kind:'directory',records:scopedCommits(commits,{repo:scope.repo,path:row.path})}))
+    :repositories.map(repo=>({id:repo.id,label:repo.name||repo.id.split('/').pop(),kind:'repository',records:commits.filter(c=>c.repo===repo.id)}));
+  const measured=rows.map(row=>({id:row.id,label:row.label,kind:row.kind,...heatSeries(row.records,metric,now)})).filter(row=>row.kind==='repository'||row.total>0||row.prior>0);
+  return {scope:heatSeries(scopedCommits(commits,scope),metric,now),rows:measured.sort((a,b)=>b.total-a.total||a.label.localeCompare(b.label))};
+}
