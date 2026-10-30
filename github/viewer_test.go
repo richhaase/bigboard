@@ -12,7 +12,7 @@ import (
 func TestCurrentLoginUsesReadOnlyProviderRequest(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"Example-User"},"rateLimit":{"remaining":100}}}`)}}}
 	ctx := WithRequestBudget(context.Background(), 3)
-	login, err := NewProvider(runner).CurrentLogin(ctx)
+	login, err := newTestProvider(runner).CurrentLogin(ctx)
 	if err != nil || login != "Example-User" || len(runner.calls) != 1 || RequestCount(ctx) != 1 {
 		t.Fatalf("login=%q err=%v calls=%d requests=%d", login, err, len(runner.calls), RequestCount(ctx))
 	}
@@ -43,7 +43,7 @@ func TestCurrentLoginRejectsMissingOrMalformedAccount(t *testing.T) {
 	} {
 		t.Run(body, func(t *testing.T) {
 			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
-			login, err := NewProvider(runner).CurrentLogin(context.Background())
+			login, err := newTestProvider(runner).CurrentLogin(context.Background())
 			if login != "" || !errors.Is(err, ErrResponse) {
 				t.Fatalf("login=%q err=%v", login, err)
 			}
@@ -53,7 +53,7 @@ func TestCurrentLoginRejectsMissingOrMalformedAccount(t *testing.T) {
 
 func TestCurrentLoginSupportsManagedAccounts(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"example_user"}}}`)}}}
-	login, err := NewProvider(runner).CurrentLogin(context.Background())
+	login, err := newTestProvider(runner).CurrentLogin(context.Background())
 	if err != nil || login != "example_user" {
 		t.Fatalf("managed account login=%q err=%v", login, err)
 	}
@@ -64,7 +64,7 @@ func TestCurrentLoginPreservesSafeFailures(t *testing.T) {
 		t.Run(want.Error(), func(t *testing.T) {
 			runner := &fakeRunner{t: t, steps: []fakeStep{{err: want}}}
 			ctx := WithRequestBudget(context.Background(), 2)
-			login, err := NewProvider(runner).CurrentLogin(ctx)
+			login, err := newTestProvider(runner).CurrentLogin(ctx)
 			if login != "" || !errors.Is(err, want) || RequestCount(ctx) != 1 {
 				t.Fatalf("login=%q err=%v requests=%d", login, err, RequestCount(ctx))
 			}
@@ -74,7 +74,7 @@ func TestCurrentLoginPreservesSafeFailures(t *testing.T) {
 
 func TestCurrentLoginSharesInventoryBudget(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"viewer"}}}`)}, summaries(t, nil, 0, false, "")}}
-	p := NewProvider(runner)
+	p := newTestProvider(runner)
 	ctx := WithRequestBudget(context.Background(), 2)
 	if _, err := p.CurrentLogin(ctx); err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestCurrentLoginRespectsCancellationAndZeroBudget(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &fakeRunner{t: t}
-			login, err := NewProvider(runner).CurrentLogin(tc.ctx)
+			login, err := newTestProvider(runner).CurrentLogin(tc.ctx)
 			if login != "" || !errors.Is(err, tc.err) || RequestCount(tc.ctx) != 0 || len(runner.calls) != 0 {
 				t.Fatalf("login=%q err=%v requests=%d calls=%d", login, err, RequestCount(tc.ctx), len(runner.calls))
 			}
@@ -121,7 +121,7 @@ func TestCurrentLoginSharesProviderCooldown(t *testing.T) {
 				body = fmt.Sprintf(`{"data":{"viewer":{"login":"viewer"},"rateLimit":{"remaining":0,"resetAt":%q}}}`, reset.Format(time.RFC3339))
 			}
 			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
-			p := NewProvider(runner)
+			p := newTestProvider(runner)
 			p.now = func() time.Time { return now }
 			ctx := WithRequestBudget(context.Background(), 3)
 			login, err := p.CurrentLogin(ctx)

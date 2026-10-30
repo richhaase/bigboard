@@ -3,6 +3,7 @@ module github.com/richhaase/bigboard/desktop
 go 1.26.10
 
 require (
+	github.com/keybase/go-keychain v0.0.1
 	github.com/richhaase/bigboard v0.0.0
 	github.com/wailsapp/wails/v2 v2.17.0
 )

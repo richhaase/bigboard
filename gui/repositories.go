@@ -24,9 +24,15 @@ func (s *Service) RepositoryControls() (RepositoryControls, error) {
 	controls := RepositoryControls{Repositories: []ControlledRepository{}, CachePath: s.cachePath, Errors: []string{}}
 	known := map[string]ControlledRepository{}
 	for _, repo := range listed {
+		if !s.accountAllows(repo.ID) {
+			continue
+		}
 		known[repo.ID] = ControlledRepository{Repository: Repository{ID: repo.ID, Name: repo.Name, Branch: repo.DefaultBranch, PushedAt: timestamp(repo.PushedAt)}, Listed: true, Selectable: true, Included: s.included(snapshot.Settings, repo.ID)}
 	}
 	for _, repo := range snapshot.Repositories {
+		if !s.accountAllows(repo.ID) {
+			continue
+		}
 		row := known[repo.ID]
 		row.Repository = repo
 		row.Selectable = true
@@ -39,6 +45,12 @@ func (s *Service) RepositoryControls() (RepositoryControls, error) {
 		controls.Errors = append(controls.Errors, err.Error())
 	}
 	for _, repo := range cached {
+		s.mu.Lock()
+		allowed := s.accountAllows(repo.ID)
+		s.mu.Unlock()
+		if !allowed {
+			continue
+		}
 		row, exists := known[repo.ID]
 		if !exists {
 			row.Repository = Repository{ID: repo.ID, Name: repo.Name, Branch: repo.DefaultBranch}
@@ -89,7 +101,7 @@ func (s *Service) ApplyRepositoryControls(selection RepositorySelection) (Snapsh
 	}
 	if s.snapshot.Mode == "cache" {
 		for _, repo := range cached {
-			if sourceContains(s.snapshot.Settings, repo.ID) {
+			if s.accountAllows(repo.ID) && sourceContains(s.snapshot.Settings, repo.ID) {
 				known[repo.ID] = true
 			}
 		}

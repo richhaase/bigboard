@@ -11,13 +11,13 @@ help:
 	@echo "Core-only checks use the -core suffix; desktop checks use -desktop."
 
 build:
-	cd desktop && $(WAILS) build -skipbindings -s -m
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && $(WAILS) build -v 0 -skipbindings -s -m -ldflags "$$auth_flags"
 
 dev:
-	cd desktop && $(WAILS) dev -s -skipbindings
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && $(WAILS) dev -v 0 -s -skipbindings -ldflags "$$auth_flags"
 
 preview:
-	cd desktop && go run . --serve
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && go run -ldflags "$$auth_flags" . --serve
 
 test: test-core test-desktop test-frontend
 
@@ -39,7 +39,7 @@ fmt:
 	cd desktop && go fmt ./...
 
 fmt-check:
-	@files="$$(gofmt -l git github gui stats desktop/*.go)"; status=$$?; \
+	@files="$$(gofmt -l auth git github gui stats desktop/*.go)"; status=$$?; \
 		test $$status -eq 0 || exit $$status; \
 		test -z "$$files" || { printf '%s\n' "$$files"; exit 1; }
 

@@ -15,24 +15,23 @@ repository. See the [workflow guide](docs/visual-guide.md) for the other boards.
 
 ## Try this branch locally
 
-The GUI-only application on this branch has not been released yet. On macOS,
-build it with Go and the Xcode command line tools:
+This branch prepares v1.1.0 with built-in GitHub sign-in. On macOS, build it
+with Go and the Xcode command line tools:
 
 ```sh
 make build
 open desktop/build/bin/Bigboard.app
 ```
 
-Git 2.31 or newer is required for repository history. Live GitHub data also
-requires [GitHub CLI](https://cli.github.com/) (`gh`), signed in with access to
-your repositories:
+Git 2.31 or newer is required for repository history. Bigboard connects directly
+to GitHub; GitHub CLI is not required. Open **Settings** and choose **Sign in with
+GitHub**. Authorize Bigboard in your browser, then use **Manage repository access**
+to select the repositories it may read. Choose your personal account,
+organizations, or both, click **Discover repositories**, and save your selection.
+Organization approval and access policies still apply.
 
-```sh
-gh auth login
-```
-
-Open **Settings**, choose your personal account, organizations, or both, then
-click **Discover repositories**. Select at least one repository, review, and save.
+Local builds need the publisher's GitHub App build settings to enable sign-in;
+see [publisher setup](docs/github-app.md). Homebrew releases include those settings.
 Settings edits `$XDG_CONFIG_HOME/bigboard/config.json` (default
 `~/.config/bigboard/config.json`), preserving advanced analysis preferences.
 You can also use **Cached history** without network requests. No sample records
@@ -59,7 +58,7 @@ guide. Quit through the application menu or the usual macOS shortcut.
 
 The next tagged release is configured to ship a signed, notarized universal
 macOS app for Apple silicon and Intel, with macOS 13 Ventura or newer required. The
-existing Homebrew cask name will install **Bigboard.app**, plus Git and GitHub CLI:
+existing Homebrew cask name will install **Bigboard.app**, plus Git:
 
 ```sh
 brew install --cask richhaase/tap/bigboard
@@ -71,8 +70,8 @@ no `bigboard` command and needs no Go, Node, or separate web server at runtime.
 
 This replaces the terminal product and its Linux downloads. Homebrew upgrades
 replace the old command with the app; scripts using `bigboard --export` must move
-to **Export JSON** on Contributors. Existing configuration, caches, and bookmarks
-remain available to the app.
+to **Export JSON** on Contributors. Settings remain in the XDG configuration file. Repository evidence and bookmarks
+are isolated by GitHub account.
 
 ## Development and documentation
 
@@ -81,6 +80,7 @@ loopback web server for development; it is not how the installed app runs.
 `make test` checks both Go modules and the frontend models. See the
 [desktop development guide](desktop/README.md) for prerequisites and browser checks.
 
+- [GitHub app setup](docs/github-app.md): publisher registration and authentication boundaries.
 - [Workflow guide](docs/visual-guide.md): a tour of the boards and dialogs.
 - [User reference](docs/reference.md): settings, controls, identities, storage, and counting rules.
 - [Workflow coverage](desktop/parity.md): supported behavior and verification boundaries.

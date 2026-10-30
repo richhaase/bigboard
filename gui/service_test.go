@@ -279,20 +279,21 @@ func TestStartupPublishesRealCacheBeforeNetworkAndRetainsOnFailure(t *testing.T)
 	}
 }
 
-func TestFreshUnconfiguredServiceUsesRealCacheAndRequestsSetupWhenEmpty(t *testing.T) {
+func TestFreshStoredAccountDefaultsToLiveAndRequestsRepositorySelection(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	s, err := NewService()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s, err := NewServiceForStoredAccount(context.Background(), "41", func(context.Context) (string, error) { t.Fatal("empty startup accessed GitHub"); return "", nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.Snapshot().Mode != "cache" {
-		t.Fatal("fresh settings did not select real cache")
+	if s.Snapshot().Mode != "live" {
+		t.Fatal("fresh settings did not select GitHub data")
 	}
 	result, err := s.Refresh()
 	if err != nil || result.Status.Phase != "setup" || len(result.Repositories) != 0 || len(result.Commits) != 0 {
-		t.Fatalf("empty cache did not request setup: %+v, %v", result, err)
+		t.Fatalf("fresh account did not request selection: %+v %v", result.Status, err)
 	}
 }
 

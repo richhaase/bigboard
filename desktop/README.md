@@ -2,15 +2,15 @@
 
 Bigboard is a native Wails app with a Go backend and embedded HTML, CSS, and
 JavaScript. The system webview renders the interface; the installed app does not
-run a web server or require Node or Go. Git and an authenticated GitHub CLI remain
-runtime dependencies for live data.
+run a web server or require Node or Go. Git is the only command-line runtime dependency. GitHub access uses the native
+app sign-in and direct HTTPS API requests.
 
 ## Build and run on macOS
 
 Use the Go version in the module files and install the Xcode command line tools.
-For live data, install Git 2.31 or newer and GitHub CLI, then run `gh auth login`.
-When launched from Finder, Bigboard also searches standard Homebrew locations
-for these tools.
+For live data, install Git 2.31 or newer. When launched from Finder, Bigboard
+also searches standard Homebrew locations for Git. Publisher build settings and
+the native sign-in protocol are documented in [GitHub app setup](../docs/github-app.md).
 
 From the repository root:
 
@@ -87,11 +87,11 @@ The tag workflow in [release.yml](../.github/workflows/release.yml) is the
 release authority. It builds a universal macOS app, signs with Developer ID,
 notarizes and staples it, then publishes
 `Bigboard_<version>_darwin_universal.zip` and `checksums.txt`. The
-`richhaase/tap/bigboard` cask installs the app and declares Git and GitHub CLI as
-dependencies. The app requires macOS 13 Ventura or newer. Users launch Bigboard
+`richhaase/tap/bigboard` cask installs the app and declares Git as its
+command-line dependency. The app requires macOS 13 Ventura or newer. Users launch Bigboard
 from Finder, Spotlight, or the Dock.
 
-This branch prepares that distribution; it does not claim a GUI release has
-already been published. No Windows or Linux application package is distributed
+This branch targets v1.1.0. GitHub App registration and real native sign-in
+validation must be completed before publishing it. No Windows or Linux application package is distributed
 by this workflow. Signing credentials belong in the release environment, never
 in source or local documentation.

@@ -32,11 +32,7 @@ type analysisConfig struct {
 	Sort                 string                          `json:"sort"`
 	Groups               map[string][]string             `json:"groups"`
 	WorkAreas            map[string][]stats.WorkAreaRule `json:"work_areas"`
-	Theme                string                          `json:"theme"`
-	Fuzzy                bool                            `json:"fuzzy"`
-	GitHub               *struct {
-		Enabled bool `json:"enabled"`
-	} `json:"github"`
+
 	source []byte
 }
 
@@ -72,9 +68,7 @@ func normalizeSettings(settings Settings) (Settings, error) {
 		}
 	}
 	settings.Organizations = organizations
-	if settings.Mode == "live" && settings.PersonalAccount == "" && len(settings.Organizations) == 0 {
-		return Settings{}, errors.New("add a personal GitHub account or organization for live data")
-	}
+
 	repositories := []string{}
 	for _, value := range settings.Repositories {
 		canonical, err := gh.CanonicalRepo(strings.TrimSpace(value))
@@ -82,7 +76,7 @@ func normalizeSettings(settings Settings) (Settings, error) {
 			return Settings{}, fmt.Errorf("repository %q must use owner/name", value)
 		}
 		owner, _, _ := strings.Cut(canonical, "/")
-		if settings.Mode == "live" && owner != settings.PersonalAccount && !slices.Contains(settings.Organizations, owner) {
+		if settings.Mode == "live" && (settings.PersonalAccount != "" || len(settings.Organizations) > 0) && owner != settings.PersonalAccount && !slices.Contains(settings.Organizations, owner) {
 			return Settings{}, fmt.Errorf("repository %s is outside the configured accounts", canonical)
 		}
 		if !slices.Contains(repositories, canonical) {
@@ -113,11 +107,6 @@ func loadSettings(path string) (Settings, analysisConfig, error) {
 		if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
 			return Settings{}, analysis, errors.New("configuration must be a JSON object")
 		}
-		for _, key := range []string{"paths", "depth"} {
-			if _, exists := fields[key]; exists {
-				return Settings{}, analysis, fmt.Errorf("legacy %s is no longer supported; Bigboard uses its own GitHub repository cache; remove paths/depth and configure personal_account or organizations instead", key)
-			}
-		}
 		_, hasMode = fields["mode"]
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
@@ -137,10 +126,7 @@ func loadSettings(path string) (Settings, analysisConfig, error) {
 	}
 	settings := Settings{Mode: analysis.Mode, PersonalAccount: analysis.PersonalAccount, Organizations: slices.Clone(analysis.Organizations), Repositories: slices.Clone(analysis.Repositories), ExcludedRepositories: slices.Clone(analysis.ExcludedRepositories)}
 	if !hasMode {
-		settings.Mode = "cache"
-		if settings.PersonalAccount != "" || len(settings.Organizations) > 0 {
-			settings.Mode = "live"
-		}
+		settings.Mode = "live"
 	}
 	settings, err = normalizeSettings(settings)
 	return settings, analysis, err

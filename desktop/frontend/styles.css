@@ -2180,3 +2180,13 @@ select {
 .group-picker { min-width:0;max-width:180px; }
 .repo-pushed { display:block;font-size:9px;color:var(--muted);margin-top:4px; }
 @media(max-width:720px) { .date-tabs { flex:1 1 100%;justify-content:flex-start; } }
+
+.sign-in-screen{width:100%;min-height:100vh;display:grid;place-items:center;padding:32px;background:radial-gradient(ellipse at top,#223449 0,#131c29 65%)}
+.sign-in-card{width:min(100%,560px);padding:42px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 24px 90px #0003}
+.sign-in-card .brand-mark{margin-bottom:28px;width:48px;height:48px;font-size:28px}
+.sign-in-card h1{font-size:34px;line-height:1.15;margin:12px 0 20px}
+.sign-in-card p{line-height:1.6;color:var(--muted)}
+.sign-in-card .button{margin:12px 8px 12px 0}
+.account-settings{padding-bottom:20px;margin-bottom:22px;border-bottom:1px solid var(--border)}
+.account-actions{display:flex;flex-wrap:wrap;gap:8px}
+@media(max-width:600px){.sign-in-screen{padding:18px}.sign-in-card{padding:26px}.sign-in-card h1{font-size:28px}}

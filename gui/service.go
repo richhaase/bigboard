@@ -31,6 +31,8 @@ type provider interface {
 }
 
 type Service struct {
+	accountID       string
+	authorized      map[string]git.Repository
 	mu              sync.Mutex
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -56,6 +58,10 @@ type Service struct {
 }
 
 func NewService() (*Service, error) {
+	return newService("")
+}
+
+func newService(accountID string) (*Service, error) {
 	root := os.Getenv("XDG_CONFIG_HOME")
 	if root == "" {
 		home, err := os.UserHomeDir()
@@ -76,8 +82,11 @@ func NewService() (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	if accountID != "" {
+		cache.Root = filepath.Join(filepath.Dir(cache.Root), "accounts", accountID, "repos")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{ctx: ctx, cancel: cancel, cache: cache, provider: gh.NewProvider(nil), cachePath: cache.Root, path: path, analysis: analysis, now: time.Now}
+	s := &Service{accountID: accountID, ctx: ctx, cancel: cancel, cache: cache, provider: gh.NewProvider(nil), cachePath: cache.Root, path: path, analysis: analysis, now: time.Now}
 	s.configStore = newConfigStore(path, analysis.source)
 	s.loadBookmarks()
 	s.snapshot = emptySnapshot(settings, cache.Root)
@@ -102,7 +111,7 @@ func (s *Service) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.decorateLocked(&s.snapshot)
-	return cloneSnapshot(s.snapshot)
+	return cloneSnapshot(s.restrictAccess(s.snapshot))
 }
 
 func cloneSnapshot(snapshot Snapshot) Snapshot {
@@ -146,6 +155,13 @@ func (s *Service) Refresh() (Snapshot, error) {
 		s.mu.Unlock()
 		return Snapshot{}, err
 	}
+	if s.accountID != "" && len(s.snapshot.Settings.Repositories) == 0 {
+		s.snapshot.Status.Phase = "setup"
+		s.snapshot.Status.Message = "Choose repositories available to your GitHub account."
+		result := cloneSnapshot(s.restrictAccess(s.snapshot))
+		s.mu.Unlock()
+		return result, nil
+	}
 	s.busy = true
 	s.workers.Add(1)
 	previous := cloneSnapshot(s.snapshot)
@@ -172,6 +188,19 @@ func (s *Service) SaveSettings(settings Settings) (Snapshot, error) {
 		s.mu.Unlock()
 		return Snapshot{}, err
 	}
+	if s.accountID != "" {
+		for _, id := range settings.Repositories {
+			if !s.accountAllows(id) {
+				s.mu.Unlock()
+				return Snapshot{}, errors.New("choose repositories available to your GitHub sign-in")
+			}
+		}
+		for _, id := range s.analysis.ExcludedRepositories {
+			if !s.accountAllows(id) && !slices.Contains(settings.ExcludedRepositories, id) {
+				settings.ExcludedRepositories = append(settings.ExcludedRepositories, id)
+			}
+		}
+	}
 	if s.configStore == nil {
 		s.configStore = newConfigStore(s.path, s.analysis.source)
 	}
@@ -193,6 +222,9 @@ func (s *Service) SaveSettings(settings Settings) (Snapshot, error) {
 	if previous.Mode != settings.Mode {
 		previous = emptySnapshot(settings, s.cachePath)
 	}
+	if s.accountID != "" {
+		settings = s.accessibleSettings(settings)
+	}
 	previous.Settings = settings
 	previous = s.retainSelected(previous)
 	s.snapshot = cloneSnapshot(previous)
@@ -210,9 +242,19 @@ func (s *Service) Discover(settings Settings) ([]Repository, error) {
 		s.mu.Unlock()
 		return nil, err
 	}
+	if s.busy {
+		s.mu.Unlock()
+		return nil, errors.New("wait for the current operation before discovering repositories")
+	}
+	s.busy = true
 	s.workers.Add(1)
 	s.mu.Unlock()
-	defer s.workers.Done()
+	defer func() { s.mu.Lock(); s.busy = false; s.mu.Unlock(); s.workers.Done() }()
+	if s.accountID != "" && settings.Mode == "live" {
+		if err := s.checkAccess(s.ctx); err != nil {
+			return nil, err
+		}
+	}
 	selected := settings.Repositories
 	settings.Repositories = nil
 	settings, err := normalizeSettings(settings)
@@ -254,6 +296,39 @@ func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 		s.mu.Unlock()
 		previous = cached
 	}
+	if s.accountID != "" && previous.Settings.Mode == "live" {
+		if err := s.checkAccess(s.ctx); err != nil {
+			if accessDenied(err) {
+				s.mu.Lock()
+				previous = s.restrictAccess(previous)
+				s.mu.Unlock()
+			}
+			previous.Status.Phase = "partial"
+			previous.Status.Errors = append(previous.Status.Errors, "Repository access: "+err.Error())
+			previous.Status.Message = "Could not verify repository access. Showing previously authorized cached history; try refreshing again."
+			if accessDenied(err) {
+				previous.Status.Message = "GitHub access was denied. Sign in again or manage repository access."
+			}
+			for i := range previous.Repositories {
+				previous.Repositories[i].Stale = true
+			}
+			s.mu.Lock()
+			s.snapshot, s.busy = previous, false
+			s.mu.Unlock()
+			return previous, nil
+		}
+		s.mu.Lock()
+		previous = s.restrictAccess(previous)
+		if len(previous.Settings.Repositories) == 0 {
+			previous.Status.Phase = "setup"
+			previous.Status.Message = "Your previous repository selection is no longer available. Choose repositories or manage GitHub access."
+			s.snapshot, s.busy = previous, false
+			s.mu.Unlock()
+			return previous, nil
+		}
+		s.snapshot = cloneSnapshot(previous)
+		s.mu.Unlock()
+	}
 	result := s.refreshRepositories(previous, false, false)
 	s.mu.Lock()
 	if result.Mode == "live" && s.ctx.Err() == nil && len(result.Commits) > 0 && slices.ContainsFunc(result.Repositories, func(repo Repository) bool { return repo.Fetched }) {
@@ -265,7 +340,7 @@ func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 	s.decorateLocked(&result)
 	s.snapshot = result
 	s.busy = false
-	result = cloneSnapshot(result)
+	result = cloneSnapshot(s.restrictAccess(result))
 	s.mu.Unlock()
 	return result, nil
 }
@@ -291,6 +366,9 @@ func (s *Service) retainSelected(previous Snapshot) Snapshot {
 }
 
 func (s *Service) discover(ctx context.Context, settings Settings) ([]git.Repository, error) {
+	if s.accountID != "" {
+		return s.discoverAuthorized(ctx, settings)
+	}
 	var repositories []git.Repository
 	var inventoryErr error
 	if settings.Mode == "cache" {

@@ -52,10 +52,9 @@ release:
 
     Bigboard for macOS: explore work areas, contributors, and commit evidence across GitHub repositories.
 
-    ### Upgrading from the terminal version
-    This is a GUI-only macOS application. Homebrew upgrades replace the terminal command with Bigboard.app.
-    Linux downloads and the `bigboard` command, including `bigboard --export`, are no longer distributed.
-    Use Export JSON on the Contributors board. Existing configuration, repository caches, and bookmarks are reused.
+    ### GitHub sign-in
+    Sign in with GitHub from Bigboard and select repository access in your browser.
+    GitHub CLI is no longer required. Organization access policies still apply.
   footer: |
     ---
 
@@ -70,7 +69,7 @@ release:
 
     ### Direct Download
     Download the universal macOS archive, extract it, and move Bigboard.app to Applications.
-    Git and an authenticated GitHub CLI are required for live data.
+    Git is required for repository history. Open Bigboard and choose Sign in with GitHub.
 
 announce:
   skip: true

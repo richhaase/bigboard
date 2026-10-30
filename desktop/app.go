@@ -12,34 +12,95 @@ import (
 )
 
 type App struct {
-	ctx     context.Context
-	service *gui.Service
+	auth        authentication
+	session     sessionState
+	connect     func(context.Context, string, func(context.Context) (string, error)) (*gui.Service, error)
+	openBrowser func(string)
+	ctx         context.Context
+	service     *gui.Service
 }
 
-func (a *App) Snapshot() gui.Snapshot         { return a.service.Snapshot() }
-func (a *App) Refresh() (gui.Snapshot, error) { return a.service.Refresh() }
-func (a *App) SaveSettings(settings gui.Settings) (gui.Snapshot, error) {
-	return a.service.SaveSettings(settings)
+func (a *App) Refresh() (DesktopSnapshot, error) {
+	return a.withSnapshot(func(service *gui.Service) (gui.Snapshot, error) { return service.Refresh() })
+}
+func (a *App) SaveSettings(settings gui.Settings) (DesktopSnapshot, error) {
+	return a.withSnapshot(func(service *gui.Service) (gui.Snapshot, error) { return service.SaveSettings(settings) })
 }
 func (a *App) Discover(settings gui.Settings) ([]gui.Repository, error) {
-	return a.service.Discover(settings)
+	service, err := a.currentService()
+	if err != nil {
+		return nil, err
+	}
+	result, err := service.Discover(settings)
+	if !a.sessionCurrent(service) {
+		return nil, errors.New("GitHub account changed")
+	}
+	return result, err
 }
-func (a *App) IdentityOptions() gui.IdentityOptions { return a.service.IdentityOptions() }
-func (a *App) SaveIdentity(request gui.IdentityRequest) (gui.Snapshot, error) {
-	return a.service.SaveIdentity(request)
+func (a *App) IdentityOptions() gui.IdentityOptions {
+	service, err := a.currentService()
+	if err != nil {
+		return gui.IdentityOptions{Identities: []gui.IdentityOption{}}
+	}
+	result := service.IdentityOptions()
+	if !a.sessionCurrent(service) {
+		return gui.IdentityOptions{Identities: []gui.IdentityOption{}}
+	}
+	return result
+}
+func (a *App) SaveIdentity(request gui.IdentityRequest) (DesktopSnapshot, error) {
+	return a.withSnapshot(func(service *gui.Service) (gui.Snapshot, error) { return service.SaveIdentity(request) })
 }
 func (a *App) RepositoryControls() (gui.RepositoryControls, error) {
-	return a.service.RepositoryControls()
+	service, err := a.currentService()
+	if err != nil {
+		return gui.RepositoryControls{}, err
+	}
+	result, err := service.RepositoryControls()
+	if !a.sessionCurrent(service) {
+		return gui.RepositoryControls{}, errors.New("GitHub account changed")
+	}
+	return result, err
 }
-func (a *App) ApplyRepositoryControls(request gui.RepositorySelection) (gui.Snapshot, error) {
-	return a.service.ApplyRepositoryControls(request)
+func (a *App) ApplyRepositoryControls(request gui.RepositorySelection) (DesktopSnapshot, error) {
+	return a.withSnapshot(func(service *gui.Service) (gui.Snapshot, error) { return service.ApplyRepositoryControls(request) })
 }
 func (a *App) RemoveCachedRepository(id string) (gui.RepositoryControls, error) {
-	return a.service.RemoveCachedRepository(id)
+	service, err := a.currentService()
+	if err != nil {
+		return gui.RepositoryControls{}, err
+	}
+	result, err := service.RemoveCachedRepository(id)
+	if !a.sessionCurrent(service) {
+		return gui.RepositoryControls{}, errors.New("GitHub account changed")
+	}
+	return result, err
 }
-func (a *App) SelectGroup(name string) (gui.Snapshot, error)    { return a.service.SelectGroup(name) }
-func (a *App) OpenPath(request gui.PathRequest) (string, error) { return a.service.OpenPath(request) }
-func (a *App) ExportJSON() (string, error)                      { return a.service.ExportJSON() }
+func (a *App) SelectGroup(name string) (DesktopSnapshot, error) {
+	return a.withSnapshot(func(service *gui.Service) (gui.Snapshot, error) { return service.SelectGroup(name) })
+}
+func (a *App) OpenPath(request gui.PathRequest) (string, error) {
+	service, err := a.currentService()
+	if err != nil {
+		return "", err
+	}
+	result, err := service.OpenPath(request)
+	if !a.sessionCurrent(service) {
+		return "", errors.New("GitHub account changed")
+	}
+	return result, err
+}
+func (a *App) ExportJSON() (string, error) {
+	service, err := a.currentService()
+	if err != nil {
+		return "", err
+	}
+	result, err := service.ExportJSON()
+	if !a.sessionCurrent(service) {
+		return "", errors.New("GitHub account changed")
+	}
+	return result, err
+}
 func (a *App) SaveExportJSON() (string, error) {
 	if a.ctx == nil {
 		return "", errors.New("use the preview download action to export")

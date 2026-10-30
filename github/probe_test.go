@@ -37,7 +37,7 @@ func TestRepositoryProbeBatchesDeduplicateAndShareBudget(t *testing.T) {
 		runner.steps = append(runner.steps, fakeStep{data: probePayload(t, data)})
 	}
 	repositories = append(repositories, "ORG/REPO0")
-	provider := NewProvider(runner)
+	provider := newTestProvider(runner)
 	ctx := WithRequestBudget(context.Background(), 3)
 	results := provider.ProbeAll(ctx, repositories)
 	calls := 0
@@ -70,7 +70,7 @@ func TestRepositoryProbeUnknownAndAliasErrorsCannotProveEmpty(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: probePayload(t, map[string]any{
 		"repo0": probeRepository("ORG/RENAMED", 0), "repo1": nil, "repo3": malformed, "repo4": probeRepository("org/error", 0), "repo5": probeRepository("org/positive", 2),
 	}, map[string]any{"message": "Could not resolve to a Repository", "path": []any{"repo4"}})}}}
-	results := NewProvider(runner).ProbeAll(context.Background(), []string{"org/old", "org/null", "org/missing", "org/malformed", "org/error", "org/positive"})
+	results := newTestProvider(runner).ProbeAll(context.Background(), []string{"org/old", "org/null", "org/missing", "org/malformed", "org/error", "org/positive"})
 	if results[0].Err != nil || results[0].Repo != "org/renamed" || *results[0].OpenPRCount != 0 || results[5].Err != nil || *results[5].OpenPRCount != 2 {
 		t.Fatalf("valid aliases lost: %+v", results)
 	}
@@ -90,7 +90,7 @@ func TestRepositoryProbeCooldownStopsInventoryAndLaterProbes(t *testing.T) {
 				header = "HTTP/2 200\r\nX-RateLimit-Remaining: 0\r\nRetry-After: 600\r\n\r\n"
 			}
 			runner := &fakeRunner{t: t, steps: []fakeStep{{data: append([]byte(header), data...)}}}
-			provider := NewProvider(runner)
+			provider := newTestProvider(runner)
 			ctx := WithRequestBudget(context.Background(), 10)
 			result := provider.ProbeAll(ctx, []string{"org/repo"})[0]
 			if !result.RetryAt.After(time.Now()) || (!successful && (result.Err == nil || result.OpenPRCount != nil)) {
@@ -109,7 +109,7 @@ func TestRepositoryProbeCanceledContextMakesNoRequests(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result := NewProvider(runner).ProbeAll(ctx, []string{"org/repo"})[0]
+	result := newTestProvider(runner).ProbeAll(ctx, []string{"org/repo"})[0]
 	if !errors.Is(result.Err, context.Canceled) || result.OpenPRCount != nil || len(runner.calls) != 0 {
 		t.Fatalf("canceled probe: %+v", result)
 	}
@@ -119,7 +119,7 @@ func TestRepositoryProbePartialGraphQLErrorWithCLIExitIsIsolated(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{err: ErrRequest, data: probePayload(t, map[string]any{
 		"repo0": probeRepository("org/good", 0), "repo1": probeRepository("org/bad", 0),
 	}, map[string]any{"message": "field unavailable", "path": []any{"repo1", "pullRequests"}})}}}
-	results := NewProvider(runner).ProbeAll(context.Background(), []string{"org/good", "org/bad"})
+	results := newTestProvider(runner).ProbeAll(context.Background(), []string{"org/good", "org/bad"})
 	if results[0].Err != nil || results[0].OpenPRCount == nil || *results[0].OpenPRCount != 0 || results[1].Err == nil || results[1].OpenPRCount != nil {
 		t.Fatalf("partial CLI exit was not isolated: %+v", results)
 	}

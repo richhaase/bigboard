@@ -40,7 +40,7 @@ func TestFetchAllPrioritizesInventoriesAcrossRepositories(t *testing.T) {
 		requests = append(requests, RepositoryRequest{Repo: repo})
 	}
 	runner.steps = append(runner.steps, repoFiles(t, "acme/repo0", rows[0], []*rawFile{file("last.go", "ADDED")}, 2, false, ""))
-	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), requests)
+	results := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), requests)
 	if len(results) != 3 || len(runner.calls) != 4 {
 		t.Fatalf("results=%d calls=%d", len(results), len(runner.calls))
 	}
@@ -70,7 +70,7 @@ func TestFetchAllFilesPrioritizeNewestAcrossRepositories(t *testing.T) {
 		repoFiles(t, "acme/newer", newer, []*rawFile{file("newest.go", "ADDED")}, 2, false, ""),
 		repoFiles(t, "acme/older", older, []*rawFile{file("older.go", "ADDED")}, 2, false, ""),
 	}}
-	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), []RepositoryRequest{{Repo: "acme/older"}, {Repo: "acme/newer"}})
+	results := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 4), []RepositoryRequest{{Repo: "acme/older"}, {Repo: "acme/newer"}})
 	if !hasPair(runner.calls[2].args, "-f", "name=newer") {
 		t.Fatal("repository order displaced newer PR files")
 	}
@@ -90,7 +90,7 @@ func TestFetchAllKeepsInlineFilesEfficient(t *testing.T) {
 		}
 		runner.steps = append(runner.steps, summaries(t, rows, 140, page < 2, fmt.Sprintf("page%d", page)))
 	}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo"}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo"}})[0]
 	if !result.Complete || result.Err != nil || len(result.PRs) != 140 || len(runner.calls) != 3 || result.InventoryRequests != 3 || result.FileRequests != 0 {
 		t.Fatalf("inline file evidence regressed: %+v calls=%d", result, len(runner.calls))
 	}
@@ -118,13 +118,13 @@ func TestFetchAllReusesOnlyCurrentCompleteFileEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := pendingPR(7)
-			old := NewProvider(nil).convertPR("acme/repo", pr(7, file("first.go", "MODIFIED"), file("old-only.go", "ADDED")), false).pr
+			old := newTestProvider(nil).convertPR("acme/repo", pr(7, file("first.go", "MODIFIED"), file("old-only.go", "ADDED")), false).pr
 			if tc.mutate != nil {
 				tc.mutate(raw, &old)
 			}
 			original := slices.Clone(old.Files)
 			runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
-			result := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{old}}})[0]
+			result := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{old}}})[0]
 			got := result.PRs[0]
 			if got.FilesComplete != tc.reuse || result.InventoryRequests != 1 || result.FileRequests != 0 {
 				t.Fatalf("wrong reuse: %+v", result)
@@ -157,7 +157,7 @@ func TestFetchAllSharesRepositoryLimitAcrossPhases(t *testing.T) {
 		filePage(t, 7, []*rawFile{file("second.go", "ADDED")}, 5, true, "second"),
 		filePage(t, 7, []*rawFile{file("third.go", "ADDED")}, 5, true, "third"),
 	}}
-	result := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 8), []RepositoryRequest{{Repo: "acme/repo"}})[0]
+	result := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 8), []RepositoryRequest{{Repo: "acme/repo"}})[0]
 	if !result.Complete || !errors.Is(result.FilesErr, ErrBudgetExceeded) || result.InventoryRequests != 2 || result.FileRequests != 2 || len(runner.calls) != 4 {
 		t.Fatalf("repository allowance reset between phases: %+v", result)
 	}
@@ -165,7 +165,7 @@ func TestFetchAllSharesRepositoryLimitAcrossPhases(t *testing.T) {
 
 func TestFetchAllSharedCooldownStopsLaterInventories(t *testing.T) {
 	var calls atomic.Int32
-	p := NewProvider(batchRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
+	p := newTestProvider(batchRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 		calls.Add(1)
 		return nil, ErrRateLimited
 	}))
@@ -186,7 +186,7 @@ func TestFetchAllSharedCooldownStopsLaterInventories(t *testing.T) {
 
 func TestFetchAllDeduplicatesCanonicalAliases(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(7)}, 1, false, ""), summaries(t, []*rawPR{pr(7)}, 1, false, "")}}
-	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old"}, {Repo: "acme/repo"}, {Repo: "ACME/OLD"}})
+	results := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old"}, {Repo: "acme/repo"}, {Repo: "ACME/OLD"}})
 	if len(runner.calls) < 1 || len(runner.calls) > 2 || len(results) != 3 {
 		t.Fatalf("canonical aliases fetched repeatedly: calls=%d results=%d", len(runner.calls), len(results))
 	}
@@ -212,7 +212,7 @@ func TestFetchAllCancellationPreservesCollectedInventory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var calls atomic.Int32
-	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+	p := newTestProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		calls.Add(1)
 		cancel()
 		return repoSummaries(t, requestRepository(args), []*rawPR{pendingPR(7)}, 1, false, "").data, nil
@@ -245,7 +245,7 @@ func TestFetchAllFileAuthenticationFailureStopsOtherRepositories(t *testing.T) {
 		repoSummaries(t, "acme/two", []*rawPR{pendingPR(2)}, 1, false, ""),
 		{err: ErrAuthentication},
 	}}
-	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/one"}, {Repo: "acme/two"}})
+	results := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/one"}, {Repo: "acme/two"}})
 	for _, result := range results {
 		if !result.Complete || result.InventoryErr != nil || !errors.Is(result.FilesErr, ErrAuthentication) {
 			t.Fatalf("file failure corrupted inventory: %+v", result)
@@ -262,7 +262,7 @@ func TestFetchAllCountsRequestsForNewlyDiscoveredAliases(t *testing.T) {
 		summaries(t, []*rawPR{pr(7)}, 1, false, ""),
 		summaries(t, []*rawPR{pr(7)}, 1, false, ""),
 	}}
-	results := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old-one"}, {Repo: "acme/old-two"}, {Repo: "acme/repo"}})
+	results := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/old-one"}, {Repo: "acme/old-two"}, {Repo: "acme/repo"}})
 	requests := 0
 	for _, result := range results {
 		requests += result.InventoryRequests
@@ -277,7 +277,7 @@ func TestFetchAllIncompleteAliasCannotReplaceCompleteCanonicalInventory(t *testi
 		summaries(t, []*rawPR{pr(1), pr(2)}, 2, false, ""),
 		summaries(t, []*rawPR{pr(1)}, 2, true, "next"),
 	}}
-	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/old-name"}})
+	results := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/old-name"}})
 	requests := 0
 	for _, result := range results {
 		requests += result.InventoryRequests
@@ -298,7 +298,7 @@ func TestFetchAllAliasLookupSharesCanonicalAllowance(t *testing.T) {
 		summaries(t, []*rawPR{row}, 1, false, ""),
 		filePage(t, 1, []*rawFile{file("second.go", "ADDED")}, 4, true, "second"),
 	}}
-	results := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 6), []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/old-name"}})
+	results := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 6), []RepositoryRequest{{Repo: "acme/repo"}, {Repo: "acme/old-name"}})
 	requests := 0
 	for _, result := range results {
 		requests += result.InventoryRequests + result.FileRequests
@@ -344,7 +344,7 @@ func TestInlineFileGraphQLErrorKeepsInventoryCoverageSeparate(t *testing.T) {
 				t.Fatal(err)
 			}
 			runner := &fakeRunner{t: t, steps: []fakeStep{{data: data, err: ErrRequest}}}
-			result := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+			result := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 			if result.Complete != tc.complete || len(result.PRs) != 1 || result.PRs[0].FilesComplete {
 				t.Fatalf("wrong field coverage: %+v", result)
 			}

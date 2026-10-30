@@ -616,6 +616,75 @@ try {
  await page.reload();
  await page.getByRole('dialog').waitFor();
  await page.getByRole('heading',{name:'Workspace settings',exact:true}).waitFor();
+ await page.unroute('**/api/**');
+ let authState={configured:true,signedIn:false,login:'',accountId:'',pending:false,error:''};
+ const emptyAuthSnapshot=()=>({...loaded,auth:authState,settings:{mode:'live',personalAccount:'',organizations:[],repositories:[],excludedRepositories:[]},repositories:[],commits:[],pullRequests:[],generatedAt:'',status:{...loaded.status,phase:'signin',errors:[]}});
+ snapshot=emptyAuthSnapshot();
+ let authRefreshes=0;
+ let accessOpens=0;
+ let authDiscovery=repositories.map(r=>({...r,included:true}));
+ await page.route('**/api/**',async route=>{
+  const endpoint=new URL(route.request().url()).pathname;
+  const send=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
+  if(endpoint==='/api/snapshot')return send(snapshot);
+  if(endpoint==='/api/auth')return send(authState);
+  if(endpoint==='/api/sign-in'){authState={...authState,pending:true,error:''};return send(authState);}
+  if(endpoint==='/api/cancel-sign-in'){authState={...authState,pending:false};return send(authState);}
+  if(endpoint==='/api/sign-out'){authState={configured:true,signedIn:false,login:'',accountId:'',pending:false,error:''};snapshot=emptyAuthSnapshot();return send(snapshot);}
+  if(endpoint==='/api/manage-access'){accessOpens++;return send(null);}
+  if(endpoint==='/api/discover')return send(authDiscovery);
+  if(endpoint==='/api/settings'){const draft=route.request().postDataJSON();snapshot={...loaded,auth:authState,settings:draft,repositories:repositories.filter(r=>draft.repositories.includes(r.id)),commits:commits.filter(c=>draft.repositories.includes(c.repo)),pullRequests:pullRequests.filter(p=>draft.repositories.includes(p.repo))};return send(snapshot);}
+  if(endpoint==='/api/refresh'){authRefreshes++;return send(snapshot);}
+  throw new Error(`Unexpected auth-test endpoint ${endpoint}`);
+ });
+ await page.reload();
+ await page.getByRole('button',{name:'Sign in with GitHub',exact:true}).waitFor();
+ assert.equal(await page.locator('.sidebar').count(),0,'signed-out users see no workspace data');
+ assert.equal(authRefreshes,0,'signed-out startup does not refresh repositories');
+ assert.equal(await page.locator('input').count(),0,'users never enter a client ID or token');
+ await click('[data-action="sign-in"]');
+ await page.getByText('Finish signing in in your browser. Bigboard will continue here.',{exact:true}).waitFor();
+ await click('[data-action="cancel-sign-in"]');
+ await page.getByRole('button',{name:'Sign in with GitHub',exact:true}).waitFor();
+ await click('[data-action="sign-in"]');
+ authState={configured:true,signedIn:true,login:'first-test-account',accountId:'41',pending:false,error:''};
+ snapshot={...emptyAuthSnapshot(),auth:authState,status:{...loaded.status,phase:'setup',errors:[]}};
+ await page.getByRole('dialog').waitFor();
+ await page.getByText('Signed in as first-test-account',{exact:true}).waitFor();
+ assert.equal(authRefreshes,0,'new sign-in requires repository selection before refresh');
+ await click('[data-action="manage-access"]');
+ assert.equal(accessOpens,1,'access management is available before repository selection');
+ await discoverSettings();
+ assert.equal(await page.locator('[data-settings-repo]').count(),2);
+ await page.locator('[data-settings-repo="test-org/beta"]').uncheck();
+ await click('[data-action="save-settings"]');
+ await click('[data-action="save-settings"]');
+ await page.getByRole('heading',{name:'Repository activity',exact:true}).waitFor();
+ assert.equal(await page.locator('[data-row="activity"]').count(),1,'the signed-in selection is used');
+ await page.locator('[data-board="activity"][data-field="query"]').fill('remember-this-filter');
+ await click('[data-action="settings"]');
+ await click('[data-action="sign-out"]');
+ await page.getByRole('button',{name:'Sign in with GitHub',exact:true}).waitFor();
+ assert.equal(await page.locator('.sidebar').count(),0,'sign out removes the workspace immediately');
+ assert.equal(await page.locator('body').innerText().then(text=>text.includes('first-test-account')),false,'sign out removes the prior account label');
+ await click('[data-action="sign-in"]');
+ authState={configured:true,signedIn:true,login:'second-test-account',accountId:'42',pending:false,error:''};
+ snapshot={...emptyAuthSnapshot(),auth:{...authState,error:'Could not verify repository access'},status:{...loaded.status,phase:'access',errors:[]}};
+ await page.getByRole('button',{name:'Check repository access',exact:true}).waitFor();
+ assert.equal(await page.locator('.sidebar').count(),0,'failed access verification cannot display prior-account data');
+ authState.error='';
+ snapshot={...snapshot,auth:authState,status:{...loaded.status,phase:'setup',errors:[]}};
+ await click('[data-action="retry-access"]');
+ await page.getByText('Signed in as second-test-account',{exact:true}).waitFor();
+ await click('[data-action="close-modal"]');
+ assert.equal(await page.locator('[data-action="range"][data-value="14"]').getAttribute('aria-pressed'),'true','account changes restore the default range');
+ await click('[data-action="settings"]');
+ await click('[data-action="sign-out"]');
+ authState={configured:false,signedIn:false,login:'',accountId:'',pending:false,error:''};
+ snapshot=emptyAuthSnapshot();
+ await page.reload();
+ await page.getByText('GitHub sign-in is unavailable in this build. Install an official Bigboard release with GitHub sign-in enabled.',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Sign in with GitHub',exact:true}).count(),0,'unconfigured builds cannot begin a broken authorization flow');
  assert.deepEqual(errors,[],'no uncaught browser errors');
  console.log('Browser checks passed: real-data loading flow, interim cached history, bounded history rendering, three boards, filters, settings, empty setup, failure retention, responsive layout. Test fixture data exists only in intercepted API responses.');
  console.log(`Screenshots: ${screenshots}`);

@@ -23,11 +23,10 @@ const (
 	leanInventoryBytes   = 128 * 1024
 )
 
-// Provider is safe for concurrent independent repository fetches. It retains no
-// credentials or response cache; the caller owns refresh scheduling and stale
-// snapshots. Shared quota cooldown survives individual fetch cancellation.
 type Provider struct {
 	runner      Runner
+	client      Client
+	requests    chan struct{}
 	limits      limits
 	quota       quotaState
 	now         func() time.Time
@@ -38,12 +37,11 @@ type limits struct {
 	pullRequests, files, requests, summaryPages int
 }
 
-// NewProvider uses the installed gh/git executables when runner is nil.
-func NewProvider(runner Runner) *Provider {
-	if runner == nil {
-		runner = ExecRunner{}
+func NewProvider(client Client) *Provider {
+	if client == nil {
+		client = NewHTTPClient(nil)
 	}
-	return &Provider{runner: runner, now: time.Now, limits: limits{
+	return &Provider{runner: ExecRunner{}, client: client, requests: make(chan struct{}, 1), now: time.Now, limits: limits{
 		pullRequests: MaxPullRequests, files: MaxFilesPerPR, requests: MaxRequests,
 		summaryPages: MaxPullRequests / prPageSize,
 	}}
@@ -889,66 +887,42 @@ func (s *fetchSession) request(query, repo, cursor string, number int) (apiRespo
 	} else if s.requests >= s.limit || !takeRequest(s.ctx) {
 		return response, ErrBudgetExceeded
 	}
-	args := []string{"api", "graphql", "--hostname", "github.com", "--method", "POST", "--include",
-		"-f", "query=" + query}
+	variables := make(map[string]any)
 	if repo != "" {
 		owner, name, _ := strings.Cut(repo, "/")
-		args = append(args, "-f", "owner="+owner, "-f", "name="+name)
+		variables["owner"], variables["name"] = owner, name
 	}
 	if cursor != "" {
-		args = append(args, "-f", "cursor="+cursor)
+		variables["cursor"] = cursor
 	}
 	if number != 0 {
-		args = append(args, "-F", "number="+strconv.Itoa(number))
+		variables["number"] = number
 	}
+	body, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
 	s.requests++
-	ctx, cancel := context.WithTimeout(s.ctx, timeout)
-	defer cancel()
-	started := time.Now()
-	data, err := s.provider.runner.Run(ctx, "gh", args...)
-	elapsed := time.Since(started)
+	reply, err := s.provider.apiRequest(s.ctx, Request{Method: "POST", Endpoint: "graphql", Body: body, timeout: timeout})
+	data := reply.Body
+	elapsed := reply.elapsed
 	if s.allowance != nil {
 		s.allowance.charge(elapsed)
 	}
 	for _, allowance := range s.allowances {
 		allowance.charge(elapsed)
 	}
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
 	err = safeRequestError(err)
 	if len(data) > MaxOutputBytes {
 		return response, ErrOutputLimit
 	}
-	data, retryAt, limited, throttled := responseBody(data, s.provider.now())
-	if throttled {
-		err = ErrRateLimited
-	}
-	// Inspect all response forms, including errors and successful last pages.
 	defer func() {
-		if response.Data != nil && response.Data.RateLimit != nil {
-			if response.Data.RateLimit.Remaining <= 0 {
-				limited = true
-			}
-			if reset, parseErr := time.Parse(time.RFC3339, response.Data.RateLimit.ResetAt); parseErr == nil && reset.After(retryAt) && limited {
-				retryAt = reset
-			}
-		}
-		if limited || errors.Is(err, ErrRateLimited) {
-			s.provider.limitUntil(retryAt)
+		if errors.Is(err, ErrRateLimited) || s.provider.cooldown().After(s.provider.now()) {
 			s.blocked = ErrRateLimited
 		} else if errors.Is(err, ErrAuthentication) || errors.Is(err, ErrUnavailable) {
 			s.blocked = err
-		} else if err == nil {
-			s.provider.quotaSuccess()
 		}
 		if s.registry != nil {
 			s.registry.fail(s.blocked)
 		}
 	}()
-	if limited && len(data) == 0 {
-		err = ErrRateLimited
-	}
 	if len(data) == 0 && err != nil {
 		return response, err
 	}

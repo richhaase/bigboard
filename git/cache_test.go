@@ -638,7 +638,7 @@ func TestRepositoryCacheOfflineAndCanceledRefresh(t *testing.T) {
 
 func TestCacheGitIsolatesEnvironmentAndDisablesPrompts(t *testing.T) {
 	dir := t.TempDir()
-	program := "#!/bin/sh\nprintf '%s\\n' \"$@\" \"dir=${GIT_DIR-unset}\" \"count=${GIT_CONFIG_COUNT-unset}\" \"prompt=$GIT_TERMINAL_PROMPT\" \"lazy=$GIT_NO_LAZY_FETCH\" \"ssh=$GIT_SSH_COMMAND\"\n"
+	program := "#!/bin/sh\nprintf '%s\\n' \"$@\" \"dir=${GIT_DIR-unset}\" \"count=${GIT_CONFIG_COUNT-unset}\" \"prompt=$GIT_TERMINAL_PROMPT\" \"lazy=$GIT_NO_LAZY_FETCH\" \"ssh=$GIT_SSH_COMMAND\" \"global=$GIT_CONFIG_GLOBAL\" \"system=$GIT_CONFIG_SYSTEM\" \"nosystem=$GIT_CONFIG_NOSYSTEM\" \"authorization=${BIGBOARD_GIT_AUTHORIZATION-unset}\" \"trace=${GIT_TRACE-unset}\" \"tlslog=${SSLKEYLOGFILE-unset}\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(program), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -647,48 +647,44 @@ func TestCacheGitIsolatesEnvironmentAndDisablesPrompts(t *testing.T) {
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_SSH_COMMAND", "untrusted")
 	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	t.Setenv("GIT_TRACE", "1")
+	t.Setenv("BIGBOARD_GIT_AUTHORIZATION", "untrusted")
+	t.Setenv("SSLKEYLOGFILE", filepath.Join(dir, "tls.log"))
 	out, err := runCacheGit(context.Background(), dir, "--version")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"core.fsmonitor=false", "core.hooksPath=" + os.DevNull, "credential.helper=!gh auth git-credential", "dir=unset", "count=unset", "prompt=0", "lazy=1", "ssh=ssh -o BatchMode=yes"} {
+	for _, want := range []string{"core.fsmonitor=false", "core.hooksPath=" + os.DevNull, "credential.helper=", "http.followRedirects=false", "http.sslVerify=true", "dir=unset", "count=unset", "prompt=0", "lazy=1", "ssh=ssh -o BatchMode=yes", "global=" + os.DevNull, "system=" + os.DevNull, "nosystem=1", "authorization=unset", "trace=unset", "tlslog=unset"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing safety setting %q in %q", want, out)
 		}
 	}
 }
 
-func TestCacheGitUsesOnlyGHCredentialHelper(t *testing.T) {
+func TestCacheGitIgnoresInheritedCredentialsAndURLRewrites(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "bin")
 	home := filepath.Join(dir, "home")
 	inherited := filepath.Join(dir, "inherited.log")
-	for _, path := range []string{bin, home} {
-		if err := os.Mkdir(path, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	gh := "#!/bin/sh\ncat >/dev/null\nprintf 'username=gh-user\\npassword=gh-token\\n'\n"
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0700); err != nil {
+	if err := os.Mkdir(home, 0700); err != nil {
 		t.Fatal(err)
 	}
 	global := "[credential]\n\thelper = \"!f() { cat >/dev/null; echo \\\"$1\\\" >> '" + inherited + "'; printf 'username=inherited\\\\npassword=inherited\\\\n'; }; f\"\n"
+	global += "[url \"https://example.invalid/\"]\n\tinsteadOf = https://github.com/\n"
 	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(global), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	probe := "alias.probe=!printf 'protocol=https\\nhost=example.invalid\\n\\n' | git credential fill"
 	out, err := runCacheGit(context.Background(), "", "-c", probe, "probe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "username=gh-user\n") || !strings.Contains(out, "password=gh-token\n") {
-		t.Errorf("credentials did not come from gh: %q", out)
+	if err == nil || out != "" {
+		t.Errorf("credential lookup did not fail without a helper: %q, %v", out, err)
 	}
 	if _, err := os.Stat(inherited); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("inherited credential helper was invoked: %v", err)
+	}
+	if out, err := runCacheGit(context.Background(), "", "config", "--get-regexp", "^url\\."); err == nil || out != "" {
+		t.Errorf("inherited URL rewrite was loaded: %q, %v", out, err)
 	}
 }
 

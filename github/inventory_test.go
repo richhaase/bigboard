@@ -23,12 +23,12 @@ func requestRepository(args []string) string {
 	return owner + "/" + name
 }
 
-func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
+func TestInventoryRequestsAreSerializedAndJoinBeforeFiles(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	started := make(chan string, 8)
-	first, second := make(chan struct{}), make(chan struct{})
-	var active, maximum, calls, finished atomic.Int32
+	release := make(chan struct{})
+	var active, maximum, finished atomic.Int32
 	runner := batchRunnerFunc(func(ctx context.Context, _ string, args ...string) ([]byte, error) {
 		repo := requestRepository(args)
 		if hasPair(args, "-f", "query="+filesQuery) {
@@ -41,13 +41,9 @@ func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 		defer active.Add(-1)
 		for old := maximum.Load(); now > old && !maximum.CompareAndSwap(old, now); old = maximum.Load() {
 		}
-		gate := first
-		if calls.Add(1) > inventoryConcurrency {
-			gate = second
-		}
 		started <- repo
 		select {
-		case <-gate:
+		case <-release:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -59,26 +55,20 @@ func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 		requests = append(requests, RepositoryRequest{Repo: fmt.Sprintf("acme/repo%d", i)})
 	}
 	done := make(chan []Result, 1)
-	go func() { done <- NewProvider(runner).FetchAll(ctx, requests) }()
-	for range inventoryConcurrency {
+	go func() { done <- newTestProvider(runner).FetchAll(ctx, requests) }()
+	for range 8 {
 		select {
 		case <-started:
 		case <-ctx.Done():
-			t.Fatal("inventory requests did not overlap")
+			t.Fatal("inventory request did not start")
 		}
-	}
-	if active.Load() != inventoryConcurrency {
-		t.Fatalf("active=%d", active.Load())
-	}
-	close(first)
-	for range inventoryConcurrency {
 		select {
 		case <-started:
-		case <-ctx.Done():
-			t.Fatal("queued inventory requests did not start")
+			t.Fatal("API requests overlapped")
+		case <-time.After(5 * time.Millisecond):
 		}
+		release <- struct{}{}
 	}
-	close(second)
 	select {
 	case results := <-done:
 		for i, result := range results {
@@ -89,7 +79,7 @@ func TestInventoryWorkersOverlapWithinBoundAndJoinBeforeFiles(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("workers did not join")
 	}
-	if maximum.Load() != inventoryConcurrency || active.Load() != 0 {
+	if maximum.Load() != 1 || active.Load() != 0 {
 		t.Fatalf("maximum=%d active=%d", maximum.Load(), active.Load())
 	}
 }
@@ -100,7 +90,7 @@ func TestConcurrentAliasCompleteEvidenceWinsAndRequestsCountOnce(t *testing.T) {
 	ctx = WithRequestBudget(ctx, 2)
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
-	p := NewProvider(batchRunnerFunc(func(ctx context.Context, _ string, args ...string) ([]byte, error) {
+	p := newTestProvider(batchRunnerFunc(func(ctx context.Context, _ string, args ...string) ([]byte, error) {
 		started <- struct{}{}
 		select {
 		case <-release:
@@ -116,12 +106,10 @@ func TestConcurrentAliasCompleteEvidenceWinsAndRequestsCountOnce(t *testing.T) {
 	go func() {
 		done <- p.FetchAll(ctx, []RepositoryRequest{{Repo: "acme/old-name"}, {Repo: "acme/repo"}, {Repo: "ACME/REPO"}})
 	}()
-	for range 2 {
-		select {
-		case <-started:
-		case <-ctx.Done():
-			t.Fatal("aliases did not overlap")
-		}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("alias request did not start")
 	}
 	close(release)
 	select {
@@ -145,7 +133,7 @@ func TestInventorySharedFailuresStopQueuedRequests(t *testing.T) {
 	for _, failure := range []error{ErrAuthentication, ErrUnavailable} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			var calls atomic.Int32
-			p := NewProvider(batchRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
+			p := newTestProvider(batchRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 				calls.Add(1)
 				return nil, failure
 			}))
@@ -168,7 +156,7 @@ func TestInventorySharedFailuresStopQueuedRequests(t *testing.T) {
 func TestConcurrentInventoryCannotExceedRefreshBudget(t *testing.T) {
 	ctx := WithRequestBudget(t.Context(), 7)
 	var calls atomic.Int32
-	p := NewProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+	p := newTestProvider(batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		calls.Add(1)
 		return repoSummaries(t, requestRepository(args), nil, 0, false, "").data, nil
 	}))
