@@ -25,7 +25,7 @@ cask "bigboard" do
 
   depends_on formula: "gh"
   depends_on formula: "git"
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Bigboard.app"
 

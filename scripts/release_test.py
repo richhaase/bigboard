@@ -167,7 +167,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('depends_on formula: "gh"', result.stdout)
         self.assertNotIn('binary ', result.stdout)
         self.assertIn('darwin_universal.zip', result.stdout)
-        self.assertIn('depends_on macos: ">= :ventura"', result.stdout)
+        self.assertIn('depends_on macos: :ventura', result.stdout)
         syntax = subprocess.run(["ruby", "-c"], input=result.stdout, capture_output=True, text=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
