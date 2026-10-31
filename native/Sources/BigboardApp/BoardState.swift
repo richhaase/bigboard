@@ -10,6 +10,7 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     case heat = "Heat", directories = "Directories", commits = "Commits", people = "People", related = "Related"
     var id: String { rawValue }
 }
+enum ToolbarPopover: Equatable { case date, repositories, groups }
 enum Panel: String, Identifiable { case settings, filters, status, help, identities, repositories; var id: String { rawValue } }
 struct RelatedEvidence: Equatable { var mode: String; var values: Set<String> }
 struct BoardFilters: Equatable {
@@ -45,8 +46,12 @@ struct BoardFilters: Equatable {
     var commitLimit = 100
     var contextualRepository: String?
     var savedPRFilters: BoardFilters?
-    var repositoryPopoverPresented = false
-    var panel: Panel? { didSet { if panel != nil { repositoryPopoverPresented = false } } }
+    var toolbarPopover: ToolbarPopover?
+    var repositoryPopoverPresented: Bool {
+        get { toolbarPopover == .repositories }
+        set { setToolbarPopover(.repositories, presented: newValue) }
+    }
+    var panel: Panel? { didSet { if panel != nil { toolbarPopover = nil } } }
     var preferencesApplied = false
     var rangeLabel: String { sinceLastLook ? "Since last look" : days == 0 ? "All time" : "Last \(days) days" }
     var currentFilters: BoardFilters {
@@ -64,8 +69,19 @@ struct BoardFilters: Equatable {
         if let first = ids.first { return [first] }
         return []
     }
-    func toggleRepositoryPopover() { panel = nil; repositoryPopoverPresented.toggle() }
-    func dismissRepositoryPopover() { repositoryPopoverPresented = false }
+    func toggleToolbarPopover(_ value: ToolbarPopover) { panel = nil; toolbarPopover = toolbarPopover == value ? nil : value }
+    func setToolbarPopover(_ value: ToolbarPopover, presented: Bool) {
+        if presented { panel = nil; toolbarPopover = value }
+        else if toolbarPopover == value { toolbarPopover = nil }
+    }
+    func dismissToolbarPopover() { toolbarPopover = nil }
+    func toggleRepositoryPopover() { toggleToolbarPopover(.repositories) }
+    func dismissRepositoryPopover() { setToolbarPopover(.repositories, presented: false) }
+    func handlePopoverShortcut(_ key: String) -> Bool {
+        guard toolbarPopover != nil else { return false }
+        if key == "\u{1b}" { dismissToolbarPopover() }
+        return true
+    }
     var repositoryFilterLabel: String { repositories.isEmpty ? "All" : "\(repositories.count) selected" }
     @discardableResult func setRepositoryFilter(_ ids: Set<String>, available: [Repository]) -> Bool {
         let selected = ids.intersection(available.map(\.id))
@@ -142,10 +158,10 @@ struct BoardFilters: Equatable {
     }
     func returnToActivity() { restorePRFilters(); board = .activity }
     func restorePRFilters() { if let savedPRFilters { prs = savedPRFilters }; savedPRFilters = nil; contextualRepository = nil }
-    func switchBoard(_ value: Board) { dismissRepositoryPopover(); restorePRFilters(); board = value }
+    func switchBoard(_ value: Board) { dismissToolbarPopover(); restorePRFilters(); board = value }
     func resetBoard() { let old = currentFilters; currentFilters = BoardFilters(sort: old.sort, reversed: old.reversed) }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
-        dismissRepositoryPopover()
+        dismissToolbarPopover()
         days = configuration.sinceDays; sinceLastLook = false; repositories = []
         activity = BoardFilters(); contributors = BoardFilters(sort: configuration.contributorSort); prs = BoardFilters(sort: "updated")
         scope = ActivityScope(); lens = .heat; activitySelection = nil; contributorSelection = nil; prSelection = nil

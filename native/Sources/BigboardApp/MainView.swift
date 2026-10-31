@@ -43,12 +43,13 @@ struct MainView: View {
                     dateFilter
                     repositoryFilter
                     if !workspace.configuration.groups.isEmpty { groupFilter }
-                    Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                        .labelStyle(.iconOnly)
+                    Button { Task { await workspace.refresh() } } label: { ToolbarControlLabel(symbol: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh")
                         .disabled(workspace.busy || !workspace.authStatus.signedIn)
                         .help("Refresh repository evidence")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(ToolbarControlStyle())
+                .padding(.trailing, 12)
                 .fixedSize(horizontal: true, vertical: false)
             }.sharedBackgroundVisibility(.hidden)
         }
@@ -61,46 +62,74 @@ struct MainView: View {
         .onChange(of: navigation.repositories) { navigation.reconcile() }
         .background(KeyCommandMonitor { key in handleKey(key) })
     }
+    private func toolbarPopover(_ value: ToolbarPopover) -> Binding<Bool> {
+        Binding(get: { navigation.toolbarPopover == value }, set: { navigation.setToolbarPopover(value, presented: $0) })
+    }
     private var dateFilter: some View {
-        Menu {
-            ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : "Last \(days) days") { navigation.days = days; navigation.sinceLastLook = false } }
-            Divider()
-            Button("Since last look") { navigation.sinceLastLook = true }.disabled(workspace.snapshot.bookmark == nil)
-            Button("Custom range…") { navigation.panel = .filters }
-        } label: { Label(navigation.rangeLabel, systemImage: "calendar") }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.visible)
-        .labelStyle(.titleAndIcon)
+        Button { navigation.toggleToolbarPopover(.date) } label: {
+            ToolbarControlLabel(title: navigation.rangeLabel, symbol: "calendar", disclosure: true)
+        }
+        .accessibilityLabel("Date filter")
+        .accessibilityValue(navigation.rangeLabel)
         .help("Date filter for all boards")
+        .popover(isPresented: toolbarPopover(.date), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Date filter").font(.headline).padding(8)
+                ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
+                    ToolbarChoiceRow(title: days == 0 ? "All time" : "Last \(days) days", selected: !navigation.sinceLastLook && navigation.days == days) {
+                        navigation.days = days
+                        navigation.sinceLastLook = false
+                        navigation.dismissToolbarPopover()
+                    }
+                }
+                Divider().padding(.vertical, 4)
+                ToolbarChoiceRow(title: "Since last look", selected: navigation.sinceLastLook) {
+                    navigation.sinceLastLook = true
+                    navigation.dismissToolbarPopover()
+                }.disabled(workspace.snapshot.bookmark == nil)
+                ToolbarChoiceRow(title: "Custom range…") { navigation.panel = .filters }
+            }.padding(8).frame(width: 220).buttonStyle(.automatic)
+        }
     }
     private var repositoryFilter: some View {
         Button { navigation.toggleRepositoryPopover() } label: {
-            HStack(spacing: 6) {
-                Label("Repository filter: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
-            }
+            ToolbarControlLabel(title: "Repository filter: \(navigation.repositoryFilterLabel)", symbol: "line.3.horizontal.decrease.circle", disclosure: true)
         }
-        .labelStyle(.titleAndIcon)
+        .accessibilityLabel("Repository filter")
+        .accessibilityValue(navigation.repositoryFilterLabel)
         .help("Filter loaded repositories across all boards")
-        .popover(isPresented: $navigation.repositoryPopoverPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+        .popover(isPresented: toolbarPopover(.repositories), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
             VStack(spacing: 0) {
                 HStack { Text("Repository filter").font(.headline); Spacer(); Button("Done") { navigation.dismissRepositoryPopover() } }.padding(16)
                 Divider()
                 RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation)
-            }.frame(width: 420, height: 450)
+            }.frame(width: 420, height: 450).buttonStyle(.automatic)
         }
     }
     private var groupFilter: some View {
-        Menu {
-            Picker("Group", selection: Binding(get: { workspace.activeGroup }, set: { name in Task { await workspace.selectGroup(name) } })) {
-                Text("All groups").tag("")
-                ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
-            }
-        } label: { Text(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup) }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.visible)
+        Button { navigation.toggleToolbarPopover(.groups) } label: {
+            ToolbarControlLabel(title: workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup, symbol: "square.stack", disclosure: true)
+        }
+        .accessibilityLabel("Workspace group")
+        .accessibilityValue(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup)
         .disabled(workspace.busy)
         .help("Choose workspace group")
+        .popover(isPresented: toolbarPopover(.groups), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Workspace group").font(.headline).padding(8)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach([""] + workspace.configuration.groups.keys.sorted(), id: \.self) { name in
+                            ToolbarChoiceRow(title: name.isEmpty ? "All groups" : name, selected: workspace.activeGroup == name) {
+                                navigation.dismissToolbarPopover()
+                                Task { await workspace.selectGroup(name) }
+                            }.disabled(workspace.busy)
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(workspace.configuration.groups.count + 1) * 32 - 2, 320))
+            }.padding(8).frame(minWidth: 220).buttonStyle(.automatic)
+        }
     }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn, signedIn: workspace.authStatus.signedIn, error: workspace.error)
@@ -137,7 +166,7 @@ struct MainView: View {
         VStack { EmptyBoard(title: workspace.busy ? "Loading repositories" : "Choose your repositories", message: workspace.snapshot.coverage.message.isEmpty ? "Discover repositories in Settings, choose what to track, and save your workspace." : workspace.snapshot.coverage.message, symbol: "shippingbox"); Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent).padding(.bottom, 50) }
     }
     private func handleKey(_ key: String) {
-        if navigation.repositoryPopoverPresented { if key == "\u{1b}" { navigation.dismissRepositoryPopover() }; return }
+        if navigation.handlePopoverShortcut(key) { return }
         if navigation.panel != nil { if key == "\u{1b}" { navigation.panel = nil }; return }
         switch key {
         case "a": navigation.switchBoard(.activity)
@@ -182,6 +211,57 @@ struct MainView: View {
     private func copyView() {
         let text = BoardMarkdown.render(snapshot: workspace.snapshot, configuration: workspace.configuration, navigation: navigation)
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+private struct ToolbarControlLabel: View {
+    var title: String? = nil
+    var symbol: String
+    var disclosure = false
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).frame(width: 14).accessibilityHidden(true)
+            if let title { Text(title).lineLimit(1) }
+            if disclosure { Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true) }
+        }
+    }
+}
+private struct ToolbarControlStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View { ToolbarControlBody(configuration: configuration, enabled: isEnabled) }
+}
+private struct ToolbarControlBody: View {
+    var configuration: ButtonStyleConfiguration
+    var enabled: Bool
+    @State private var hovered = false
+    private var backgroundOpacity: Double {
+        guard enabled else { return 0 }
+        return configuration.isPressed ? 0.10 : hovered ? 0.05 : 0
+    }
+    var body: some View {
+        configuration.label
+            .font(.system(size: 13))
+            .foregroundStyle(enabled ? Color.primary : Color.secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(backgroundOpacity)))
+            .onHover { hovered = $0 }
+    }
+}
+private struct ToolbarChoiceRow: View {
+    var title: String
+    var selected = false
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark").frame(width: 12).opacity(selected ? 1 : 0).accessibilityHidden(true)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(ToolbarControlStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 struct DataStatusPresentation: Equatable {

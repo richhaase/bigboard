@@ -101,6 +101,45 @@ import Testing
         state.resetForAccount(WorkspaceConfiguration())
         #expect(!state.repositoryPopoverPresented)
     }
+    @Test func toolbarPopoversSwitchWithoutStaleDismissalsClosingTheNewPopover() {
+        let state = BoardState()
+        state.toggleRepositoryPopover()
+        state.toggleToolbarPopover(.date)
+        #expect(state.toolbarPopover == .date)
+        #expect(!state.repositoryPopoverPresented)
+        state.repositoryPopoverPresented = false
+        #expect(state.toolbarPopover == .date)
+        state.toggleToolbarPopover(.groups)
+        state.setToolbarPopover(.date, presented: false)
+        #expect(state.toolbarPopover == .groups)
+        state.toggleToolbarPopover(.groups)
+        #expect(state.toolbarPopover == nil)
+        state.panel = .status
+        state.toggleToolbarPopover(.date)
+        #expect(state.panel == nil)
+        #expect(state.toolbarPopover == .date)
+    }
+    @Test func allToolbarPopoversIsolateShortcutsAndYieldToNavigation() {
+        let state = BoardState()
+        for popover in [ToolbarPopover.date, .repositories, .groups] {
+            state.toggleToolbarPopover(popover)
+            #expect(state.handlePopoverShortcut("r"))
+            #expect(state.handlePopoverShortcut("a"))
+            #expect(state.toolbarPopover == popover)
+            #expect(state.handlePopoverShortcut("\u{1b}"))
+            #expect(state.toolbarPopover == nil)
+            #expect(!state.handlePopoverShortcut("a"))
+            state.toggleToolbarPopover(popover)
+            state.panel = .filters
+            #expect(state.toolbarPopover == nil)
+            state.toggleToolbarPopover(popover)
+            state.switchBoard(.contributors)
+            #expect(state.toolbarPopover == nil)
+            state.toggleToolbarPopover(popover)
+            state.resetForAccount(WorkspaceConfiguration())
+            #expect(state.toolbarPopover == nil)
+        }
+    }
     @Test func dataStatusIndicatorQualifiesIncompleteAndCachedEvidence() {
         let complete = Repository(id: "acme/app", prInventoryComplete: true, prFilesComplete: true, prReviewersComplete: true)
         var snapshot = Snapshot(repositories: [complete])
