@@ -245,3 +245,73 @@ private func alteredPR(_ patch: (inout [String: Any]) -> Void, errors: [[String:
     #expect(try store.load() != nil)
     do { _ = try await auth.token(); Issue.record("Invalidated session remained usable") } catch { #expect(error as? GitHubFailure == .auth) }
 }
+
+@Test func liveViewerRefreshPersistsRenamedLoginAlongsideRotatedCredentials() async throws {
+    let store = MemoryCredentials(try storedCredentials(expired: true))
+    let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"renamed","id":123}"#)])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    let service = GitHubService(token: { try await auth.token() }, transport: network, now: { testNow })
+    let state = try await auth.refreshViewer(using: service)
+    #expect(state.signedIn && state.login == "renamed" && state.accountID == "123")
+    let reloaded = AuthManager(configuration: testConfiguration, store: store, transport: ScriptedGitHub([]), now: { testNow })
+    #expect(await reloaded.status().login == "renamed")
+    #expect(try await reloaded.token() == "new-access")
+    let saved = String(data: try #require(try store.load()), encoding: .utf8) ?? ""
+    #expect(saved.contains("new-refresh"))
+    #expect(await network.count == 2)
+}
+@Test func liveViewerRefreshRejectsChangedAccountWithoutOverwritingCredential() async throws {
+    let original = try storedCredentials()
+    let store = MemoryCredentials(original)
+    let network = ScriptedGitHub([reply(#"{"login":"someone-else","id":456}"#)])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    let service = GitHubService(token: { try await auth.token() }, transport: network, now: { testNow })
+    do { _ = try await auth.refreshViewer(using: service); Issue.record("Accepted a different GitHub account") }
+    catch { #expect(error as? GitHubFailure == .auth) }
+    #expect(try store.load() == original)
+    #expect(await auth.status().accountID == "123")
+}
+@Test func failedViewerPersistenceDoesNotRollBackTokenRotation() async throws {
+    let store = MemoryCredentials(try storedCredentials(expired: true))
+    let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"renamed","id":123}"#)])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    #expect(try await auth.token() == "new-access")
+    store.failingWrites(true)
+    let service = GitHubService(token: { try await auth.token() }, transport: network, now: { testNow })
+    do { _ = try await auth.refreshViewer(using: service); Issue.record("Ignored a Keychain write failure") }
+    catch { #expect(error as? AuthFailure == .storage) }
+    store.failingWrites(false)
+    #expect(try await auth.token() == "new-access")
+    #expect(await auth.status().login == "rich")
+    #expect(await network.count == 2)
+}
+private actor DelayedViewerGitHub: GitHubTransport {
+    private var waiter: CheckedContinuation<GitHubHTTPResponse, Never>?
+    private(set) var started = false
+    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
+        started = true
+        return await withCheckedContinuation { waiter = $0 }
+    }
+    func release() {
+        waiter?.resume(returning: reply(#"{"login":"renamed","id":123}"#))
+        waiter = nil
+    }
+}
+@Test(arguments: [false, true]) func canceledViewerRefreshCannotPersistLateAccountMetadata(signOut: Bool) async throws {
+    let original = try storedCredentials()
+    let store = MemoryCredentials(original)
+    let network = DelayedViewerGitHub()
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    let service = GitHubService(token: { try await auth.token() }, transport: network, now: { testNow })
+    let pending = Task { try await auth.refreshViewer(using: service) }
+    for _ in 0..<100 {
+        if await network.started { break }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await network.started)
+    if signOut { try await auth.signOut() } else { pending.cancel() }
+    await network.release()
+    do { _ = try await pending.value; Issue.record("Applied a canceled viewer response") }
+    catch { #expect(error is CancellationError) }
+    #expect(try store.load() == (signOut ? nil : original))
+}

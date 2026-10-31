@@ -129,6 +129,9 @@ final class WorkspaceModel {
             discoveryVerified = false
             try storage.invalidateGrant(id)
             do {
+                let state = try await auth.refreshViewer(using: github)
+                guard operation == generation, !Task.isCancelled else { return }
+                authStatus = state; snapshot.viewer = state.login
                 let repos = try await github.discover()
                 guard operation == generation, !Task.isCancelled else { return }
                 authorized = repos
@@ -289,13 +292,16 @@ final class WorkspaceModel {
         defer { if operation == generation { busy = false } }
         do {
             try storage.invalidateGrant(account)
+            let state = try await auth.refreshViewer(using: github)
+            guard operation == generation, !Task.isCancelled else { return }
+            authStatus = state; snapshot.viewer = state.login
             let rows = try await github.discover()
-            guard operation == generation else { return }
+            guard operation == generation, !Task.isCancelled else { return }
             authorized = rows; discovered = rows; discoveryVerified = true
             try storage.saveGrant(rows, account: account)
             restrictSnapshot()
         } catch {
-            guard operation == generation else { return }
+            guard operation == generation, !Task.isCancelled else { return }
             if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
             if let failure = error as? GitHubFailure, failure.isAccessDenied {
                 if let owner = failure.installationOwner { authorized.removeAll { $0.id.split(separator: "/").first.map(String.init) == owner } } else { authorized = [] }
@@ -307,7 +313,7 @@ final class WorkspaceModel {
     }
     @discardableResult
     func saveConfiguration(_ config: WorkspaceConfiguration) async -> Bool {
-        if isPreview { configuration = config; return true }
+        if isPreview { configuration = config; reconcileActiveGroup(); return true }
         guard !busy, !account.isEmpty, authStatus.signedIn else {
             error = busy ? "Wait for the current operation to finish before applying settings." : "Sign in before applying settings."
             return false
@@ -330,6 +336,7 @@ final class WorkspaceModel {
             }
             try storage.saveConfiguration(config, account: account)
             configuration = config; eligible = [:]; error = ""
+            reconcileActiveGroup()
             _ = beginRefresh()
             return true
         } catch {
@@ -353,7 +360,14 @@ final class WorkspaceModel {
             busy = false
         } catch { self.error = error.localizedDescription; busy = false }
     }
-    func selectGroup(_ name: String) async { guard !busy else { return }; activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]; await refresh() }
+    private func reconcileActiveGroup() {
+        if !activeGroup.isEmpty, configuration.groups[activeGroup] == nil { activeGroup = "" }
+        snapshot.bookmark = baseline[bookmarkKey]
+    }
+    func selectGroup(_ name: String) async {
+        guard !busy, name.isEmpty || configuration.groups[name] != nil else { return }
+        activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]; await refresh()
+    }
     func removeCache(_ id: String) async {
         guard !isPreview else { return }
         guard !busy, inventoryVerified, !authorized.contains(where: {$0.id == id}), let history else { error = "Refresh live access before removing an unlisted cache."; return }

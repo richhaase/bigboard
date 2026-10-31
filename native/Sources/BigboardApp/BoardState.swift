@@ -102,6 +102,7 @@ struct RepositoryChecklist {
         let filters = (board ?? self.board) == .contributors ? contributors : activity
         return Analysis.select(snapshot.commits, days: heat ? 0 : days, since: !heat && sinceLastLook ? snapshot.bookmark : nil, repos: repositories, hideBots: filters.hideBots, people: filters.people, now: snapshot.generatedAt)
     }
+    func timelinePoints(_ records: [Commit], snapshot: Snapshot, heat: Bool = false) -> [TimelinePoint] { Analysis.timeline(records, days: heat ? 0 : days, since: !heat && sinceLastLook ? snapshot.bookmark : nil, now: snapshot.generatedAt) }
     func searchCommits(_ records: [Commit]) -> [Commit] { records.filter { activity.query.isEmpty || "\($0.subject) \($0.author) \($0.email)".localizedCaseInsensitiveContains(activity.query) } }
     func activityRows(_ snapshot: Snapshot, configuration: WorkspaceConfiguration) -> [ActivityRow] {
         let rows = Analysis.activityRows(filteredCommits(snapshot), repositories: visibleRepositories(snapshot), scope: scope, workAreas: configuration.workAreas).filter { activity.query.isEmpty || $0.label.localizedCaseInsensitiveContains(activity.query) }

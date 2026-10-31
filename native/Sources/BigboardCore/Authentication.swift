@@ -168,10 +168,24 @@ actor AuthManager {
         request.setValue("Bigboard", forHTTPHeaderField: "User-Agent")
         let response = try await transport.send(request, maximumBytes: 32768)
         guard response.status == 200 else { throw AuthFailure.exchange }
-        struct User: Decodable { var login: String; var id: UInt64 }
-        guard let user = try? JSONDecoder().decode(User.self, from: response.data), user.id > 0, validGitHubLogin(user.login) else { throw AuthFailure.exchange }
+        guard let user = try? JSONDecoder().decode(GitHubUser.self, from: response.data), user.valid else { throw AuthFailure.exchange }
         value.login = user.login; value.accountID = String(user.id)
         return value
+    }
+    func refreshViewer(using github: GitHubService) async throws -> AuthStatus {
+        try Task.checkCancellation()
+        guard configuration.valid else { throw AuthFailure.configuration }
+        try load()
+        guard let saved = credentials else { throw GitHubFailure.auth }
+        let expected = generation
+        let user = try await github.viewer()
+        try Task.checkCancellation()
+        guard generation == expected else { throw CancellationError() }
+        guard var current = unsaved ?? credentials, current.accountID == saved.accountID, String(user.id) == saved.accountID else { throw GitHubFailure.auth }
+        if current.login != user.login { current.login = user.login; try save(current) }
+        let state = status()
+        guard state.signedIn else { throw GitHubFailure.auth }
+        return state
     }
     func token() async throws -> String {
         try Task.checkCancellation()
@@ -191,8 +205,9 @@ actor AuthManager {
             refreshTask = task
         }
         do {
-            let next = try await task.value
+            var next = try await task.value
             guard generation == expected else { throw CancellationError() }
+            if let current = credentials, current.accountID == next.accountID { next.login = current.login }
             do { try save(next) } catch { unsaved = next; throw error }
             refreshTask = nil; message = ""; try Task.checkCancellation(); return next.accessToken
         } catch {

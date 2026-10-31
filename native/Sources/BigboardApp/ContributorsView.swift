@@ -35,7 +35,7 @@ struct ContributorsBoard: View {
             DeltaView(added: person.totals.added, removed: person.totals.removed, unknown: person.totals.unknown)
             HStack { Text("AI assisted \(Int(person.totals.aiPercent))%"); Text("Net \(person.totals.net)"); Text("Churn \(person.totals.added == 0 ? "0.00" : String(format: "%.2f", Double(person.totals.removed) / Double(person.totals.added)))") }.font(.caption).foregroundStyle(.secondary)
             SectionTitle(title: "Contribution rhythm", detail: navigation.rangeLabel)
-            ActivityTimeline(records: person.records, days: navigation.days, now: workspace.snapshot.generatedAt)
+            ActivityTimeline(points: navigation.timelinePoints(person.records, snapshot: workspace.snapshot))
             ActivityCalendar(records: person.records, now: workspace.snapshot.generatedAt)
             SectionTitle(title: "Where work happened")
             ForEach(Analysis.activityRows(person.records, repositories: navigation.visibleRepositories(workspace.snapshot)).filter { $0.totals.commits > 0 }) { row in

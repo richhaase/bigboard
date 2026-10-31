@@ -123,7 +123,7 @@ struct ActivityBoard: View {
                     Button { navigation.contributorSelection = person.id; navigation.board = .contributors } label: { HStack { Text(person.name).lineLimit(1); Spacer(); Text("\(person.totals.commits)").foregroundStyle(.secondary) } }.buttonStyle(.plain)
                 }
                 SectionTitle(title: "Recent activity")
-                ActivityTimeline(records: inspectRecords, days: navigation.days, now: workspace.snapshot.generatedAt)
+                ActivityTimeline(points: navigation.timelinePoints(inspectRecords, snapshot: workspace.snapshot, heat: navigation.lens == .heat))
                 SectionTitle(title: "Open pull requests")
                 let related = relatedPRs
                 if workspace.snapshot.cachedOnly { Text("PR context is unavailable offline.").font(.caption).foregroundStyle(.secondary) }
@@ -137,13 +137,7 @@ struct ActivityBoard: View {
         }
     }
     private var relatedPRs: [PullRequest] {
-        workspace.snapshot.pullRequests.filter { pr in
-            guard pr.repo == inspectScope.repo, navigation.dateMatches(pr.updatedAt, snapshot: workspace.snapshot) else { return false }
-            if !inspectScope.areaName.isEmpty {
-                return pr.files.contains { Analysis.classifyWorkArea($0, rules: workspace.configuration.workAreas[inspectScope.repo] ?? []) == inspectScope.areaName && (inspectScope.path.isEmpty || $0 == inspectScope.path || (!inspectScope.isFile && $0.hasPrefix(inspectScope.path + "/"))) }
-            }
-            return inspectScope.path.isEmpty || pr.files.contains { $0 == inspectScope.path || $0.hasPrefix(inspectScope.path + "/") }
-        }
+        Analysis.relatedPRs(workspace.snapshot.pullRequests, scope: inspectScope, workAreas: workspace.configuration.workAreas).filter { navigation.dateMatches($0.updatedAt, snapshot: workspace.snapshot) }
     }
     private func searched(_ records: [Commit]) -> [Commit] { records.filter { navigation.activity.query.isEmpty || "\($0.subject) \($0.author) \($0.email)".localizedCaseInsensitiveContains(navigation.activity.query) } }
 }

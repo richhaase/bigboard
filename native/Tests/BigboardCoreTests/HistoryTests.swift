@@ -35,6 +35,46 @@ struct HistoryTests {
         #expect(commit.added == 2000 && commit.removed == 2)
         #expect(commit.files[0].excludedReason.isEmpty)
     }
+    @Test func attributeWildcardsPreservePathAndBasenameSemantics() throws {
+        for path in ["generated.swift", "src/generated.swift", "src/deep/generated.swift"] {
+            #expect(try HistoryRules.pathMatches("**/generated.swift", path))
+            #expect(try HistoryRules.pathMatches("*.swift", path))
+        }
+        #expect(try HistoryRules.pathMatches("src/**/generated.swift", "src/generated.swift"))
+        #expect(try HistoryRules.pathMatches("src/**/generated.swift", "src/a/b/generated.swift"))
+        #expect(try HistoryRules.pathMatches("src/**", "src"))
+        #expect(try HistoryRules.pathMatches("src/*/file?.[ch]", "src/a/file1.c"))
+        #expect(try !HistoryRules.pathMatches("src/*/file?.[ch]", "src/a/b/file1.c"))
+        #expect(try !HistoryRules.pathMatches("/generated.swift", "src/generated.swift"))
+        #expect(try !HistoryRules.pathMatches("src/**/generated.swift", "other/src/generated.swift"))
+        #expect(try !HistoryRules.pathMatches("src/**/generated.swift", "src/generated.swift/extra"))
+    }
+    @Test func repeatedRecursiveAttributeWildcardsFinishWithExactMatches() throws {
+        let prefix = Array(repeating: "**", count: 32).joined(separator: "/")
+        let directory = Array(repeating: "directory", count: 32).joined(separator: "/")
+        let matching = directory + "/generated.swift"
+        let nonmatching = directory + "/source.swift"
+        #expect(try HistoryRules.pathMatches(prefix + "/generated.swift", matching))
+        #expect(try !HistoryRules.pathMatches(prefix + "/generated.swift", nonmatching))
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: HistoryRules.attributes(prefix + "/generated.swift linguist-generated"))
+        try parser.feed(payload(files: ["\n3\t0\t" + matching, "2\t0\t" + nonmatching]))
+        let commit = try #require(parser.finish().first)
+        #expect(commit.added == 2)
+        #expect(commit.files.map(\.excludedReason) == ["attribute", ""])
+    }
+    @Test func oversizedAttributeMatchingFailsHistoryParsing() throws {
+        let pattern = Array(repeating: "**", count: 1024).joined(separator: "/") + "/generated.swift"
+        let path = Array(repeating: "directory", count: 1024).joined(separator: "/") + "/source.swift"
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: HistoryRules.attributes(pattern + " linguist-generated"))
+        do {
+            try parser.feed(payload(files: ["\n3\t0\t" + path]))
+            Issue.record("An oversized attribute match did not stop history parsing.")
+        } catch { #expect(error.localizedDescription == "Repository attribute matching exceeded the safety limit.") }
+        #expect(throws: (any Error).self) { try HistoryRules.pathMatches(String(repeating: "*", count: 64 * 1024 + 1), "source.swift") }
+        #expect(throws: (any Error).self) { try HistoryRules.pathMatches("**/source.swift", String(repeating: "a", count: 64 * 1024 + 1)) }
+        #expect(throws: (any Error).self) { try HistoryRules.pathMatches(String(repeating: "a", count: 4097), "source.swift") }
+        #expect(throws: (any Error).self) { try HistoryRules.pathMatches("**/source.swift", String(repeating: "a", count: 4097)) }
+    }
     @Test func identityAliasesAndCoauthorAI() throws {
         var config = WorkspaceConfiguration()
         config.identities = ["canonical@example.test": IdentityRule(aliases: ["alias@example.test"], name: "Canonical Name")]

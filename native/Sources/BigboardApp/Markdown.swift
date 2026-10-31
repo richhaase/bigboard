@@ -21,7 +21,7 @@ import Foundation
                 lines += table(["Area", "Recent / week", "Prior / week", "Change", "Total"], rows.map { [escaped($0.label), number($0.heat.recent), number($0.heat.prior), $0.heat.status == "new" ? "New" : $0.heat.ratio.map { String(format: "%.2f×", $0) } ?? "—", number($0.heat.total)] })
             case .directories:
                 if navigation.scope.isFile { lines += commits(navigation.searchCommits(scoped)); break }
-                lines += table(["Path", "Commits", "People", "Added", "Removed"], navigation.activityRows(snapshot, configuration: configuration).map { [escaped($0.label), "\($0.totals.commits)", "\($0.totals.people)", "\($0.totals.added)", "\($0.totals.removed)\($0.totals.unknown ? " + ?" : "")"] })
+                lines += table(["Path", "Commits", "People", "Added", "Removed"], navigation.activityRows(snapshot, configuration: configuration).map { [escaped($0.label + ($0.kind == "directory" ? "/" : "")), "\($0.totals.commits)", "\($0.totals.people)", "\($0.totals.added)", "\($0.totals.removed)\($0.totals.unknown ? " + ?" : "")"] })
             case .commits:
                 lines += commits(navigation.searchCommits(scoped))
             case .people:
@@ -46,7 +46,7 @@ import Foundation
     private static func escaped(_ value: String) -> String { value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "|", with: "\\|").replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ") }
     private static func matches(_ value: String, _ query: String) -> Bool { query.isEmpty || value.localizedCaseInsensitiveContains(query) }
     private static func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
-    private static func scopeName(_ scope: ActivityScope) -> String { scope.repo.isEmpty ? "All repositories" : scope.repo + (scope.path.isEmpty && scope.areaName.isEmpty ? "" : " / " + (scope.areaName.isEmpty ? scope.path : scope.areaName)) }
+    private static func scopeName(_ scope: ActivityScope) -> String { scope.repo.isEmpty ? "All repositories" : scope.repo + (scope.path.isEmpty && scope.areaName.isEmpty ? "" : " / " + (scope.areaName.isEmpty ? scope.path + (scope.isFile ? "" : "/") : scope.areaName)) }
     private static func people(_ rows: [PersonRow]) -> [String] { table(["Contributor", "Commits", "Added", "Removed", "AI share"], rows.map { [escaped($0.name), "\($0.totals.commits)", "\($0.totals.added)", "\($0.totals.removed)\($0.totals.unknown ? " + ?" : "")", "\(Int($0.totals.aiPercent))%"] }) }
     private static func commits(_ records: [Commit]) -> [String] { table(["Date", "Commit", "Subject", "Author", "Added", "Removed"], Analysis.unique(records).sorted { $0.date > $1.date }.map { [$0.date.formatted(.iso8601), "[\($0.id.prefix(7))](https://github.com/\($0.repo)/commit/\($0.id))", escaped($0.subject), escaped($0.author), "\($0.added)", "\($0.removed)\($0.linesUnknown ? " + ?" : "")"] }) }
 }

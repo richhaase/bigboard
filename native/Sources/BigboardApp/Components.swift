@@ -55,8 +55,7 @@ struct CommitList: View {
     }
 }
 struct ActivityTimeline: View {
-    var records: [Commit]; var days: Int; var now: Date
-    var points: [TimelinePoint] { Analysis.timeline(records, days: days, now: now) }
+    var points: [TimelinePoint]
     var body: some View {
         Chart(points, id: \.date) { point in BarMark(x: .value("Date", point.date), y: .value("Commits", point.commits)).foregroundStyle(Color.accentColor.gradient) }
             .chartYAxis { AxisMarks(position: .leading) }

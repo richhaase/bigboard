@@ -39,6 +39,28 @@ import Testing
         #expect(state.filteredCommits(snapshot).map(\.id) == ["recent"])
         #expect(state.filteredCommits(snapshot, heat: true).map(\.id) == ["recent", "old"])
     }
+    @Test func boardTimelinesFollowBookmarkInsteadOfPreviousDaySelection() {
+        let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("older", days: 40), commit("oldest", days: 700), commit("before", days: 850)], bookmark: now.addingTimeInterval(-800 * 86400))
+        let state = BoardState(); state.days = 14; state.sinceLastLook = true
+        for board in [Board.activity, .contributors] {
+            state.board = board
+            let records = state.filteredCommits(snapshot)
+            #expect(records.map(\.id) == ["recent", "older", "oldest"])
+            let points = state.timelinePoints(records, snapshot: snapshot)
+            #expect(points.reduce(0) { $0 + $1.commits } == records.count)
+            #expect(points.count > 24)
+        }
+        state.sinceLastLook = false
+        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
+    }
+    @Test func bookmarkTimelineFallsBackWithoutBookmarkAndHeatIgnoresActiveRange() {
+        var snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100)])
+        let state = BoardState(); state.days = 14; state.sinceLastLook = true
+        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
+        snapshot.bookmark = now.addingTimeInterval(-2 * 86400)
+        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
+        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot, heat: true).reduce(0) { $0 + $1.commits } == 2)
+    }
     @Test func fileDrillReturnsToParentAndAreaBoundaryRemains() {
         let state = BoardState()
         state.explore(ActivityScope(repo: "acme/app", path: "Sources/UI/View.swift", isFile: true, areaName: "Interface"))
@@ -195,6 +217,20 @@ import Testing
         let narrowed = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(narrowed.components(separatedBy: "https://github.com/acme/app/commit/").count == 2)
         #expect(narrowed.contains("Change 149"))
+    }
+    @Test func markdownDistinguishesHistoricalFileAndDirectoryRowsAndScopes() {
+        var newer = commit("new"), older = commit("old")
+        newer.files = [FileChange(path: "component", removed: 1), FileChange(path: "component/new.swift", added: 100)]
+        older.files = [FileChange(path: "component", added: 1)]
+        let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [newer, older])
+        let state = BoardState(); state.lens = .directories; state.scope = ActivityScope(repo: "acme/app")
+        let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
+        #expect(markdown.contains("| component | 2 | 1 | 1 | 1 |"))
+        #expect(markdown.contains("| component/ | 1 | 1 | 100 | 0 |"))
+        state.scope.path = "component"; state.lens = .commits
+        #expect(BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state).contains("Scope: acme/app / component/\n"))
+        state.scope.isFile = true
+        #expect(BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state).contains("Scope: acme/app / component\n"))
     }
     @Test func accountAndAccessChangesClearUnavailableContext() {
         let state = BoardState(); state.scope = ActivityScope(repo: "acme/private"); state.repositories = ["acme/private"]; state.showPRs(repo: "acme/private")

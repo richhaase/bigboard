@@ -136,20 +136,30 @@ enum HistoryRules {
             return generated.map { AttributeRule(pattern: pattern, generated: $0) }
         }
     }
-    static func pathMatches(_ pattern: String, _ path: String) -> Bool {
-        if !pattern.contains("/") { return glob(pattern, String(path.split(separator: "/").last ?? "")) }
+    static func pathMatches(_ pattern: String, _ path: String) throws -> Bool {
+        let patternBytes = pattern.utf8.count, pathBytes = path.utf8.count
+        guard patternBytes <= 64 * 1024, pathBytes <= 64 * 1024 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
         let p = pattern.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").map(String.init)
         let s = path.split(separator: "/").map(String.init)
-        func match(_ i: Int, _ j: Int) -> Bool {
-            if i == p.count { return j == s.count }
-            if p[i] == "**" { return (j...s.count).contains { match(i + 1, $0) } }
-            return j < s.count && glob(p[i], s[j]) && match(i + 1, j + 1)
+        guard p.allSatisfy({ $0.utf8.count <= 4096 }), s.allSatisfy({ $0.utf8.count <= 4096 }) else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
+        if !pattern.contains("/") { return glob(pattern, s.last ?? "") }
+        let work = (patternBytes + 1) * (s.count + 1) + (pathBytes + 1) * p.count
+        guard work <= 1_000_000 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
+        var reachable = [Bool](repeating: false, count: s.count + 1)
+        reachable[0] = true
+        for component in p {
+            if component == "**" {
+                for j in s.indices { reachable[j + 1] = reachable[j + 1] || reachable[j] }
+            } else {
+                for j in s.indices.reversed() { reachable[j + 1] = reachable[j] && glob(component, s[j]) }
+                reachable[0] = false
+            }
         }
-        return match(0, 0)
+        return reachable[s.count]
     }
-    static func exclusion(_ file: FileChange, allFiles: Bool, attributes: [AttributeRule]) -> String {
+    static func exclusion(_ file: FileChange, allFiles: Bool, attributes: [AttributeRule]) throws -> String {
         if allFiles { return "" }
-        if let attribute = attributes.last(where: { pathMatches($0.pattern, file.path) }) { return attribute.generated ? "attribute" : "" }
+        if let attribute = try attributes.last(where: { try pathMatches($0.pattern, file.path) }) { return attribute.generated ? "attribute" : "" }
         if file.path.split(separator: "/").contains(where: { ignoredDirectories.contains(String($0)) }) || ignoredGlobs.contains(where: { glob($0, String(file.path.split(separator: "/").last ?? "")) }) { return "path" }
         if !file.binary && file.added + file.removed >= 2000 && bulkExtensions.contains((file.path as NSString).pathExtension.lowercased()) { return "bulk" }
         return ""
@@ -245,7 +255,7 @@ final class GitLogParser: @unchecked Sendable {
     private func append(_ original: FileChange) throws {
         guard !records.isEmpty, !original.path.isEmpty else { throw BigboardError.message("Git history contains an empty path.") }
         var file = original
-        file.excludedReason = HistoryRules.exclusion(file, allFiles: configuration.allFiles, attributes: attributes)
+        file.excludedReason = try HistoryRules.exclusion(file, allFiles: configuration.allFiles, attributes: attributes)
         let index = records.count - 1
         if file.excludedReason.isEmpty { records[index].added += file.added; records[index].removed += file.removed }
         records[index].files.append(file)

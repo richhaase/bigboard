@@ -86,6 +86,11 @@ struct GitHubResult: Sendable {
     var deniedRepositories: Set<String> = []
     var authenticationRequired = false
 }
+struct GitHubUser: Decodable, Sendable {
+    var login: String
+    var id: UInt64
+    var valid: Bool { id > 0 && validGitHubLogin(login) }
+}
 actor GitHubService {
     private let token: @Sendable () async throws -> String
     private let transport: any GitHubTransport
@@ -93,6 +98,7 @@ actor GitHubService {
     private var busy = false
     private var requests = 0
     private var discoveryRequests = 0
+    private var viewerRequests = 0
     private var maximumRequests = 128
     private var repositoryLimit = Int.max
     private var deadline = Date.distantFuture
@@ -137,8 +143,14 @@ actor GitHubService {
         if body == nil, let etag = response.headers["etag"], etag.utf8.count < 512, !etag.contains("\n"), !etag.contains("\r") { conditional[endpoint] = (etag, response.data) }
         return response.data
     }
+    func viewer() async throws -> GitHubUser {
+        try await begin(budget: 1); defer { viewerRequests = requests; busy = false }
+        let user = try decode(GitHubUser.self, try await request("user"))
+        guard user.valid else { throw GitHubFailure.response }
+        return user
+    }
     func discover() async throws -> [Repository] {
-        try await begin(budget: 128); defer { discoveryRequests = requests; busy = false }
+        try await begin(budget: 128); defer { discoveryRequests = requests + viewerRequests; viewerRequests = 0; busy = false }
         var installations: [Installation] = [], seen = Set<Int64>(), expected: Int?
         for page in 1...128 {
             let data = try await request("user/installations?per_page=100&page=\(page)")

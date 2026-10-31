@@ -89,6 +89,7 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
         responses = statuses.map { GitHubHTTPResponse(status: $0, headers: [:], data: Data(($0 == 200 ? #"{"total_count":0,"installations":[]}"# : "{}").utf8)) }
     }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
+        if request.url?.path == "/user" { return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)) }
         guard !responses.isEmpty else { throw GitHubFailure.unavailable }
         return responses.removeFirst()
     }
@@ -181,6 +182,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         count += 1
+        if request.url?.path == "/user" { return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)) }
         if !responses.isEmpty { return responses.removeFirst() }
         return await withCheckedContinuation { waiter = $0 }
     }
@@ -204,7 +206,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(try storage.loadConfiguration("123") == draft)
     #expect(workspace.busy)
     #expect(workspace.snapshot.coverage.phase == "refreshing")
-    let expected = initialFailure ? 4 : 3
+    let expected = initialFailure ? 7 : 5
     for _ in 0..<100 {
         if await network.count == expected { break }
         try await Task.sleep(for: .milliseconds(5))
@@ -235,5 +237,97 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(draft.repositories == ["owner/repo"])
     #expect(workspace.error.contains("changed outside"))
     #expect(workspace.busy == false)
-    #expect(await network.count == 2)
+    #expect(await network.count == 3)
+}
+
+private actor ViewerWorkspaceTransport: GitHubTransport {
+    private var users: [String]
+    private(set) var count = 0
+    init(_ users: [String]) { self.users = users }
+    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
+        count += 1
+        if request.url?.path == "/user", !users.isEmpty {
+            return GitHubHTTPResponse(status: 200, headers: [:], data: Data(users.removeFirst().utf8))
+        }
+        if request.url?.path == "/user/installations" {
+            return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":0,"installations":[]}"#.utf8))
+        }
+        throw GitHubFailure.unavailable
+    }
+}
+@Test(arguments: [false, true]) @MainActor func liveCollectionRefreshesViewerForMineAndAttention(settingsDiscovery: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let store = try workspaceTestStore()
+    let auth = workspaceTestAuth(store)
+    let network = ViewerWorkspaceTransport([#"{"login":"fixture","id":123}"#, #"{"login":"renamed","id":123}"#])
+    let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
+    await workspace.start()
+    #expect(workspace.snapshot.viewer == "fixture")
+    if settingsDiscovery { await workspace.discover() } else { await workspace.refresh() }
+    #expect(workspace.authStatus.login == "renamed")
+    #expect(workspace.snapshot.viewer == "renamed" && workspace.snapshot.accountID == "123")
+    #expect(await workspaceTestAuth(store).status().login == "renamed")
+    var authored = PullRequest(repo: "owner/repo", number: 1, title: "Own change", author: "renamed", url: "", updatedAt: Date())
+    authored.checks = "FAILURE"
+    var requested = PullRequest(repo: "owner/repo", number: 2, title: "Review change", author: "other", url: "", updatedAt: Date())
+    requested.reviewers = ["renamed"]
+    let rows = [authored, requested]
+    #expect(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["authored"])).map(\.number) == [1])
+    #expect(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["requested"])).map(\.number) == [2])
+    #expect(Set(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["attention"])).map(\.number)) == [1, 2])
+    #expect(await network.count == 4)
+}
+@Test @MainActor func changedLiveViewerAccountInvalidatesWorkspace() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try storage.saveGrant([Repository(id: "private/repo")], account: "123")
+    let store = try workspaceTestStore()
+    let network = ViewerWorkspaceTransport([#"{"login":"other","id":456}"#])
+    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(store), transport: network)
+    await workspace.start()
+    #expect(!workspace.authStatus.signedIn)
+    #expect(workspace.snapshot.accountID.isEmpty && workspace.snapshot.viewer.isEmpty)
+    #expect(workspace.snapshot.repositories.isEmpty && workspace.discovered.isEmpty)
+    #expect(try storage.loadGrant("123").isEmpty)
+    #expect(try store.load() != nil)
+    #expect(await network.count == 1)
+}
+@Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositoriesAndBookmark(rename: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    var config = try storage.loadConfiguration("123")
+    config.repositories = ["fixture/one", "fixture/two"]
+    config.groups = ["Focus": ["fixture/one"]]
+    config.cachedOnly = true
+    try storage.saveConfiguration(config, account: "123")
+    try storage.saveGrant(config.repositories.map { Repository(id: $0) }, account: "123")
+    let allBookmark = Date(timeIntervalSince1970: 100), groupBookmark = Date(timeIntervalSince1970: 200)
+    try storage.saveBookmarks(["all": allBookmark, "group:Focus": groupBookmark], account: "123")
+    let network = ViewerWorkspaceTransport([])
+    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    await workspace.start()
+    await workspace.selectGroup("Focus")
+    #expect(workspace.snapshot.repositories.map(\.id) == ["fixture/one"])
+    #expect(workspace.snapshot.bookmark == groupBookmark)
+    config.groups = rename ? ["Renamed": ["fixture/one"]] : [:]
+    #expect(await workspace.saveConfiguration(config))
+    #expect(workspace.activeGroup.isEmpty)
+    #expect(workspace.snapshot.bookmark == allBookmark)
+    for _ in 0..<100 {
+        if !workspace.busy { break }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(!workspace.busy)
+    #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
+    #expect(workspace.snapshot.bookmark == allBookmark)
+    await workspace.selectGroup("Focus")
+    #expect(workspace.activeGroup.isEmpty)
+    #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
+    #expect(await network.count == 0)
+    await workspace.shutdown()
+    #expect(try storage.bookmarks("123")["all"] == allBookmark)
 }

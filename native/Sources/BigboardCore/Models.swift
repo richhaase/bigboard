@@ -109,6 +109,7 @@ struct ActivityScope: Hashable, Sendable {
     var path = ""
     var isFile = false
     var areaName = ""
+    func contains(_ candidate: String) -> Bool { path.isEmpty || (isFile ? candidate == path : candidate.hasPrefix(path + "/")) }
 }
 struct AuthStatus: Sendable {
     var configured = false

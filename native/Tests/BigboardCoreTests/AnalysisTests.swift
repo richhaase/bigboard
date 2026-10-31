@@ -59,6 +59,43 @@ struct AnalysisTests {
         let heat = Analysis.heatRows(commits, repositories: [], scope: source.scope, workAreas: areas, now: now)
         #expect(heat.count == 1 && heat[0].heat.total == 3)
     }
+    @Test func historicalFileAndDirectoryScopesKeepDistinctEvidence() throws {
+        for prefix in ["", "src/"] {
+            let path = prefix + "component"
+            let newer = commit("new", added: 100, removed: 1, files: [FileChange(path: path, removed: 1), FileChange(path: path + "/new.swift", added: 100)])
+            let older = commit("old", days: 1, added: 1, removed: 0, files: [FileChange(path: path, added: 1)])
+            let parent = ActivityScope(repo: "o/a", path: String(prefix.dropLast()))
+            for records in [[newer, older], [older, newer]] {
+                let rows = Analysis.activityRows(records, repositories: [], scope: parent)
+                #expect(rows.count == 2)
+                #expect(Set(rows.map(\.id)) == ["file:" + path, "directory:" + path])
+                let file = try #require(rows.first { $0.kind == "file" })
+                let directory = try #require(rows.first { $0.kind == "directory" })
+                #expect(file.totals.added == 1 && file.totals.removed == 1)
+                #expect(Set(file.records.map(\.id)) == ["new", "old"])
+                #expect(directory.totals.added == 100 && directory.totals.removed == 0)
+                #expect(directory.records.map(\.id) == ["new"])
+                #expect(directory.records.flatMap(\.files).map(\.path) == [path + "/new.swift"])
+                #expect(rows.reduce(0) { $0 + $1.totals.change } == Analysis.totals(records).change)
+                #expect(Analysis.activityRows(records, repositories: [], scope: file.scope).isEmpty)
+                #expect(Analysis.activityRows(records, repositories: [], scope: directory.scope).map(\.id) == ["file:" + path + "/new.swift"])
+                let heat = Analysis.heatRows(records, repositories: [], scope: parent, now: now)
+                #expect(heat.map(\.id) == [directory.id])
+                #expect(heat.first?.heat.total == 100)
+            }
+        }
+    }
+    @Test func relatedPullRequestsDistinguishHistoricalFileAndDirectoryPaths() {
+        let paths = ["component", "component/new.swift", "componentary/other.swift"]
+        let prs = paths.enumerated().map { index, path in PullRequest(repo: "o/a", number: index + 1, title: path, author: "A", url: "", updatedAt: now, files: [path]) }
+        let areas = ["o/a": [WorkArea(name: "Engine", paths: ["component"])]]
+        for area in ["", "Engine"] {
+            #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/a", path: "component", isFile: true, areaName: area), workAreas: areas).map(\.number) == [1])
+            #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/a", path: "component", areaName: area), workAreas: areas).map(\.number) == [2])
+        }
+        #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/other")).isEmpty)
+        #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/a")).count == 3)
+    }
     @Test func longestWorkAreaPrefixWins() {
         let rules = [WorkArea(name: "All", paths: ["src/"]), WorkArea(name: "Engine", paths: ["src/core"]), WorkArea(name: "Later tie", paths: ["src/core"])]
         #expect(Analysis.classifyWorkArea("src/core/parser.swift", rules: rules) == "Engine")
@@ -90,6 +127,30 @@ struct AnalysisTests {
         #expect(series.count == 5)
         #expect(series.allSatisfy { cal.component(.hour, from: $0.date) == 0 })
         #expect(zip(series, series.dropFirst()).contains { $1.date.timeIntervalSince($0.date) == 25 * 3600 })
+    }
+    @Test func bookmarkTimelineUsesActualSpanAndExclusiveBoundary() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let bookmark = now.addingTimeInterval(-45 * 86400)
+        let records = [commit("before", days: 46), commit("boundary", days: 45), commit("after", days: 40), commit("recent", days: 1), commit("future", days: -8)]
+        let points = Analysis.timeline(records, days: 14, since: bookmark, now: now, calendar: cal)
+        let day = cal.startOfDay(for: bookmark)
+        #expect(points.first?.date == cal.date(byAdding: .day, value: -(cal.component(.weekday, from: day) - 1), to: day))
+        #expect(points.reduce(0) { $0 + $1.commits } == 3)
+        #expect(points.filter { $0.commits > 0 }.count == 3)
+        #expect(points.allSatisfy { cal.component(.weekday, from: $0.date) == 1 })
+    }
+    @Test func monthlyTimelineRetainsExplicitRangesBeyondOneYear() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let bookmark = now.addingTimeInterval(-800 * 86400)
+        let records = [commit("before", days: 801), commit("boundary", days: 800), commit("old", days: 700), commit("recent", days: 1)]
+        let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: bookmark))
+        let points = Analysis.timeline(records, days: 14, since: bookmark, now: now, calendar: cal)
+        #expect(points.first?.date == firstMonth)
+        #expect(points.count > 24)
+        #expect(points.reduce(0) { $0 + $1.commits } == 2)
+        let explicitDays = Analysis.timeline(records, days: 800, now: now, calendar: cal)
+        #expect(explicitDays.map(\.date) == points.map(\.date))
+        #expect(explicitDays.map(\.commits) == points.map(\.commits))
     }
     @Test func relatedSharedEvidenceAndPeopleDiffer() {
         let records = [commit("same", repo: "o/a"), commit("same", repo: "o/b"), commit("different", repo: "o/c")]

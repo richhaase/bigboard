@@ -156,11 +156,18 @@ enum Analysis {
             let files = original.files.filter { file in
                 guard file.excludedReason.isEmpty else { return false }
                 if !scope.areaName.isEmpty && classifyWorkArea(file.path, rules: workAreas[scope.repo] ?? []) != scope.areaName { return false }
-                return scope.path.isEmpty || file.path == scope.path || (!scope.isFile && file.path.hasPrefix(scope.path + "/"))
+                return scope.contains(file.path)
             }
             guard !files.isEmpty else { return nil }
             var commit = original; commit.files = files; commit.added = files.reduce(0) { $0 + $1.added }; commit.removed = files.reduce(0) { $0 + $1.removed }
             return commit
+        }
+    }
+    static func relatedPRs(_ pullRequests: [PullRequest], scope: ActivityScope, workAreas: [String: [WorkArea]] = [:]) -> [PullRequest] {
+        pullRequests.filter { pr in
+            guard pr.repo == scope.repo else { return false }
+            if scope.path.isEmpty && scope.areaName.isEmpty { return true }
+            return pr.files.contains { scope.contains($0) && (scope.areaName.isEmpty || classifyWorkArea($0, rules: workAreas[scope.repo] ?? []) == scope.areaName) }
         }
     }
     static func activityRows(_ commits: [Commit], repositories: [Repository], scope: ActivityScope = ActivityScope(), workAreas: [String: [WorkArea]] = [:]) -> [ActivityRow] {
@@ -168,20 +175,22 @@ enum Analysis {
             let grouped = Dictionary(grouping: commits, by: \.repo)
             return repositories.map { repo in let rows = grouped[repo.id] ?? []; return ActivityRow(id: repo.id, label: repo.id, kind: "repository", scope: ActivityScope(repo: repo.id), records: rows, totals: totals(rows), latest: rows.map(\.date).max()) }
         }
+        guard !scope.isFile else { return [] }
         let input = scope.areaName.isEmpty ? commits : scoped(commits, scope: scope, workAreas: workAreas)
         let prefix = scope.path.isEmpty ? "" : scope.path + "/"
-        var locations: [String: ActivityScope] = [:]
+        var locations: Set<ActivityScope> = []
         for commit in input where commit.repo == scope.repo && !commit.pathsUnknown {
             for file in commit.files where file.excludedReason.isEmpty && file.path.hasPrefix(prefix) {
                 let remainder = String(file.path.dropFirst(prefix.count))
                 guard let first = remainder.split(separator: "/", omittingEmptySubsequences: false).first, !first.isEmpty else { continue }
                 let path = prefix + first
-                locations[path] = ActivityScope(repo: scope.repo, path: path, isFile: !remainder.contains("/"), areaName: scope.areaName)
+                locations.insert(ActivityScope(repo: scope.repo, path: path, isFile: !remainder.contains("/"), areaName: scope.areaName))
             }
         }
-        return locations.map { path, location in
+        return locations.map { location in
             let records = scoped(input, scope: location, workAreas: workAreas)
-            return ActivityRow(id: path, label: String(path.split(separator: "/").last ?? ""), kind: location.isFile ? "file" : "directory", scope: location, records: records, totals: totals(records), latest: records.map(\.date).max())
+            let kind = location.isFile ? "file" : "directory"
+            return ActivityRow(id: kind + ":" + location.path, label: String(location.path.split(separator: "/").last ?? ""), kind: kind, scope: location, records: records, totals: totals(records), latest: records.map(\.date).max())
         }.sorted { $0.totals.change != $1.totals.change ? $0.totals.change > $1.totals.change : literalLess($0.id, $1.id) }
     }
     static func related(_ commits: [Commit], scope: ActivityScope, mode: String = "commits", workAreas: [String: [WorkArea]] = [:]) -> [RelatedRow] {
@@ -210,20 +219,22 @@ enum Analysis {
         }
         return rows.values.sorted { $0.date < $1.date }
     }
-    static func timeline(_ commits: [Commit], days: Int = 30, now: Date = Date(), calendar: Calendar = .current) -> [TimelinePoint] {
-        let daily = days > 0 && days <= 30, weekly = days > 30 && days <= 180
+    static func timeline(_ commits: [Commit], days: Int = 30, since: Date? = nil, now: Date = Date(), calendar: Calendar = .current) -> [TimelinePoint] {
+        let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
+        let span = cutoff.map { max(0, now.timeIntervalSince($0) / 86_400) }
+        let daily = span.map { $0 <= 30 } ?? false, weekly = span.map { $0 > 30 && $0 <= 180 } ?? false
         func bucket(_ date: Date) -> Date {
             if daily { return calendar.startOfDay(for: date) }
             if weekly { let d = calendar.startOfDay(for: date); return calendar.date(byAdding: .day, value: -(calendar.component(.weekday, from: d) - 1), to: d)! }
             return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
         }
-        let start = daily || weekly ? bucket(now.addingTimeInterval(-Double(days) * 86_400)) : calendar.date(byAdding: .month, value: -11, to: bucket(now))!
+        let start = cutoff.map(bucket) ?? calendar.date(byAdding: .month, value: -11, to: bucket(now))!
         let component: Calendar.Component = daily ? .day : weekly ? .weekOfYear : .month
         var rows: [Date: TimelinePoint] = [:]
         var date = start
         while date <= now { rows[date] = TimelinePoint(date: date); date = calendar.date(byAdding: component, value: 1, to: date)! }
         for c in unique(commits) {
-            if daily && c.date < now.addingTimeInterval(-Double(days) * 86_400) { continue }
+            if let cutoff, c.date <= cutoff { continue }
             let key = bucket(c.date)
             guard rows[key] != nil || c.date > now else { continue }
             var row = rows[key] ?? TimelinePoint(date: key); row.commits += 1; row.added += c.linesUnknown ? 0 : c.added; row.removed += c.linesUnknown ? 0 : c.removed; rows[key] = row
