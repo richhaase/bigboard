@@ -38,13 +38,23 @@ struct MainView: View {
             }.navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                dateFilter
-                repositoryFilter
-                if !workspace.configuration.groups.isEmpty { groupFilter }
-                dataStatusIndicator
-                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
+            ToolbarItem(id: "date-filter", placement: .primaryAction) { dateFilter }
+                .sharedBackgroundVisibility(.visible)
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(id: "repository-filter", placement: .primaryAction) { repositoryFilter }
+                .sharedBackgroundVisibility(.visible)
+            if !workspace.configuration.groups.isEmpty {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+                ToolbarItem(id: "group-filter", placement: .primaryAction) { groupFilter }
+                    .sharedBackgroundVisibility(.visible)
             }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(id: "data-status", placement: .primaryAction) { dataStatusIndicator }
+                .sharedBackgroundVisibility(.visible)
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(id: "refresh", placement: .primaryAction) {
+                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
+            }.sharedBackgroundVisibility(.visible)
         }
         .sheet(item: $navigation.panel) { panel in WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation) }
         .onChange(of: workspace.snapshot.accountID) { old, new in
@@ -89,9 +99,9 @@ struct MainView: View {
         let status = DataStatusPresentation(snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn, signedIn: workspace.authStatus.signedIn, error: workspace.error)
         return Button { navigation.panel = .status } label: {
             Group {
-                if status.loading { ProgressView().controlSize(.small).frame(width: 16, height: 16) }
+                if status.loading { ProgressView().controlSize(.small) }
                 else { Image(systemName: status.symbol).foregroundStyle(status.warning ? Color.orange : Color.secondary) }
-            }
+            }.frame(width: 16, height: 16)
         }
         .accessibilityLabel("Data status")
         .accessibilityValue(status.label)

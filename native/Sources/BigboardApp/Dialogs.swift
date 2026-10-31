@@ -254,7 +254,6 @@ struct RepositoryFilterPanel: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Choose which loaded repositories appear across Activity, Contributors, and Pull requests. Changes take effect immediately.").foregroundStyle(.secondary)
                 RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), preferredRepository: navigation.contextualRepository ?? (navigation.scope.repo.isEmpty ? nil : navigation.scope.repo))
-                Text("Manage saved collection choices in Workspace Settings → Repositories.").font(.caption).foregroundStyle(.secondary)
             }.padding(24)
         }
     }
@@ -286,7 +285,6 @@ struct RepositoryFilterSelection: View {
                         .disabled(selection.intersection(available) == [repo.id])
                 }
                 if visible.isEmpty { Text("No loaded repositories match this search.").foregroundStyle(.secondary) }
-                Text("Keep at least one repository selected, or choose All loaded repositories.").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
