@@ -48,8 +48,7 @@ struct MainView: View {
                         .disabled(workspace.busy || !workspace.authStatus.signedIn)
                         .help("Refresh repository evidence")
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
+                .buttonStyle(.borderless)
                 .fixedSize(horizontal: true, vertical: false)
             }.sharedBackgroundVisibility(.hidden)
         }
@@ -69,7 +68,7 @@ struct MainView: View {
             Button("Since last look") { navigation.sinceLastLook = true }.disabled(workspace.snapshot.bookmark == nil)
             Button("Custom range…") { navigation.panel = .filters }
         } label: { Label(navigation.rangeLabel, systemImage: "calendar") }
-        .menuStyle(.button)
+        .menuStyle(.borderlessButton)
         .menuIndicator(.visible)
         .labelStyle(.titleAndIcon)
         .help("Date filter for all boards")
@@ -98,7 +97,7 @@ struct MainView: View {
                 ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
             }
         } label: { Text(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup) }
-        .menuStyle(.button)
+        .menuStyle(.borderlessButton)
         .menuIndicator(.visible)
         .disabled(workspace.busy)
         .help("Choose workspace group")
