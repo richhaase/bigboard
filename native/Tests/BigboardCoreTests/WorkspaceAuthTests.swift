@@ -168,3 +168,72 @@ private final class WaitingWorkspaceCredentials: CredentialStore, @unchecked Sen
     #expect(workspace.authStatus.configured)
     #expect(workspace.authStatus.signedIn == false)
 }
+private actor ConfigurationWorkspaceTransport: GitHubTransport {
+    private var responses: [GitHubHTTPResponse]
+    private var waiter: CheckedContinuation<GitHubHTTPResponse, Never>?
+    private(set) var count = 0
+    init(initialFailure: Bool = false) {
+        responses = [
+            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":1,"installations":[{"id":1,"account":{"login":"owner","type":"User"}}]}"#.utf8)),
+            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":1,"repositories":[{"full_name":"owner/repo","default_branch":"main","archived":false,"pushed_at":"2026-10-31T12:00:00Z"}]}"#.utf8))
+        ]
+        if initialFailure { responses.insert(GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8)), at: 0) }
+    }
+    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
+        count += 1
+        if !responses.isEmpty { return responses.removeFirst() }
+        return await withCheckedContinuation { waiter = $0 }
+    }
+    func release() {
+        waiter?.resume(returning: GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8)))
+        waiter = nil
+    }
+}
+@Test(arguments: [false, true]) @MainActor func configurationApplyReturnsAfterLocalSaveAndRefreshesIndependently(initialFailure: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let network = ConfigurationWorkspaceTransport(initialFailure: initialFailure)
+    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    await workspace.start()
+    #expect(workspace.configuration.repositories.isEmpty)
+    var draft = workspace.configuration; draft.repositories = ["owner/repo"]
+    let saved = await workspace.saveConfiguration(draft)
+    #expect(saved)
+    #expect(workspace.configuration == draft)
+    #expect(try storage.loadConfiguration("123") == draft)
+    #expect(workspace.busy)
+    #expect(workspace.snapshot.coverage.phase == "refreshing")
+    let expected = initialFailure ? 4 : 3
+    for _ in 0..<100 {
+        if await network.count == expected { break }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await network.count == expected)
+    await workspace.signOut()
+    await network.release()
+}
+@Test @MainActor func configurationApplyFailurePreservesDraftAndSavedConfiguration() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let network = ConfigurationWorkspaceTransport()
+    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    await workspace.start()
+    let original = workspace.configuration
+    var unavailable = original; unavailable.repositories = ["other/private"]
+    #expect(await workspace.saveConfiguration(unavailable) == false)
+    #expect(unavailable.repositories == ["other/private"])
+    #expect(workspace.configuration == original)
+    #expect(workspace.error.contains("other/private"))
+    var draft = original; draft.repositories = ["owner/repo"]
+    let settingsURL = try storage.accountRoot("123").appendingPathComponent("workspace.json")
+    try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try JSONEncoder().encode(WorkspaceConfiguration()).write(to: settingsURL)
+    #expect(await workspace.saveConfiguration(draft) == false)
+    #expect(workspace.configuration == original)
+    #expect(draft.repositories == ["owner/repo"])
+    #expect(workspace.error.contains("changed outside"))
+    #expect(workspace.busy == false)
+    #expect(await network.count == 2)
+}

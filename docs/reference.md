@@ -1,4 +1,10 @@
 > This document describes the retained Go/Wails reference app. For the Swift replacement, see the [native guide](../native/README.md).
+>
+> In the native app, **Repository filter** (top control, sidebar, Boards menu, or
+> `i`) shows all loaded repositories or a selected subset across all boards. It
+> does not refresh data or save collection choices. Saved choices remain in
+> **Workspace Settings → Repositories**; verified cache removal is in
+> **Workspace Settings → Storage**. The native app has no session-tracking layer.
 
 # Bigboard user reference
 
@@ -39,10 +45,11 @@ least one repository, choose **Review workspace**, then **Save workspace**.
 Discovery is required each time Settings is opened and after changing sources.
 Errors preserve the draft. Cancel closes the dialog without saving.
 
-Settings saves sources and exclusions for later sessions. Newly discovered
-repositories remain eligible unless excluded. The repository viewing picker
-only narrows the boards; **Repository controls** changes tracking for this
-session. Neither changes the saved workspace.
+In the reference app, Settings saves sources and exclusions for later sessions.
+Newly discovered repositories remain eligible unless excluded. Its repository
+viewing picker only narrows the boards; **Repository controls** changes tracking
+for that session. Neither changes the saved workspace. The native app replaces
+those controls with the viewing-only **Repository filter** described above.
 
 ## Navigation and scope
 
@@ -253,8 +260,10 @@ and bookmark keys are isolated by the stable GitHub account ID. Bookmark keys us
 caches cover default-branch history; developer checkouts are not scanned or modified. Disposable parsed scans are rebuilt when their inputs
 change or their files are damaged.
 
-**Repository controls** stages session inclusion, then **Apply tracking** applies
-it. Excluding a repository does not remove its cache. A cache can be removed
+The reference app’s **Repository controls** stages session inclusion, then
+**Apply tracking** applies it. Excluding a repository does not remove its cache.
+The native app has no equivalent session-tracking step and places cache removal
+in **Workspace Settings → Storage**. A cache can be removed
 only after a successful live GitHub refresh no longer lists its repository.
 Discover in Settings alone does not authorize removal, and Cached history mode
 cannot remove caches. **Remove cache** requires a separate confirmation; group

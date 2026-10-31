@@ -1,4 +1,10 @@
 > This document describes the retained Go/Wails reference app. For the Swift replacement, see the [native guide](../native/README.md).
+>
+> In the native app, **Repository filter** (top control, sidebar, Boards menu, or
+> `i`) shows all loaded repositories or a selected subset across all boards. It
+> does not refresh data or save collection choices. Saved choices remain in
+> **Workspace Settings → Repositories**; verified cache removal is in
+> **Workspace Settings → Storage**. The native app has no session-tracking layer.
 
 # Bigboard workflow guide
 
@@ -84,9 +90,11 @@ of the draft.
 
 **Data status** explains refresh failures, coverage, cache storage, and bookmarks.
 Use **Refresh** after resolving a problem; there is no periodic remote refresh.
-**Settings** saves collection choices, while **Repository controls** changes
-tracking only for this session. The shared repository picker only changes what
-you see.
+In this reference app, **Settings** saves collection choices, while **Repository
+controls** changes tracking only for the session. Its shared repository picker
+only changes what you see. In the native app, use **Repository filter** for
+viewing scope and **Workspace Settings → Storage** for verified cache removal;
+there is no session-tracking step.
 
 ## Find keyboard controls
 

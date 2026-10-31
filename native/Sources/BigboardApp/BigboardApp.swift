@@ -25,14 +25,14 @@ import AppKit
         }
         .defaultSize(width: 1360, height: 900)
         .commands {
-            CommandGroup(replacing: .appSettings) { Button("Workspace Settings…") { navigation.panel = .settings }.keyboardShortcut(",") }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { navigation.panel = .settings }.keyboardShortcut(",") }
             CommandMenu("Boards") {
                 ForEach(Board.allCases) { board in Button(board.rawValue) { navigation.switchBoard(board) } }
                 Divider()
                 Button("Refresh") { Task { await workspace.refresh() } }.keyboardShortcut("r").disabled(workspace.busy)
                 Button("Filters…") { navigation.panel = .filters }.keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("Data Status…") { navigation.panel = .status }
-                Button("Repository Controls…") { navigation.panel = .repositories }
+                Button("Repository Filter…") { navigation.panel = .repositories }
                 Button("Contributor Identities…") { navigation.panel = .identities }
             }
             CommandGroup(replacing: .help) { Button("Keyboard Guide") { navigation.panel = .help } }

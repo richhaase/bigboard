@@ -8,23 +8,10 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding(get: { navigation.board }, set: { navigation.switchBoard($0) })) {
-                Section("Explore") { ForEach(Board.allCases) { board in Label(board.rawValue, systemImage: board.symbol).tag(board) } }
-                Section("Workspace") {
-                    Button("Repository controls", systemImage: "externaldrive") { navigation.panel = .repositories }
-                    Button("Data status", systemImage: "info.circle") { navigation.panel = .status }
-                    Button("Settings", systemImage: "gearshape") { navigation.panel = .settings }
-                    Button("Keyboard guide", systemImage: "keyboard") { navigation.panel = .help }
-                }
+                ForEach(Board.allCases) { board in Label(board.rawValue, systemImage: board.symbol).tag(board) }
             }.navigationTitle("Bigboard").navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(workspace.authStatus.login.isEmpty ? "Personal workspace" : workspace.authStatus.login).fontWeight(.medium)
-                    Text("\(workspace.snapshot.repositories.count) repositories").foregroundStyle(.secondary)
-                }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding()
-            }
         } detail: {
             VStack(spacing: 0) {
-                sharedScope
                 if workspace.isPreview { Text("Interface preview · Synthetic data · No account or repository access").font(.caption).frame(maxWidth: .infinity).padding(6).background(.yellow.opacity(0.15)) }
                 if !workspace.error.isEmpty { HStack { Image(systemName: "exclamationmark.triangle"); Text(workspace.error).textSelection(.enabled); Spacer(); Button("Dismiss") { workspace.error = "" } }.padding(10).background(.orange.opacity(0.12)) }
                 if workspace.busy { HStack { ProgressView().controlSize(.small); Text(workspace.snapshot.coverage.message.isEmpty ? "Loading repository evidence…" : workspace.snapshot.coverage.message).font(.callout); Spacer() }.padding(10) }
@@ -50,7 +37,15 @@ struct MainView: View {
                 HStack { Text("Activity describes change, not productivity."); Spacer(); Text(workspace.snapshot.cachedOnly ? "Cached history" : workspace.snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened)) }.font(.caption).foregroundStyle(.secondary).padding(8)
             }.navigationTitle(navigation.board.rawValue)
         }
-        .toolbar { ToolbarItem { Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(workspace.busy || !workspace.authStatus.signedIn) } }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                dateFilter
+                repositoryFilter
+                if !workspace.configuration.groups.isEmpty { groupFilter }
+                dataStatusIndicator
+                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
+            }
+        }
         .sheet(item: $navigation.panel) { panel in WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation) }
         .onChange(of: workspace.snapshot.accountID) { old, new in
             if old != new { navigation.resetForAccount(workspace.configuration) }
@@ -60,27 +55,47 @@ struct MainView: View {
         .onChange(of: navigation.repositories) { navigation.reconcile() }
         .background(KeyCommandMonitor { key in handleKey(key) })
     }
-    private var sharedScope: some View {
-        HStack {
-            Menu {
-                ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : "Last \(days) days") { navigation.days = days; navigation.sinceLastLook = false } }
+    private var dateFilter: some View {
+        Menu {
+            ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in Button(days == 0 ? "All time" : "Last \(days) days") { navigation.days = days; navigation.sinceLastLook = false } }
+            Divider()
+            Button("Since last look") { navigation.sinceLastLook = true }.disabled(workspace.snapshot.bookmark == nil)
+            Button("Custom range…") { navigation.panel = .filters }
+        } label: { Label(navigation.rangeLabel, systemImage: "calendar") }
+        .labelStyle(.titleAndIcon)
+        .help("Date filter for all boards")
+    }
+    private var repositoryFilter: some View {
+        Button { navigation.toggleRepositoryPopover() } label: {
+            Label("Repository filter: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
+        }
+        .labelStyle(.titleAndIcon)
+        .help("Filter loaded repositories across all boards")
+        .popover(isPresented: $navigation.repositoryPopoverPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            VStack(spacing: 0) {
+                HStack { Text("Repository filter").font(.headline); Spacer(); Button("Done") { navigation.dismissRepositoryPopover() } }.padding(16)
                 Divider()
-                Button("Since last look") { navigation.sinceLastLook = true }.disabled(workspace.snapshot.bookmark == nil)
-                Button("Custom range…") { navigation.panel = .filters }
-            } label: { Label(navigation.rangeLabel, systemImage: "calendar") }
-            Menu {
-                Button("All tracked repositories") { navigation.repositories = [] }
-                Divider()
-                ForEach(workspace.snapshot.repositories) { repo in Toggle(repo.id, isOn: Binding(get: { navigation.repositories.contains(repo.id) }, set: { if $0 { navigation.repositories.insert(repo.id) } else { navigation.repositories.remove(repo.id) } })) }
-            } label: { Label(navigation.repositories.isEmpty ? "All repositories" : "\(navigation.repositories.count) repositories", systemImage: "square.stack.3d.up") }
-            if !workspace.configuration.groups.isEmpty {
-                Picker("Group", selection: Binding(get: { workspace.activeGroup }, set: { name in Task { await workspace.selectGroup(name) } })) {
-                    Text("All groups").tag("")
-                    ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
-                }.frame(maxWidth: 200).disabled(workspace.busy)
+                RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation)
+            }.frame(width: 420, height: 450)
+        }
+    }
+    private var groupFilter: some View {
+        Picker("Group", selection: Binding(get: { workspace.activeGroup }, set: { name in Task { await workspace.selectGroup(name) } })) {
+            Text("All groups").tag("")
+            ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
+        }.frame(maxWidth: 180).disabled(workspace.busy)
+    }
+    private var dataStatusIndicator: some View {
+        let status = DataStatusPresentation(snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn, signedIn: workspace.authStatus.signedIn, error: workspace.error)
+        return Button { navigation.panel = .status } label: {
+            Group {
+                if status.loading { ProgressView().controlSize(.small).frame(width: 16, height: 16) }
+                else { Image(systemName: status.symbol).foregroundStyle(status.warning ? Color.orange : Color.secondary) }
             }
-            Spacer()
-        }.padding(12).background(.bar)
+        }
+        .accessibilityLabel("Data status")
+        .accessibilityValue(status.label)
+        .help("Data status: \(status.label). Click for details.")
     }
     private var signedOut: some View {
         VStack(spacing: 18) {
@@ -100,6 +115,7 @@ struct MainView: View {
         VStack { EmptyBoard(title: workspace.busy ? "Loading repositories" : "Choose your repositories", message: workspace.snapshot.coverage.message.isEmpty ? "Discover repositories in Settings, choose what to track, and save your workspace." : workspace.snapshot.coverage.message, symbol: "shippingbox"); Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent).padding(.bottom, 50) }
     }
     private func handleKey(_ key: String) {
+        if navigation.repositoryPopoverPresented { if key == "\u{1b}" { navigation.dismissRepositoryPopover() }; return }
         if navigation.panel != nil { if key == "\u{1b}" { navigation.panel = nil }; return }
         switch key {
         case "a": navigation.switchBoard(.activity)
@@ -144,6 +160,22 @@ struct MainView: View {
     private func copyView() {
         let text = BoardMarkdown.render(snapshot: workspace.snapshot, configuration: workspace.configuration, navigation: navigation)
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+struct DataStatusPresentation: Equatable {
+    var label: String
+    var symbol: String
+    var loading = false
+    var warning = false
+    init(snapshot: Snapshot, busy: Bool, checkingSignIn: Bool, signedIn: Bool, error: String) {
+        if checkingSignIn { label = "Checking saved sign-in"; symbol = "arrow.triangle.2.circlepath"; loading = true }
+        else if busy { label = "Refreshing repository evidence"; symbol = "arrow.triangle.2.circlepath"; loading = true }
+        else if !error.isEmpty || !snapshot.coverage.errors.isEmpty || snapshot.coverage.phase == "partial" || snapshot.repositories.contains(where: { $0.stale || $0.prStale || (!snapshot.cachedOnly && (!$0.prInventoryComplete || !$0.prFilesComplete || !$0.prReviewersComplete)) }) {
+            label = "Some evidence is incomplete or stale"; symbol = "exclamationmark.circle"; warning = true
+        } else if snapshot.cachedOnly { label = "Cached history"; symbol = "externaldrive" }
+        else if !signedIn { label = "Sign in to load repository evidence"; symbol = "info.circle" }
+        else if snapshot.repositories.isEmpty { label = "No repository evidence loaded"; symbol = "info.circle" }
+        else { label = "Repository evidence loaded"; symbol = "checkmark.circle" }
     }
 }
 struct KeyCommandMonitor: NSViewRepresentable {

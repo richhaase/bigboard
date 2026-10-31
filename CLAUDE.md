@@ -25,9 +25,15 @@ old configuration, history, grants, bookmarks, or browser preferences.
 - Live startup publishes cached history before the network pass completes.
   Swift Observation publishes snapshots to the native interface. Later
   refreshes are explicit. Never fill runtime gaps with fabricated records.
-- Keep collection settings, session tracking, named groups, and viewing filters
-  distinct. Exact exclusions win over explicit inclusions, then config exclusion
-  patterns apply. Newly discovered repositories follow those same rules. Settings must discover current sources before review/save.
+- Settings saves repository collection choices; named groups retain their existing
+  collection scope. Repository filter is shared viewing state in BoardState and
+  only narrows already loaded data. It never refreshes, saves collection settings,
+  or adds session tracking. All repositories uses an empty filter set; Selected
+  repositories requires at least one loaded repository. Exact exclusions win over
+  explicit inclusions, then config exclusion patterns apply. Newly discovered
+  repositories follow those same rules. Settings reuses a current verified inventory or verifies access when needed before
+  applying repository changes. Apply reports local save success separately from
+  background refresh, so the sheet closes without waiting for network collection.
 - Preserve usable snapshots on failure and qualify stale/partial evidence.
   PR inventory coverage is independent of file and reviewer coverage. Unknown
   inventory with no rows is not a complete zero. PR loading is also distinct
@@ -48,8 +54,8 @@ old configuration, history, grants, bookmarks, or browser preferences.
   merge-readiness judgments.
 - All-time JSON export uses the loaded tracked snapshot and Swift aggregation,
   ignoring viewing filters and making no network requests. Native export uses a Save dialog.
-- Cache removal is ownership-checked and limited to unlisted repositories after
-  a successful live GitHub refresh; Settings discovery and Cached history alone
+- Cache removal lives in Workspace Settings > Storage. It is ownership-checked
+  and limited to unlisted repositories after a successful live GitHub refresh; Settings discovery and Cached history alone
   do not authorize removal. GitHub path links verify retained revisions locally.
   Never scan or mutate developer checkouts.
 - Bookmarks use a fresh native account-scoped timestamp file. Their baseline stays fixed during

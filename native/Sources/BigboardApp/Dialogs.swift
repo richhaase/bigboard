@@ -5,13 +5,13 @@ struct WorkspacePanel: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     @Environment(\.dismiss) private var dismiss
-    var title: String { switch panel { case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities"; case .repositories: "Repository controls" } }
+    var title: String { switch panel { case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities"; case .repositories: "Repository filter" } }
     var body: some View {
         VStack(spacing: 0) {
             HStack { Text(title).font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
             Divider()
             if !workspace.error.isEmpty { Text(workspace.error).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
-            if workspace.busy { ProgressView().controlSize(.small).padding(8) }
+            if workspace.busy, panel != .settings { ProgressView().controlSize(.small).padding(8) }
             Group {
                 switch panel {
                 case .settings: SettingsPanel(workspace: workspace)
@@ -19,7 +19,7 @@ struct WorkspacePanel: View {
                 case .status: StatusPanel(workspace: workspace)
                 case .help: HelpPanel()
                 case .identities: IdentitiesPanel(workspace: workspace)
-                case .repositories: RepositoriesPanel(workspace: workspace)
+                case .repositories: RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.frame(width: 780, height: 700)
@@ -30,8 +30,9 @@ struct SettingsPanel: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft = WorkspaceConfiguration()
     @State private var selected: Set<String> = []
-    @State private var discovered = false
-    @State private var reviewing = false
+    @State private var applying = false
+    @State private var initialized = false
+    @State private var repositorySort = SettingsRepositorySort.recent
     @State private var tab = "repositories"
     @State private var query = ""
     @State private var groupName = ""
@@ -39,33 +40,49 @@ struct SettingsPanel: View {
     @State private var areaRepo = ""
     @State private var areaName = ""
     @State private var areaPaths = ""
-    var repositoryIDs: [String] { Set(workspace.discovered.map(\.id) + draft.repositories).sorted().filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) } }
+    private var repositoryRows: [Repository] { SettingsRepositories.rows(available: workspace.discovered, saved: Array(Set(draft.repositories).union(selected)), sort: repositorySort, query: query) }
+    private var availableIDs: Set<String> { Set(workspace.discovered.map(\.id)) }
+    private var selectableVisibleIDs: Set<String> { Set(repositoryRows.map(\.id)).intersection(availableIDs) }
     var body: some View {
         VStack(spacing: 0) {
-            if reviewing { review }
-            else {
-                Picker("Settings section", selection: $tab) { Text("Repositories").tag("repositories"); Text("Groups & areas").tag("organization"); Text("Analysis").tag("analysis") }.pickerStyle(.segmented).padding()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if tab == "repositories" { repositories }
-                        else if tab == "organization" { organization }
-                        else { analysis }
-                    }.padding(20)
-                }
-            }
-            Divider()
-            HStack {
-                if reviewing { Button("Back") { reviewing = false } }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(reviewing ? "Save workspace" : "Review changes") {
-                    if reviewing {
+            Picker("Settings section", selection: $tab) {
+                Text("Repositories").tag("repositories")
+                Text("Groups & areas").tag("organization")
+                Text("General").tag("general")
+                Text("Advanced").tag("advanced")
+                Text("Storage").tag("storage")
+            }.pickerStyle(.segmented).padding()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if tab == "repositories" { repositories }
+                    else if tab == "organization" { organization }
+                    else if tab == "storage" { StorageSettingsPanel(workspace: workspace) }
+                    else if tab == "advanced" { advanced }
+                    else { general }
+                }.padding(20)
+            }.disabled(applying)
+            if tab != "storage" {
+                Divider()
+                HStack {
+                    if applying { ProgressView("Applying settings…").controlSize(.small) }
+                    Spacer()
+                    Button("Cancel") { dismiss() }.disabled(applying)
+                    Button("Apply") {
                         prepare()
-                        Task { await workspace.saveConfiguration(draft); if workspace.configuration == draft { dismiss() } }
-                    } else { prepare(); reviewing = true }
-                }.buttonStyle(.borderedProminent).disabled(workspace.busy || !workspace.authStatus.signedIn || selected.isEmpty || (Set(workspace.configuration.repositories) != selected && !discovered))
-            }.padding()
-        }.onAppear { draft = workspace.configuration; selected = Set(draft.repositories) }
+                        let candidate = draft
+                        applying = true
+                        Task {
+                            let saved = await workspace.saveConfiguration(candidate)
+                            applying = false
+                            if saved { dismiss() }
+                        }
+                    }.buttonStyle(.borderedProminent).disabled(applying || workspace.busy || !workspace.authStatus.signedIn || selected.isEmpty)
+                }.padding()
+            }
+        }.onAppear {
+            guard !initialized else { return }
+            initialized = true; draft = workspace.configuration; selected = Set(draft.repositories)
+        }
     }
     private var repositories: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -77,15 +94,31 @@ struct SettingsPanel: View {
                 else { Button("Sign in") { Task { await workspace.signIn() } }.disabled(!workspace.authStatus.configured) }
             }
             HStack {
-                Button("Discover repositories", systemImage: "arrow.clockwise") { Task { await workspace.discover(); discovered = workspace.error.isEmpty; if discovered { selected.formIntersection(workspace.discovered.map(\.id)) } } }.disabled(workspace.busy || !workspace.authStatus.signedIn)
+                Button("Refresh repository list", systemImage: "arrow.clockwise") { Task { await workspace.discover() } }.disabled(workspace.busy || !workspace.authStatus.signedIn)
                 Text("\(selected.count) selected").foregroundStyle(.secondary)
                 Spacer()
-                Button("Select visible") { selected.formUnion(repositoryIDs) }.disabled(!discovered)
-                Button("Clear") { selected = [] }
+                Button(query.isEmpty ? "Select all" : "Select visible") { selected.formUnion(selectableVisibleIDs) }.disabled(selectableVisibleIDs.isEmpty)
+                Button("Clear selection") { selected = [] }.disabled(selected.isEmpty)
             }
-            TextField("Search repositories", text: $query).textFieldStyle(.roundedBorder)
-            if repositoryIDs.isEmpty { Text("Discover repositories, select the ones to track, then review and save.").foregroundStyle(.secondary).padding(.vertical, 30) }
-            ForEach(repositoryIDs, id: \.self) { id in Toggle(id, isOn: membership(id, $selected)).toggleStyle(.checkbox) }
+            HStack {
+                TextField("Search repositories", text: $query).textFieldStyle(.roundedBorder)
+                Picker("Sort", selection: $repositorySort) {
+                    Text("Recent push").tag(SettingsRepositorySort.recent)
+                    Text("Name").tag(SettingsRepositorySort.name)
+                }.frame(width: 180)
+            }
+            if repositoryRows.isEmpty { Text("Refresh the repository list, choose what to track, then apply your settings.").foregroundStyle(.secondary).padding(.vertical, 30) }
+            ForEach(repositoryRows) { repo in
+                HStack(alignment: .top) {
+                    Toggle(repo.id, isOn: membership(repo.id, $selected)).toggleStyle(.checkbox)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        if let pushed = repo.pushedAt { Text("Last push \(pushed.formatted(date: .abbreviated, time: .omitted))") }
+                        else { Text("Push date unavailable") }
+                        if !availableIDs.contains(repo.id) { Text("Not in current access list").foregroundStyle(.orange) }
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
     private var organization: some View {
@@ -114,40 +147,33 @@ struct SettingsPanel: View {
             }.disabled(areaRepo.isEmpty || areaName.isEmpty || entries(areaPaths).isEmpty)
         }.textFieldStyle(.roundedBorder)
     }
-    private var analysis: some View {
+    private var general: some View {
         VStack(alignment: .leading, spacing: 18) {
+            SectionTitle(title: "Startup defaults", detail: "Choose the initial view when opening a workspace")
+            LabeledContent("Date range (days; 0 for all time)") { TextField("Days", value: $draft.sinceDays, format: .number).frame(width: 90) }
+            Picker("Contributor sort", selection: $draft.contributorSort) { Text("Lines changed").tag("change"); Text("Commits").tag("commits"); Text("Name").tag("name"); Text("Additions").tag("added"); Text("Removals").tag("removed"); Text("Net lines").tag("net"); Text("AI share").tag("ai"); Text("Recent").tag("recent") }
+            Divider()
             Toggle("Use cached history only", isOn: $draft.cachedOnly)
-            Text("Cached mode reads local history and leaves live PR context unavailable.").font(.caption).foregroundStyle(.secondary)
+            Text("Read local history without refreshing GitHub. Live pull-request information is unavailable in this mode.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private var advanced: some View {
+        VStack(alignment: .leading, spacing: 18) {
             Toggle("Include generated, vendored, and bulk-data line changes", isOn: $draft.allFiles)
-            LabeledContent("Startup date range (days; 0 for all time)") { TextField("Days", value: $draft.sinceDays, format: .number).frame(width: 90) }
+            Text("These changes are excluded from line totals by default; commits remain visible.").font(.caption).foregroundStyle(.secondary)
             LabeledContent("Pull-request request budget") { TextField("Requests", value: $draft.requestBudget, format: .number).frame(width: 90) }
-            Picker("Startup contributor sort", selection: $draft.contributorSort) { Text("Lines changed").tag("change"); Text("Commits").tag("commits"); Text("Name").tag("name"); Text("Additions").tag("added"); Text("Removals").tag("removed"); Text("Net lines").tag("net"); Text("AI share").tag("ai"); Text("Recent").tag("recent") }
+            Text("Maximum API requests for pull-request collection during a refresh.").font(.caption).foregroundStyle(.secondary)
             stringList("Exclude repository patterns", values: $draft.exclude)
             stringList("Additional AI identities", values: $draft.aiIdentities)
             stringList("Additional bot identities", values: $draft.botIdentities)
-            Text("Enter one value per line. Repository exclusions support glob patterns. Identity patterns are matched against author names and emails.").font(.caption).foregroundStyle(.secondary)
-        }
-    }
-    private var review: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Review your workspace").font(.title2)
-                Text("\(selected.count) repositories · \(draft.groups.count) groups · \(draft.workAreas.values.flatMap { $0 }.count) work areas").font(.headline)
-                ForEach(selected.sorted(), id: \.self) { Text($0) }
-                Divider()
-                Text(draft.cachedOnly ? "Read cached history only" : "Refresh history and live pull requests")
-                Text(draft.allFiles ? "Include all line changes" : "Exclude generated, vendored, and bulk-data line changes")
-                Text("Startup range: \(draft.sinceDays == 0 ? "all time" : "\(draft.sinceDays) days") · Request budget: \(draft.requestBudget)")
-                Text("Saving refreshes the workspace with these settings.").foregroundStyle(.secondary)
-            }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            Text("Enter one rule per line. Repository exclusions use glob patterns. AI rules use author/coauthor email addresses or @domain; bot rules also accept exact names.").font(.caption).foregroundStyle(.secondary)
         }
     }
     private func prepare() {
-        draft.repositories = selected.sorted()
+        draft = SettingsRepositories.applying(selected, available: availableIDs, to: draft)
         draft.exclude = entries(draft.exclude.joined(separator: "\n"))
         draft.aiIdentities = entries(draft.aiIdentities.joined(separator: "\n"))
         draft.botIdentities = entries(draft.botIdentities.joined(separator: "\n"))
-        if discovered { draft.excludedRepositories = Set(workspace.discovered.map(\.id)).subtracting(selected).sorted() }
     }
     private func stringList(_ label: String, values: Binding<[String]>) -> some View { VStack(alignment: .leading) { Text(label); TextEditor(text: Binding(get: { values.wrappedValue.joined(separator: "\n") }, set: { values.wrappedValue = $0.components(separatedBy: .newlines) })).font(.body.monospaced()).frame(height: 65).border(.quaternary) } }
 }
@@ -168,9 +194,8 @@ struct FiltersPanel: View {
                 Section("Shared scope") {
                     Toggle("Since last look", isOn: $since).disabled(workspace.snapshot.bookmark == nil)
                     LabeledContent("Last days (0 for all time)") { TextField("Days", value: $days, format: .number).frame(width: 100).disabled(since) }
-                    DisclosureGroup("Repositories (\(repositories.isEmpty ? "all" : "\(repositories.count)"))") {
-                        Button("All repositories") { repositories = [] }
-                        ForEach(workspace.snapshot.repositories) { repo in Toggle(repo.id, isOn: membership(repo.id, $repositories)) }
+                    DisclosureGroup("Repository filter (\(repositories.isEmpty ? "all" : "\(repositories.count) selected"))") {
+                        RepositoryFilterSelection(repositories: workspace.snapshot.repositories, selection: $repositories)
                     }
                 }
                 Section(navigation.board.rawValue) {
@@ -189,7 +214,7 @@ struct FiltersPanel: View {
                     } else { Text("Review, check, author, and attention facets are also available above the PR list.").foregroundStyle(.secondary) }
                 }
             }.formStyle(.grouped)
-            HStack { Button("Reset this board") { filters = BoardFilters(sort: filters.sort, reversed: filters.reversed) }; Button("Reset shared scope") { days = workspace.configuration.sinceDays; since = false; repositories = [] }; Spacer(); Button("Cancel") { dismiss() }; Button("Apply") { navigation.currentFilters = filters; navigation.days = max(0, min(3650, days)); navigation.sinceLastLook = since; navigation.repositories = repositories; dismiss() }.buttonStyle(.borderedProminent) }.padding()
+            HStack { Button("Reset this board") { filters = BoardFilters(sort: filters.sort, reversed: filters.reversed) }; Button("Reset shared scope") { days = workspace.configuration.sinceDays; since = false; repositories = [] }; Spacer(); Button("Cancel") { dismiss() }; Button("Apply") { navigation.currentFilters = filters; navigation.days = max(0, min(3650, days)); navigation.sinceLastLook = since; navigation.setRepositoryFilter(repositories, available: workspace.snapshot.repositories); dismiss() }.buttonStyle(.borderedProminent) }.padding()
         }.onAppear { filters = navigation.currentFilters; days = navigation.days; since = navigation.sinceLastLook; repositories = navigation.repositories }
     }
 }
@@ -221,26 +246,63 @@ struct StatusPanel: View {
         }
     }
 }
-struct RepositoriesPanel: View {
-    @Bindable var workspace: WorkspaceModel
-    @State private var selected: Set<String> = []
-    @State private var removal: String?
-    var ids: [String] { Set(workspace.discovered.map(\.id) + workspace.snapshot.repositories.map(\.id) + workspace.configuration.repositories).sorted() }
+struct RepositoryFilterPanel: View {
+    var repositories: [Repository]
+    @Bindable var navigation: BoardState
     var body: some View {
-        VStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Session tracking").font(.headline)
-                    Text("Choose which repositories load during this session. Use Settings to change your saved workspace.").foregroundStyle(.secondary)
-                    ForEach(ids, id: \.self) { Toggle($0, isOn: membership($0, $selected)).toggleStyle(.checkbox) }
-                    Button("Apply session tracking") { Task { await workspace.setTracked(selected) } }.disabled(workspace.busy)
-                    SectionTitle(title: "Unlisted caches")
-                    Text("Caches can be removed after live access confirms that a repository is no longer available to the app. Removing a cache does not change the repository on GitHub.").font(.caption).foregroundStyle(.secondary)
-                    ForEach(workspace.cachedRepositoryRows.filter { workspace.removableCacheIDs.contains($0.id) }) { repo in HStack { Text(repo.id); Spacer(); Button("Remove cache…", role: .destructive) { removal = repo.id }.disabled(workspace.busy) } }
-                    if workspace.removableCacheIDs.isEmpty { Text("No removable caches.").foregroundStyle(.secondary) }
-                }.padding(24)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Choose which loaded repositories appear across Activity, Contributors, and Pull requests. Changes take effect immediately.").foregroundStyle(.secondary)
+                RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), preferredRepository: navigation.contextualRepository ?? (navigation.scope.repo.isEmpty ? nil : navigation.scope.repo))
+                Text("Manage saved collection choices in Workspace Settings → Repositories.").font(.caption).foregroundStyle(.secondary)
+            }.padding(24)
+        }
+    }
+}
+struct RepositoryFilterSelection: View {
+    var repositories: [Repository]
+    @Binding var selection: Set<String>
+    var preferredRepository: String? = nil
+    @State private var query = ""
+    private var available: Set<String> { Set(repositories.map(\.id)) }
+    private var visible: [Repository] { repositories.sorted { $0.id < $1.id }.filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) } }
+    private var showsAll: Binding<Bool> { Binding(get: { selection.isEmpty }, set: { selection = $0 ? [] : BoardState.startingRepositorySelection(from: repositories, preferred: preferredRepository) }) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Show", selection: showsAll) {
+                Text("All loaded repositories (\(repositories.count))").tag(true)
+                Text("Selected repositories").tag(false).disabled(repositories.isEmpty)
+            }.pickerStyle(.radioGroup)
+            if repositories.isEmpty { Text("No repository data is loaded. Choose repositories in Settings to get started.").foregroundStyle(.secondary) }
+            else if !selection.isEmpty {
+                HStack {
+                    Text("\(selection.intersection(available).count) of \(repositories.count) selected").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Select all loaded") { selection = available }
+                }
+                TextField("Search loaded repositories", text: $query).textFieldStyle(.roundedBorder)
+                ForEach(visible) { repo in
+                    Toggle(repo.id, isOn: membership(repo.id, $selection)).toggleStyle(.checkbox)
+                        .disabled(selection.intersection(available) == [repo.id])
+                }
+                if visible.isEmpty { Text("No loaded repositories match this search.").foregroundStyle(.secondary) }
+                Text("Keep at least one repository selected, or choose All loaded repositories.").font(.caption).foregroundStyle(.secondary)
             }
-        }.onAppear { selected = Set(ids).subtracting(workspace.sessionExcluded) }
+        }
+    }
+}
+struct StorageSettingsPanel: View {
+    @Bindable var workspace: WorkspaceModel
+    @State private var removal: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle(title: "Local storage")
+            Text(workspace.storageDescription).font(.callout.monospaced()).textSelection(.enabled)
+            SectionTitle(title: "Unlisted caches")
+            Text("Caches can be removed after live access confirms that a repository is no longer available to the app. Removing a cache does not change the repository on GitHub.").font(.caption).foregroundStyle(.secondary)
+            ForEach(workspace.cachedRepositoryRows.filter { workspace.removableCacheIDs.contains($0.id) }) { repo in HStack { Text(repo.id); Spacer(); Button("Remove cache…", role: .destructive) { removal = repo.id }.disabled(workspace.busy) } }
+            if workspace.removableCacheIDs.isEmpty { Text("No removable caches.").foregroundStyle(.secondary) }
+        }
         .confirmationDialog("Remove local cache?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
             if let id = removal { Button("Remove \(id)", role: .destructive) { Task { await workspace.removeCache(id) }; removal = nil } }
         } message: { Text("The local mirror will be deleted. It can be downloaded again if access is restored.") }
@@ -289,7 +351,7 @@ struct IdentitiesPanel: View {
     }
 }
 struct HelpPanel: View {
-    let commands: [(String, String)] = [("A / C / P", "Activity / Contributors / Pull requests"), ("⌘R or R", "Refresh repository evidence"), ("/", "Focus search"), ("F or T", "Open filters"), ("E", "Data status"), ("I", "Repository controls"), ("⌘, or ,", "Workspace settings"), ("? or F1", "Keyboard guide"), ("X", "Reset this board’s filters"), ("Y", "Copy the current view as Markdown"), ("B", "Show or hide bots"), ("S / Shift-S", "Cycle sort / reverse sort order"), ("Return / →", "Directories: explore the selected row"), ("O", "Open the selected path or PR on GitHub"), ("1 / 2 / 3 / 4 / 5", "Activity: commits / people / related / directories / heat"), ("Escape or ←", "Move back through Activity context"), ("V", "Activity: open repository pull requests"), ("M", "Activity: switch related evidence; Contributors: edit identities; PRs: needs attention"), ("Shift-M / N", "PRs: authored by me / review requested")]
+    let commands: [(String, String)] = [("A / C / P", "Activity / Contributors / Pull requests"), ("⌘R or R", "Refresh repository evidence"), ("/", "Focus search"), ("F or T", "Open filters"), ("E", "Data status"), ("I", "Repository filter"), ("⌘, or ,", "Workspace settings"), ("? or F1", "Keyboard guide"), ("X", "Reset this board’s filters"), ("Y", "Copy the current view as Markdown"), ("B", "Show or hide bots"), ("S / Shift-S", "Cycle sort / reverse sort order"), ("Return / →", "Directories: explore the selected row"), ("O", "Open the selected path or PR on GitHub"), ("1 / 2 / 3 / 4 / 5", "Activity: commits / people / related / directories / heat"), ("Escape or ←", "Move back through Activity context"), ("V", "Activity: open repository pull requests"), ("M", "Activity: switch related evidence; Contributors: edit identities; PRs: needs attention"), ("Shift-M / N", "PRs: authored by me / review requested")]
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 14) { Text("Shortcuts work when you are not editing text. Use standard macOS list navigation, window controls, and menu commands throughout the app.").foregroundStyle(.secondary); ForEach(commands, id: \.0) { key, action in HStack { Text(key).font(.body.monospaced()).frame(width: 180, alignment: .leading); Text(action); Spacer() }; Divider() }; Text("Heat compares each area with its own recent history. Contribution totals describe changes; they do not measure productivity. Pull-request evidence may be partial; Data status explains coverage.").foregroundStyle(.secondary) }.padding(24) }
     }

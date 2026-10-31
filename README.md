@@ -43,12 +43,21 @@ for missing live data.
 | Pull requests | Open PRs, review/check state, individual review requests, and work needing your attention. |
 
 Date and repository viewing scope apply across boards. Each board retains its
-own search, sort, and selection. Settings manages tracked repositories, named
-groups, work areas, analysis rules, and offline mode. Repository controls manages
-session tracking and eligible cache removal. Identities merges email aliases
-without merging people merely because they share a display name.
+own search, sort, and selection. **Repository filter** shows all loaded repositories
+or a selected subset across all three boards. It changes only what you see,
+without refreshing data or saving collection choices.
 
-The app uses native sidebar navigation, tables, inspectors, sheets, menus,
+**Settings** manages saved repository collection choices, named groups, work
+areas, startup defaults, advanced counting rules, and offline mode. Eligible local caches can be removed
+under **Settings → Storage**. Identities merges email aliases without merging
+people merely because they share a display name.
+
+The sidebar contains Activity, Contributors, and Pull requests. Date and repository
+filters sit in the toolbar; the repository picker stays open for multiple selections.
+Workspace Settings is in the app menu, Keyboard Guide is under Help, and Data
+Status opens from the toolbar indicator.
+
+The app uses native tables, inspectors, sheets, menus,
 clipboard actions, and Save dialogs. Activity is evidence, not a productivity
 score or a judgment that a PR is ready to merge.
 

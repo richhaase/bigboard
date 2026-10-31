@@ -64,6 +64,56 @@ import Testing
         #expect(state.relatedEvidence == nil)
         #expect(state.evidenceRecords([matching, unrelated], canonical: [matching, unrelated]).count == 2)
     }
+    @Test func selectedRepositoryModeStartsWithOneRelevantRepository() {
+        let repos = [Repository(id: "acme/service"), Repository(id: "acme/app"), Repository(id: "acme/library")]
+        #expect(BoardState.startingRepositorySelection(from: repos, preferred: "acme/library") == ["acme/library"])
+        #expect(BoardState.startingRepositorySelection(from: repos) == ["acme/app"])
+        #expect(BoardState.startingRepositorySelection(from: repos, preferred: "unloaded/repo") == ["acme/app"])
+        #expect(BoardState.startingRepositorySelection(from: []).isEmpty)
+    }
+    @Test func repositoryPopoverRemainsOpenAcrossSelections() {
+        let state = BoardState()
+        let repos = [Repository(id: "acme/app"), Repository(id: "acme/library"), Repository(id: "acme/service")]
+        state.toggleRepositoryPopover()
+        #expect(state.repositoryPopoverPresented)
+        state.setRepositoryFilter(["acme/app", "acme/library"], available: repos)
+        #expect(state.repositoryPopoverPresented)
+        state.setRepositoryFilter(["acme/library"], available: repos)
+        #expect(state.repositoryPopoverPresented)
+        state.setRepositoryFilter([], available: repos)
+        #expect(state.repositoryPopoverPresented)
+        #expect(state.panel == nil)
+        state.dismissRepositoryPopover()
+        #expect(!state.repositoryPopoverPresented)
+        #expect(state.repositories.isEmpty)
+    }
+    @Test func repositoryPopoverYieldsToOtherNavigation() {
+        let state = BoardState()
+        state.toggleRepositoryPopover()
+        state.panel = .status
+        #expect(!state.repositoryPopoverPresented)
+        #expect(state.panel == .status)
+        state.toggleRepositoryPopover()
+        #expect(state.panel == nil)
+        state.switchBoard(.contributors)
+        #expect(!state.repositoryPopoverPresented)
+        state.toggleRepositoryPopover()
+        state.resetForAccount(WorkspaceConfiguration())
+        #expect(!state.repositoryPopoverPresented)
+    }
+    @Test func dataStatusIndicatorQualifiesIncompleteAndCachedEvidence() {
+        let complete = Repository(id: "acme/app", prInventoryComplete: true, prFilesComplete: true, prReviewersComplete: true)
+        var snapshot = Snapshot(repositories: [complete])
+        let loaded = DataStatusPresentation(snapshot: snapshot, busy: false, checkingSignIn: false, signedIn: true, error: "")
+        #expect(!loaded.warning && !loaded.loading)
+        snapshot.repositories[0].prFilesComplete = false
+        #expect(DataStatusPresentation(snapshot: snapshot, busy: false, checkingSignIn: false, signedIn: true, error: "").warning)
+        snapshot.cachedOnly = true
+        let cached = DataStatusPresentation(snapshot: snapshot, busy: false, checkingSignIn: false, signedIn: true, error: "")
+        #expect(cached.label == "Cached history")
+        #expect(!cached.warning)
+        #expect(DataStatusPresentation(snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "").loading)
+    }
     @Test func reverseSortIsStableForEqualMetrics() {
         let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [commit("a", email: "a@example.test"), commit("b", email: "b@example.test"), commit("c", email: "c@example.test")])
         let state = BoardState(); let forward = state.peopleRows(snapshot).map(\.id)

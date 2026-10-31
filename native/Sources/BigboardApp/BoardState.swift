@@ -45,7 +45,8 @@ struct BoardFilters: Equatable {
     var commitLimit = 100
     var contextualRepository: String?
     var savedPRFilters: BoardFilters?
-    var panel: Panel?
+    var repositoryPopoverPresented = false
+    var panel: Panel? { didSet { if panel != nil { repositoryPopoverPresented = false } } }
     var preferencesApplied = false
     var rangeLabel: String { sinceLastLook ? "Since last look" : days == 0 ? "All time" : "Last \(days) days" }
     var currentFilters: BoardFilters {
@@ -56,6 +57,22 @@ struct BoardFilters: Equatable {
         if sinceLastLook, let bookmark = snapshot.bookmark { return date.map { $0 > bookmark } ?? false }
         guard days > 0 else { return true }
         return date.map { $0 > snapshot.generatedAt.addingTimeInterval(-Double(days) * 86400) } ?? false
+    }
+    static func startingRepositorySelection(from repositories: [Repository], preferred: String? = nil) -> Set<String> {
+        let ids = repositories.map(\.id).sorted()
+        if let preferred, ids.contains(preferred) { return [preferred] }
+        if let first = ids.first { return [first] }
+        return []
+    }
+    func toggleRepositoryPopover() { panel = nil; repositoryPopoverPresented.toggle() }
+    func dismissRepositoryPopover() { repositoryPopoverPresented = false }
+    var repositoryFilterLabel: String { repositories.isEmpty ? "All" : "\(repositories.count) selected" }
+    @discardableResult func setRepositoryFilter(_ ids: Set<String>, available: [Repository]) -> Bool {
+        let selected = ids.intersection(available.map(\.id))
+        guard ids.isEmpty || !selected.isEmpty else { return false }
+        repositories = selected
+        reconcile()
+        return true
     }
     func visibleRepositories(_ snapshot: Snapshot) -> [Repository] { snapshot.repositories.filter { repositories.isEmpty || repositories.contains($0.id) } }
     func filteredCommits(_ snapshot: Snapshot, heat: Bool = false, for board: Board? = nil) -> [Commit] {
@@ -125,9 +142,10 @@ struct BoardFilters: Equatable {
     }
     func returnToActivity() { restorePRFilters(); board = .activity }
     func restorePRFilters() { if let savedPRFilters { prs = savedPRFilters }; savedPRFilters = nil; contextualRepository = nil }
-    func switchBoard(_ value: Board) { restorePRFilters(); board = value }
+    func switchBoard(_ value: Board) { dismissRepositoryPopover(); restorePRFilters(); board = value }
     func resetBoard() { let old = currentFilters; currentFilters = BoardFilters(sort: old.sort, reversed: old.reversed) }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
+        dismissRepositoryPopover()
         days = configuration.sinceDays; sinceLastLook = false; repositories = []
         activity = BoardFilters(); contributors = BoardFilters(sort: configuration.contributorSort); prs = BoardFilters(sort: "updated")
         scope = ActivityScope(); lens = .heat; activitySelection = nil; contributorSelection = nil; prSelection = nil
@@ -140,5 +158,8 @@ struct BoardFilters: Equatable {
         if let contextualRepository, !available.contains(contextualRepository) { restorePRFilters() }
         reconcile()
     }
-    func reconcile() { if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; relatedEvidence = nil; lens = .heat } }
+    func reconcile() {
+        if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; scopedPerson = nil; relatedEvidence = nil; lens = .heat }
+        if let contextualRepository, !repositories.isEmpty && !repositories.contains(contextualRepository) { restorePRFilters() }
+    }
 }

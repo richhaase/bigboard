@@ -13,7 +13,6 @@ final class WorkspaceModel {
     var cachedRepositoryRows: [Repository] = []
     var removableCacheIDs: Set<String> { inventoryVerified ? Set(cachedRepositoryRows.map(\.id)).subtracting(authorized.map(\.id)) : [] }
     var activeGroup = ""
-    var sessionExcluded: Set<String> = []
     var storageDescription: String { "Settings: \(storage.supportRoot.path)\nHistory: \(storage.cacheRoot.path)" }
     let isPreview: Bool
     private let storage: WorkspaceStorage
@@ -58,7 +57,7 @@ final class WorkspaceModel {
         authorized = try storage.loadGrant(account)
         baseline = try storage.bookmarks(account)
         eligible = [:]; discovered = []; cachedRepositoryRows = []; inventoryVerified = false; discoveryVerified = false; pendingGitDenials = []; pendingGitAuthentication = false
-        sessionExcluded = []; activeGroup = ""
+        activeGroup = ""
         history = GitHistory(root: try storage.repositoryRoot(account))
         let manager = auth
         github = GitHubService(token: { try await manager.token() }, transport: transport)
@@ -66,20 +65,27 @@ final class WorkspaceModel {
         snapshot.bookmark = baseline[bookmarkKey]
     }
     func refresh() async {
-        guard !isPreview, !busy, history != nil, github != nil, !account.isEmpty else { return }
+        await beginRefresh()?.value
+    }
+    private func beginRefresh() -> Task<Void, Never>? {
+        guard !isPreview, !busy, history != nil, github != nil, !account.isEmpty else { return nil }
         busy = true
+        snapshot.coverage.phase = "refreshing"
+        snapshot.coverage.message = "Refreshing workspace…"
         let operation = generation
-        let task = Task { await self.performRefresh(operation: operation) }
+        let task = Task {
+            await self.performRefresh(operation: operation)
+            if operation == self.generation { self.refreshTask = nil }
+        }
         refreshTask = task
-        await task.value
-        if operation == generation { refreshTask = nil }
+        return task
     }
     private func selected(_ repositories: [Repository]) -> [Repository] {
         let configured = Set(configuration.repositories)
         let excluded = Set(configuration.excludedRepositories)
         let group = activeGroup.isEmpty ? nil : Set(configuration.groups[activeGroup] ?? [])
         return repositories.filter { repo in
-            if excluded.contains(repo.id) || sessionExcluded.contains(repo.id) { return false }
+            if excluded.contains(repo.id) { return false }
             if let group, !group.contains(repo.id) { return false }
             if configured.contains(repo.id) { return true }
             let name = String(repo.id.split(separator: "/").last ?? "")
@@ -120,13 +126,14 @@ final class WorkspaceModel {
         }
         do {
             let previousGrant = authorized
+            discoveryVerified = false
             try storage.invalidateGrant(id)
             do {
                 let repos = try await github.discover()
                 guard operation == generation, !Task.isCancelled else { return }
                 authorized = repos
                 try storage.saveGrant(repos, account: id)
-                discovered = repos; inventoryVerified = true
+                discovered = repos; inventoryVerified = true; discoveryVerified = true
             } catch {
                 guard operation == generation, !Task.isCancelled else { return }
                 if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
@@ -254,7 +261,7 @@ final class WorkspaceModel {
         authorized = []; discovered = []; cachedRepositoryRows = []; configuration = WorkspaceConfiguration()
         snapshot = Snapshot(); snapshot.coverage = Coverage(phase: "signin", message: GitHubFailure.auth.localizedDescription)
         account = ""; history = nil; github = nil; baseline = [:]; eligible = [:]
-        activeGroup = ""; sessionExcluded = []; pendingGitDenials = []; pendingGitAuthentication = false
+        activeGroup = ""; pendingGitDenials = []; pendingGitAuthentication = false
         inventoryVerified = false; discoveryVerified = false
         checkingSignIn = false
         authStatus.signedIn = false; authStatus.login = ""; authStatus.accountID = ""; authStatus.pending = false
@@ -298,17 +305,37 @@ final class WorkspaceModel {
             self.error = error.localizedDescription
         }
     }
-    func saveConfiguration(_ config: WorkspaceConfiguration) async {
-        if isPreview { configuration = config; return }
-        guard !busy, !account.isEmpty else { return }
+    @discardableResult
+    func saveConfiguration(_ config: WorkspaceConfiguration) async -> Bool {
+        if isPreview { configuration = config; return true }
+        guard !busy, !account.isEmpty, authStatus.signedIn else {
+            error = busy ? "Wait for the current operation to finish before applying settings." : "Sign in before applying settings."
+            return false
+        }
+        let operation = generation
         do {
-            if config.repositories != configuration.repositories {
-                guard discoveryVerified, !config.repositories.isEmpty, Set(config.repositories).isSubset(of: Set(discovered.map(\.id))) else { throw BigboardError.message("Discover repositories and select at least one before saving.") }
+            try storage.validate(config)
+            guard !config.repositories.isEmpty else { throw BigboardError.message("Select at least one repository to track.") }
+            if Set(config.repositories) != Set(configuration.repositories) {
+                if !discoveryVerified {
+                    await discover()
+                    guard operation == generation, !Task.isCancelled else { return false }
+                    guard discoveryVerified else {
+                        if error.isEmpty { error = "Repository access could not be verified. Try applying again." }
+                        return false
+                    }
+                }
+                let unavailable = Set(config.repositories).subtracting(discovered.map(\.id)).sorted()
+                guard unavailable.isEmpty else { throw BigboardError.message("These selected repositories are not in the current access list: \(unavailable.joined(separator: ", ")). Refresh the list or remove them from your selection.") }
             }
             try storage.saveConfiguration(config, account: account)
-            configuration = config; sessionExcluded = []; eligible = [:]
-            await refresh()
-        } catch { self.error = error.localizedDescription }
+            configuration = config; eligible = [:]; error = ""
+            _ = beginRefresh()
+            return true
+        } catch {
+            if operation == generation { self.error = error.localizedDescription }
+            return false
+        }
     }
     func saveIdentities(_ rules: [String: IdentityRule]) async {
         if isPreview { configuration.identities = rules; return }
@@ -327,8 +354,6 @@ final class WorkspaceModel {
         } catch { self.error = error.localizedDescription; busy = false }
     }
     func selectGroup(_ name: String) async { guard !busy else { return }; activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]; await refresh() }
-    func setTracked(_ ids: Set<String>) async { guard !busy else { return }; sessionExcluded = Set((isPreview ? discovered : authorized).map(\.id)).subtracting(ids); await refresh() }
-    func setTracked(_ ids: [String]) async { await setTracked(Set(ids)) }
     func removeCache(_ id: String) async {
         guard !isPreview else { return }
         guard !busy, inventoryVerified, !authorized.contains(where: {$0.id == id}), let history else { error = "Refresh live access before removing an unlisted cache."; return }
@@ -373,7 +398,7 @@ final class WorkspaceModel {
         let operation = generation
         snapshot = Snapshot(); configuration = WorkspaceConfiguration(); discovered = []; authorized = []; cachedRepositoryRows = []
         account = ""; history = nil; github = nil; baseline = [:]; eligible = [:]; busy = false
-        activeGroup = ""; sessionExcluded = []; pendingGitDenials = []; pendingGitAuthentication = false; inventoryVerified = false; discoveryVerified = false
+        activeGroup = ""; pendingGitDenials = []; pendingGitAuthentication = false; inventoryVerified = false; discoveryVerified = false
         checkingSignIn = false
         authStatus.signedIn = false; authStatus.login = ""; authStatus.accountID = ""; authStatus.pending = false
         do { try await auth.signOut() } catch { if operation == generation { self.error = error.localizedDescription } }
