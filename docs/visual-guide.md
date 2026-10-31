@@ -13,8 +13,12 @@ coverage details. It spins during refresh, while progress also appears at the
 top of the main screen.
 
 Use the toolbar Repository filter to focus on a few already loaded repositories.
-The picker stays open for multiple selections and applies each change
-immediately. Settings controls collection; the toolbar filter controls viewing.
+All loaded repositories start checked in one checklist. Uncheck the repositories
+you want to hide; changes apply immediately while the picker stays open. The
+last checked repository cannot be unchecked until you check another. Search
+finds repositories, and **Select all loaded** restores every checkmark. Close and
+reopen the picker to see the current selection. These are viewing changes only,
+without refreshing data or saving collection settings.
 
 ## Follow a change through the code
 

@@ -64,28 +64,53 @@ import Testing
         #expect(state.relatedEvidence == nil)
         #expect(state.evidenceRecords([matching, unrelated], canonical: [matching, unrelated]).count == 2)
     }
-    @Test func selectedRepositoryModeStartsWithOneRelevantRepository() {
-        let repos = [Repository(id: "acme/service"), Repository(id: "acme/app"), Repository(id: "acme/library")]
-        #expect(BoardState.startingRepositorySelection(from: repos, preferred: "acme/library") == ["acme/library"])
-        #expect(BoardState.startingRepositorySelection(from: repos) == ["acme/app"])
-        #expect(BoardState.startingRepositorySelection(from: repos, preferred: "unloaded/repo") == ["acme/app"])
-        #expect(BoardState.startingRepositorySelection(from: []).isEmpty)
+    @Test func repositoryChecklistStartsWithAllAndProtectsOnlyTheLastCheckedRepository() throws {
+        let available = Set((1...13).map { "acme/repo\($0)" })
+        var checklist = RepositoryChecklist(selection: [], available: available)
+        #expect(checklist.checked == available)
+        checklist.selection = try #require(checklist.setting("acme/repo1", checked: false))
+        #expect(checklist.checked.count == 12)
+        #expect(!checklist.checked.contains("acme/repo1"))
+        for id in available.subtracting(["acme/repo1", "acme/repo13"]) {
+            checklist.selection = try #require(checklist.setting(id, checked: false))
+        }
+        #expect(checklist.checked == ["acme/repo13"])
+        #expect(checklist.setting("acme/repo13", checked: false) == nil)
+        checklist.selection = try #require(checklist.setting("acme/repo1", checked: true))
+        #expect(checklist.checked == ["acme/repo1", "acme/repo13"])
+        #expect(checklist.setting("acme/repo13", checked: false) == ["acme/repo1"])
+        #expect(checklist.setting("acme/repo1", checked: false) == ["acme/repo13"])
     }
-    @Test func repositoryPopoverRemainsOpenAcrossSelections() {
+    @Test func repositoryChecklistSelectAllUsesAllLoadedAndRejectsUnavailableRows() throws {
+        let available: Set<String> = ["acme/app", "acme/library"]
+        var checklist = RepositoryChecklist(selection: ["acme/app"], available: available)
+        checklist.selection = try #require(checklist.setting("acme/library", checked: true))
+        #expect(checklist.selection.isEmpty)
+        #expect(checklist.checked == available)
+        checklist.available.insert("acme/new")
+        #expect(checklist.checked.contains("acme/new"))
+        #expect(checklist.setting("unloaded/repo", checked: true) == nil)
+        #expect(RepositoryChecklist(selection: [], available: []).checked.isEmpty)
+    }
+    @Test func repositoryPopoverAppliesChecklistChangesImmediatelyAndKeepsThemWhenClosed() throws {
         let state = BoardState()
         let repos = [Repository(id: "acme/app"), Repository(id: "acme/library"), Repository(id: "acme/service")]
+        let available = Set(repos.map(\.id))
         state.toggleRepositoryPopover()
+        let changed = try #require(RepositoryChecklist(selection: state.repositories, available: available).setting("acme/app", checked: false))
+        #expect(state.setRepositoryFilter(changed, available: repos))
         #expect(state.repositoryPopoverPresented)
-        state.setRepositoryFilter(["acme/app", "acme/library"], available: repos)
-        #expect(state.repositoryPopoverPresented)
-        state.setRepositoryFilter(["acme/library"], available: repos)
-        #expect(state.repositoryPopoverPresented)
-        state.setRepositoryFilter([], available: repos)
-        #expect(state.repositoryPopoverPresented)
-        #expect(state.panel == nil)
+        #expect(state.repositories == ["acme/library", "acme/service"])
+        #expect(state.visibleRepositories(Snapshot(repositories: repos)).map(\.id) == ["acme/library", "acme/service"])
         state.dismissRepositoryPopover()
+        #expect(state.repositories == ["acme/library", "acme/service"])
+        state.toggleRepositoryPopover()
+        #expect(RepositoryChecklist(selection: state.repositories, available: available).checked == ["acme/library", "acme/service"])
+        #expect(state.handlePopoverShortcut("\u{1b}"))
         #expect(!state.repositoryPopoverPresented)
-        #expect(state.repositories.isEmpty)
+        #expect(state.repositories == ["acme/library", "acme/service"])
+        #expect(state.setRepositoryFilter([], available: repos))
+        #expect(RepositoryChecklist(selection: state.repositories, available: available).checked == available)
     }
     @Test func repositoryPopoverYieldsToOtherNavigation() {
         let state = BoardState()

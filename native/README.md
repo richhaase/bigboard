@@ -79,13 +79,16 @@ control containing status and timestamp at the bottom right, or from the Boards 
 The footer control spins during refresh; the main screen's top progress display
 remains visible. Date and repository filters and Refresh stay in the toolbar.
 
-The filter offers **All loaded repositories** or **Selected repositories**. All shows
-every repository already loaded in the current workspace; Selected requires at
-least one of those repositories. The selection applies to Activity, Contributors,
-and Pull requests while preserving each board's other filters. It is viewing
-state only: changes take effect immediately, make no refresh or network request, write no settings,
-and do not unload history. In `BoardState`, an empty repository filter set
-means All; it does not mean that collection is disabled.
+The filter is one checklist, initially showing every loaded repository checked.
+It stays open while changes apply immediately across Activity, Contributors,
+and Pull requests. Reopening it reflects the current selection. Search narrows
+the displayed rows, and **Select all loaded** checks every loaded repository.
+When only one repository remains checked, its checkbox is disabled until another
+repository is checked.
+
+Filtering preserves each board's other filters. It makes no refresh or network
+request, writes no settings, and does not unload history. Closing the picker
+keeps the selection already applied.
 
 Settings reuses the current verified repository inventory, supports Select All,
 shows last-push dates, and defaults to most recently pushed with alternate sorts.
@@ -136,8 +139,10 @@ app, test together with the old app closed:
    closes after saving while the main screen shows refresh progress.
 4. Refresh; inspect Activity → Heat → directory/file → commits → people → PRs.
 5. Exercise Contributor selection, PR filters, groups, identities and both exports.
-   Change Repository filter across boards; verify loaded history and saved
-   repository choices stay intact and no refresh starts.
+   Change Repository filter and verify immediate results across boards. Leave
+   one repository checked and verify that it cannot be unchecked until another
+   is checked. Close and reopen the picker; verify the selection is retained,
+   saved collection choices remain intact, and no refresh starts.
 6. Quit and reopen; confirm native preferences/bookmarks and cached startup.
 7. Test offline refresh, interrupted refresh, changed repository access, and
    verified cache removal in Workspace Settings → Storage.
@@ -201,6 +206,6 @@ subsequent walkthrough fixes add focused repository-filter and settings tests.
 The first usability pass adds a persistent multi-select repository popover,
 a board-only sidebar, toolbar scope controls, footer data status, recent-push repository
 sorting, and direct Apply with background refresh. The combined native suite
-passes 85 tests after these changes; the optimized universal bundle builds and
+passes 86 tests after these changes; the optimized universal bundle builds and
 passes local signature verification. Contributor rhythm and calendar behavior
 were intentionally retained for further evaluation.

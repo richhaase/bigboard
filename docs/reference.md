@@ -43,12 +43,16 @@ Data Status opens from the combined status and timestamp at the bottom right.
 A configured repository group adds a group picker. Each board retains
 its own search, sorting, filters, and selection while you move between boards.
 
-The toolbar's **Repository filter** stays open while you choose several
-repositories. **All loaded repositories** shows the collected workspace;
-**Selected repositories** requires at least one loaded repository. Changes take
-effect immediately across all boards. This filter does not fetch history,
-change saved collection choices, or unload caches. Use Settings to change what
-the app collects. Changing a named group changes collection scope and refreshes.
+The toolbar's **Repository filter** is one checklist, initially showing all
+loaded repositories checked. It stays open while changes apply immediately
+across all boards. Reopening it shows the current selection. Search narrows the
+list; **Select all loaded** checks every loaded repository. When only one
+repository remains checked, its checkbox is disabled until you check another.
+Closing the picker keeps the selection already applied.
+
+This filter does not fetch history, make network requests, change saved
+collection choices, or unload caches. Use Settings to change what the app
+collects. Changing a named group changes collection scope and refreshes.
 
 The date menu offers 1, 7, 14, 30, 90, and 365 days, All time, Since last look,
 and a custom range through Filters. The default is 14 days unless changed in

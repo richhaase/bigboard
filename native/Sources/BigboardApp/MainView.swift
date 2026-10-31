@@ -100,7 +100,7 @@ struct MainView: View {
         .help("Filter loaded repositories across all boards")
         .popover(isPresented: toolbarPopover(.repositories), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
             VStack(spacing: 0) {
-                HStack { Text("Repository filter").font(.headline); Spacer(); Button("Done") { navigation.dismissRepositoryPopover() } }.padding(16)
+                HStack { Text("Repository filter").font(.headline); Spacer() }.padding(16)
                 Divider()
                 RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation, repositoryListHeightLimit: 240)
             }.frame(width: 420).fixedSize(horizontal: false, vertical: true).buttonStyle(.automatic)

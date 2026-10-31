@@ -251,33 +251,26 @@ struct RepositoryFilterPanel: View {
     @Bindable var navigation: BoardState
     var repositoryListHeightLimit: CGFloat? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose which loaded repositories appear across Activity, Contributors, and Pull requests. Changes take effect immediately.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), preferredRepository: navigation.contextualRepository ?? (navigation.scope.repo.isEmpty ? nil : navigation.scope.repo), listHeightLimit: repositoryListHeightLimit)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+        RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), listHeightLimit: repositoryListHeightLimit)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(16)
     }
 }
 struct RepositoryFilterSelection: View {
     var repositories: [Repository]
     @Binding var selection: Set<String>
-    var preferredRepository: String? = nil
     var listHeightLimit: CGFloat? = nil
     @State private var query = ""
     private var available: Set<String> { Set(repositories.map(\.id)) }
+    private var checklist: RepositoryChecklist { RepositoryChecklist(selection: selection, available: available) }
     private var visible: [Repository] { repositories.sorted { $0.id < $1.id }.filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) } }
-    private var showsAll: Binding<Bool> { Binding(get: { selection.isEmpty }, set: { selection = $0 ? [] : BoardState.startingRepositorySelection(from: repositories, preferred: preferredRepository) }) }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Show", selection: showsAll) {
-                Text("All loaded repositories (\(repositories.count))").tag(true)
-                Text("Selected repositories").tag(false).disabled(repositories.isEmpty)
-            }.pickerStyle(.radioGroup).frame(maxWidth: .infinity, alignment: .leading)
             if repositories.isEmpty { Text("No repository data is loaded. Choose repositories in Settings to get started.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            else if !selection.isEmpty {
+            else {
                 HStack {
-                    Text("\(selection.intersection(available).count) of \(repositories.count) selected").foregroundStyle(.secondary)
+                    Text("\(checklist.checked.count) of \(repositories.count) selected").foregroundStyle(.secondary)
                     Spacer()
-                    Button("Select all loaded") { selection = available }
+                    Button("Select all loaded") { selection = [] }
                 }
                 TextField("Search loaded repositories", text: $query).textFieldStyle(.roundedBorder)
                 if visible.isEmpty { Text("No loaded repositories match this search.").foregroundStyle(.secondary) }
@@ -294,8 +287,10 @@ struct RepositoryFilterSelection: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func repositoryRow(_ repo: Repository) -> some View {
-        Toggle(repo.id, isOn: membership(repo.id, $selection)).toggleStyle(.checkbox)
-            .disabled(selection.intersection(available) == [repo.id])
+        Toggle(repo.id, isOn: Binding(get: { checklist.checked.contains(repo.id) }, set: { checked in
+            if let updated = checklist.setting(repo.id, checked: checked) { selection = updated }
+        })).toggleStyle(.checkbox)
+            .disabled(checklist.checked == [repo.id])
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

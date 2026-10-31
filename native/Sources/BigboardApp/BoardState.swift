@@ -25,6 +25,19 @@ struct BoardFilters: Equatable {
     var states: Set<String> = []
     var mine: Set<String> = []
 }
+struct RepositoryChecklist {
+    var selection: Set<String>
+    var available: Set<String>
+    var checked: Set<String> { selection.isEmpty ? available : selection.intersection(available) }
+    func setting(_ id: String, checked isChecked: Bool) -> Set<String>? {
+        guard available.contains(id) else { return nil }
+        var updated = checked
+        if isChecked { updated.insert(id) }
+        else { updated.remove(id) }
+        guard !updated.isEmpty else { return nil }
+        return updated == available ? [] : updated
+    }
+}
 @MainActor @Observable final class BoardState {
     var board: Board = .activity
     var days = 14
@@ -62,12 +75,6 @@ struct BoardFilters: Equatable {
         if sinceLastLook, let bookmark = snapshot.bookmark { return date.map { $0 > bookmark } ?? false }
         guard days > 0 else { return true }
         return date.map { $0 > snapshot.generatedAt.addingTimeInterval(-Double(days) * 86400) } ?? false
-    }
-    static func startingRepositorySelection(from repositories: [Repository], preferred: String? = nil) -> Set<String> {
-        let ids = repositories.map(\.id).sorted()
-        if let preferred, ids.contains(preferred) { return [preferred] }
-        if let first = ids.first { return [first] }
-        return []
     }
     func toggleToolbarPopover(_ value: ToolbarPopover) { panel = nil; toolbarPopover = toolbarPopover == value ? nil : value }
     func setToolbarPopover(_ value: ToolbarPopover, presented: Bool) {
