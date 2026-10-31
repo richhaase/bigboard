@@ -193,7 +193,7 @@ func hasPair(args []string, key, value string) bool {
 
 func TestFetchEmptyCompleteInventory(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, nil, 0, false, "")}}
-	result := NewProvider(runner).Fetch(context.Background(), "ACME/Repo")
+	result := newTestProvider(runner).Fetch(context.Background(), "ACME/Repo")
 	if result.Err != nil || !result.Complete || result.Repo != "acme/repo" || result.PRs == nil || len(result.PRs) != 0 {
 		t.Fatalf("result = %+v", result)
 	}
@@ -210,7 +210,7 @@ func TestFetchSummariesPaginationAndCanonicalIdentity(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{
 		summaries(t, []*rawPR{first}, 2, true, "cursor-one"), summaries(t, []*rawPR{second}, 2, false, ""),
 	}}
-	result := NewProvider(runner).Fetch(context.Background(), "ACME/REPO")
+	result := newTestProvider(runner).Fetch(context.Background(), "ACME/REPO")
 	if result.Err != nil || !result.Complete || len(result.PRs) != 2 {
 		t.Fatalf("result = %+v", result)
 	}
@@ -239,7 +239,7 @@ func TestFetchDeduplicatesCanonicalPRAndKeepsNewest(t *testing.T) {
 	old, newest := pr(4), pr(4)
 	newest.Title, newest.UpdatedAt = "Newest", "2026-09-30T13:00:00Z"
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{old}, 1, true, "next"), summaries(t, []*rawPR{newest}, 1, false, "")}}
-	got := NewProvider(runner).Fetch(context.Background(), "Acme/Repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "Acme/Repo")
 	if got.Err != nil || !got.Complete || len(got.PRs) != 1 || got.PRs[0].Title != "Newest" || got.PRs[0].Key() != "acme/repo#4" {
 		t.Fatalf("result = %+v", got)
 	}
@@ -249,7 +249,7 @@ func TestNullAggregatesRemainUnknown(t *testing.T) {
 	raw := pr(1)
 	raw.Author, raw.ReviewDecision, raw.Mergeable = nil, nil, nil
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	row := got.PRs[0]
 	if got.Err != nil || row.ReviewDecision != Unknown || row.Mergeable != Unknown || row.CheckState != Unknown || row.Author != "" {
 		t.Fatalf("unknown metadata inferred as known: %+v", row)
@@ -263,7 +263,7 @@ func TestUnfamiliarAggregateStatesAreUnknown(t *testing.T) {
 	raw := pr(1)
 	raw.ReviewDecision, raw.Mergeable = pointer("SOMETHING_NEW"), pointer("READY")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.PRs[0].ReviewDecision != Unknown || got.PRs[0].Mergeable != Unknown {
 		t.Fatalf("row = %+v", got.PRs[0])
 	}
@@ -271,7 +271,7 @@ func TestUnfamiliarAggregateStatesAreUnknown(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			body := fmt.Sprintf(`{"data":{"repository":{"nameWithOwner":"acme/repo","pullRequests":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"number":1,"updatedAt":"2026-09-30T12:00:00Z","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":%q}}}]}}]}}}}`, state)
 			r := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
-			result := NewProvider(r).Fetch(context.Background(), "acme/repo")
+			result := newTestProvider(r).Fetch(context.Background(), "acme/repo")
 			if result.PRs[0].CheckState != state {
 				t.Fatalf("checks = %q", result.PRs[0].CheckState)
 			}
@@ -287,7 +287,7 @@ func TestFilePaginationAndRenameHonesty(t *testing.T) {
 		filePage(t, 7, []*rawFile{file("web/b.ts", "RENAMED")}, 3, true, "files-two"),
 		filePage(t, 7, []*rawFile{file("old/c.go", "DELETED")}, 3, false, ""),
 	}}
-	result := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	result := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if result.Err != nil || !result.Complete || len(result.PRs) != 1 {
 		t.Fatalf("result = %+v", result)
 	}
@@ -304,7 +304,7 @@ func TestFilePaginationRecoversOriginsCompletenessWhenNoRenames(t *testing.T) {
 	raw := pr(1)
 	raw.Files = conn([]*rawFile{file("a.go", "MODIFIED")}, 2, true, "more")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), filePage(t, 1, []*rawFile{file("a.go", "MODIFIED"), file("b.go", "ADDED")}, 2, false, "")}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Err != nil || !got.PRs[0].FilesComplete || !got.PRs[0].PreviousPathsComplete || !got.PRs[0].ContextComplete || len(got.PRs[0].Files) != 2 {
 		t.Fatalf("result = %+v", got)
 	}
@@ -319,7 +319,7 @@ func TestReviewsAndRequestedReviewersBoundedIndependentlyOfDecision(t *testing.T
 	submitted := time.Date(2026, time.September, 30, 11, 0, 0, 0, time.UTC)
 	raw.LatestReviews = conn([]*rawReview{{Author: &actor{Login: "bob"}, State: pointer("CHANGES_REQUESTED"), SubmittedAt: submitted.Format(time.RFC3339)}}, 1, false, "")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
-	result := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	result := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	row := result.PRs[0]
 	if !reflect.DeepEqual(row.RequestedReviewers, []string{"alice", "Acme/backend"}) || row.RequestedReviewersComplete || !row.ReviewsComplete || row.ContextComplete || row.ReviewDecision != "APPROVED" {
 		t.Fatalf("review context = %+v", row)
@@ -400,7 +400,7 @@ func TestErrorsCannotBecomeSuccessfulEmptyResults(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &fakeRunner{t: t, steps: []fakeStep{tc.step}}
-			result := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+			result := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 			if result.Complete || len(result.PRs) != 0 || !errors.Is(result.Err, tc.want) || strings.Contains(result.Err.Error(), "secret") {
 				t.Fatalf("result = %+v, want %v", result, tc.want)
 			}
@@ -413,7 +413,7 @@ func TestGraphQLPartialErrorPreservesRows(t *testing.T) {
 	step.data = payload(t, &rawRepository{NameWithOwner: "acme/repo", PullRequests: conn([]*rawPR{pr(1)}, 1, false, "")}, 100, "field unavailable")
 	step.err = ErrRequest // gh exits nonzero even when GraphQL includes partial data.
 	runner := &fakeRunner{t: t, steps: []fakeStep{step}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Complete || len(got.PRs) != 1 || !errors.Is(got.Err, ErrIncomplete) {
 		t.Fatalf("partial data lost: %+v", got)
 	}
@@ -421,7 +421,7 @@ func TestGraphQLPartialErrorPreservesRows(t *testing.T) {
 
 func TestLaterSummaryFailurePreservesEarlierRows(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(1)}, 2, true, "more"), {err: ErrAuthentication}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Complete || len(got.PRs) != 1 || !errors.Is(got.Err, ErrAuthentication) {
 		t.Fatalf("result = %+v", got)
 	}
@@ -431,7 +431,7 @@ func TestFileFailureDoesNotInvalidateSummaryInventory(t *testing.T) {
 	raw := pr(1)
 	raw.Files = conn([]*rawFile{file("a.go", "ADDED")}, 2, true, "more")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), {err: ErrRateLimited}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if !got.Complete || len(got.PRs) != 1 || !errors.Is(got.Err, ErrRateLimited) || got.PRs[0].FilesComplete || got.PRs[0].ContextComplete || len(got.PRs[0].Files) != 1 {
 		t.Fatalf("result = %+v", got)
 	}
@@ -440,7 +440,7 @@ func TestFileFailureDoesNotInvalidateSummaryInventory(t *testing.T) {
 func TestRateLimitStopsFurtherRequests(t *testing.T) {
 	first := payload(t, &rawRepository{NameWithOwner: "acme/repo", PullRequests: conn([]*rawPR{pr(1)}, 2, true, "more")}, 0)
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: first}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Complete || !errors.Is(got.Err, ErrRateLimited) || len(got.PRs) != 1 || len(runner.calls) != 1 {
 		t.Fatalf("result = %+v; calls = %d", got, len(runner.calls))
 	}
@@ -449,7 +449,7 @@ func TestRateLimitStopsFurtherRequests(t *testing.T) {
 func TestPRAndRequestBudgets(t *testing.T) {
 	t.Run("PR count", func(t *testing.T) {
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(1), pr(2)}, 3, true, "more")}}
-		p := NewProvider(runner)
+		p := newTestProvider(runner)
 		p.limits.pullRequests = 2
 		got := p.Fetch(context.Background(), "acme/repo")
 		if got.Complete || len(got.PRs) != 2 || !errors.Is(got.Err, ErrBudgetExceeded) || len(runner.calls) != 1 {
@@ -460,7 +460,7 @@ func TestPRAndRequestBudgets(t *testing.T) {
 		raw := pr(1)
 		raw.Files = conn([]*rawFile{file("a", "ADDED")}, 2, true, "more")
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, "")}}
-		p := NewProvider(runner)
+		p := newTestProvider(runner)
 		p.limits.requests = 1
 		got := p.Fetch(context.Background(), "acme/repo")
 		if !got.Complete || !errors.Is(got.Err, ErrBudgetExceeded) || got.PRs[0].FilesComplete || len(runner.calls) != 1 {
@@ -484,7 +484,7 @@ func TestFilesHardBudget(t *testing.T) {
 		steps = append(steps, filePage(t, 1, files(page*filePageSize), MaxFilesPerPR+1, true, fmt.Sprintf("cursor-%d", page+1)))
 	}
 	runner := &fakeRunner{t: t, steps: steps}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if !got.Complete || !errors.Is(got.Err, ErrBudgetExceeded) || got.PRs[0].FilesComplete || len(got.PRs[0].Files) != MaxFilesPerPR || len(runner.calls) != MaxFilesPerPR/filePageSize {
 		t.Fatalf("result: complete=%v err=%v fileCount=%d calls=%d", got.Complete, got.Err, len(got.PRs[0].Files), len(runner.calls))
 	}
@@ -493,14 +493,14 @@ func TestFilesHardBudget(t *testing.T) {
 func TestBrokenPaginationCannotClaimCompleteness(t *testing.T) {
 	t.Run("repeated summary cursor", func(t *testing.T) {
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(1)}, 3, true, "same"), summaries(t, []*rawPR{pr(2)}, 3, true, "same")}}
-		got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+		got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 		if got.Complete || !errors.Is(got.Err, ErrResponse) || len(runner.calls) != 2 {
 			t.Fatalf("result = %+v", got)
 		}
 	})
 	t.Run("missing summary cursor", func(t *testing.T) {
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(1)}, 2, true, "")}}
-		got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+		got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 		if got.Complete || !errors.Is(got.Err, ErrResponse) {
 			t.Fatalf("result = %+v", got)
 		}
@@ -509,14 +509,14 @@ func TestBrokenPaginationCannotClaimCompleteness(t *testing.T) {
 		raw := pr(1)
 		raw.Files = conn([]*rawFile{file("a", "ADDED")}, 3, true, "same")
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), filePage(t, 1, []*rawFile{file("b", "ADDED")}, 3, true, "same")}}
-		got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+		got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 		if !got.Complete || got.PRs[0].FilesComplete || !errors.Is(got.Err, ErrIncomplete) {
 			t.Fatalf("result = %+v", got)
 		}
 	})
 	t.Run("total mismatch", func(t *testing.T) {
 		runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{pr(1)}, 2, false, "")}}
-		got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+		got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 		if got.Complete || !errors.Is(got.Err, ErrIncomplete) {
 			t.Fatalf("result = %+v", got)
 		}
@@ -530,7 +530,7 @@ func TestChangedPRDuringFilePaginationStaysPartial(t *testing.T) {
 	next.UpdatedAt = "2026-09-30T14:00:00Z"
 	next.Files = conn([]*rawFile{file("after.go", "ADDED")}, 2, false, "")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), {data: payload(t, &rawRepository{NameWithOwner: "Acme/Repo", PullRequest: next}, 100)}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if !errors.Is(got.Err, ErrIncomplete) || got.PRs[0].FilesComplete || len(got.PRs[0].Files) != 1 {
 		t.Fatalf("mixed two snapshots: %+v", got)
 	}
@@ -538,12 +538,12 @@ func TestChangedPRDuringFilePaginationStaysPartial(t *testing.T) {
 
 func TestNoRequestsForInvalidRepoOrCanceledContext(t *testing.T) {
 	runner := &fakeRunner{t: t}
-	if got := NewProvider(runner).Fetch(context.Background(), "https://evil.test/a/b"); !errors.Is(got.Err, ErrInvalidRepository) || got.Complete {
+	if got := newTestProvider(runner).Fetch(context.Background(), "https://evil.test/a/b"); !errors.Is(got.Err, ErrInvalidRepository) || got.Complete {
 		t.Fatalf("result = %+v", got)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if got := NewProvider(runner).Fetch(ctx, "a/b"); !errors.Is(got.Err, context.Canceled) || got.Complete {
+	if got := newTestProvider(runner).Fetch(ctx, "a/b"); !errors.Is(got.Err, context.Canceled) || got.Complete {
 		t.Fatalf("result = %+v", got)
 	}
 	if len(runner.calls) != 0 {
@@ -557,7 +557,7 @@ func TestSchemaFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: data}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Err != nil || !got.Complete || len(got.PRs) != 3 {
 		t.Fatalf("fixture invalid: %+v", got)
 	}
@@ -584,7 +584,7 @@ func TestChangedRevisionDuringPaginationStaysPartial(t *testing.T) {
 				next.BaseRefOid = ""
 			}
 			runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), {data: payload(t, &rawRepository{NameWithOwner: "Acme/Repo", PullRequest: next}, 100)}}}
-			got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+			got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 			if !errors.Is(got.Err, ErrIncomplete) || !got.Complete || got.PRs[0].FilesComplete || got.PRs[0].ContextComplete || len(got.PRs[0].Files) != 1 {
 				t.Fatalf("mixed different revisions: %+v", got)
 			}
@@ -600,7 +600,7 @@ func TestFractionalTimestampPaginationRemainsComplete(t *testing.T) {
 	next.UpdatedAt = raw.UpdatedAt
 	next.Files = conn([]*rawFile{file("after.go", "ADDED")}, 2, false, "")
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{raw}, 1, false, ""), {data: payload(t, &rawRepository{NameWithOwner: "Acme/Repo", PullRequest: next}, 100)}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if got.Err != nil || !got.PRs[0].FilesComplete || !got.PRs[0].ContextComplete {
 		t.Fatalf("timestamp precision lost: %+v", got)
 	}
@@ -612,7 +612,7 @@ func TestAuthenticationFailureStopsRemainingFileCalls(t *testing.T) {
 		row.Files = conn([]*rawFile{file("a", "MODIFIED")}, 2, true, "next")
 	}
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, []*rawPR{first, second}, 2, false, ""), {err: ErrAuthentication}}}
-	got := NewProvider(runner).Fetch(context.Background(), "acme/repo")
+	got := newTestProvider(runner).Fetch(context.Background(), "acme/repo")
 	if !got.Complete || !errors.Is(got.Err, ErrAuthentication) || len(runner.calls) != 2 {
 		t.Fatalf("result = %+v; calls = %d", got, len(runner.calls))
 	}

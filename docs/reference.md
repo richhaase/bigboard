@@ -5,15 +5,30 @@
 ## Setup and settings
 
 Open Bigboard from Finder, Spotlight, or the Dock. Git 2.31 or newer is required
-for repository history. Live GitHub data also needs GitHub CLI (`gh`) installed
-and signed in. Run `gh auth login` to authenticate, then return to Bigboard;
-the app uses that authentication rather than providing a separate sign-in flow.
+for repository history; Homebrew installs it. Choose **Sign in with GitHub** in
+Settings and authorize Bigboard in your browser. **Manage repository access**
+opens GitHub's app installation page, where you choose which repositories it may
+read. Return to Bigboard and discover repositories after changing access.
+Organization approval, SSO, and repository restrictions still apply. GitHub CLI
+and personal access tokens are not needed.
+
+After an initial verified sign-in, restarting with the same saved GitHub account
+can show that account’s cached history offline. Cached evidence is marked stale
+until a live access check and refresh succeed. A new sign-in or account switch
+verifies repository access before opening history; an explicit access denial
+hides affected evidence instead of treating it as a connection failure.
+
+Sign-in tokens are stored in macOS Keychain, never in `config.json`. **Sign out**
+removes local credentials; revoke the app separately in GitHub's application
+settings if needed. Use **Sign in again** when GitHub reports expired or revoked
+authorization.
 
 Open **Settings** in the sidebar or press `,`. Choose **GitHub** for live data or
 **Cached history** to read existing owned repositories without network requests.
-Enter a personal account, organizations, or both for live discovery. Personal
-repositories must belong to the signed-in account; accessible non-archived
-repositories from the selected organizations are also included.
+Discover the repositories authorized for your GitHub sign-in, then choose what
+to track. Optional personal-account and organization filters narrow that list.
+Repositories appear only when both your account and the Bigboard installation
+can access them. Archived repositories are excluded.
 
 Click **Discover repositories** to load the full list for the current sources.
 Repositories are ordered by last push, newest first; this can include activity
@@ -211,7 +226,7 @@ context.
 PR collection is bounded to 200 open PRs per repository and 1,000 current file
 paths per PR, with a shared request budget (default 128) and bounded request
 deadlines. Bodies, comments, diffs, and check logs are not fetched. Git history
-uses Bigboard-owned caches, authenticated through `gh` for remote operations.
+uses Bigboard-owned caches, authenticated with the app's backend token for remote operations.
 
 Last-look bookmarks are separate for all repositories and each named group.
 Their baseline stays fixed during a session. Normal native-app exit advances
@@ -225,13 +240,15 @@ the open-PR list.
 | Data | Default location |
 | --- | --- |
 | Settings, analysis rules, and identities | `~/.config/bigboard/config.json` |
-| Owned repository caches | `~/.cache/bigboard/repos/github.com/owner/name.git` |
+| Owned repository caches | `~/.cache/bigboard/accounts/<GitHub ID>/repos/github.com/owner/name.git` |
+| Last verified repository access | `~/.cache/bigboard/accounts/<GitHub ID>/repos/access.json` |
 | Last-look bookmarks | `~/.local/state/bigboard/last-seen.json` |
 
 `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME` override the respective
-base directories. Existing configurations, caches, and bookmark timestamps are
-reused. Full bare caches cover default-branch history; developer checkouts are
-not scanned or modified. Disposable parsed scans are rebuilt when their inputs
+base directories. Configuration remains shared in `config.json`; cache directories
+and bookmark keys are isolated by the stable GitHub account ID. Bookmark keys use
+`account:<ID>:all` or `account:<ID>:group:<name>` in the same state file. Full bare
+caches cover default-branch history; developer checkouts are not scanned or modified. Disposable parsed scans are rebuilt when their inputs
 change or their files are damaged.
 
 **Repository controls** stages session inclusion, then **Apply tracking** applies
@@ -287,7 +304,6 @@ restart to load them rather than overwriting them.
 | `bot_identities` | Additional bot emails, `@domain` suffixes, or exact author names |
 | `identities` | Canonical emails, aliases, and optional display names |
 | `work_areas` | Named literal file/directory prefixes for related evidence |
-| `theme`, `fuzzy`, `github` | Accepted for compatibility; they do not control GUI appearance or data mode. `github` accepts an object with an `enabled` boolean. |
 
 Saving Settings does not discard `exclude` patterns. For example, `vendor-*`
 continues to exclude newly discovered matching repositories; explicitly checking
@@ -346,8 +362,9 @@ globally; repository associations and directory subtotals can overlap. Future
 author dates remain included. AI percentages describe detected authors/co-authors,
 not inferred tool use. Bots are included unless hidden on the current board.
 
-- **Discovery or authentication fails:** run `gh auth status`, sign in if needed,
-  check access, then retry Discover or Refresh.
+- **Discovery or authentication fails:** open Settings, sign in again if needed,
+  and check **Manage repository access**. An organization may require an
+  administrator to approve Bigboard. Return and retry Discover or Refresh.
 - **No matching rows:** inspect shared scope and board filters. Reset this board
   preserves dates/repositories; Reset shared restores All time/all tracked repos.
 - **Stale or partial data:** inspect Data status and refresh after resolving the

@@ -10,7 +10,8 @@ command-line product. See [README](README.md) for local startup and
 | Location | Responsibility |
 | --- | --- |
 | `git/` | Owned bare Git caches, authenticated clone/fetch, commit collection, file filtering, identities, disposable parsed scans, retained-revision queries |
-| `github/` | Repository discovery, branch probes, bounded PR inventories/files/reviewers, request budgets and cooldowns through `gh` |
+| `auth/` | Native OAuth code/PKCE/state, backend token rotation, and opaque Keychain store interface |
+| `github/` | Repository discovery, branch probes, bounded PR inventories/files/reviewers, request budgets and cooldowns through direct HTTPS APIs |
 | `stats/` | Canonical commit selection, contributor aggregation, scoped directory counts, calendars, related work areas |
 | `gui/` | Application service, snapshots, cache-first refresh, settings/identities, repository controls, groups, bookmarks, JSON export |
 | `desktop/main.go` | Native Wails lifecycle, embedded assets, development-only loopback server entry |
@@ -27,7 +28,7 @@ command-line product. See [README](README.md) for local startup and
 The root Go module uses the standard library. `desktop` is a nested module with
 Wails dependencies and a local replacement for the root module. The frontend is
 plain ES modules; assets are embedded without a bundler. Runtime dependencies
-are Git and authenticated GitHub CLI, not Go, Node, or a hosted service.
+are Git and native GitHub sign-in, not Go, Node, GitHub CLI, or a hosted service.
 
 ## Data and state contracts
 
@@ -106,6 +107,7 @@ from isolated model tests.
 
 The tag workflow in [.github/workflows/release.yml](.github/workflows/release.yml)
 and the packaging scripts define release behavior. The GUI package is a signed,
-notarized universal macOS app with an app-only Homebrew cask and Git/gh
-dependencies. Local builds and PR checks do not publish, install, or release it.
+notarized universal macOS app with an app-only Homebrew cask and a Git
+dependency. Publisher-owned GitHub App build settings are required for release
+sign-in; see [publisher setup](docs/github-app.md). Local builds and PR checks do not publish, install, or release it.
 Do not run a tag, release, or installation without the user’s authorization.

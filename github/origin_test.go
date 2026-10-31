@@ -67,7 +67,7 @@ func TestCanonicalRepoAndKey(t *testing.T) {
 
 func TestResolveReadsOnlyLocalOrigin(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte("git@github.com:ACME/Repo.git\n")}}}
-	p := NewProvider(runner)
+	p := newTestProvider(runner)
 	got, err := p.Resolve(context.Background(), "some local path;not a shell")
 	if err != nil || got != "acme/repo" {
 		t.Fatalf("resolve = %q, %v", got, err)
@@ -85,12 +85,12 @@ func TestResolveRejectsMissingMultipleAndUnsafeOrigins(t *testing.T) {
 		{data: []byte("https://github.com/a/b\n\n")}, {data: []byte("https://other.test/a/b\n")},
 		{data: []byte("https://secret:password@github.com/a/b\n")},
 	} {
-		p := NewProvider(&fakeRunner{t: t, steps: []fakeStep{step}})
+		p := newTestProvider(&fakeRunner{t: t, steps: []fakeStep{step}})
 		if got, err := p.Resolve(context.Background(), "."); err == nil || got != "" {
 			t.Fatalf("resolve accepted %#v => %q, %v", step, got, err)
 		}
 	}
-	p := NewProvider(&fakeRunner{t: t})
+	p := newTestProvider(&fakeRunner{t: t})
 	if _, err := p.Resolve(context.Background(), ""); err == nil {
 		t.Fatal("empty path accepted")
 	}
@@ -111,12 +111,12 @@ func TestCommandEnvironmentIsolated(t *testing.T) {
 		}
 		values[k] = v
 	}
-	for _, k := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_ASKPASS", "GH_REPO", "GH_DEBUG", "DEBUG", "GH_FORCE_TTY"} {
+	for _, k := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_ASKPASS", "GH_REPO", "GH_DEBUG", "DEBUG", "GH_FORCE_TTY", "GH_TOKEN", "GH_HOST", "GH_PROMPT_DISABLED", "GH_PAGER", "GH_TELEMETRY"} {
 		if _, exists := values[k]; exists {
 			t.Errorf("inherited unsafe key %s", k)
 		}
 	}
-	for k, want := range map[string]string{"GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "GH_TELEMETRY": "0", "GH_TOKEN": "fake-test-token"} {
+	for k, want := range map[string]string{"PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"} {
 		if values[k] != want {
 			t.Errorf("env %s = %q; want %q", k, values[k], want)
 		}
@@ -140,11 +140,11 @@ func TestLimitedBufferCancelsOnOverflow(t *testing.T) {
 
 func TestClassifyFailureDoesNotExposeDiagnostics(t *testing.T) {
 	for diagnostic, want := range map[string]error{
-		"API rate limit exceeded secret":    ErrRateLimited,
-		"To get started, run gh auth login": ErrAuthentication,
-		"HTTP 401 Bad credentials":          ErrAuthentication,
-		"HTTP 404 sensitive path":           ErrRepository,
-		"HTTP 500 secret raw body":          ErrRequest,
+		"API rate limit exceeded secret": ErrRateLimited,
+		"Authentication required":        ErrAuthentication,
+		"HTTP 401 Bad credentials":       ErrAuthentication,
+		"HTTP 404 sensitive path":        ErrRepository,
+		"HTTP 500 secret raw body":       ErrRequest,
 	} {
 		if got := classifyFailure(diagnostic); got != want || strings.Contains(got.Error(), "secret") {
 			t.Errorf("classify %q = %v, want %v", diagnostic, got, want)
@@ -156,14 +156,14 @@ func TestCanceledResolveDoesNotPretendSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	runner := &fakeRunner{t: t, steps: []fakeStep{{err: context.Canceled}}}
-	if _, err := NewProvider(runner).Resolve(ctx, "."); !errors.Is(err, context.Canceled) {
+	if _, err := newTestProvider(runner).Resolve(ctx, "."); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestResolvePreservesLookupFailures(t *testing.T) {
 	for _, want := range []error{ErrUnsupportedOrigin, ErrUnavailable, ErrRequest, ErrOutputLimit} {
-		p := NewProvider(&fakeRunner{t: t, steps: []fakeStep{{err: want}}})
+		p := newTestProvider(&fakeRunner{t: t, steps: []fakeStep{{err: want}}})
 		if _, err := p.Resolve(context.Background(), "."); !errors.Is(err, want) {
 			t.Fatalf("resolve error = %v, want %v", err, want)
 		}
@@ -176,7 +176,7 @@ func TestResolveDistinguishesMissingOriginFromBrokenRepository(t *testing.T) {
 	if _, err := (ExecRunner{}).Run(ctx, "git", "init", dir); err != nil {
 		t.Fatal(err)
 	}
-	p := NewProvider(nil)
+	p := newTestProvider(nil)
 	if _, err := p.Resolve(ctx, dir); !errors.Is(err, ErrUnsupportedOrigin) {
 		t.Fatalf("missing origin = %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/richhaase/bigboard/gui"
+	"github.com/richhaase/bigboard/auth"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -24,6 +24,9 @@ import (
 var assets embed.FS
 
 var version = "development"
+var githubClientID string
+var githubClientSecret string
+var githubAppSlug string
 
 func main() {
 	serve := flag.Bool("serve", false, "Serve a local preview instead of opening the desktop window")
@@ -41,21 +44,16 @@ func run(serve bool, address string) error {
 			return err
 		}
 	}
-	service, err := gui.NewService()
-	if err != nil {
-		if !serve {
-			if displayErr := wails.Run(startupErrorOptions(err)); displayErr != nil {
-				return fmt.Errorf("%w; could not display startup error: %v", err, displayErr)
-			}
-		}
-		return err
-	}
-	defer service.Close()
 	frontend, err := fs.Sub(assets, "frontend")
 	if err != nil {
 		return err
 	}
-	app := &App{service: service}
+	var store auth.Store
+	if !serve {
+		store = newKeychainStore()
+	}
+	app := &App{auth: auth.NewManager(auth.Config{ClientID: githubClientID, ClientSecret: githubClientSecret, RedirectURI: auth.CallbackURI, AppSlug: githubAppSlug}, store)}
+	defer app.shutdown()
 	if serve {
 		return servePreview(address, frontend, app)
 	}
@@ -70,15 +68,14 @@ func run(serve bool, address string) error {
 		BackgroundColour: options.NewRGB(19, 28, 41),
 		AssetServer:      &assetserver.Options{Assets: frontend},
 		OnStartup:        func(ctx context.Context) { app.ctx = ctx },
-		OnShutdown:       func(context.Context) { service.Close() },
+		OnShutdown:       func(context.Context) { app.shutdown() },
 		Bind:             []interface{}{app},
-		Mac:              &mac.Options{TitleBar: mac.TitleBarDefault(), Appearance: mac.NSAppearanceNameDarkAqua, About: &mac.AboutInfo{Title: "Bigboard", Message: "Version " + version}},
+		Mac:              &mac.Options{OnUrlOpen: app.handleAuthURL, TitleBar: mac.TitleBarDefault(), Appearance: mac.NSAppearanceNameDarkAqua, About: &mac.AboutInfo{Title: "Bigboard", Message: "Version " + version}},
 	})
 	if err != nil {
 		return err
 	}
-	service.Close()
-	return service.SaveBookmark()
+	return nil
 }
 
 func desktopToolPath(current string) string {

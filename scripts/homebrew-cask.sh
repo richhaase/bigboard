@@ -23,14 +23,13 @@ cask "bigboard" do
   desc "Explore work areas, contributors, and commit evidence across GitHub repositories"
   homepage "https://github.com/richhaase/bigboard"
 
-  depends_on formula: "gh"
   depends_on formula: "git"
   depends_on macos: :ventura
 
   app "Bigboard.app"
 
   caveats <<~EOS
-    Live GitHub data requires authentication. Run gh auth login before opening Bigboard.
+    Open Bigboard and choose Sign in with GitHub to connect your repositories.
   EOS
 end
 CASK

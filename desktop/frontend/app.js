@@ -6,12 +6,12 @@ const icons={activity:'▥',people:'◉',prs:'⑂',folder:'▰',file:'≡',repo:
 const icon=name=>`<span aria-hidden="true">${icons[name]||name}</span>`;
 const api=async(method,arg)=>{
   if(window.go?.main?.App?.[method]) return window.go.main.App[method](...(arg===undefined?[]:[arg]));
-  const paths={Snapshot:'snapshot',SnapshotStatus:'snapshot-status',Refresh:'refresh',SaveSettings:'settings',Discover:'discover',IdentityOptions:'identities',SaveIdentity:'identity',RepositoryControls:'repository-controls',ApplyRepositoryControls:'repository-controls',RemoveCachedRepository:'remove-cache',SelectGroup:'group',OpenPath:'path',ExportJSON:'export'};
-  const response=await fetch(`/api/${paths[method]}`,{method:['Snapshot','SnapshotStatus','IdentityOptions','RepositoryControls','ExportJSON'].includes(method)?'GET':'POST',headers:{'Content-Type':'application/json'},...(arg===undefined?{}:{body:JSON.stringify(method==='SelectGroup'?{name:arg}:method==='RemoveCachedRepository'?{id:arg}:arg)})});
+  const paths={Snapshot:'snapshot',SnapshotStatus:'snapshot-status',Refresh:'refresh',SaveSettings:'settings',Discover:'discover',IdentityOptions:'identities',SaveIdentity:'identity',RepositoryControls:'repository-controls',ApplyRepositoryControls:'repository-controls',RemoveCachedRepository:'remove-cache',SelectGroup:'group',OpenPath:'path',ExportJSON:'export',AuthStatus:'auth',StartSignIn:'sign-in',CancelSignIn:'cancel-sign-in',SignOut:'sign-out',ManageGitHubAccess:'manage-access'};
+  const response=await fetch(`/api/${paths[method]}`,{method:['Snapshot','SnapshotStatus','IdentityOptions','RepositoryControls','ExportJSON','AuthStatus'].includes(method)?'GET':'POST',headers:{'Content-Type':'application/json'},...(arg===undefined?{}:{body:JSON.stringify(method==='SelectGroup'?{name:arg}:method==='RemoveCachedRepository'?{id:arg}:arg)})});
   if(!response.ok){let message=await response.text();try{message=JSON.parse(message).error||message;}catch{}throw new Error(message||`Request failed (${response.status})`);}
   return response.json();
 };
-const state={snapshot:null,board:'activity',days:14,since:'',repos:[],prContext:null,busy:false,error:'',activity:{lens:'heat',heatMetric:'lines',relatedMode:'commits',lensPerson:'',people:[],query:'',sort:'change',reverse:false,hideBots:false,scope:{repo:'',path:'',file:false},selected:''},people:{query:'',sort:'change',reverse:false,hideBots:false,selected:''},prs:{query:'',sort:'updated',reverse:false,author:'',review:'',checks:'',state:'',mine:'',selected:''},modal:null,settingsDraft:null,discovered:[],dialogError:''};
+const state={snapshot:null,board:'activity',days:14,since:'',repos:[],prContext:null,busy:false,error:'',activity:{lens:'heat',heatMetric:'lines',heatAll:false,relatedMode:'commits',lensPerson:'',people:[],query:'',sort:'change',reverse:false,hideBots:false,scope:{repo:'',path:'',file:false},selected:''},people:{query:'',sort:'change',reverse:false,hideBots:false,selected:''},prs:{query:'',sort:'updated',reverse:false,author:'',review:'',checks:'',state:'',mine:'',selected:''},modal:null,settingsDraft:null,discovered:[],dialogError:''};
 let lastFocus=null;
 let preferencesApplied=false;
 let renderedBoard='activity';
@@ -28,6 +28,9 @@ const mineOptions=[['attention','Needs my attention'],['authored','Authored by m
 const sortOptions=type=>type==='prs'?[['updated','Updated: newest first'],['repository','Repository: A–Z'],['author','Author: A–Z'],['title','Title: A–Z'],['attention','Attention: oldest first']]:type==='people'?[['change','Lines changed'],['commits','Commits'],['added','Lines added'],['removed','Lines removed'],['net','Net lines'],['ai','AI share'],['name','Name'],['recent','Most recent']]:[['change','Lines changed'],['commits','Commits'],['recent','Most recent'],['name','Name']];
 let toastTimer;
 let refreshVersion=0;
+let sessionVersion=0;
+let authTimer;
+let authWorking=false;
 let prEvidenceLoaded=false;
 const prCoverageUnknown=(repo='',path='')=>loadingPRs()||state.snapshot.mode==='cache'||visibleRepositories().filter(r=>!repo||r.id===repo).some(r=>r.prInventoryComplete===false||r.prStale||(path&&r.prFilesComplete===false));
 const loadingPRs=()=>state.snapshot.mode==='live'&&state.busy&&!prEvidenceLoaded&&!state.snapshot.pullRequests.length;
@@ -60,11 +63,12 @@ function searchActivityCommits(records){
 function scopeTitle(){const scope=state.activity.scope;return scope.areaName?scope.areaName:scope.file?scope.path.split('/').pop():scope.path?scope.path.split('/').pop():scope.repo?scope.repo.split('/').pop():'Repository activity';}
 function tableHead(columns){return `<div class="table-head">${columns.map(c=>`<span>${c}</span>`).join('')}</div>`;}
 function render(){
+ if(state.snapshot?.auth&&(!state.snapshot.auth.signedIn||state.snapshot.status.phase==='access')){renderSignIn();return;}
  const snapshot=state.snapshot;if(!snapshot)return;
  boardScroll[renderedBoard]=document.scrollingElement?.scrollTop||0;
  const configs={activity:['Activity','Follow the change. Find the context.'],people:['Contributors','The people behind the work.'],prs:['Pull requests','See what is moving and what needs attention.']};
  const [title,subtitle]=configs[state.board];const total=totals(currentCommits());
- $('#app').innerHTML=`<aside class="sidebar"><div class="brand"><img class="brand-mark" src="brand.png" alt=""><div><strong>BIGBOARD</strong><span>WORK IN VIEW</span></div></div><div class="workspace"><span class="workspace-dot"></span><div><strong>${esc(snapshot.settings.personalAccount||snapshot.settings.organizations?.[0]||'Your workspace')}</strong><span>${snapshot.repositories.length} repositories</span></div></div><div class="nav-label">EXPLORE</div><nav aria-label="Boards">${[['activity','Activity','a'],['people','Contributors','c'],['prs','Pull requests','p']].map(([id,label,key])=>`<button data-action="board" data-value="${id}" aria-label="${label}" class="nav-item ${state.board===id?'active':''}" ${state.board===id?'aria-current="page"':''}>${icon(id)}<span>${label}</span><kbd>${key}</kbd></button>`).join('')}</nav><div class="sidebar-bottom"><button class="nav-item" data-action="controls" aria-label="Repository controls">${icon('repo')}<span>Repository controls</span><kbd>i</kbd></button><button class="nav-item" data-action="status" aria-label="Data status">${icon('◷')}<span>Data status</span><span class="status-dot ${snapshot.status.errors?.length?'warning':''}"></span></button><button class="nav-item" data-action="settings" aria-label="Settings">${icon('settings')}<span>Settings</span><kbd>,</kbd></button><button class="nav-item" data-action="help" aria-label="Keyboard guide">${icon('?')}<span>Keyboard guide</span><kbd>?</kbd></button><div class="app-edition">DESKTOP APP <span>LOCAL FIRST</span></div></div></aside><main class="main"><header class="page-header"><div><div class="eyebrow">YOUR ENGINEERING LANDSCAPE</div><h1>${title}</h1><p>${subtitle}</p></div><button class="button refresh ${state.busy?'spinning':''}" data-action="refresh" ${state.busy?'disabled':''}>${icon('refresh')} ${state.busy?'Refreshing…':'Refresh'}<kbd>r</kbd></button></header><section class="scope-toolbar" aria-label="Shared viewing scope"><div class="date-tabs" role="group" aria-label="Date range">${ranges.map(r=>`<button data-action="range" data-value="${r.value}" class="${!state.since&&state.days===r.value?'selected':''}" aria-pressed="${!state.since&&state.days===r.value}">${r.label}</button>`).join('')}<button data-action="dates" class="${state.since||!ranges.some(r=>r.value===state.days)?'selected':''}">${state.since?'Since last look':!ranges.some(r=>r.value===state.days)?rangeLabel():'Custom…'}</button></div><button class="button scope-button" data-action="repositories">${icon('repo')} ${state.repos.length?`${state.repos.length} selected`:'All repositories'} <span>⌄</span></button>${Object.keys(snapshot.groups||{}).length?`<label class="group-picker"><span class="sr-only">Repository group</span><select data-action="select-group" aria-label="Repository group"><option value="">All groups</option>${Object.keys(snapshot.groups).sort().map(g=>`<option value="${esc(g)}" ${snapshot.activeGroup===g?'selected':''}>${esc(g)}</option>`).join('')}</select></label>`:''}<div class="snapshot-time"><span class="status-dot ${snapshot.status.errors?.length?'warning':''}"></span>${state.busy?'Refreshing data…':snapshot.mode==='cache'?'Cached history':dateValue(snapshot.generatedAt)?`Updated ${age(snapshot.generatedAt).toLowerCase()}`:'Not loaded'}</div></section>${state.error?`<div class="error-banner" role="alert">${esc(state.error)}<button data-action="dismiss-error" aria-label="Dismiss error">×</button></div>`:''}${snapshot.status.errors?.length?`<button class="coverage-banner" data-action="status">${snapshot.status.errors.length} data ${snapshot.status.errors.length===1?'issue':'issues'} · Some results may be incomplete <span>View details →</span></button>`:''}${state.busy?`<div class="loading-banner" role="status"><span class="loading-dot"></span>${esc(snapshot.status.phase==='refreshing'?snapshot.status.message:'Loading repository history…')}</div>`:''}${!snapshot.repositories.length?renderEmptyWorkspace():state.board==='activity'?renderActivity(total):state.board==='people'?renderPeople(total):renderPRs()}<footer class="main-footer"><span>Activity is a signal, not a productivity score.</span><span>${state.board==='prs'?loadingPRs()?'Pull requests loading':number(snapshot.pullRequests.length)+' known open PRs'+(prCoverageUnknown()?' · partial':''):number(total.commits)+' commits in scope'}<span class="footer-separator">/</span>LOCAL WORKSPACE</span></footer></main>`;
+ $('#app').innerHTML=`<aside class="sidebar"><div class="brand"><img class="brand-mark" src="brand.png" alt=""><div><strong>BIGBOARD</strong><span>WORK IN VIEW</span></div></div><div class="workspace"><span class="workspace-dot"></span><div><strong>${esc(snapshot.settings.personalAccount||snapshot.settings.organizations?.[0]||snapshot.auth?.login||'Your workspace')}</strong><span>${snapshot.repositories.length} repositories</span></div></div><div class="nav-label">EXPLORE</div><nav aria-label="Boards">${[['activity','Activity','a'],['people','Contributors','c'],['prs','Pull requests','p']].map(([id,label,key])=>`<button data-action="board" data-value="${id}" aria-label="${label}" class="nav-item ${state.board===id?'active':''}" ${state.board===id?'aria-current="page"':''}>${icon(id)}<span>${label}</span><kbd>${key}</kbd></button>`).join('')}</nav><div class="sidebar-bottom"><button class="nav-item" data-action="controls" aria-label="Repository controls">${icon('repo')}<span>Repository controls</span><kbd>i</kbd></button><button class="nav-item" data-action="status" aria-label="Data status">${icon('◷')}<span>Data status</span><span class="status-dot ${snapshot.status.errors?.length?'warning':''}"></span></button><button class="nav-item" data-action="settings" aria-label="Settings">${icon('settings')}<span>Settings</span><kbd>,</kbd></button><button class="nav-item" data-action="help" aria-label="Keyboard guide">${icon('?')}<span>Keyboard guide</span><kbd>?</kbd></button><div class="app-edition">DESKTOP APP <span>LOCAL FIRST</span></div></div></aside><main class="main"><header class="page-header"><div><div class="eyebrow">YOUR ENGINEERING LANDSCAPE</div><h1>${title}</h1><p>${subtitle}</p></div><button class="button refresh ${state.busy?'spinning':''}" data-action="refresh" ${state.busy?'disabled':''}>${icon('refresh')} ${state.busy?'Refreshing…':'Refresh'}<kbd>r</kbd></button></header><section class="scope-toolbar" aria-label="Shared viewing scope"><div class="date-tabs" role="group" aria-label="Date range">${ranges.map(r=>`<button data-action="range" data-value="${r.value}" class="${!state.since&&state.days===r.value?'selected':''}" aria-pressed="${!state.since&&state.days===r.value}">${r.label}</button>`).join('')}<button data-action="dates" class="${state.since||!ranges.some(r=>r.value===state.days)?'selected':''}">${state.since?'Since last look':!ranges.some(r=>r.value===state.days)?rangeLabel():'Custom…'}</button></div><button class="button scope-button" data-action="repositories">${icon('repo')} ${state.repos.length?`${state.repos.length} selected`:'All repositories'} <span>⌄</span></button>${Object.keys(snapshot.groups||{}).length?`<label class="group-picker"><span class="sr-only">Repository group</span><select data-action="select-group" aria-label="Repository group"><option value="">All groups</option>${Object.keys(snapshot.groups).sort().map(g=>`<option value="${esc(g)}" ${snapshot.activeGroup===g?'selected':''}>${esc(g)}</option>`).join('')}</select></label>`:''}<div class="snapshot-time"><span class="status-dot ${snapshot.status.errors?.length?'warning':''}"></span>${state.busy?'Refreshing data…':snapshot.mode==='cache'?'Cached history':dateValue(snapshot.generatedAt)?`Updated ${age(snapshot.generatedAt).toLowerCase()}`:'Not loaded'}</div></section>${state.error?`<div class="error-banner" role="alert">${esc(state.error)}<button data-action="dismiss-error" aria-label="Dismiss error">×</button></div>`:''}${snapshot.status.errors?.length?`<button class="coverage-banner" data-action="status">${snapshot.status.errors.length} data ${snapshot.status.errors.length===1?'issue':'issues'} · Some results may be incomplete <span>View details →</span></button>`:''}${state.busy?`<div class="loading-banner" role="status"><span class="loading-dot"></span>${esc(snapshot.status.phase==='refreshing'?snapshot.status.message:'Loading repository history…')}</div>`:''}${!snapshot.repositories.length?renderEmptyWorkspace():state.board==='activity'?renderActivity(total):state.board==='people'?renderPeople(total):renderPRs()}<footer class="main-footer"><span>Activity is a signal, not a productivity score.</span><span>${state.board==='prs'?loadingPRs()?'Pull requests loading':number(snapshot.pullRequests.length)+' known open PRs'+(prCoverageUnknown()?' · partial':''):number(total.commits)+' commits in scope'}<span class="footer-separator">/</span>LOCAL WORKSPACE</span></footer></main>`;
  window.scrollTo(0,boardScroll[state.board]||0);renderedBoard=state.board;
 }
 function filterToolbar(type,extra=''){
@@ -129,12 +133,15 @@ function openModal(type){
 function closeModal(){state.modal=null;$('#modal-root').innerHTML='';if(lastFocus?.isConnected)lastFocus.focus();}
 function renderModal(){
  if(!state.modal){$('#modal-root').innerHTML='';return;}
- const titles={settings:'Workspace settings',repositories:'Repository scope',status:'Data status',help:'Keyboard guide',dates:'Date range',filters:'Filters',identities:'Contributor identities',identityReview:'Review identity changes',controls:'Repository controls',removeCache:'Remove cached repository',sort:'Sort pull requests'};
+ const titles={'github-setup':'Choose where to install Bigboard',settings:'Workspace settings',repositories:'Repository scope',status:'Data status',help:'Keyboard guide',dates:'Date range',filters:'Filters',identities:'Contributor identities',identityReview:'Review identity changes',controls:'Repository controls',removeCache:'Remove cached repository',sort:'Sort pull requests'};
  let content='';let footer='<button class="button" data-action="close-modal">Done</button>';
  const parity=renderParityModal();
- if(parity){content=parity.content;footer=parity.footer;}else if(state.modal==='settings'){
+ if(parity){content=parity.content;footer=parity.footer;}else if(state.modal==='github-setup'){
+ content=`<p><strong>Signed in as ${esc(state.snapshot.auth.login)}</strong></p><p class="modal-intro">Next, choose the personal account or organization where you want to install Bigboard Desktop, and which repositories it can read.</p><p>GitHub will ask you to approve read-only access. An organization may require administrator approval.</p><button class="button primary" data-action="manage-access">Choose account and repositories on GitHub ↗</button><p class="field-help">After installing, return here and continue. If Bigboard already has access to your repositories, you can continue now.</p>`;
+ footer='<button class="button" data-action="close-modal">Later</button><button class="button primary" data-action="continue-setup">Continue to workspace</button>';
+ }else if(state.modal==='settings'){
  const draft=state.settingsDraft;
- content=`<p class="modal-intro">Choose the repositories and data source for your Bigboard workspace.</p><div class="mode-options" role="group" aria-label="Data source">${[['live','GitHub','Refresh repositories and PRs'],['cache','Cached history','Read your existing local cache']].map(([mode,title,description])=>`<button data-action="settings-mode" data-value="${mode}" class="mode-option ${draft.mode===mode?'selected':''}" aria-pressed="${draft.mode===mode}"><strong>${title}</strong><span>${description}</span></button>`).join('')}</div><div class="settings-fields"><label>Personal account<input id="personalAccount" name="personalAccount" autocomplete="off" value="${esc(draft.personalAccount)}" placeholder="GitHub username"></label><label>Organizations<input id="organizations" name="organizations" autocomplete="off" value="${esc((draft.organizations||[]).join(', '))}" placeholder="Separate names with commas"></label></div><p class="field-help">${draft.mode==='live'?'Git and GitHub CLI (gh) must be installed. To sign in, run <code>gh auth login</code>, then return to Bigboard to discover repositories. Refresh reads default-branch history and open PRs.':'Reads owned Bigboard caches without network requests. Uncached repositories will have no history.'}</p><div class="section-heading"><h3>Tracked repositories</h3><button class="button small" data-action="discover" ${state.busy?'disabled':''}>${state.busy?'Working…':'Discover repositories'}</button></div><p class="field-help">Discover the full repository list for your current sources before reviewing, then choose at least one repository. Newly discovered repositories are included unless you exclude them.</p><div class="repository-choices">${state.discovered.length?state.discovered.map(r=>`<label><input type="checkbox" data-settings-repo="${esc(r.id)}" ${(draft.repositories||[]).includes(r.id)?'checked':''}><span>${esc(r.id)}${r.pushedAt?`<small class="repo-pushed">Last push ${esc(fullDate(r.pushedAt))}</small>`:''}</span></label>`).join(''):'<p class="muted-text">Discover repositories after entering your account or organizations.</p>'}</div>`;
+ content=`${renderAccountSettings()}<p class="modal-intro">Choose the repositories and data source for your Bigboard workspace.</p><div class="mode-options" role="group" aria-label="Data source">${[['live','GitHub','Refresh repositories and PRs'],['cache','Cached history','Read your existing local cache']].map(([mode,title,description])=>`<button data-action="settings-mode" data-value="${mode}" class="mode-option ${draft.mode===mode?'selected':''}" aria-pressed="${draft.mode===mode}"><strong>${title}</strong><span>${description}</span></button>`).join('')}</div><div class="settings-fields"><label>Personal account<input id="personalAccount" name="personalAccount" autocomplete="off" value="${esc(draft.personalAccount)}" placeholder="GitHub username"></label><label>Organizations<input id="organizations" name="organizations" autocomplete="off" value="${esc((draft.organizations||[]).join(', '))}" placeholder="Separate names with commas"></label></div><p class="field-help">${draft.mode==='live'?'Choose repositories available to your GitHub sign-in. Leave account and organization filters blank to see all accessible repositories. Refresh reads default-branch history and open PRs.':'Reads owned Bigboard caches without network requests. Uncached repositories will have no history.'}</p><div class="section-heading"><h3>Tracked repositories</h3><button class="button small" data-action="discover" ${state.busy?'disabled':''}>${state.busy?'Working…':'Discover repositories'}</button></div><p class="field-help">Discover the full repository list for your current sources before reviewing, then choose at least one repository. Newly discovered repositories are included unless you exclude them.</p><div class="repository-choices">${state.discovered.length?state.discovered.map(r=>`<label><input type="checkbox" data-settings-repo="${esc(r.id)}" ${(draft.repositories||[]).includes(r.id)?'checked':''}><span>${esc(r.id)}${r.pushedAt?`<small class="repo-pushed">Last push ${esc(fullDate(r.pushedAt))}</small>`:''}</span></label>`).join(''):'<p class="muted-text">Discover repositories available to your GitHub account.</p>'}</div>`;
  if(state.settingsReview)content=`<p class="modal-intro">Review your workspace before saving.</p><dl class="status-facts"><div><dt>Data source</dt><dd>${esc(draft.mode)}</dd></div><div><dt>Account</dt><dd>${esc(draft.personalAccount||'None')}</dd></div><div><dt>Organizations</dt><dd>${esc((draft.organizations||[]).join(', ')||'None')}</dd></div><div><dt>Repositories</dt><dd>${draft.repositories.length?draft.repositories.map(esc).join('<br>'):'All discovered repositories'}</dd></div></dl><button class="text-button" data-action="edit-settings">Back to editing</button>`;
  footer=`<button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="save-settings" ${state.busy?'disabled':''}>${state.busy?'Saving…':state.settingsReview?'Save workspace':'Review workspace'}</button>`;
  }else if(state.modal==='repositories'){
@@ -161,21 +168,22 @@ function readSettings(){
  return state.settingsDraft;
 }
 async function runWithSnapshots(method,arg){
- const version=++refreshVersion;let pending=true;let timer;
+ const version=++refreshVersion;const session=sessionVersion;let pending=true;let timer;
  if(method==='SaveSettings')prEvidenceLoaded=false;
- const fingerprint=status=>[status.generatedAt,status.phase,status.message,status.commits,status.repositories,status.pullRequests].join('|');
- const statusOf=snapshot=>({generatedAt:snapshot.generatedAt,phase:snapshot.status.phase,message:snapshot.status.message,commits:snapshot.commits.length,repositories:snapshot.repositories.length,pullRequests:snapshot.pullRequests.length});
+ const fingerprint=status=>[status.generatedAt,status.phase,status.message,status.commits,status.repositories,status.pullRequests,status.auth?.configured,status.auth?.signedIn,status.auth?.accountId,status.auth?.pending,status.auth?.error].join('|');
+ const statusOf=snapshot=>({generatedAt:snapshot.generatedAt,phase:snapshot.status.phase,message:snapshot.status.message,commits:snapshot.commits.length,repositories:snapshot.repositories.length,pullRequests:snapshot.pullRequests.length,auth:snapshot.auth});
  let last=fingerprint(statusOf(state.snapshot));
  const poll=async()=>{
-  if(!pending||version!==refreshVersion)return;
+  if(!pending||version!==refreshVersion||session!==sessionVersion)return;
   try{
    const status=await api('SnapshotStatus');
-   if(pending&&version===refreshVersion&&fingerprint(status)!==last){const next=validSnapshot(await api('Snapshot'));if(pending&&version===refreshVersion){state.snapshot=next;last=fingerprint(statusOf(next));render();}}
+   if(!pending||version!==refreshVersion||session!==sessionVersion)return;
+   if(fingerprint(status)!==last){const next=validSnapshot(await api('Snapshot'));if(!pending||version!==refreshVersion||session!==sessionVersion)return;if(next.auth?.accountId!==state.snapshot.auth?.accountId||next.auth?.signedIn!==state.snapshot.auth?.signedIn)resetSessionView();state.snapshot=next;last=fingerprint(statusOf(next));render();}
   }catch{}
-  if(pending&&version===refreshVersion)timer=setTimeout(poll,1000);
+  if(pending&&version===refreshVersion&&session===sessionVersion)timer=setTimeout(poll,1000);
  };
  timer=setTimeout(poll,500);
- try{const result=validSnapshot(await api(method,arg));prEvidenceLoaded=result.mode==='live'&&(result.status.phase==='ready'||result.pullRequests.length>0);return result;}catch(error){if(state.snapshot.status.phase==='refreshing')state.snapshot={...state.snapshot,status:{...state.snapshot.status,phase:'partial',message:`${method==='SaveSettings'?'Workspace update':'Refresh'} failed; showing retained data.`,errors:[...new Set([...state.snapshot.status.errors,error.message])]}};throw error;}finally{pending=false;clearTimeout(timer);}
+ try{const result=validSnapshot(await api(method,arg));if(session!==sessionVersion)return state.snapshot;prEvidenceLoaded=result.mode==='live'&&(result.status.phase==='ready'||result.pullRequests.length>0);return result;}catch(error){if(session!==sessionVersion)return state.snapshot;if(state.snapshot.status.phase==='refreshing')state.snapshot={...state.snapshot,status:{...state.snapshot.status,phase:'partial',message:`${method==='SaveSettings'?'Workspace update':'Refresh'} failed; showing retained data.`,errors:[...new Set([...state.snapshot.status.errors,error.message])]}};throw error;}finally{pending=false;clearTimeout(timer);}
 }
 async function refresh(){
  if(state.busy)return;state.busy=true;state.error='';render();
@@ -211,6 +219,7 @@ function explore(id,kind){
 }
 function back(){if(state.prContext){returnActivity();return;}const s=state.activity;const heat=s.lens==='heat'&&s.scope.repo;if(s.lens!=='ranking'&&!heat){s.lens='ranking';s.lensPerson='';s.lensEvidence=null;render();return;}if(!s.scope.repo)return;const path=s.scope.path.split('/').filter(Boolean);if(path.length){path.pop();s.scope={...s.scope,path:path.join('/'),file:false};}else s.scope={repo:'',path:'',file:false};s.lens=heat?'heat':'ranking';s.heatAll=false;s.lensPerson='';s.lensEvidence=null;s.selected='';render();}
 async function action(button){
+ if(await authAction(button))return;
  const value=button.dataset.value;
  if(await parityAction(button))return;
  switch(button.dataset.action){
@@ -239,8 +248,8 @@ async function action(button){
  case 'scope-all':state.repoDraft=[];renderModal();break;
  case 'apply-scope':state.repos=[...state.repoDraft];reconcileActivityRepositoryScope();closeModal();render();break;
  case 'discover':{
-  readSettings();state.settingsDiscovered=false;const sources=settingsSources();const request=structuredClone({...state.settingsDraft,...state.settingsSavedSelection});state.busy=true;state.dialogError='';renderModal();
-  try{const discovered=(await api('Discover',request))||[];if(settingsSources()!==sources){state.dialogError='Sources changed during discovery. Discover repositories again before reviewing.';}else{state.discovered=discovered.sort((a,b)=>dateValue(b.pushedAt)-dateValue(a.pushedAt)||a.id.localeCompare(b.id));state.settingsDiscovered=true;state.settingsDraft.repositories=state.discovered.filter(r=>state.settingsTouched.has(r.id)?state.settingsTouched.get(r.id):r.included!==false).map(r=>r.id);if(!state.discovered.length)state.dialogError='No repositories were found for these sources.';}}catch(e){state.dialogError=e.message;}finally{state.busy=false;renderModal();}break;
+  readSettings();state.settingsDiscovered=false;const session=sessionVersion;const sources=settingsSources();const request=structuredClone({...state.settingsDraft,...state.settingsSavedSelection});state.busy=true;state.dialogError='';renderModal();
+  try{const discovered=(await api('Discover',request))||[];if(session!==sessionVersion)return;if(settingsSources()!==sources){state.dialogError='Sources changed during discovery. Discover repositories again before reviewing.';}else{state.discovered=discovered.sort((a,b)=>dateValue(b.pushedAt)-dateValue(a.pushedAt)||a.id.localeCompare(b.id));state.settingsDiscovered=true;state.settingsDraft.repositories=state.discovered.filter(r=>state.settingsTouched.has(r.id)?state.settingsTouched.get(r.id):r.included!==false).map(r=>r.id);if(!state.discovered.length)state.dialogError='No repositories were found for these sources.';}}catch(e){state.dialogError=e.message;}finally{state.busy=false;renderModal();}break;
  }
  case 'save-settings':{
   readSettings();if(!state.settingsReview){if(!state.settingsDiscovered){state.dialogError='Discover repositories for the current sources before reviewing.';renderModal();break;}if(!state.discovered.length||!state.settingsDraft.repositories.length){state.dialogError='Discover repositories and select at least one before reviewing.';renderModal();break;}const known=new Set(state.discovered.map(r=>r.id));state.settingsDraft.excludedRepositories=[...state.settingsDraft.excludedRepositories.filter(id=>!known.has(id)),...state.discovered.filter(r=>!state.settingsDraft.repositories.includes(r.id)).map(r=>r.id)];state.dialogError='';state.settingsReview=true;renderModal();break;}state.busy=true;state.dialogError='';renderModal();
@@ -268,6 +277,7 @@ document.addEventListener('change',event=>{
  if(input.dataset.scopeRepo){const repos=new Set(state.repoDraft);input.checked?repos.add(input.dataset.scopeRepo):repos.delete(input.dataset.scopeRepo);state.repoDraft=[...repos];}
 });
 document.addEventListener('keydown',event=>{
+ if(state.snapshot?.auth&&(!state.snapshot.auth.signedIn||state.snapshot.status.phase==='access'))return;
  if(parityKey(event))return;
  if(state.modal)return;
  if(event.ctrlKey||event.metaKey||event.altKey||['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)||event.target.isContentEditable)return;
@@ -487,8 +497,77 @@ document.addEventListener('focusout',event=>{const board=event.target.dataset.bo
 document.addEventListener('focusin',event=>{const input=event.target;if(input.dataset.field==='query'&&searchBefore[input.dataset.board]===undefined)searchBefore[input.dataset.board]=state[input.dataset.board].query;});
 document.addEventListener('input',event=>{if(event.target.id==='identitySearch'){const query=event.target.value.toLowerCase();document.querySelectorAll('[data-identity-row]').forEach(row=>row.hidden=!row.textContent.toLowerCase().includes(query));}});
 
+function renderAccountSettings(){
+ const account=state.snapshot.auth;if(!account)return '';
+ return `<section class="account-settings"><div><strong>Signed in as ${esc(account.login)}</strong><p class="field-help">Access is limited to repositories you and Bigboard can read. Organizations may require an administrator to approve access.</p></div><div class="account-actions"><button class="button small" data-action="manage-access">Manage GitHub access ↗</button><button class="button small" data-action="sign-in" ${account.pending?'disabled':''}>${account.pending?'Waiting for GitHub…':'Sign in again'}</button><button class="button small" data-action="sign-out">Sign out</button></div>${account.pending?'<button class="text-button" data-action="cancel-sign-in">Cancel sign-in</button>':''}${account.error?`<p class="dialog-error" role="alert">${esc(account.error)}</p>`:''}</section>`;
+}
+
+function renderSignIn(){
+ const account=state.snapshot.auth;const verifying=account.signedIn;
+ let actions;
+ if(!account.configured)actions='<p class="field-help">GitHub sign-in is unavailable in this build. Install an official Bigboard release with GitHub sign-in enabled.</p>';
+ else if(account.pending)actions='<p role="status">Finish signing in in your browser. Bigboard will continue here.</p><button class="button" data-action="cancel-sign-in">Cancel sign-in</button>';
+ else if(verifying)actions=`<button class="button primary" data-action="retry-access" ${authWorking?'disabled':''}>${authWorking?'Checking access…':'Check repository access'}</button><button class="button" data-action="manage-access">Manage GitHub access ↗</button><button class="button" data-action="sign-in">Sign in again</button><button class="text-button" data-action="sign-out">Sign out</button>`;
+ else actions=`<button class="button primary" data-action="sign-in" ${authWorking?'disabled':''}>${authWorking?'Opening GitHub…':'Sign in with GitHub'}</button>${state.signOutFailed?'<button class="button" data-action="sign-out">Retry sign-out</button>':''}`;
+ $('#modal-root').innerHTML='';state.modal=null;
+ $('#app').innerHTML=`<main class="sign-in-screen"><section class="sign-in-card"><img class="brand-mark" src="brand.png" alt=""><div class="eyebrow">BIGBOARD</div><h1>${verifying?'Connect your repositories':'Your GitHub work, in view.'}</h1><p>${verifying?`Signed in as ${esc(account.login)}. Verify repository access to open your workspace.`:'Explore repository activity, contributors, and pull requests in one local workspace.'}</p>${account.error?`<div class="dialog-error" role="alert">${esc(account.error)}</div>`:''}${state.error?`<div class="dialog-error" role="alert">${esc(state.error)}</div>`:''}${actions}<p class="field-help">Bigboard requests read-only repository access. Your history stays on this Mac. You may need an organization administrator to approve Bigboard.</p></section></main>`;
+}
+
+function resetSessionView(){
+ sessionVersion++;refreshVersion++;prEvidenceLoaded=false;preferencesApplied=false;commitLimit=100;
+ state.board='activity';state.days=14;state.since='';state.repos=[];state.prContext=null;state.error='';state.busy=false;state.modal=null;state.settingsDraft=null;state.discovered=[];state.dialogError='';state.signOutFailed=false;
+ Object.assign(state.activity,{lens:'heat',heatMetric:'lines',heatAll:false,relatedMode:'commits',lensPerson:'',lensEvidence:null,people:[],query:'',sort:'change',reverse:false,hideBots:false,scope:{repo:'',path:'',file:false},selected:''});
+ Object.assign(state.people,{query:'',sort:'change',reverse:false,hideBots:false,selected:''});
+ Object.assign(state.prs,{query:'',sort:'updated',reverse:false,author:'',review:'',checks:'',state:'',mine:'',selected:''});
+ for(const board of Object.keys(boardScroll))boardScroll[board]=0;
+ $('#modal-root').innerHTML='';
+}
+
+async function openAuthenticatedWorkspace(){
+ resetSessionView();const session=sessionVersion;
+ let snapshot;try{snapshot=await api('Snapshot');}catch(error){if(session===sessionVersion){state.error=error.message;render();}return;}
+ if(session!==sessionVersion)return;state.snapshot=validSnapshot(snapshot);applyPreferences();render();
+ if(!state.snapshot.auth?.signedIn||state.snapshot.status.phase==='access')return;
+ if(state.snapshot.status.phase==='setup'){openModal(state.snapshot.auth?.signedIn?'github-setup':'settings');return;}
+ await refresh();
+}
+
+function pollSignIn(){
+ clearTimeout(authTimer);const session=sessionVersion;
+ authTimer=setTimeout(async()=>{
+  try{
+   const account=await api('AuthStatus');if(session!==sessionVersion)return;state.snapshot.auth=account;
+   if(account.pending){if(state.modal==='settings')renderModal();else render();pollSignIn();return;}
+   if(account.signedIn&&!account.error){await openAuthenticatedWorkspace();return;}
+   render();if(state.modal==='settings')renderModal();
+  }catch(error){if(session!==sessionVersion)return;state.error=error.message;render();}
+ },700);
+}
+
+async function discoverSetupRepositories(){
+ await action({dataset:{action:'discover'}});
+}
+
+async function authAction(button){
+ const action=button.dataset.action;
+ if(!['sign-in','cancel-sign-in','sign-out','manage-access','retry-access','continue-setup'].includes(action))return false;
+ if(authWorking)return true;
+ authWorking=true;state.error='';
+ try{
+  if(action==='sign-in'){state.snapshot.auth=await api('StartSignIn');if(state.modal==='settings')renderModal();else render();pollSignIn();}
+  if(action==='cancel-sign-in'){sessionVersion++;clearTimeout(authTimer);state.snapshot.auth=await api('CancelSignIn');render();if(state.modal==='settings')renderModal();}
+  if(action==='sign-out'){clearTimeout(authTimer);resetSessionView();const account={...state.snapshot.auth,signedIn:false,login:'',accountId:'',pending:false};state.snapshot=validSnapshot({auth:account,settings:{mode:'live'},status:{phase:'signin',errors:[]}});render();try{state.snapshot=validSnapshot(await api('SignOut'));}catch(error){state.signOutFailed=true;state.snapshot.auth=await api('AuthStatus');throw error;}render();}
+  if(action==='manage-access'){await api('ManageGitHubAccess');toast('Choose repository access on GitHub, then return and discover repositories.');}
+  if(action==='retry-access'){render();await openAuthenticatedWorkspace();}
+  if(action==='continue-setup'){openModal('settings');await discoverSetupRepositories();}
+ }catch(error){state.error=error.message;if(state.modal){state.dialogError=error.message;renderModal();}else render();}
+ finally{authWorking=false;if(!state.modal)render();}
+ return true;
+}
+
 async function start(){
- try{state.snapshot=validSnapshot(await api('Snapshot'));applyPreferences();prEvidenceLoaded=state.snapshot.mode==='live'&&(state.snapshot.status.phase==='ready'||state.snapshot.pullRequests.length>0);render();if(!dateValue(state.snapshot.generatedAt)||state.snapshot.status.phase==='initial')await refresh();}
- catch(e){$('#app').innerHTML=`<div class="boot"><img class="brand-mark" src="brand.png" alt=""><h1>Unable to open the workspace</h1><p>${esc(e.message)}</p><button class="button primary" id="retry-start">Try again</button></div>`;$('#retry-start').addEventListener('click',start);}
+ const session=sessionVersion;
+ try{const snapshot=await api('Snapshot');if(session!==sessionVersion)return;state.snapshot=validSnapshot(snapshot);applyPreferences();prEvidenceLoaded=state.snapshot.mode==='live'&&(state.snapshot.status.phase==='ready'||state.snapshot.pullRequests.length>0);render();if(state.snapshot.auth&&!state.snapshot.auth.signedIn)return;if(state.snapshot.status.phase==='access')return;if(state.snapshot.status.phase==='setup'){openModal(state.snapshot.auth?.signedIn?'github-setup':'settings');return;}if(!dateValue(state.snapshot.generatedAt)||state.snapshot.status.phase==='initial')await refresh();}
+ catch(e){if(session!==sessionVersion)return;$('#app').innerHTML=`<div class="boot"><img class="brand-mark" src="brand.png" alt=""><h1>Unable to open the workspace</h1><p>${esc(e.message)}</p><button class="button primary" id="retry-start">Try again</button></div>`;$('#retry-start').addEventListener('click',start);}
 }
 start();

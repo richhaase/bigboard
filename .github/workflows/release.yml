@@ -46,6 +46,9 @@ jobs:
       - name: Build universal macOS application
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          BIGBOARD_GITHUB_CLIENT_ID: ${{ vars.BIGBOARD_GITHUB_CLIENT_ID }}
+          BIGBOARD_GITHUB_CLIENT_SECRET: ${{ secrets.BIGBOARD_GITHUB_CLIENT_SECRET }}
+          BIGBOARD_GITHUB_APP_SLUG: ${{ vars.BIGBOARD_GITHUB_APP_SLUG }}
         run: bash scripts/build-macos.sh "${RELEASE_TAG#v}"
       - name: Sign and notarize application
         env:

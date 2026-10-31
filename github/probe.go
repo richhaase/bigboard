@@ -80,7 +80,11 @@ func parseRepositoryProbe(response apiResponse, alias, repo string, requestErr e
 	}
 	for _, problem := range response.Errors {
 		if len(problem.Path) == 0 || problem.Path[0] == alias {
-			result.Err = joinError(requestErr, ErrIncomplete)
+			kind := classifyFailure(problem.Type + " " + problem.Message)
+			if kind == ErrRequest {
+				kind = ErrIncomplete
+			}
+			result.Err = joinError(result.Err, kind)
 			return result
 		}
 	}
@@ -119,5 +123,5 @@ func probeFieldErrors(err error) bool {
 		}
 		return true
 	}
-	return errors.Is(err, ErrRequest) || errors.Is(err, ErrIncomplete) || errors.Is(err, ErrRepository)
+	return errors.Is(err, ErrRequest) || errors.Is(err, ErrIncomplete) || errors.Is(err, ErrRepository) || errors.Is(err, ErrPermission)
 }

@@ -1,10 +1,9 @@
 package github
 
 import (
-	"bytes"
 	"context"
+	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -84,67 +83,25 @@ func (p *Provider) quotaSuccess() {
 	p.quota.failures = 0
 }
 
-// gh --include prefixes the JSON body with HTTP headers. Retain only the safe
-// quota fields, never diagnostic text or authentication headers. Plain JSON is
-// also accepted for injected runners.
-func responseBody(data []byte, now time.Time) ([]byte, time.Time, bool, bool) {
+func responseQuota(response Response, now time.Time) (time.Time, bool, bool) {
 	var retryAt time.Time
-	limited, throttled := false, false
-	for bytes.HasPrefix(data, []byte("HTTP/")) {
-		end, sep := bytes.Index(data, []byte("\r\n\r\n")), 4
-		if end < 0 {
-			end, sep = bytes.Index(data, []byte("\n\n")), 2
+	if value := response.Header.Get("Retry-After"); value != "" {
+		if seconds, err := strconv.ParseInt(value, 10, 32); err == nil && seconds >= 0 {
+			retryAt = now.Add(time.Duration(seconds) * time.Second)
+		} else if date, err := http.ParseTime(value); err == nil {
+			retryAt = date
 		}
-		if end < 0 {
-			break
-		}
-		lines := strings.Split(strings.ReplaceAll(string(data[:end]), "\r\n", "\n"), "\n")
-		status := strings.Fields(lines[0])
-		if len(status) > 1 && status[1] == "429" {
-			limited, throttled = true, true
-		}
-		var reset time.Time
-		remainingZero := false
-		for _, line := range lines[1:] {
-			key, value, ok := strings.Cut(line, ":")
-			if !ok {
-				continue
-			}
-			value = strings.TrimSpace(value)
-			switch strings.ToLower(key) {
-			case "retry-after":
-				var until time.Time
-				if seconds, err := strconv.ParseInt(value, 10, 32); err == nil && seconds >= 0 {
-					until = now.Add(time.Duration(seconds) * time.Second)
-				} else {
-					for _, layout := range []string{time.RFC1123, time.RFC850, time.ANSIC} {
-						if date, err := time.Parse(layout, value); err == nil {
-							until = date
-							break
-						}
-					}
-				}
-				if until.After(retryAt) {
-					retryAt = until
-				}
-			case "x-ratelimit-remaining":
-				remainingZero = value == "0"
-			case "x-ratelimit-reset":
-				if epoch, err := strconv.ParseInt(value, 10, 64); err == nil {
-					reset = time.Unix(epoch, 0)
-				}
-			}
-		}
-		if len(status) > 1 && status[1] == "403" && retryAt.After(now) {
-			limited, throttled = true, true
-		}
-		if remainingZero {
-			limited = true
-			if reset.After(retryAt) {
+	}
+	limited := response.StatusCode == 429 || (response.StatusCode == 403 && retryAt.After(now))
+	throttled := limited
+	if response.Header.Get("X-RateLimit-Remaining") == "0" {
+		limited = true
+		if epoch, err := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			if reset := time.Unix(epoch, 0); reset.After(retryAt) {
 				retryAt = reset
 			}
 		}
-		data = data[end+sep:]
+		throttled = throttled || response.StatusCode == 403
 	}
-	return data, retryAt, limited, throttled
+	return retryAt, limited, throttled
 }

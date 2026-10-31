@@ -2,145 +2,131 @@ package github
 
 import (
 	"errors"
+	"net/http"
 	"reflect"
-	"slices"
 	"testing"
+	"time"
 )
 
-func taggedStep(etag, body string) fakeStep {
-	return fakeStep{data: []byte("HTTP/2.0 200 OK\nContent-Type: application/json\r\nEtag: " + etag + "\r\nX-Ratelimit-Used: 61\r\n\r\n" + body)}
+func taggedDiscovery(step discoveryStep, etag string) discoveryStep {
+	step.response.Header = http.Header{"Etag": {etag}}
+	return step
+}
+func notModifiedDiscovery() discoveryStep {
+	return discoveryStep{response: Response{StatusCode: http.StatusNotModified}}
 }
 
-func notModifiedStep(etag string) fakeStep {
-	return fakeStep{data: []byte("HTTP/2.0 304 Not Modified\nEtag: " + etag + "\r\nX-Ratelimit-Used: 61\r\n\r\n"), err: ErrRequest}
-}
-
-func conditionalHeader(args []string) string {
-	if i := slices.Index(args, "-H"); i >= 0 && i+1 < len(args) {
-		return args[i+1]
-	}
-	return ""
-}
-
-func TestDiscoverRepositoriesReusesPagesOnNotModified(t *testing.T) {
-	body := `[{"full_name":"example/api","default_branch":"main","archived":false},{"full_name":"example/old","default_branch":"main","archived":true}]`
-	runner := &discoveryRunner{t: t, steps: []fakeStep{
-		taggedStep(`W/"page-1"`, body),
-		notModifiedStep(`"page-1"`),
-		taggedStep(`W/"page-1b"`, `[{"full_name":"example/api","default_branch":"main"},{"full_name":"example/new","default_branch":"trunk"}]`),
+func TestAccessibleDiscoveryReusesConditionalInstallationAndRepositoryPages(t *testing.T) {
+	first := repositoryRow("example/api")
+	retired := repositoryRow("example/old")
+	retired["archived"] = true
+	client := &discoveryClient{t: t, steps: []discoveryStep{
+		taggedDiscovery(installationPage(t, 1, installationRow(1, "example", "Organization")), `"installation"`),
+		taggedDiscovery(repositoryPage(t, 2, first, retired), `W/"repositories"`),
+		notModifiedDiscovery(), notModifiedDiscovery(),
+		notModifiedDiscovery(), taggedDiscovery(repositoryPage(t, 2, first, repositoryRow("example/new")), `"changed"`),
 	}}
-	provider := NewProvider(runner)
-	want := []DiscoveredRepository{{Name: "example/api", DefaultBranch: "main"}}
-	for i := range 2 {
-		got, err := provider.DiscoverRepositories(t.Context(), []string{"example"})
-		if err != nil || !reflect.DeepEqual(got, want) {
-			t.Fatalf("discovery %d = %+v, %v; want %+v", i, got, err, want)
+	provider := NewProvider(client)
+	for range 2 {
+		got, err := provider.DiscoverAccessibleRepositories(t.Context())
+		if err != nil || !reflect.DeepEqual(got, []DiscoveredRepository{{OwnerType: "Organization", Name: "example/api", DefaultBranch: "main"}}) {
+			t.Fatalf("conditional discovery=%+v err=%v", got, err)
 		}
 	}
-	got, err := provider.DiscoverRepositories(t.Context(), []string{"example"})
-	want = []DiscoveredRepository{{Name: "example/api", DefaultBranch: "main"}, {Name: "example/new", DefaultBranch: "trunk"}}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("changed discovery = %+v, %v; want %+v", got, err, want)
+	got, err := provider.DiscoverAccessibleRepositories(t.Context())
+	if err != nil || len(got) != 2 || got[1].Name != "example/new" {
+		t.Fatalf("changed repositories=%+v err=%v", got, err)
 	}
-	headers := []string{conditionalHeader(runner.calls[0].args), conditionalHeader(runner.calls[1].args), conditionalHeader(runner.calls[2].args)}
-	if !reflect.DeepEqual(headers, []string{"", `If-None-Match: W/"page-1"`, `If-None-Match: W/"page-1"`}) {
-		t.Fatalf("conditional headers = %q", headers)
-	}
-	for _, call := range runner.calls {
-		if !slices.Contains(call.args, "--include") || call.args[len(call.args)-1] != "orgs/example/repos?type=all&per_page=100&page=1" {
-			t.Fatalf("request = %+v", call)
+	for i, call := range client.calls {
+		want := ""
+		if i >= 2 {
+			want = `"installation"`
+			if i%2 == 1 {
+				want = `W/"repositories"`
+			}
+		}
+		if call.Header.Get("If-None-Match") != want {
+			t.Fatalf("request %d missing matching validator", i)
 		}
 	}
 }
 
-func TestDiscoverPersonalRepositoriesSendsStoredETags(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{
-		taggedStep(`"user"`, `{"login":"example"}`),
-		taggedStep(`"repos"`, `[{"full_name":"example/api","default_branch":"main"}]`),
-		notModifiedStep(`"user"`),
-		notModifiedStep(`"repos"`),
+func TestDiscoverPersonalRepositoriesReusesIdentityAndInstallationValidators(t *testing.T) {
+	client := &discoveryClient{t: t, steps: []discoveryStep{
+		taggedDiscovery(discoveryJSON(t, map[string]any{"login": "example"}), `"user"`),
+		taggedDiscovery(installationPage(t, 1, installationRow(1, "example", "User")), `"installations"`),
+		taggedDiscovery(repositoryPage(t, 1, repositoryRow("example/private")), `"repositories"`),
+		notModifiedDiscovery(), notModifiedDiscovery(), notModifiedDiscovery(),
 	}}
-	provider := NewProvider(runner)
-	for i := range 2 {
+	provider := NewProvider(client)
+	for range 2 {
 		got, err := provider.DiscoverPersonalRepositories(t.Context(), "example")
-		if err != nil || !reflect.DeepEqual(got, []DiscoveredRepository{{Name: "example/api", DefaultBranch: "main"}}) {
-			t.Fatalf("discovery %d = %+v, %v", i, got, err)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("personal conditional repositories=%+v err=%v", got, err)
 		}
 	}
-	if conditionalHeader(runner.calls[2].args) != `If-None-Match: "user"` || conditionalHeader(runner.calls[3].args) != `If-None-Match: "repos"` {
-		t.Fatalf("calls = %+v", runner.calls)
+	for i, tag := range []string{`"user"`, `"installations"`, `"repositories"`} {
+		if client.calls[i+3].Header.Get("If-None-Match") != tag {
+			t.Fatalf("conditional validator missing for %s", client.calls[i+3].Endpoint)
+		}
 	}
 }
 
 func TestConditionalRequestRejectsUnusableResponses(t *testing.T) {
-	cases := []struct {
+	for _, tc := range []struct {
 		name  string
-		first fakeStep
-		step  fakeStep
+		first bool
+		step  discoveryStep
 		want  error
 	}{
-		{"304-without-cache", fakeStep{}, notModifiedStep(`"x"`), ErrRequest},
-		{"missing-status", fakeStep{}, fakeStep{data: []byte(`[]`)}, ErrResponse},
-		{"not-found", fakeStep{}, fakeStep{data: []byte("HTTP/2.0 404 Not Found\r\n\r\n{}"), err: ErrRepository}, ErrRepository},
-		{"redirect-status", fakeStep{}, fakeStep{data: []byte("HTTP/2.0 302 Found\r\n\r\n")}, ErrResponse},
-		{"304-after-auth-failure", taggedStep(`"x"`, `[]`), fakeStep{data: []byte("HTTP/2.0 304 Not Modified\r\n\r\n"), err: ErrAuthentication}, ErrAuthentication},
-	}
-	for _, tc := range cases {
+		{"304 without cache", false, notModifiedDiscovery(), ErrResponse},
+		{"not found", false, discoveryStep{response: Response{StatusCode: 404}}, ErrRepository},
+		{"redirect", false, discoveryStep{response: Response{StatusCode: 302}}, ErrRequest},
+		{"authentication with 304", true, discoveryStep{response: Response{StatusCode: 304}, err: ErrAuthentication}, ErrAuthentication},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			steps := []fakeStep{tc.step}
-			if tc.first.data != nil {
-				steps = append([]fakeStep{tc.first}, steps...)
+			steps := []discoveryStep{}
+			if tc.first {
+				steps = append(steps, taggedDiscovery(installationPage(t, 0), `"cached"`))
 			}
-			runner := &discoveryRunner{t: t, steps: steps}
-			provider := NewProvider(runner)
-			if tc.first.data != nil {
-				if _, err := provider.DiscoverRepositories(t.Context(), []string{"example"}); err != nil {
+			steps = append(steps, tc.step)
+			client := &discoveryClient{t: t, steps: steps}
+			provider := NewProvider(client)
+			if tc.first {
+				if _, err := provider.conditionalRequest(t.Context(), "user/installations"); err != nil {
 					t.Fatal(err)
 				}
 			}
-			got, err := provider.DiscoverRepositories(t.Context(), []string{"example"})
-			if got != nil || !errors.Is(err, tc.want) {
-				t.Fatalf("repositories = %+v, %v; want %v", got, err, tc.want)
+			if _, err := provider.conditionalRequest(t.Context(), "user/installations"); !errors.Is(err, tc.want) {
+				t.Fatalf("conditional error=%v want=%v", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestConditionalRequestForgetsETagAfterFailure(t *testing.T) {
-	runner := &discoveryRunner{t: t, steps: []fakeStep{
-		taggedStep(`"x"`, `[]`),
-		{err: ErrRateLimited},
-		includedStep(`[]`),
-	}}
-	provider := NewProvider(runner)
-	_, _ = provider.DiscoverRepositories(t.Context(), []string{"example"})
-	if _, err := provider.DiscoverRepositories(t.Context(), []string{"example"}); !errors.Is(err, ErrRateLimited) {
-		t.Fatalf("err = %v", err)
+func TestConditionalRequestForgetsValidatorAfterFailure(t *testing.T) {
+	client := &discoveryClient{t: t, steps: []discoveryStep{taggedDiscovery(installationPage(t, 0), `"cached"`), {err: ErrRateLimited}, installationPage(t, 0)}}
+	provider := NewProvider(client)
+	if _, err := provider.conditionalRequest(t.Context(), "user/installations"); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := provider.DiscoverRepositories(t.Context(), []string{"example"}); err != nil || conditionalHeader(runner.calls[2].args) != "" {
-		t.Fatalf("err = %v, calls = %+v", err, runner.calls)
+	if _, err := provider.conditionalRequest(t.Context(), "user/installations"); !errors.Is(err, ErrRateLimited) {
+		t.Fatal(err)
+	}
+	if _, err := provider.conditionalRequest(t.Context(), "user/installations"); !errors.Is(err, ErrRateLimited) || len(client.calls) != 2 {
+		t.Fatalf("cooldown ignored: calls=%d error=%v", len(client.calls), err)
+	}
+	retry := provider.cooldown().Add(time.Second)
+	provider.now = func() time.Time { return retry }
+	if _, err := provider.conditionalRequest(t.Context(), "user/installations"); err != nil || client.calls[2].Header.Get("If-None-Match") != "" {
+		t.Fatalf("failed validator reused: %v", err)
 	}
 }
 
-func TestParseIncludedResponseAcceptsGHHeaderFormats(t *testing.T) {
-	for _, data := range []string{
-		"HTTP/2.0 200 OK\nEtag: \"a\"\r\nX-Other: b\r\n\r\n[1]",
-		"HTTP/1.1 200 OK\r\nETag: \"a\"\r\n\r\n[1]",
-		"HTTP/2.0 200 OK\nEtag: \"a\"\n\n[1]",
-	} {
-		status, header, body, ok := parseIncludedResponse([]byte(data))
-		if !ok || status != 200 || header.Get("Etag") != `"a"` || string(body) != "[1]" {
-			t.Fatalf("parse(%q) = %d %v %q %v", data, status, header, body, ok)
-		}
-	}
-	for _, data := range []string{"", "[1]", "HTTP/2.0 OK\r\n\r\n", "HTTP/2.0 999 Odd\r\n\r\n", "HTTP/2.0 200 OK\n bad\r\n\r\n"} {
-		if _, _, _, ok := parseIncludedResponse([]byte(data)); ok {
-			t.Fatalf("parse(%q) accepted", data)
-		}
-	}
+func TestRejectsUnsafeETags(t *testing.T) {
 	for _, etag := range []string{"", "a b", "\"a\"\n", string(make([]byte, maxETagLength+1))} {
 		if validETag(etag) {
-			t.Fatalf("validETag(%q) accepted", etag)
+			t.Fatalf("unsafe validator accepted")
 		}
 	}
 }

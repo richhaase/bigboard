@@ -11,14 +11,48 @@ import (
 	gh "github.com/richhaase/bigboard/github"
 )
 
-func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bool) Snapshot {
+func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bool) (result Snapshot) {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
 	defer cancel()
 	settings := previous.Settings
-	result := emptySnapshot(settings, s.cachePath)
+	result = emptySnapshot(settings, s.cachePath)
 	if offline {
 		settings.Mode = "cache"
 	}
+	if s.accountID != "" && settings.Mode == "live" {
+		if err := s.invalidateAccess(); err != nil {
+			result = cloneSnapshot(previous)
+			result.Status.Phase = "partial"
+			result.Status.Errors = append(result.Status.Errors, "Preparing repository access: "+err.Error())
+			return result
+		}
+	}
+	denied := map[string]bool{}
+	denyAll := false
+	defer func() {
+		if s.accountID == "" || settings.Mode != "live" {
+			return
+		}
+		s.mu.Lock()
+		allowed := make(map[string]git.Repository, len(s.authorized))
+		for id, repo := range s.authorized {
+			if !denyAll && !denied[id] {
+				allowed[id] = repo
+			}
+		}
+		s.mu.Unlock()
+		if err := s.replaceAccess(context.WithoutCancel(ctx), allowed); err != nil {
+			result.Status.Errors = append(result.Status.Errors, "Saving repository access: "+err.Error())
+		}
+		if !denyAll && len(denied) == 0 {
+			return
+		}
+		s.mu.Lock()
+		result = s.restrictAccess(result)
+		s.mu.Unlock()
+		result.Status.Phase = "partial"
+		result.Status.Message = "GitHub access was denied. Sign in again or manage repository access."
+	}()
 	result.GeneratedAt = s.now().Format(time.RFC3339)
 	repositories, discoveryErr := s.discover(ctx, settings)
 	if discoveryErr != nil {
@@ -64,9 +98,22 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 			}
 		}
 	}
+	if s.accountID != "" {
+		for id, probe := range probes {
+			if accessDenied(probe.Err) {
+				denied[id] = true
+			}
+		}
+		selected = slices.DeleteFunc(selected, func(repo git.Repository) bool { return denied[repo.ID] })
+		if accessDenied(discoveryErr) {
+			denyAll = true
+			selected = nil
+		}
+	}
 	type scanned struct {
 		repo    Repository
 		commits []Commit
+		denied  bool
 	}
 	outcomes := make([]scanned, len(selected))
 	semaphore := make(chan struct{}, 8)
@@ -92,7 +139,7 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 				defer func() { <-semaphore }()
 			case <-ctx.Done():
 				view.Stale, view.Error = true, ctx.Err().Error()
-				outcomes[i] = scanned{view, retainedCommits(previous, repo.ID)}
+				outcomes[i] = scanned{repo: view, commits: retainedCommits(previous, repo.ID)}
 				return
 			}
 			fetched := false
@@ -108,6 +155,10 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 					err = s.cache.Refresh(ctx, repo)
 				}
 				if err != nil {
+					if s.accountID != "" && accessDenied(err) {
+						outcomes[i] = scanned{repo: view, denied: true}
+						return
+					}
 					view.Stale, view.Error = true, err.Error()
 				} else {
 					fetched = true
@@ -138,7 +189,7 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 				}
 				view.Fetched = fetched
 			}
-			outcomes[i] = scanned{view, commits}
+			outcomes[i] = scanned{repo: view, commits: commits}
 		}()
 	}
 	workers.Wait()
@@ -148,6 +199,10 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 		s.prResults = map[string]gh.Result{}
 	}
 	for _, outcome := range outcomes {
+		if outcome.denied {
+			denied[outcome.repo.ID] = true
+			continue
+		}
 		result.Repositories = append(result.Repositories, outcome.repo)
 		result.Commits = append(result.Commits, outcome.commits...)
 		if outcome.repo.Error != "" {
@@ -177,15 +232,22 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 		result.Status.AccountRequests = gh.RequestCount(fetchCtx) - beforeAccount
 		if err != nil {
 			result.Status.Errors = append(result.Status.Errors, "GitHub account: "+err.Error())
+			if s.accountID != "" && accessDenied(err) {
+				denyAll = true
+			}
 		} else {
 			result.Viewer = viewer
 		}
-		if len(requests) > 0 {
+		if len(requests) > 0 && !denyAll {
 			rows := s.provider.FetchAll(fetchCtx, requests)
 			for i, request := range requests {
 				inventory := gh.Result{Repo: request.Repo, Err: gh.ErrIncomplete}
 				if i < len(rows) {
 					inventory = rows[i]
+				}
+				if s.accountID != "" && accessDenied(inventory.Err) {
+					denied[request.Repo] = true
+					continue
 				}
 				retained := inventory
 				if !retained.Complete {

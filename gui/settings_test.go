@@ -18,14 +18,14 @@ func TestUnifiedConfigurationLoadsSettingsAndInfersOnlyAbsentMode(t *testing.T) 
 		name, data, mode string
 		valid            bool
 	}{
-		{"empty", `{}`, "cache", true},
+		{"empty", `{}`, "live", true},
 		{"organization", `{"organizations":["Example"]}`, "live", true},
 		{"personal", `{"personal_account":"Person"}`, "live", true},
 		{"explicit cache", `{"mode":"cache","organizations":["Example"]}`, "cache", true},
 		{"explicit empty", `{"mode":"","organizations":["Example"]}`, "", false},
 		{"null mode", `{"mode":null}`, "", false},
 		{"synthetic", `{"mode":"demo"}`, "", false},
-		{"live without sources", `{"mode":"live"}`, "", false},
+		{"live without source filters", `{"mode":"live"}`, "live", true},
 		{"explicit includes", `{"organizations":["example"],"repositories":["EXAMPLE/engine"]}`, "live", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,7 +49,7 @@ func TestUnifiedConfigurationLoadsSettingsAndInfersOnlyAbsentMode(t *testing.T) 
 
 func TestSettingsSaveUsesUnifiedConfigurationAndPreservesAdvancedFields(t *testing.T) {
 	s, _, provider := testService(t, "cache")
-	original := []byte(`{"organizations":["example"],"sort":"commits","since":"30d","exclude":["vendor-*"],"all_files":true,"ai_identities":["assistant@example.test"],"bot_identities":["robot@example.test"],"identities":{"person@example.test":{"name":"Configured Person"}},"pr_request_budget":42,"groups":{"core":["outside/engine"]},"work_areas":{"example/engine":[{"name":"Core","paths":["src"]}]},"theme":"dark","fuzzy":true,"github":{"enabled":true}}`)
+	original := []byte(`{"organizations":["example"],"sort":"commits","since":"30d","exclude":["vendor-*"],"all_files":true,"ai_identities":["assistant@example.test"],"bot_identities":["robot@example.test"],"identities":{"person@example.test":{"name":"Configured Person"}},"pr_request_budget":42,"groups":{"core":["outside/engine"]},"work_areas":{"example/engine":[{"name":"Core","paths":["src"]}]}}`)
 	if err := os.WriteFile(s.path, original, 0640); err != nil {
 		t.Fatal(err)
 	}

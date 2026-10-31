@@ -18,10 +18,14 @@ func timestamp(at time.Time) string {
 }
 
 func (s *Service) bookmarkKey() string {
-	if s.group != "" {
-		return "group:" + s.group
+	prefix := ""
+	if s.accountID != "" {
+		prefix = "account:" + s.accountID + ":"
 	}
-	return "all"
+	if s.group != "" {
+		return prefix + "group:" + s.group
+	}
+	return prefix + "all"
 }
 
 func (s *Service) loadBookmarks() {

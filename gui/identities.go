@@ -22,6 +22,17 @@ func (s *Service) IdentityOptions() IdentityOptions {
 		}
 	}
 	for email, identity := range s.analysis.Identities {
+		if s.accountID != "" {
+			_, visible := byEmail[email]
+			for _, alias := range identity.Aliases {
+				if _, ok := byEmail[alias]; ok {
+					visible = true
+				}
+			}
+			if !visible {
+				continue
+			}
+		}
 		option := byEmail[email]
 		option.Email = email
 		if identity.Name != "" {

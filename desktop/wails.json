@@ -13,6 +13,13 @@
     "productName": "Bigboard",
     "productVersion": "0.0.0",
     "comments": "Explore repository activity with Bigboard",
-    "copyright": "Copyright \u00a9 Rich Haase"
+    "copyright": "Copyright \u00a9 Rich Haase",
+    "protocols": [
+      {
+        "scheme": "com.richhaase.bigboard",
+        "description": "Bigboard GitHub sign-in",
+        "role": "Viewer"
+      }
+    ]
   }
 }

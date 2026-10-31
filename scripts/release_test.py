@@ -164,7 +164,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn(hashlib.sha256(self.archive.read_bytes()).hexdigest(), result.stdout)
         self.assertIn('app "Bigboard.app"', result.stdout)
         self.assertIn('depends_on formula: "git"', result.stdout)
-        self.assertIn('depends_on formula: "gh"', result.stdout)
+        self.assertNotIn('depends_on formula: "gh"', result.stdout)
+        self.assertNotIn("gh auth", result.stdout)
         self.assertNotIn('binary ', result.stdout)
         self.assertIn('darwin_universal.zip', result.stdout)
         self.assertIn('depends_on macos: :ventura', result.stdout)
@@ -181,3 +182,21 @@ class ReleaseTests(unittest.TestCase):
         result = self.run_script("build-macos.sh", "not-a-version")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid release version", result.stderr)
+
+    def test_release_auth_configuration_is_required_and_validated(self):
+        for name in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG"):
+            self.env.pop(name, None)
+        result = self.run_script("auth-ldflags.sh", "required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.run_script("auth-ldflags.sh").returncode, 0)
+        self.env.update(BIGBOARD_GITHUB_CLIENT_ID="fixture-client", BIGBOARD_GITHUB_CLIENT_SECRET="fixture-public-parameter", BIGBOARD_GITHUB_APP_SLUG="fixture-app")
+        result = self.run_script("auth-ldflags.sh", "required")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("-X main.githubClientID=fixture-client", result.stdout)
+        self.assertIn("-X main.githubAppSlug=fixture-app", result.stdout)
+        self.env["BIGBOARD_GITHUB_CLIENT_SECRET"] = "invalid whitespace parameter"
+        result = self.run_script("auth-ldflags.sh", "required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn(self.env["BIGBOARD_GITHUB_CLIENT_SECRET"], result.stderr)

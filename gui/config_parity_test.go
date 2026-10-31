@@ -139,16 +139,16 @@ func TestSourceChangesPreserveGroupsAndShowOnlyActiveMembers(t *testing.T) {
 	}
 }
 
-func TestLegacyRepositoryPathsAndDepthHaveMigrationGuidance(t *testing.T) {
-	for _, key := range []string{"paths", "depth"} {
+func TestUnsupportedConfigurationFieldsAreRejected(t *testing.T) {
+	for _, key := range []string{"paths", "depth", "theme", "fuzzy", "github"} {
 		t.Run(key, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "config.json"), []byte(fmt.Sprintf(`{"%s":null}`, key)), 0600); err != nil {
 				t.Fatal(err)
 			}
 			_, _, err := loadSettings(path)
-			if err == nil || !strings.Contains(err.Error(), "legacy "+key) || !strings.Contains(err.Error(), "cache") || !strings.Contains(err.Error(), "personal_account or organizations") {
-				t.Fatalf("missing migration guidance: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") || !strings.Contains(err.Error(), key) {
+				t.Fatalf("unsupported field was not rejected: %v", err)
 			}
 		})
 	}

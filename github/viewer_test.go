@@ -2,31 +2,29 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 )
 
 func TestCurrentLoginUsesReadOnlyProviderRequest(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"Example-User"},"rateLimit":{"remaining":100}}}`)}}}
+	runner := &responseClient{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"Example-User"},"rateLimit":{"remaining":100}}}`)}}}
 	ctx := WithRequestBudget(context.Background(), 3)
 	login, err := NewProvider(runner).CurrentLogin(ctx)
 	if err != nil || login != "Example-User" || len(runner.calls) != 1 || RequestCount(ctx) != 1 {
 		t.Fatalf("login=%q err=%v calls=%d requests=%d", login, err, len(runner.calls), RequestCount(ctx))
 	}
 	call := runner.calls[0]
-	if call.command != "gh" || call.args[0] != "api" || call.args[1] != "graphql" ||
-		!hasPair(call.args, "--hostname", "github.com") || !hasPair(call.args, "--method", "POST") ||
-		!hasPair(call.args, "-f", "query="+viewerQuery) || !strings.Contains(strings.Join(call.args, " "), "--include") {
+	var payload struct {
+		Query     string
+		Variables map[string]any
+	}
+	if call.Method != "POST" || call.Endpoint != "graphql" || json.Unmarshal(call.Body, &payload) != nil || payload.Query != viewerQuery || len(payload.Variables) != 0 {
 		t.Fatalf("unexpected account request: %+v", call)
 	}
-	for _, arg := range call.args {
-		if strings.HasPrefix(arg, "owner=") || strings.HasPrefix(arg, "name=") {
-			t.Fatalf("account request included repository variable: %q", arg)
-		}
-	}
+
 }
 
 func TestCurrentLoginRejectsMissingOrMalformedAccount(t *testing.T) {
@@ -42,7 +40,7 @@ func TestCurrentLoginRejectsMissingOrMalformedAccount(t *testing.T) {
 		`not JSON`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
+			runner := &responseClient{t: t, steps: []fakeStep{{data: []byte(body)}}}
 			login, err := NewProvider(runner).CurrentLogin(context.Background())
 			if login != "" || !errors.Is(err, ErrResponse) {
 				t.Fatalf("login=%q err=%v", login, err)
@@ -52,7 +50,7 @@ func TestCurrentLoginRejectsMissingOrMalformedAccount(t *testing.T) {
 }
 
 func TestCurrentLoginSupportsManagedAccounts(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"example_user"}}}`)}}}
+	runner := &responseClient{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"example_user"}}}`)}}}
 	login, err := NewProvider(runner).CurrentLogin(context.Background())
 	if err != nil || login != "example_user" {
 		t.Fatalf("managed account login=%q err=%v", login, err)
@@ -62,7 +60,7 @@ func TestCurrentLoginSupportsManagedAccounts(t *testing.T) {
 func TestCurrentLoginPreservesSafeFailures(t *testing.T) {
 	for _, want := range []error{ErrAuthentication, ErrUnavailable, ErrRateLimited, ErrOutputLimit} {
 		t.Run(want.Error(), func(t *testing.T) {
-			runner := &fakeRunner{t: t, steps: []fakeStep{{err: want}}}
+			runner := &responseClient{t: t, steps: []fakeStep{{err: want}}}
 			ctx := WithRequestBudget(context.Background(), 2)
 			login, err := NewProvider(runner).CurrentLogin(ctx)
 			if login != "" || !errors.Is(err, want) || RequestCount(ctx) != 1 {
@@ -73,7 +71,7 @@ func TestCurrentLoginPreservesSafeFailures(t *testing.T) {
 }
 
 func TestCurrentLoginSharesInventoryBudget(t *testing.T) {
-	runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"viewer"}}}`)}, summaries(t, nil, 0, false, "")}}
+	runner := &responseClient{t: t, steps: []fakeStep{{data: []byte(`{"data":{"viewer":{"login":"viewer"}}}`)}, summaries(t, nil, 0, false, "")}}
 	p := NewProvider(runner)
 	ctx := WithRequestBudget(context.Background(), 2)
 	if _, err := p.CurrentLogin(ctx); err != nil {
@@ -102,7 +100,7 @@ func TestCurrentLoginRespectsCancellationAndZeroBudget(t *testing.T) {
 		{"no allowance", WithRequestBudget(context.Background(), 0), ErrBudgetExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			runner := &fakeRunner{t: t}
+			runner := &responseClient{t: t}
 			login, err := NewProvider(runner).CurrentLogin(tc.ctx)
 			if login != "" || !errors.Is(err, tc.err) || RequestCount(tc.ctx) != 0 || len(runner.calls) != 0 {
 				t.Fatalf("login=%q err=%v requests=%d calls=%d", login, err, RequestCount(tc.ctx), len(runner.calls))
@@ -120,7 +118,7 @@ func TestCurrentLoginSharesProviderCooldown(t *testing.T) {
 			if exhaustedSuccess {
 				body = fmt.Sprintf(`{"data":{"viewer":{"login":"viewer"},"rateLimit":{"remaining":0,"resetAt":%q}}}`, reset.Format(time.RFC3339))
 			}
-			runner := &fakeRunner{t: t, steps: []fakeStep{{data: []byte(body)}}}
+			runner := &responseClient{t: t, steps: []fakeStep{{data: []byte(body)}}}
 			p := NewProvider(runner)
 			p.now = func() time.Time { return now }
 			ctx := WithRequestBudget(context.Background(), 3)

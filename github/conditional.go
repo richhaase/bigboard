@@ -1,13 +1,9 @@
 package github
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"net/textproto"
+	"net/http"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -49,70 +45,33 @@ func (p *Provider) conditionalRequest(ctx context.Context, endpoint string) ([]b
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, RequestTimeout)
-	defer cancel()
 	previous, cached := p.conditional.get(endpoint)
-	args := []string{"api", "--hostname", "github.com", "--method", "GET", "--include"}
+	header := make(http.Header)
 	if cached {
-		args = append(args, "-H", "If-None-Match: "+previous.etag)
+		header.Set("If-None-Match", previous.etag)
 	}
-	data, err := p.runner.Run(ctx, "gh", append(args, endpoint)...)
+	response, err := p.apiRequest(ctx, Request{Method: "GET", Endpoint: endpoint, Header: header})
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if len(data) > MaxOutputBytes {
-		return nil, ErrOutputLimit
-	}
-	status, header, body, parsed := parseIncludedResponse(data)
-	if parsed && status == 304 && cached && (err == nil || errors.Is(err, ErrRequest)) {
+	if response.StatusCode == http.StatusNotModified && cached && err == nil {
 		return slices.Clone(previous.body), nil
 	}
 	if err != nil {
 		p.conditional.forget(endpoint)
-		return nil, safeRequestError(err)
+		return nil, err
 	}
-	if !parsed || status != 200 {
+	if response.StatusCode != http.StatusOK {
 		p.conditional.forget(endpoint)
 		return nil, ErrResponse
 	}
+	header, body := response.Header, response.Body
 	if etag := header.Get("Etag"); validETag(etag) {
 		p.conditional.put(endpoint, conditionalEntry{etag: etag, body: slices.Clone(body)})
 	} else {
 		p.conditional.forget(endpoint)
 	}
 	return body, nil
-}
-
-func parseIncludedResponse(data []byte) (int, textproto.MIMEHeader, []byte, bool) {
-	head, body := data, []byte(nil)
-	end, size := bytes.Index(data, []byte("\r\n\r\n")), 4
-	if bare := bytes.Index(data, []byte("\n\n")); bare >= 0 && (end < 0 || bare < end) {
-		end, size = bare, 2
-	}
-	if end >= 0 {
-		head, body = data[:end], data[end+size:]
-	}
-	lines := strings.Split(strings.ReplaceAll(string(head), "\r\n", "\n"), "\n")
-	fields := strings.Fields(lines[0])
-	if len(fields) < 2 || !strings.HasPrefix(fields[0], "HTTP/") {
-		return 0, nil, nil, false
-	}
-	status, err := strconv.Atoi(fields[1])
-	if err != nil || status < 100 || status > 599 {
-		return 0, nil, nil, false
-	}
-	header := make(textproto.MIMEHeader)
-	for _, line := range lines[1:] {
-		if line == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(key) != key || key == "" {
-			return 0, nil, nil, false
-		}
-		header.Add(key, strings.TrimSpace(value))
-	}
-	return status, header, body, true
 }
 
 func validETag(etag string) bool {

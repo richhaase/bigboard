@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +20,7 @@ func TestQuotaCooldownAcrossRepositoriesAndCancellation(t *testing.T) {
 		success             bool
 	}{
 		{name: "429", headers: "HTTP/2.0 429 Too Many Requests\r\nRetry-After: 120\r\n", body: `{"message":"Too Many Requests"}`, err: ErrRequest, delay: 2 * time.Minute},
-		{name: "secondary-date", headers: "HTTP/2.0 403 Forbidden\r\nRetry-After: " + now.Add(3*time.Minute).Format(time.RFC1123) + "\r\n", body: `{"errors":[{"type":"RATE_LIMITED"}]}`, err: ErrRequest, delay: 3 * time.Minute},
+		{name: "secondary-date", headers: "HTTP/2.0 403 Forbidden\r\nRetry-After: " + now.Add(3*time.Minute).Format(http.TimeFormat) + "\r\n", body: `{"errors":[{"type":"RATE_LIMITED"}]}`, err: ErrRequest, delay: 3 * time.Minute},
 		{name: "secondary-rest-body", headers: "HTTP/2.0 403 Forbidden\r\nRetry-After: 120\r\n", body: `{ "message": "slow down" }`, err: context.Canceled, delay: 2 * time.Minute},
 		{name: "primary", headers: fmt.Sprintf("HTTP/2.0 200 OK\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: %d\r\n", now.Add(time.Hour).Unix()), body: `{"errors":[{"type":"RATE_LIMITED"}]}`, err: ErrRequest, delay: time.Hour},
 		{name: "missing-headers", body: `{"errors":[{"type":"RATE_LIMITED"}]}`, err: ErrRequest, delay: time.Minute},
@@ -36,7 +37,7 @@ func TestQuotaCooldownAcrossRepositoriesAndCancellation(t *testing.T) {
 				body = append([]byte(tc.headers+"\r\n"), body...)
 			}
 			runner := &fakeRunner{t: t, steps: []fakeStep{{data: body, err: tc.err}, summaries(t, nil, 0, false, "")}}
-			p := NewProvider(runner)
+			p := newTestProvider(runner)
 			p.now = func() time.Time { return clock }
 			ctx, cancel := context.WithCancel(context.Background())
 			first := p.Fetch(ctx, "acme/repo")
@@ -67,7 +68,7 @@ func TestQuotaCooldownAcrossRepositoriesAndCancellation(t *testing.T) {
 func TestSecondaryBackoffIsBoundedAndResetsOnSuccess(t *testing.T) {
 	clock := time.Now()
 	runner := &fakeRunner{t: t}
-	p := NewProvider(runner)
+	p := newTestProvider(runner)
 	p.now = func() time.Time { return clock }
 	for i := 0; i < 7; i++ {
 		runner.steps = append(runner.steps, fakeStep{err: ErrRateLimited})
@@ -87,7 +88,7 @@ func TestSecondaryBackoffIsBoundedAndResetsOnSuccess(t *testing.T) {
 
 func TestRefreshBudgetSharedAcrossRepositories(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{summaries(t, nil, 0, false, ""), summaries(t, nil, 0, false, "")}}
-	p := NewProvider(runner)
+	p := newTestProvider(runner)
 	ctx := WithRequestBudget(context.Background(), 2)
 	for i := 0; i < 4; i++ {
 		got := p.Fetch(ctx, fmt.Sprintf("acme/repo%d", i))

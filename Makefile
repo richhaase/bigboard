@@ -1,6 +1,6 @@
 .PHONY: help build dev preview test test-core test-desktop test-frontend test-coverage fmt fmt-check lint lint-core lint-desktop vet vet-core vet-desktop tidy clean staticcheck staticcheck-core staticcheck-desktop check gui gui-build gui-preview gui-test
 
-WAILS = go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
+WAILS = bash ../scripts/wails.sh
 NODE = fnm exec --using $(shell cat .node-version)
 LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 STATICCHECK = go run honnef.co/go/tools/cmd/staticcheck@latest
@@ -11,13 +11,13 @@ help:
 	@echo "Core-only checks use the -core suffix; desktop checks use -desktop."
 
 build:
-	cd desktop && $(WAILS) build -skipbindings -s -m
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && $(WAILS) build -v 0 -skipbindings -s -m -ldflags "$$auth_flags"
 
 dev:
-	cd desktop && $(WAILS) dev -s -skipbindings
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && $(WAILS) dev -v 0 -s -skipbindings -ldflags "$$auth_flags"
 
 preview:
-	cd desktop && go run . --serve
+	cd desktop && auth_flags="$$(bash ../scripts/auth-ldflags.sh)" && go run -ldflags "$$auth_flags" . --serve
 
 test: test-core test-desktop test-frontend
 
@@ -39,7 +39,7 @@ fmt:
 	cd desktop && go fmt ./...
 
 fmt-check:
-	@files="$$(gofmt -l git github gui stats desktop/*.go)"; status=$$?; \
+	@files="$$(gofmt -l auth git github gui stats desktop/*.go)"; status=$$?; \
 		test $$status -eq 0 || exit $$status; \
 		test -z "$$files" || { printf '%s\n' "$$files"; exit 1; }
 

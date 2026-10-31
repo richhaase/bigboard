@@ -38,7 +38,8 @@ evidence. Isolated browser checks exercise the real controls, draft and
 confirmation flows, loading/empty/error states, and narrow layouts; fixtures
 exist only in the test runner.
 
-The macOS bundle contains the backend and frontend assets. Git and GitHub CLI
-are external dependencies, declared by the release cask. Release signing and
+The macOS bundle contains the backend and frontend assets. Git is the external command-line
+dependency declared by the release cask. Native GitHub sign-in uses PKCE and
+Keychain; API and owned-cache Git authentication do not depend on GitHub CLI. Release signing and
 notarization are handled by the tag workflow; local builds do not establish that
 a release has passed those checks. See the [development guide](README.md).

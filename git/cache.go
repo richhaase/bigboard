@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,10 +31,11 @@ var ErrCacheDamaged = errors.New("repository cache is damaged and will be rebuil
 var objectDamagePattern = regexp.MustCompile(`(?i)(unable to|could not|cannot) read( (object|tree|blob|commit|tag))? '?\(?[0-9a-f]{40,64}|(could not|cannot) parse (object|tree|commit|tag) '?\(?[0-9a-f]{40,64}|missing (blob|tree|commit|tag) [0-9a-f]{40,64}|bad( (tree|blob|commit|tag))? object [0-9a-f]{40,64}|inflate: |loose object [0-9a-f]{40,64} .*is corrupt|packfile .* cannot be accessed|failed to traverse parents of commit`)
 
 type RepositoryCache struct {
-	Root    string
-	run     func(context.Context, string, ...string) (string, error)
-	mu      sync.Mutex
-	queries map[string]*repoQueries
+	Root        string
+	TokenSource func(context.Context) (string, error)
+	run         func(context.Context, string, ...string) (string, error)
+	mu          sync.Mutex
+	queries     map[string]*repoQueries
 }
 
 type CacheInfo struct {
@@ -622,13 +624,45 @@ func (c *RepositoryCache) git(ctx context.Context, dir string, args ...string) (
 	if c.run != nil {
 		return c.run(ctx, dir, args...)
 	}
+	if len(args) > 0 && args[0] == "fetch" {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if c.TokenSource == nil {
+			return "", github.ErrAuthentication
+		}
+		token, err := c.TokenSource(ctx)
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if err != nil {
+			for _, known := range []error{context.Canceled, context.DeadlineExceeded, github.ErrUnavailable, github.ErrRateLimited,
+				github.ErrAuthentication, github.ErrPermission, github.ErrResponse, github.ErrRequest} {
+				if errors.Is(err, known) {
+					return "", known
+				}
+			}
+			return "", github.ErrRequest
+		}
+		if token == "" || strings.ContainsAny(token, "\x00\r\n") {
+			return "", github.ErrAuthentication
+		}
+		return runCacheGitWithToken(ctx, dir, token, args...)
+	}
 	return runCacheGit(ctx, dir, args...)
 }
 
 func runCacheGit(ctx context.Context, dir string, args ...string) (string, error) {
+	return runCacheGitWithToken(ctx, dir, "", args...)
+}
+
+func runCacheGitWithToken(ctx context.Context, dir, token string, args ...string) (string, error) {
 	pinned := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "credential.interactive=false",
-		"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "fetch.writeCommitGraph=false",
+		"-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "http.sslVerify=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "fetch.writeCommitGraph=false",
 		"-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "remote.origin.pruneTags=false"}
+	if token != "" {
+		pinned = append(pinned, "--config-env=http.https://github.com/.extraHeader=BIGBOARD_GIT_AUTHORIZATION")
+	}
 	if dir != "" {
 		pinned = append(pinned, "--git-dir="+dir)
 	}
@@ -636,12 +670,17 @@ func runCacheGit(ctx context.Context, dir string, args ...string) (string, error
 	cmd.Env = nil
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if !strings.HasPrefix(key, "GIT_") && key != "SSH_ASKPASS" && key != "SSH_ASKPASS_REQUIRE" {
+		if !strings.HasPrefix(key, "GIT_") && key != "SSH_ASKPASS" && key != "SSH_ASKPASS_REQUIRE" && key != "BIGBOARD_GIT_AUTHORIZATION" && key != "SSLKEYLOGFILE" {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_ASKPASS=", "GIT_SSH_COMMAND=ssh -o BatchMode=yes", "GIT_SSH_VARIANT=ssh", "SSH_ASKPASS=", "SSH_ASKPASS_REQUIRE=never")
+	if token != "" {
+		header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+		cmd.Env = append(cmd.Env, "BIGBOARD_GIT_AUTHORIZATION="+header)
+	}
 	cmd.WaitDelay = time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -650,7 +689,20 @@ func runCacheGit(ctx context.Context, dir string, args ...string) (string, error
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
+		if token != "" {
+			message := strings.ToLower(stderr.String())
+			if strings.Contains(message, "repository not found") || strings.Contains(message, "error: 404") {
+				return "", github.ErrRepository
+			}
+			if strings.Contains(message, "authentication failed") || strings.Contains(message, "could not read username") || strings.Contains(message, "error: 401") || strings.Contains(message, "error: 403") {
+				return "", github.ErrAuthentication
+			}
+			return "", fmt.Errorf("git fetch: %w", err)
+		}
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	}
+	if token != "" {
+		return "", nil
 	}
 	return string(output), nil
 }

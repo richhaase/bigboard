@@ -39,8 +39,10 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 			}
 			return nil
 		}
-		if r.Method == http.MethodGet && (r.URL.Path == "/api/snapshot" || r.URL.Path == "/api/snapshot-status" || r.URL.Path == "/api/identities" || r.URL.Path == "/api/repository-controls" || r.URL.Path == "/api/export") {
+		if r.Method == http.MethodGet && (r.URL.Path == "/api/snapshot" || r.URL.Path == "/api/snapshot-status" || r.URL.Path == "/api/identities" || r.URL.Path == "/api/repository-controls" || r.URL.Path == "/api/export" || r.URL.Path == "/api/auth") {
 			switch r.URL.Path {
+			case "/api/auth":
+				result = app.AuthStatus()
 			case "/api/snapshot":
 				result = app.Snapshot()
 			case "/api/snapshot-status":
@@ -71,6 +73,14 @@ func previewHandler(frontend fs.FS, app *App, host string) http.Handler {
 				}
 			}
 			switch r.URL.Path {
+			case "/api/sign-in":
+				result, err = app.StartSignIn()
+			case "/api/cancel-sign-in":
+				result = app.CancelSignIn()
+			case "/api/sign-out":
+				result, err = app.SignOut()
+			case "/api/manage-access":
+				err = app.ManageGitHubAccess()
 			case "/api/refresh":
 				result, err = app.Refresh()
 			case "/api/settings":
@@ -149,7 +159,7 @@ func servePreview(address string, frontend fs.FS, app *App) error {
 	defer stop()
 	go func() {
 		<-ctx.Done()
-		app.service.Close()
+		app.shutdown()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdown)

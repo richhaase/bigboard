@@ -1,5 +1,3 @@
-// Package github provides bounded, read-only pull request context through the
-// installed GitHub CLI. Authentication remains entirely the CLI's responsibility.
 package github
 
 import (
@@ -27,19 +25,18 @@ const (
 var (
 	ErrInvalidRepository = errors.New("invalid GitHub owner/repository")
 	ErrUnsupportedOrigin = errors.New("origin is not a supported github.com repository URL")
-	ErrUnavailable       = errors.New("GitHub CLI unavailable")
-	ErrAuthentication    = errors.New("GitHub CLI authentication unavailable")
+	ErrUnavailable       = errors.New("GitHub connection unavailable")
+	ErrAuthentication    = errors.New("sign in to GitHub in Settings")
+	ErrPermission        = errors.New("GitHub access is not granted for this account or repository")
 	ErrRateLimited       = errors.New("GitHub API rate limited")
 	ErrRepository        = errors.New("GitHub repository unavailable")
 	ErrRequest           = errors.New("GitHub request failed")
 	ErrResponse          = errors.New("invalid GitHub API response")
 	ErrIncomplete        = errors.New("GitHub context is incomplete")
 	ErrBudgetExceeded    = errors.New("GitHub refresh limit reached")
-	ErrOutputLimit       = errors.New("GitHub command output limit reached")
+	ErrOutputLimit       = errors.New("GitHub response limit reached")
 )
 
-// Runner executes an argument-vector command, never a shell command. Tests can
-// implement Runner without invoking git, gh, authentication, or the network.
 type Runner interface {
 	Run(ctx context.Context, command string, args ...string) ([]byte, error)
 }
@@ -123,3 +120,11 @@ type RepositoryRequest struct {
 	Repo     string
 	Previous []PullRequest
 }
+
+type InstallationAccessError struct {
+	Owner string
+	Err   error
+}
+
+func (e *InstallationAccessError) Error() string { return e.Err.Error() }
+func (e *InstallationAccessError) Unwrap() error { return e.Err }

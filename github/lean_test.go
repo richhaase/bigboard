@@ -47,7 +47,7 @@ func withFiles(source *rawPR, total int, more bool, cursor string, nodes ...*raw
 }
 
 func snapshot(number int, files ...*rawFile) PullRequest {
-	return NewProvider(nil).convertPR("acme/repo", pr(number, files...), false).pr
+	return newTestProvider(nil).convertPR("acme/repo", pr(number, files...), false).pr
 }
 
 func queryOf(call invocation) string {
@@ -61,7 +61,7 @@ func queryOf(call invocation) string {
 
 func TestFetchAllFirstLaunchUsesInlineFiles(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{repoSummaries(t, "acme/repo", []*rawPR{pr(1, file("a.go", "MODIFIED"))}, 1, false, "")}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo"}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo"}})[0]
 	if len(runner.calls) != 1 || queryOf(runner.calls[0]) != summaryQuery || !result.PRs[0].FilesComplete || result.FileRequests != 0 {
 		t.Fatalf("first launch lost inline files: %+v", result)
 	}
@@ -70,7 +70,7 @@ func TestFetchAllFirstLaunchUsesInlineFiles(t *testing.T) {
 func TestFetchAllUnchangedSnapshotUsesLeanInventoryWithoutFileRequests(t *testing.T) {
 	previous := []PullRequest{snapshot(1, file("a.go", "MODIFIED")), snapshot(2, file("b.go", "ADDED"), file("c.go", "DELETED"))}
 	runner := &fakeRunner{t: t, steps: []fakeStep{leanSummaries(t, []*rawPR{leanPR(1, 1), leanPR(2, 2)}, 2, false, "")}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: previous}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: previous}})[0]
 	if len(runner.calls) != 1 || queryOf(runner.calls[0]) != leanSummaryQuery || result.FileRequests != 0 || result.Err != nil || !result.Complete {
 		t.Fatalf("unchanged snapshot fetched files: calls=%d %+v", len(runner.calls), result)
 	}
@@ -93,7 +93,7 @@ func TestFetchAllLeanInventoryBatchesChangedAndNewFiles(t *testing.T) {
 		leanSummaries(t, []*rawPR{changed, added, kept, empty}, 4, false, ""),
 		batchFiles(t, []*rawPR{withFiles(changed, 1, false, "", file("new.go", "ADDED")), withFiles(added, 1, false, "", file("added.go", "ADDED"))}),
 	}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: previous}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: previous}})[0]
 	if len(runner.calls) != 2 || queryOf(runner.calls[1]) != fileBatchQuery([]int{1, 2}) || result.InventoryRequests != 1 || result.FileRequests != 1 || result.Err != nil {
 		t.Fatalf("changed files not batched: calls=%d %+v", len(runner.calls), result)
 	}
@@ -115,7 +115,7 @@ func TestFetchAllLeanInventoryPaginatesBatchedFirstPages(t *testing.T) {
 		batchFiles(t, []*rawPR{withFiles(big, 2, true, "next", file("a.go", "ADDED"))}),
 		filePage(t, 1, []*rawFile{file("b.go", "ADDED")}, 2, false, ""),
 	}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
 	got := result.PRs[0]
 	if len(runner.calls) != 3 || queryOf(runner.calls[2]) != filesQuery || !hasPair(runner.calls[2].args, "-f", "cursor=next") ||
 		result.FileRequests != 2 || !got.FilesComplete || !got.PreviousPathsComplete || len(got.Files) != 2 {
@@ -130,7 +130,7 @@ func TestFetchAllLeanBatchFieldErrorMarksOnlyThatPR(t *testing.T) {
 		leanSummaries(t, []*rawPR{one, two}, 2, false, ""),
 		batchFiles(t, []*rawPR{withFiles(one, 1, false, "", file("a.go", "ADDED")), {Number: 2}}, problem),
 	}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
 	if len(runner.calls) != 2 || !result.Complete || result.InventoryErr != nil || result.FilesErr == nil {
 		t.Fatalf("field error handling wrong: %+v", result)
 	}
@@ -143,7 +143,7 @@ func TestFetchAllLeanBatchFieldErrorMarksOnlyThatPR(t *testing.T) {
 
 func TestFetchAllLeanFileBudgetKeepsAreasUnknown(t *testing.T) {
 	runner := &fakeRunner{t: t, steps: []fakeStep{leanSummaries(t, []*rawPR{leanPR(1, 1), leanPR(2, 3)}, 2, false, "")}}
-	result := NewProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
+	result := newTestProvider(runner).FetchAll(WithRequestBudget(context.Background(), 2), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
 	if len(runner.calls) != 1 || !result.Complete || result.InventoryErr != nil || !errors.Is(result.FilesErr, ErrBudgetExceeded) || result.FileRequests != 0 {
 		t.Fatalf("budget cut hid file coverage: %+v", result)
 	}
@@ -159,7 +159,7 @@ func TestFetchAllLeanBatchRevisionChangeStaysPartial(t *testing.T) {
 	moved := withFiles(row, 1, false, "", file("a.go", "ADDED"))
 	moved.HeadRefOid = strings.Repeat("d", 40)
 	runner := &fakeRunner{t: t, steps: []fakeStep{leanSummaries(t, []*rawPR{row}, 1, false, ""), batchFiles(t, []*rawPR{moved})}}
-	result := NewProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
+	result := newTestProvider(runner).FetchAll(context.Background(), []RepositoryRequest{{Repo: "acme/repo", Previous: []PullRequest{snapshot(9)}}})[0]
 	if len(runner.calls) != 2 || result.PRs[0].FilesComplete || len(result.PRs[0].Files) != 0 || !errors.Is(result.FilesErr, ErrIncomplete) {
 		t.Fatalf("moved revision accepted: %+v", result)
 	}
