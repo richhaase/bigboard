@@ -1,11 +1,10 @@
 # GitHub sign-in and publisher setup
 
-The next Bigboard release replaces the GitHub CLI dependency with a public GitHub App.
-Homebrew users install Bigboard, choose **Sign in with GitHub**, and authorize
-repository access in their browser. After sign-in, a new workspace prompts them
-to choose an installation account and repositories on GitHub, then discovers
-those repositories when they continue in Bigboard. They do not register an app, supply client
-IDs, create personal access tokens, or install `gh`.
+Bigboard signs in through a public GitHub App. Users choose **Sign in with
+GitHub**, authorize in their browser, and use **Manage access…** to
+choose installation repositories on GitHub. Back in Bigboard, they refresh the
+repository list and select what to collect in Settings. They do not register an
+app, supply client IDs, create personal access tokens, or install `gh`.
 
 ## One-time publisher registration
 
@@ -73,14 +72,14 @@ secret and callback before release readiness is established.
 
 User access is the intersection of the signed-in user's GitHub permissions and
 repositories selected for the app's installations. Discovery pages through
-`/user/installations` and each installation's repositories. **Manage repository
-access** opens GitHub's app installation page; return to Bigboard and discover
-again after selecting repositories or receiving an organization's approval.
+`/user/installations` and each installation's repositories. **Manage access…**
+opens GitHub's app installation page; return to Bigboard and refresh the
+repository list after selecting repositories or receiving an organization's approval.
 Organization policy, SSO, and administrator approval still apply. Bigboard does
 not bypass them or request write permissions to work around a denial.
 
-Access and refresh tokens stay in the native backend and macOS Keychain. They
-are absent from settings JSON, frontend state, diagnostic messages, repository
+Access and refresh tokens stay in the authentication service and macOS Keychain. They
+are absent from settings JSON, interface state, diagnostic messages, repository
 URLs, and command arguments. Expiring user tokens refresh under a serialized
 lock; refresh-token rotation is persisted before the new token is used. API
 requests are serialized, bounded, and respect GitHub retry/reset headers and
@@ -103,9 +102,9 @@ evidence is available. A confirmed denial must not revive an older offline grant
 Swift authentication and GitHub tests use an isolated credential store and mock
 HTTP transports. Native storage tests use temporary directories, and Git tests
 use owned local fixture repositories. No real credentials are read by tests.
-The Go security jobs remain checks on retained reference code; they are not a
-security scan of the Swift replacement. Native dependencies are Apple frameworks
-and system Git, with no third-party Swift package dependencies.
+Native dependencies are Apple frameworks and system Git, with no third-party
+Swift package dependencies. Automated tests and local signature verification do
+not establish release signing, notarization, or the live OAuth exchange.
 
 ## Required release verification
 

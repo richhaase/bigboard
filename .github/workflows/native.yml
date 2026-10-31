@@ -6,13 +6,13 @@ permissions:
   contents: read
 jobs:
   native:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
       - name: Verify macOS SDK
         run: |
           sdk=$(xcrun --sdk macosx --show-sdk-version)
-          test "${sdk%%.*}" -ge 27
+          test "${sdk%%.*}" -ge 26
       - name: Test
         run: swift test --package-path native
       - name: Test release packaging

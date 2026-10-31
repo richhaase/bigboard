@@ -34,27 +34,24 @@ struct MainView: View {
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 Divider()
-                HStack { Text("Activity describes change, not productivity."); Spacer(); Text(workspace.snapshot.cachedOnly ? "Cached history" : workspace.snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened)) }.font(.caption).foregroundStyle(.secondary).padding(8)
+                HStack { Text("Activity describes change, not productivity."); Spacer(); footerDataStatus }.font(.caption).foregroundStyle(.secondary).padding(8)
             }.navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
             ToolbarItem(id: "date-filter", placement: .primaryAction) { dateFilter }
                 .sharedBackgroundVisibility(.visible)
             ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(id: "repository-filter", placement: .primaryAction) { repositoryFilter }
-                .sharedBackgroundVisibility(.visible)
+            ToolbarItem(id: "repository-filter", placement: .primaryAction) { repositoryFilter.buttonStyle(.glass).buttonBorderShape(.capsule) }
+                .sharedBackgroundVisibility(.hidden)
             if !workspace.configuration.groups.isEmpty {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(id: "group-filter", placement: .primaryAction) { groupFilter }
                     .sharedBackgroundVisibility(.visible)
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(id: "data-status", placement: .primaryAction) { dataStatusIndicator }
-                .sharedBackgroundVisibility(.visible)
-            ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(id: "refresh", placement: .primaryAction) {
-                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
-            }.sharedBackgroundVisibility(.visible)
+                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.glass).buttonBorderShape(.capsule).disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
+            }.sharedBackgroundVisibility(.hidden)
         }
         .sheet(item: $navigation.panel) { panel in WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation) }
         .onChange(of: workspace.snapshot.accountID) { old, new in
@@ -95,17 +92,22 @@ struct MainView: View {
             ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
         }.frame(maxWidth: 180).disabled(workspace.busy)
     }
-    private var dataStatusIndicator: some View {
+    private var footerDataStatus: some View {
         let status = DataStatusPresentation(snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn, signedIn: workspace.authStatus.signedIn, error: workspace.error)
+        let updated = workspace.snapshot.cachedOnly ? "Cached history" : "Updated \(workspace.snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))"
         return Button { navigation.panel = .status } label: {
-            Group {
-                if status.loading { ProgressView().controlSize(.small) }
-                else { Image(systemName: status.symbol).foregroundStyle(status.warning ? Color.orange : Color.secondary) }
-            }.frame(width: 16, height: 16)
+            HStack(spacing: 6) {
+                Text(updated)
+                Group {
+                    if status.loading { ProgressView().controlSize(.mini) }
+                    else { Image(systemName: status.symbol).foregroundStyle(status.warning ? Color.orange : Color.secondary) }
+                }.frame(width: 14, height: 14)
+            }.contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Data status")
-        .accessibilityValue(status.label)
-        .help("Data status: \(status.label). Click for details.")
+        .accessibilityValue("\(updated). \(status.label)")
+        .help("\(status.label). Click for collection and coverage details.")
     }
     private var signedOut: some View {
         VStack(spacing: 18) {

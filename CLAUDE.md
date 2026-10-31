@@ -1,15 +1,15 @@
 # Bigboard development context
 
-This branch is the full native Swift replacement. The product entry point is
+Bigboard is a native Swift app. The product entry point is
 `native/Sources/BigboardApp/BigboardApp.swift`; see [README](README.md) and
-[native guide](native/README.md). Target macOS 27 and Swift 6. Use native macOS
+[native guide](native/README.md). Target macOS 26 Tahoe or later and Swift 6. Use native macOS
 conventions while preserving the existing workflows. No legacy import.
 
 `native/Sources/BigboardCore` contains authentication, GitHub collection, owned
 Git caches, analysis, versioned JSON storage and data models. SwiftUI/AppKit
 views and application orchestration are in `native/Sources/BigboardApp`.
-The old Go/Wails and web sources remain reference material and are not runtime
-dependencies. `Makefile.legacy` preserves their verification commands.
+The source tree and CI cover the native app; previous implementations are
+available in Git history.
 
 Durable JSON belongs in Application Support; rebuildable history belongs in
 Caches; credentials reuse the existing Keychain service/account. Do not run the
@@ -25,6 +25,10 @@ old configuration, history, grants, bookmarks, or browser preferences.
 - Live startup publishes cached history before the network pass completes.
   Swift Observation publishes snapshots to the native interface. Later
   refreshes are explicit. Never fill runtime gaps with fabricated records.
+- Data Status opens from one clickable control containing status and timestamp
+  at the bottom right. It shows a spinner during refresh; the main screen's top
+  progress display remains. Date/repository filters and Refresh stay in the
+  toolbar. The Boards menu and `e` shortcut also open Data Status.
 - Settings saves repository collection choices; named groups retain their existing
   collection scope. Repository filter is shared viewing state in BoardState and
   only narrows already loaded data. It never refreshes, saves collection settings,
@@ -41,12 +45,12 @@ old configuration, history, grants, bookmarks, or browser preferences.
 - Use author dates for Git and update times for PRs. Compare against retained
   snapshot times with an exclusive lower bound. Calendar buckets use local time;
   preserve future-dated selected evidence. Default to 14 days unless configured.
-- Deduplicate shared object IDs with `stats`’ canonical selection rules while
+- Deduplicate shared object IDs with `Analysis`'s canonical selection rules while
   preserving repository associations. Complete line counts beat unknown counts;
   remaining copy choice is deterministic, not the largest change volume.
   Names do not merge people. Apply mailmap then saved email mappings.
 - Generated paths, `.gitattributes` generated/vendored paths, and bulk data
-  changes are excluded from line totals unless `all_files` is set; report the
+  changes are excluded from line totals unless `allFiles` is set; report the
   excluded volume by reason rather than dropping it silently.
 - Directory volume includes only scoped files. Unknown line counts contribute
   commits but not measured lines. Bars always represent additions/removals,

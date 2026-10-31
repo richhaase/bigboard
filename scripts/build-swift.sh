@@ -50,7 +50,7 @@ cp "$bin_dir/Bigboard" "$app_path/Contents/MacOS/Bigboard"
 python3 - "$app_path/Contents/Info.plist" "$version" <<'PY'
 import os, plistlib, sys
 version=sys.argv[2]
-info={"CFBundleName":"Bigboard","CFBundleDisplayName":"Bigboard Native","CFBundleIdentifier":"com.richhaase.bigboard","CFBundleExecutable":"Bigboard","CFBundlePackageType":"APPL","CFBundleShortVersionString":version.split('-')[0],"CFBundleVersion":version.split('-')[0],"LSMinimumSystemVersion":"27.0","NSHighResolutionCapable":True,"NSPrincipalClass":"NSApplication","CFBundleIconFile":"AppIcon","CFBundleURLTypes":[{"CFBundleURLName":"com.richhaase.bigboard.oauth","CFBundleURLSchemes":["com.richhaase.bigboard"],"CFBundleTypeRole":"Viewer"}]}
+info={"CFBundleName":"Bigboard","CFBundleDisplayName":"Bigboard Native","CFBundleIdentifier":"com.richhaase.bigboard","CFBundleExecutable":"Bigboard","CFBundlePackageType":"APPL","CFBundleShortVersionString":version.split('-')[0],"CFBundleVersion":version.split('-')[0],"LSMinimumSystemVersion":"26.0","NSHighResolutionCapable":True,"NSPrincipalClass":"NSApplication","CFBundleIconFile":"AppIcon","CFBundleURLTypes":[{"CFBundleURLName":"com.richhaase.bigboard.oauth","CFBundleURLSchemes":["com.richhaase.bigboard"],"CFBundleTypeRole":"Viewer"}]}
 for key in ("BIGBOARD_GITHUB_CLIENT_ID","BIGBOARD_GITHUB_CLIENT_SECRET","BIGBOARD_GITHUB_APP_SLUG"):
  if os.environ.get(key): info[key]=os.environ[key]
 with open(sys.argv[1],'wb') as f: plistlib.dump(info,f)
@@ -58,9 +58,9 @@ PY
 iconset="$repo_root/native/build/AppIcon.iconset"
 mkdir -p "$iconset"
 for size in 16 32 128 256 512; do
-  sips -z "$size" "$size" "$repo_root/desktop/build/appicon.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z "$size" "$size" "$repo_root/native/Assets/AppIcon.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
-  sips -z "$double" "$double" "$repo_root/desktop/build/appicon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+  sips -z "$double" "$double" "$repo_root/native/Assets/AppIcon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$app_path/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$app_path"

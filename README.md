@@ -4,11 +4,13 @@ A native macOS app for understanding activity across your GitHub repositories:
 where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
-This branch replaces the Go/Wails app with Swift, SwiftUI, AppKit, and Charts.
-It requires **macOS 27**, Xcode 27, and Git 2.31 or newer. The app talks directly
+Bigboard is built with Swift, SwiftUI, AppKit, and Charts.
+It requires **macOS 26 Tahoe or later** and Git 2.31 or newer. The app talks directly
 to GitHub and maintains owned bare Git caches; developer checkouts are untouched.
 
 ## Build and run
+
+Building requires Xcode 26 or later with the macOS 26 SDK or newer.
 
 ```sh
 make build
@@ -55,7 +57,9 @@ people merely because they share a display name.
 The sidebar contains Activity, Contributors, and Pull requests. Date and repository
 filters sit in the toolbar; the repository picker stays open for multiple selections.
 Workspace Settings is in the app menu, Keyboard Guide is under Help, and Data
-Status opens from the toolbar indicator.
+Status opens by clicking the status and timestamp together at the bottom right.
+That footer control shows a spinner during refresh; progress also remains
+visible at the top of the main screen.
 
 The app uses native tables, inspectors, sheets, menus,
 clipboard actions, and Save dialogs. Activity is evidence, not a productivity
@@ -75,10 +79,11 @@ credentials, and signing out removes the shared local credential. macOS may ask
 you to permit Keychain access because the development app has a different signature.
 Native settings and caches remain separate from the old app's files.
 
-See the [native development and verification guide](native/README.md) for the
-architecture, behavior contract, and live acceptance checks. The old Go and web
-sources remain in this worktree as a reference; they are not linked into the
-native app. Their tests can be run with `make legacy-test`.
+See the [workflow guide](docs/visual-guide.md) for a first session, the
+[user reference](docs/reference.md) for controls and data semantics, and the
+[native development and verification guide](native/README.md) for the
+architecture, behavior contract, and live acceptance checks. Previous
+implementations remain available in Git history.
 
 ## License
 

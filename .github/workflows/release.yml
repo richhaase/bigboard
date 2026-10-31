@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Check release secrets
         env:
@@ -50,7 +50,7 @@ jobs:
           QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
           QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
           QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
-        run: bash scripts/sign-macos.sh desktop/build/bin/Bigboard.app "desktop/build/bin/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip"
+        run: bash scripts/sign-macos.sh native/build/Bigboard.app "native/build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip"
       - name: Publish GitHub release
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -72,7 +72,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           mkdir -p homebrew-tap/Casks
-          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "desktop/build/bin/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
+          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "native/build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
           ruby -c homebrew-tap/Casks/bigboard.rb
           git -C homebrew-tap config user.name goreleaserbot
           git -C homebrew-tap config user.email bot@goreleaser.com

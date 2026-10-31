@@ -12,10 +12,6 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Go workspace
-go.work
-go.work.sum
-
 # Env
 .env
 

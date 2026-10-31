@@ -1,7 +1,7 @@
 # Native Bigboard
 
-The replacement is a Swift 6 package targeting macOS 27. It has no third-party
-Swift packages, JavaScript runtime, embedded browser, Go bridge, or HTTP server.
+Bigboard is a Swift 6 package targeting macOS 26 Tahoe or later. It has no third-party
+Swift packages or embedded browser runtime.
 SwiftUI supplies the interface; AppKit supplies lifecycle, clipboard, browser,
 and Save dialog integration; Security supplies Keychain; Foundation supplies
 HTTP and filesystem operations. Git runs as a cancellable child process against
@@ -20,6 +20,7 @@ app-owned bare repositories.
 | `Sources/BigboardCore/Analysis.swift` | Canonical deduplication, scoped totals, Heat, people, calendars and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Versioned JSON, account isolation, atomic writes, conflicts, access and bookmarks. |
 | `Tests/BigboardCoreTests/` | Mock HTTP/auth, real temporary Git repositories, projections, UI state and storage tests. |
+| `Assets/AppIcon.png` | Source app icon used by local and release packaging. |
 
 ## Storage choice
 
@@ -61,10 +62,10 @@ store and temporary workspace and labels its fixture data.
 - JSON export aggregates all loaded tracked history; Markdown copies current
   view context. Neither initiates network access.
 
-Native control placement intentionally differs from the old web layout. Existing
-web documentation and screenshots describe the reference app. Time-range
-comparison, a new catch-up board, persistent acknowledge/snooze/pin, and historical
-PR statistics remain separate future features.
+The [user reference](../docs/reference.md) and [workflow guide](../docs/visual-guide.md)
+describe the native interface. Time-range comparison, a new catch-up board,
+persistent acknowledge/snooze/pin, and historical PR statistics remain separate
+future features.
 
 ## Repository collection and viewing
 
@@ -73,7 +74,10 @@ groups keep their existing collection behavior. These choices are separate from
 **Repository filter**, available as a persistent toolbar popover, in the Boards
 menu, or through `i`. The popover stays open across selections. The sidebar contains
 only Activity, Contributors, and Pull requests. Workspace Settings lives in the
-app menu, Keyboard Guide under Help, and Data Status in the toolbar.
+app menu and Keyboard Guide under Help. Data Status opens from a single clickable
+control containing status and timestamp at the bottom right, or from the Boards menu or `e`.
+The footer control spins during refresh; the main screen's top progress display
+remains visible. Date and repository filters and Refresh stay in the toolbar.
 
 The filter offers **All loaded repositories** or **Selected repositories**. All shows
 every repository already loaded in the current workspace; Selected requires at
@@ -98,6 +102,9 @@ Removal requires its own confirmation and does not change the GitHub repository.
 
 ## Build and verification
 
+Use Xcode 26 or later with the macOS 26 SDK or newer. The deployment target is
+macOS 26; building with a newer SDK does not raise the runtime requirement.
+
 ```sh
 make build
 make test
@@ -115,8 +122,9 @@ values override the file. The build validates values without printing them.
 `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; override
 it for another Xcode installation. `UNIVERSAL=1 CONFIGURATION=release bash
 scripts/build-swift.sh` builds both CPU architectures. The existing tag workflow
-packages the native executable, signs/notarizes it, and publishes the same app
-artifact/cask name. No publication is part of local validation.
+packages `native/build/Bigboard.app`, signs/notarizes it, and creates
+`native/build/Bigboard_<version>_darwin_universal.zip` for the app-only Homebrew
+cask. No publication is part of local validation.
 
 Automated fixtures do not establish live GitHub, real Keychain access, release
 signing, notarization, or large-account performance. Before replacing an installed
@@ -148,10 +156,10 @@ repositories, and saved a fresh single-repository workspace for
 `richhaase/bigboard`. The live refresh loaded 187 commits and reported complete
 PR inventory, files, and reviewers, with no data errors.
 
-PR collection currently makes per-repository inventory requests rather than
-the reference implementation's batched/lean GraphQL queries. The same bounds
-and coverage qualifications apply, but large workspaces may exhaust the request
-budget sooner. Remote Git branch probes use authenticated `ls-remote`.
+PR collection makes per-repository inventory requests with explicit request
+bounds and coverage qualifications. Large workspaces may exhaust the request
+budget before every repository is complete. Remote Git branch probes use
+authenticated `ls-remote`.
 
 Real private-repository failures, large-account performance, release signing,
 notarization, and a new browser OAuth exchange still require joint testing.
@@ -165,7 +173,7 @@ caches or developer checkouts. The initial port verification covered 73 native t
 subsequent walkthrough fixes add focused repository-filter and settings tests.
 
 The first usability pass adds a persistent multi-select repository popover,
-a board-only sidebar, toolbar scope/status controls, recent-push repository
+a board-only sidebar, toolbar scope controls, footer data status, recent-push repository
 sorting, and direct Apply with background refresh. The combined native suite
 passes 83 tests after these changes; the optimized universal bundle builds and
 passes local signature verification. Contributor rhythm and calendar behavior

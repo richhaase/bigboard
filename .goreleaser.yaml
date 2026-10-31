@@ -10,7 +10,7 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
   extra_files:
-    - glob: desktop/build/bin/Bigboard_{{ .Version }}_darwin_universal.zip
+    - glob: native/build/Bigboard_{{ .Version }}_darwin_universal.zip
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
@@ -46,7 +46,7 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   extra_files:
-    - glob: desktop/build/bin/Bigboard_{{ .Version }}_darwin_universal.zip
+    - glob: native/build/Bigboard_{{ .Version }}_darwin_universal.zip
   header: |
     ## Big Board v{{.Version}}
 

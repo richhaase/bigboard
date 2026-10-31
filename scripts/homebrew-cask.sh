@@ -24,7 +24,7 @@ cask "bigboard" do
   homepage "https://github.com/richhaase/bigboard"
 
   depends_on formula: "git"
-  depends_on macos: :golden_gate
+  depends_on macos: :tahoe
 
   app "Bigboard.app"
 

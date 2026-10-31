@@ -1,8 +1,8 @@
-.PHONY: help build dev test check clean legacy-test
+.PHONY: help build dev test check clean
 DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 export DEVELOPER_DIR
 help:
-	@echo "build: native Bigboard.app; dev: build and open; test/check: Swift tests; legacy-test: reference tests"
+	@echo "build: native Bigboard.app; dev: build and open; test/check: Swift tests"
 build:
 	bash scripts/build-swift.sh
 dev: build
@@ -11,7 +11,5 @@ test:
 	swift test --package-path native
 check: test
 	swift build --package-path native -c release
-legacy-test:
-	$(MAKE) -f Makefile.legacy test
 clean:
 	swift package --package-path native clean
