@@ -147,16 +147,13 @@ struct HistoryTests {
     }
     private var processFamilyFixture: String {
         """
-        import os, signal, sys, time
-        child = os.fork()
-        if child == 0:
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            with open(sys.argv[1], "w") as ready:
-                ready.write("ready")
-        time.sleep(20)
-        if child == 0:
-            with open(sys.argv[2], "w") as completed:
-                completed.write("completed")
+        (
+            trap '' TERM
+            printf ready > "$1"
+            /bin/sleep 20
+            printf completed > "$2"
+        ) &
+        wait
         """
     }
     private func awaitProcessFamilyReady(_ ready: URL, completion: ProcessFamilyCompletion) async throws {
@@ -172,7 +169,7 @@ struct HistoryTests {
         let completion = ProcessFamilyCompletion()
         let task = Task {
             defer { completion.finish() }
-            return try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 5)
+            return try await GitProcess.execute(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", processFamilyFixture, "bigboard-process-family", ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 5)
         }
         defer { task.cancel() }
         try await awaitProcessFamilyReady(ready, completion: completion)
@@ -191,7 +188,7 @@ struct HistoryTests {
         let completion = ProcessFamilyCompletion()
         let task = Task {
             defer { completion.finish() }
-            return try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 0.5)
+            return try await GitProcess.execute(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", processFamilyFixture, "bigboard-process-family", ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 0.5)
         }
         defer { task.cancel() }
         try await awaitProcessFamilyReady(ready, completion: completion)
