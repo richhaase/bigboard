@@ -164,11 +164,11 @@ func (s *Service) discoverAuthorized(ctx context.Context, settings Settings) ([]
 		s.mu.Unlock()
 		for _, owner := range settings.Organizations {
 			if owners[owner] != "Organization" {
-				return nil, gh.ErrPermission
+				return nil, errors.New("the organization filter does not match an accessible GitHub organization")
 			}
 		}
 		if settings.PersonalAccount != "" && owners[settings.PersonalAccount] != "User" {
-			return nil, gh.ErrPermission
+			return nil, errors.New("no accessible personal repositories match this account filter")
 		}
 	}
 	s.mu.Lock()

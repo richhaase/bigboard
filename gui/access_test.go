@@ -356,6 +356,9 @@ func TestFilteredDiscoveryReusesVerifiedInventory(t *testing.T) {
 	if _, err = s.Discover(Settings{Mode: "live", PersonalAccount: "example"}); err == nil {
 		t.Fatal("accepted wrong personal account")
 	}
+	if _, err = s.Discover(Settings{Mode: "live", Organizations: []string{"viewer"}}); err == nil || accessDenied(err) {
+		t.Fatalf("local filter error was treated as an access revocation: %v", err)
+	}
 }
 
 func TestAuthorizedSnapshotOwnsWorkAreaRules(t *testing.T) {
