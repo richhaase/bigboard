@@ -197,8 +197,11 @@ notarization, and a new browser OAuth exchange still require joint testing.
 
 Git operations isolate global/system Git configuration and inherited `GIT_*`
 settings. Repository mailmap and native identity rules apply. Each command has
-a 120-second deadline and 256 MiB output bound; exceptionally large history can
-therefore produce an explicitly incomplete/stale result rather than finish.
+a 120-second deadline and 256 MiB output bound. Repository `.gitattributes`
+input is limited to 4 MiB and 20,000 generated/vendored rules, with a shared
+matching-work budget for each history scan. Cancellation and timeouts interrupt
+parsing as well as Git. Exceeding a limit reports a scan error and retains stale
+evidence when available; rules are never silently truncated or skipped.
 The app supports its own complete bare caches, not arbitrary shallow/partial
 caches or developer checkouts. The initial port verification covered 73 native tests and 12 packaging tests;
 subsequent walkthrough fixes add focused repository-filter and settings tests.

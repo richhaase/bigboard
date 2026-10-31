@@ -38,6 +38,11 @@ private final class ProcessControl: @unchecked Sendable {
         }
     }
     func finish() { lock.lock(); finished = true; lock.unlock() }
+    func checkpoint() throws {
+        lock.lock(); defer { lock.unlock() }
+        if timedOut { throw BigboardError.message("Git did not finish within the operation timeout.") }
+        if cancelled { throw CancellationError() }
+    }
     var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
 }
@@ -51,7 +56,7 @@ enum GitProcess {
         guard let path = paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw BigboardError.message("Git is required. Install Git, then reopen Bigboard.") }
         return URL(fileURLWithPath: path)
     }
-    static func run(_ arguments: [String], directory: URL? = nil, token: String = "", timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, stream: (@Sendable (Data) throws -> Void)? = nil) async throws -> Data {
+    static func run(_ arguments: [String], directory: URL? = nil, token: String = "", timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, stream: (@Sendable (Data, @Sendable () throws -> Void) throws -> Void)? = nil) async throws -> Data {
         let executable = try executable()
         var pinned = ["-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.interactive=false", "-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "http.sslVerify=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never"]
         if !token.isEmpty { pinned += ["--config-env=http.https://github.com/.extraHeader=BIGBOARD_GIT_AUTHORIZATION"] }
@@ -61,7 +66,7 @@ enum GitProcess {
         if !token.isEmpty { environment["BIGBOARD_GIT_AUTHORIZATION"] = "Authorization: Basic " + Data("x-access-token:\(token)".utf8).base64EncodedString() }
         return try await execute(executable, arguments: pinned + arguments, environment: environment, directory: directory ?? gitDirectory ?? URL(fileURLWithPath: "/"), timeout: timeout, limit: limit, authenticated: !token.isEmpty, stream: stream)
     }
-    static func execute(_ executable: URL, arguments: [String], environment: [String: String], directory: URL, timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, authenticated: Bool = false, stream: (@Sendable (Data) throws -> Void)? = nil) async throws -> Data {
+    static func execute(_ executable: URL, arguments: [String], environment: [String: String], directory: URL, timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, authenticated: Bool = false, stream: (@Sendable (Data, @Sendable () throws -> Void) throws -> Void)? = nil) async throws -> Data {
         let control = ProcessControl()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
@@ -83,16 +88,19 @@ enum GitProcess {
                             do {
                                 var count = 0
                                 while let chunk = try pipe.fileHandleForReading.read(upToCount: 64 * 1024), !chunk.isEmpty {
+                                    try control.checkpoint()
                                     count += chunk.count
                                     guard count <= maximum else { throw BigboardError.message("Git output exceeded the safety limit.") }
-                                    if let callback { try callback(chunk) } else { result.bytes.append(chunk) }
+                                    if let callback { try callback(chunk, { try control.checkpoint() }) } else { result.bytes.append(chunk) }
+                                    try control.checkpoint()
                                 }
                             } catch { result.error = error; control.stop() }
                         }
                     }
                     process.waitUntilExit(); group.wait(); timer.cancel(); control.finish()
-                    if let error = out.error ?? err.error { continuation.resume(throwing: error) }
-                    else if control.didTimeOut { continuation.resume(throwing: BigboardError.message("Git did not finish within the operation timeout.")) }
+                    let readerErrors = [out.error, err.error].compactMap { $0 }
+                    if control.didTimeOut { continuation.resume(throwing: BigboardError.message("Git did not finish within the operation timeout.")) }
+                    else if let error = readerErrors.first(where: { !($0 is CancellationError) }) ?? readerErrors.first { continuation.resume(throwing: error) }
                     else if control.isCancelled { continuation.resume(throwing: CancellationError()) }
                     else if process.terminationStatus != 0 {
                         if authenticated, let failure = authenticatedFailure(String(decoding: err.bytes, as: UTF8.self)) { continuation.resume(throwing: failure); return }
@@ -115,17 +123,26 @@ enum GitProcess {
 }
 
 struct AttributeRule: Sendable { var pattern: String; var generated: Bool }
+enum AttributeDecision: Sendable { case generated, included, unspecified }
 enum HistoryRules {
+    static let maximumAttributeBytes = 4 * 1024 * 1024
+    static let maximumAttributeRules = 20_000
+    static let maximumAttributeWork = 250_000_000
     static let ignoredDirectories: Set<String> = ["vendor", "node_modules", "dist", "build", ".next", "target", ".yarn", ".venv", "__pycache__", "Pods", "Carthage"]
     static let ignoredGlobs = ["*.min.js", "*.min.css", "*.map", "*.snap", "*.lock", "*.pb.go", "*_pb2.py", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "go.sum", "Cargo.lock", "composer.lock", "Gemfile.lock", "poetry.lock"]
     static let bulkExtensions: Set<String> = ["json", "ndjson", "jsonl", "yaml", "yml", "csv", "tsv", "xml", "po", "pot", "svg"]
     static func glob(_ pattern: String, _ value: String) -> Bool { fnmatch(pattern, value, FNM_PATHNAME) == 0 }
-    static func attributes(_ contents: String) -> [AttributeRule] {
-        contents.split(separator: "\n").compactMap { line in
+    static func attributes(_ contents: String, byteLimit: Int = maximumAttributeBytes, ruleLimit: Int = maximumAttributeRules, checkpoint: @Sendable () throws -> Void = {}) throws -> [AttributeRule] {
+        try checkpoint()
+        guard contents.utf8.count <= byteLimit else { throw BigboardError.message("Repository attributes exceeded the byte limit.") }
+        var rules: [AttributeRule] = []
+        for line in contents.split(separator: "\n") {
+            try checkpoint()
             let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-            guard fields.count > 1, let pattern = fields.first, !pattern.hasPrefix("#"), !pattern.hasPrefix("!"), !pattern.hasSuffix("/") else { return nil }
+            guard fields.count > 1, let pattern = fields.first, !pattern.hasPrefix("#"), !pattern.hasPrefix("!"), !pattern.hasSuffix("/") else { continue }
             var generated: Bool?
             for raw in fields.dropFirst() {
+                try checkpoint()
                 if raw.hasPrefix("!") { continue }
                 let pieces = raw.split(separator: "=", maxSplits: 1).map(String.init)
                 var name = pieces[0], value = true
@@ -133,21 +150,35 @@ enum HistoryRules {
                 else if pieces.count == 2 { guard ["true", "false", "0", "1"].contains(pieces[1]) else { continue }; value = pieces[1] == "true" || pieces[1] == "1" }
                 if ["linguist-generated", "linguist-vendored"].contains(name), generated == nil || value { generated = value }
             }
-            return generated.map { AttributeRule(pattern: pattern, generated: $0) }
+            if let generated {
+                guard rules.count < ruleLimit else { throw BigboardError.message("Repository attributes exceeded the rule limit.") }
+                rules.append(AttributeRule(pattern: pattern, generated: generated))
+            }
         }
+        return rules
     }
     static func pathMatches(_ pattern: String, _ path: String) throws -> Bool {
+        var remainingWork = maximumAttributeWork
+        return try pathMatches(pattern, path, remainingWork: &remainingWork, checkpoint: {})
+    }
+    private static func pathMatches(_ pattern: String, _ path: String, remainingWork: inout Int, checkpoint: @Sendable () throws -> Void) throws -> Bool {
+        try checkpoint()
         let patternBytes = pattern.utf8.count, pathBytes = path.utf8.count
         guard patternBytes <= 64 * 1024, pathBytes <= 64 * 1024 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
-        let p = pattern.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").map(String.init)
-        let s = path.split(separator: "/").map(String.init)
+        let pathComponents = path.split(separator: "/")
+        let patternComponents = pattern.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/")
+        let work = pattern.contains("/") ? (patternBytes + 1) * (pathComponents.count + 1) + (pathBytes + 1) * patternComponents.count : patternBytes + pathBytes + 1
+        guard work <= 1_000_000 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
+        guard work <= remainingWork else { throw BigboardError.message("Repository attribute matching exceeded the scan work limit.") }
+        remainingWork -= work
+        let p = patternComponents.map(String.init)
+        let s = pathComponents.map(String.init)
         guard p.allSatisfy({ $0.utf8.count <= 4096 }), s.allSatisfy({ $0.utf8.count <= 4096 }) else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
         if !pattern.contains("/") { return glob(pattern, s.last ?? "") }
-        let work = (patternBytes + 1) * (s.count + 1) + (pathBytes + 1) * p.count
-        guard work <= 1_000_000 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
         var reachable = [Bool](repeating: false, count: s.count + 1)
         reachable[0] = true
         for component in p {
+            try checkpoint()
             if component == "**" {
                 for j in s.indices { reachable[j + 1] = reachable[j + 1] || reachable[j] }
             } else {
@@ -157,9 +188,17 @@ enum HistoryRules {
         }
         return reachable[s.count]
     }
-    static func exclusion(_ file: FileChange, allFiles: Bool, attributes: [AttributeRule]) throws -> String {
+    static func attributeDecision(_ path: String, attributes: [AttributeRule], remainingWork: inout Int, checkpoint: @Sendable () throws -> Void) throws -> AttributeDecision {
+        for attribute in attributes.reversed() {
+            try checkpoint()
+            if try pathMatches(attribute.pattern, path, remainingWork: &remainingWork, checkpoint: checkpoint) { return attribute.generated ? .generated : .included }
+        }
+        return .unspecified
+    }
+    static func exclusion(_ file: FileChange, allFiles: Bool, attribute: AttributeDecision) -> String {
         if allFiles { return "" }
-        if let attribute = try attributes.last(where: { try pathMatches($0.pattern, file.path) }) { return attribute.generated ? "attribute" : "" }
+        if attribute == .generated { return "attribute" }
+        if attribute == .included { return "" }
         if file.path.split(separator: "/").contains(where: { ignoredDirectories.contains(String($0)) }) || ignoredGlobs.contains(where: { glob($0, String(file.path.split(separator: "/").last ?? "")) }) { return "path" }
         if !file.binary && file.added + file.removed >= 2000 && bulkExtensions.contains((file.path as NSString).pathExtension.lowercased()) { return "bulk" }
         return ""
@@ -198,27 +237,40 @@ final class GitLogParser: @unchecked Sendable {
     private let repo: String
     private let configuration: WorkspaceConfiguration
     private let attributes: [AttributeRule]
+    private var remainingAttributeWork: Int
+    private var attributeDecisions: [Data: AttributeDecision] = [:]
+    private var cachedPathBytes = 0
+    private var failure: (any Error)?
     private var identityMap: [String: (String, String)] = [:]
     private(set) var records: [Commit] = []
-    init(repo: String, configuration: WorkspaceConfiguration, attributes: [AttributeRule] = []) {
+    init(repo: String, configuration: WorkspaceConfiguration, attributes: [AttributeRule] = [], matchingWorkLimit: Int = HistoryRules.maximumAttributeWork) {
         self.repo = repo; self.configuration = configuration; self.attributes = attributes
+        remainingAttributeWork = max(0, matchingWorkLimit)
         for (email, rule) in configuration.identities { for alias in [email] + rule.aliases { identityMap[alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = (email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), rule.name.trimmingCharacters(in: .whitespacesAndNewlines)) } }
     }
-    func feed(_ data: Data) throws {
-        buffer.append(data)
-        while let end = buffer[offset...].firstIndex(of: 0) {
-            let token = String(decoding: buffer[offset..<end], as: UTF8.self)
-            offset = end + 1
-            try consume(token)
-        }
-        guard buffer.count - offset <= 4 * 1024 * 1024 else { throw BigboardError.message("Git history contains an oversized field.") }
-        if offset > 1024 * 1024 { buffer.removeSubrange(0..<offset); offset = 0 }
+    func feed(_ data: Data, checkpoint: @Sendable () throws -> Void = {}) throws {
+        if let failure { throw failure }
+        do {
+            try checkpoint()
+            guard configuration.allFiles || attributes.count <= HistoryRules.maximumAttributeRules else { throw BigboardError.message("Repository attributes exceeded the rule limit.") }
+            buffer.append(data)
+            while let end = buffer[offset...].firstIndex(of: 0) {
+                try checkpoint()
+                let token = String(decoding: buffer[offset..<end], as: UTF8.self)
+                offset = end + 1
+                try consume(token, checkpoint: checkpoint)
+            }
+            guard buffer.count - offset <= 4 * 1024 * 1024 else { throw BigboardError.message("Git history contains an oversized field.") }
+            if offset > 1024 * 1024 { buffer.removeSubrange(0..<offset); offset = 0 }
+            try checkpoint()
+        } catch { failure = error; throw error }
     }
     func finish() throws -> [Commit] {
+        if let failure { throw failure }
         guard buffer.count == offset, metadata.isEmpty, pendingFile == nil else { throw BigboardError.message("Git history ended before a complete record was received.") }
         return records
     }
-    private func consume(_ raw: String) throws {
+    private func consume(_ raw: String, checkpoint: @Sendable () throws -> Void) throws {
         if !metadata.isEmpty {
             metadata.append(raw)
             if metadata.count == 6 {
@@ -233,7 +285,7 @@ final class GitLogParser: @unchecked Sendable {
         }
         if var file = pendingFile {
             if awaitingPreviousPath { file.previousPath = raw; pendingFile = file; awaitingPreviousPath = false }
-            else { file.path = raw; pendingFile = nil; try append(file) }
+            else { file.path = raw; pendingFile = nil; try append(file, checkpoint: checkpoint) }
             return
         }
         let token = String(raw.drop(while: { $0 == "\n" }))
@@ -250,12 +302,26 @@ final class GitLogParser: @unchecked Sendable {
             guard let added = Int(pieces[0]), let removed = Int(pieces[1]), added >= 0, removed >= 0 else { throw BigboardError.message("Git history contains invalid line counts.") }
             file.added = added; file.removed = removed
         }
-        if file.path.isEmpty { pendingFile = file; awaitingPreviousPath = true } else { try append(file) }
+        if file.path.isEmpty { pendingFile = file; awaitingPreviousPath = true } else { try append(file, checkpoint: checkpoint) }
     }
-    private func append(_ original: FileChange) throws {
+    private func append(_ original: FileChange, checkpoint: @Sendable () throws -> Void) throws {
         guard !records.isEmpty, !original.path.isEmpty else { throw BigboardError.message("Git history contains an empty path.") }
         var file = original
-        file.excludedReason = try HistoryRules.exclusion(file, allFiles: configuration.allFiles, attributes: attributes)
+        var attribute = AttributeDecision.unspecified
+        if !configuration.allFiles, !attributes.isEmpty {
+            let bytes = file.path.utf8.count
+            guard bytes <= 64 * 1024 else { throw BigboardError.message("Repository attribute matching exceeded the safety limit.") }
+            let key = Data(file.path.utf8)
+            if let cached = attributeDecisions[key] { attribute = cached }
+            else {
+                attribute = try HistoryRules.attributeDecision(file.path, attributes: attributes, remainingWork: &remainingAttributeWork, checkpoint: checkpoint)
+                if attributeDecisions.count < 16_384, bytes <= 4 * 1024 * 1024 - cachedPathBytes {
+                    attributeDecisions[key] = attribute
+                    cachedPathBytes += bytes
+                }
+            }
+        }
+        file.excludedReason = HistoryRules.exclusion(file, allFiles: configuration.allFiles, attribute: attribute)
         let index = records.count - 1
         if file.excludedReason.isEmpty { records[index].added += file.added; records[index].removed += file.removed }
         records[index].files.append(file)
@@ -481,11 +547,15 @@ actor GitHistory {
             var result = repo; result.revision = revision; result.scannedAt = cache.scannedAt; return (result, cache.records)
         }
         let attributes: [AttributeRule]
-        let listing = try await GitProcess.text(prefix + ["ls-tree", "--name-only", "--end-of-options", revision, "--", ".gitattributes"])
-        if listing.isEmpty { attributes = [] } else { attributes = HistoryRules.attributes(try await GitProcess.text(prefix + ["cat-file", "blob", revision + ":.gitattributes"])) }
+        let listing = configuration.allFiles ? "" : try await GitProcess.text(prefix + ["ls-tree", "--name-only", "--end-of-options", revision, "--", ".gitattributes"])
+        if listing.isEmpty { attributes = [] }
+        else {
+            let data = try await GitProcess.run(prefix + ["cat-file", "blob", revision + ":.gitattributes"], limit: HistoryRules.maximumAttributeBytes)
+            attributes = try HistoryRules.attributes(String(decoding: data, as: UTF8.self), checkpoint: { try Task.checkCancellation() })
+        }
         let parser = GitLogParser(repo: repo.id, configuration: configuration, attributes: attributes)
         let args = ["log", "--no-merges", "--root", "-M50%", "-C50%", "-l0", "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--no-show-signature", "--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none", "--format=%x00%H%x00%aN%x00%aE%x00%at%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00", "--numstat", "-z", revision, "--"]
-        _ = try await GitProcess.run(prefix + args, stream: { try parser.feed($0) })
+        _ = try await GitProcess.run(prefix + args, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
         let records = try parser.finish()
         try Task.checkCancellation()
         let after = try await GitProcess.text(prefix + ["rev-parse", "--verify", "HEAD^{commit}"])

@@ -18,7 +18,7 @@ struct HistoryTests {
         #expect(records[0].files[2].binary)
     }
     @Test func excludesGeneratedBulkAndRetainsCommitEvidence() throws {
-        let attrs = HistoryRules.attributes("vendor/keep.swift -linguist-generated\n**/generated.swift linguist-generated\n")
+        let attrs = try HistoryRules.attributes("vendor/keep.swift -linguist-generated\n**/generated.swift linguist-generated\n")
         let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: attrs)
         try parser.feed(payload(files: ["\n50\t0\tvendor/drop.swift", "2\t0\tvendor/keep.swift", "3\t1\tsrc/generated.swift", "1999\t1\tdata.json", "1\t0\tsource.swift"]))
         let commit = try #require(parser.finish().first)
@@ -29,7 +29,7 @@ struct HistoryTests {
     }
     @Test func allFilesOverridesEveryExclusion() throws {
         var config = WorkspaceConfiguration(); config.allFiles = true
-        let parser = GitLogParser(repo: "o/r", configuration: config, attributes: HistoryRules.attributes("* linguist-generated"))
+        let parser = GitLogParser(repo: "o/r", configuration: config, attributes: try HistoryRules.attributes("* linguist-generated"))
         try parser.feed(payload(files: ["\n2000\t2\tvendor/data.json"]))
         let commit = try #require(parser.finish().first)
         #expect(commit.added == 2000 && commit.removed == 2)
@@ -56,7 +56,7 @@ struct HistoryTests {
         let nonmatching = directory + "/source.swift"
         #expect(try HistoryRules.pathMatches(prefix + "/generated.swift", matching))
         #expect(try !HistoryRules.pathMatches(prefix + "/generated.swift", nonmatching))
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: HistoryRules.attributes(prefix + "/generated.swift linguist-generated"))
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes(prefix + "/generated.swift linguist-generated"))
         try parser.feed(payload(files: ["\n3\t0\t" + matching, "2\t0\t" + nonmatching]))
         let commit = try #require(parser.finish().first)
         #expect(commit.added == 2)
@@ -65,7 +65,7 @@ struct HistoryTests {
     @Test func oversizedAttributeMatchingFailsHistoryParsing() throws {
         let pattern = Array(repeating: "**", count: 1024).joined(separator: "/") + "/generated.swift"
         let path = Array(repeating: "directory", count: 1024).joined(separator: "/") + "/source.swift"
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: HistoryRules.attributes(pattern + " linguist-generated"))
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes(pattern + " linguist-generated"))
         do {
             try parser.feed(payload(files: ["\n3\t0\t" + path]))
             Issue.record("An oversized attribute match did not stop history parsing.")
@@ -74,6 +74,68 @@ struct HistoryTests {
         #expect(throws: (any Error).self) { try HistoryRules.pathMatches("**/source.swift", String(repeating: "a", count: 64 * 1024 + 1)) }
         #expect(throws: (any Error).self) { try HistoryRules.pathMatches(String(repeating: "a", count: 4097), "source.swift") }
         #expect(throws: (any Error).self) { try HistoryRules.pathMatches("**/source.swift", String(repeating: "a", count: 4097)) }
+    }
+    @Test func attributeInputLimitsRejectOversizedBytesAndRules() throws {
+        let contents = "é.swift linguist-generated\nsource.swift -linguist-generated\n"
+        let rules = try HistoryRules.attributes(contents, byteLimit: contents.utf8.count, ruleLimit: 2)
+        #expect(rules.map(\.pattern) == ["é.swift", "source.swift"])
+        #expect(rules.map(\.generated) == [true, false])
+        #expect(throws: (any Error).self) { try HistoryRules.attributes(contents, byteLimit: contents.utf8.count - 1, ruleLimit: 2) }
+        #expect(throws: (any Error).self) { try HistoryRules.attributes(contents, byteLimit: contents.utf8.count, ruleLimit: 1) }
+    }
+    @Test func attributeMatchingBudgetAccumulatesAcrossFilesAndFeedChunks() throws {
+        let attributes = try HistoryRules.attributes("*.gen linguist-generated")
+        for path in ["a.swift", "b.swift"] {
+            let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: attributes, matchingWorkLimit: 20)
+            try parser.feed(payload(files: ["1\t0\t" + path]))
+            #expect(try parser.finish().first?.added == 1)
+        }
+        for splitChunks in [false, true] {
+            let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: attributes, matchingWorkLimit: 20)
+            do {
+                if splitChunks {
+                    try parser.feed(payload(files: ["1\t0\ta.swift"]))
+                    #expect(parser.records.first?.files.map(\.path) == ["a.swift"])
+                    try parser.feed(Data("1\t0\tb.swift\0".utf8))
+                } else { try parser.feed(payload(files: ["1\t0\ta.swift", "1\t0\tb.swift"])) }
+                Issue.record("Attribute matching reset its work budget before the second file.")
+            } catch { #expect(error.localizedDescription == "Repository attribute matching exceeded the scan work limit.") }
+            #expect(throws: (any Error).self) { try parser.finish() }
+            #expect(throws: (any Error).self) { try parser.feed(Data()) }
+        }
+    }
+    @Test func attributeBudgetFailurePropagatesThroughGitStream() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("history")
+        try payload(files: ["1\t0\ta.swift", "1\t0\tb.swift"]).write(to: log)
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes("*.gen linguist-generated"), matchingWorkLimit: 20)
+        do {
+            _ = try await GitProcess.execute(URL(fileURLWithPath: "/bin/cat"), arguments: [log.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
+            Issue.record("Git streaming returned success after its parser exhausted the matching budget.")
+        } catch { #expect(error.localizedDescription == "Repository attribute matching exceeded the scan work limit.") }
+        #expect(throws: (any Error).self) { try parser.finish() }
+    }
+    @Test func cachedAttributeDecisionsRetainPerCommitBulkExclusions() throws {
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes("*.gen linguist-generated"), matchingWorkLimit: 20)
+        try parser.feed(payload(files: ["1\t0\tdata.json"]))
+        try parser.feed(payload(id: String(repeating: "b", count: 40), files: ["2000\t0\tdata.json"]))
+        let records = try parser.finish()
+        #expect(records.map(\.added) == [1, 0])
+        #expect(records.flatMap(\.files).map(\.excludedReason) == ["", "bulk"])
+    }
+    @Test func cachedAttributeDecisionsKeepLiteralUnicodePathBytes() throws {
+        let composed = "\u{e9}.swift", decomposed = "e\u{301}.swift"
+        let attributes = try HistoryRules.attributes(composed + " linguist-generated")
+        for paths in [[composed, decomposed], [decomposed, composed]] {
+            let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: attributes)
+            try parser.feed(payload(files: paths.map { "1\t0\t" + $0 }))
+            let record = try #require(parser.finish().first)
+            #expect(record.added == 1)
+            #expect(record.files.map { Data($0.path.utf8) } == paths.map { Data($0.utf8) })
+            #expect(record.files.map(\.excludedReason) == paths.map { $0.utf8.elementsEqual(composed.utf8) ? "attribute" : "" })
+        }
     }
     @Test func identityAliasesAndCoauthorAI() throws {
         var config = WorkspaceConfiguration()
@@ -240,6 +302,85 @@ struct HistoryTests {
         #expect(start.duration(to: .now) < .seconds(3))
         #expect(!FileManager.default.fileExists(atPath: completed.path))
     }
+    @Test func cancellationInterruptsAttributeMatchingInsideStreamCallback() async throws {
+        try await interruptAttributeMatching(timedOut: false)
+    }
+    @Test func timeoutInterruptsAttributeMatchingInsideStreamCallback() async throws {
+        try await interruptAttributeMatching(timedOut: true)
+    }
+    @Test func stderrOutputLimitSurvivesParserCancellation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("history"), trigger = directory.appendingPathComponent("emit-diagnostic"), diagnostic = directory.appendingPathComponent("diagnostic")
+        try Data("1\t0\tsource.swift\0".utf8).write(to: log)
+        try Data(repeating: 120, count: 64 * 1024 + 1).write(to: diagnostic)
+        let rules = (0..<64).map { "generated-\($0).swift linguist-generated" }.joined(separator: "\n")
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes(rules))
+        try parser.feed(payload())
+        let gate = ParserCheckpointGate(pauseAt: 12), completion = ProcessFamilyCompletion()
+        let script = """
+        /bin/cat "$1"
+        exec 1>/dev/null
+        while [ ! -f "$2" ]; do /bin/sleep 0.01; done
+        /bin/cat "$3" >&2
+        """
+        let task = Task {
+            defer { completion.finish() }
+            return try await GitProcess.execute(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script, "bigboard-stderr-limit", log.path, trigger.path, diagnostic.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 10, stream: { data, checkpoint in
+                try parser.feed(data, checkpoint: { try gate.checkpoint(checkpoint) })
+            })
+        }
+        defer { task.cancel(); gate.release() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while !gate.isPaused && !completion.isFinished && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(gate.isPaused)
+        try Data().write(to: trigger)
+        do {
+            _ = try await task.value
+            Issue.record("A Git diagnostic output limit returned success.")
+        } catch { #expect(error.localizedDescription == "Git output exceeded the safety limit.") }
+        #expect(gate.interruption is CancellationError)
+        #expect(throws: CancellationError.self) { try parser.finish() }
+    }
+    private func interruptAttributeMatching(timedOut: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("history")
+        try Data("1\t0\tsource.swift\0".utf8).write(to: log)
+        let rules = (0..<64).map { "generated-\($0).swift linguist-generated" }.joined(separator: "\n")
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: try HistoryRules.attributes(rules))
+        try parser.feed(payload())
+        let gate = ParserCheckpointGate(pauseAt: 12), completion = ProcessFamilyCompletion()
+        let task = Task {
+            defer { completion.finish() }
+            return try await GitProcess.execute(URL(fileURLWithPath: "/bin/cat"), arguments: [log.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: timedOut ? 2 : 10, stream: { data, checkpoint in
+                try parser.feed(data, checkpoint: { try gate.checkpoint(checkpoint) })
+            })
+        }
+        defer { task.cancel(); gate.release() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while !gate.isPaused && !completion.isFinished && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(gate.isPaused)
+        #expect(!completion.isFinished)
+        #expect(parser.records.first?.files.isEmpty == true)
+        if timedOut {
+            while gate.interruption == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            let error = try #require(gate.interruption)
+            #expect(error.localizedDescription == "Git did not finish within the operation timeout.")
+        } else { task.cancel() }
+        gate.release()
+        do {
+            _ = try await task.value
+            Issue.record("An interrupted attribute matcher returned a successful Git stream.")
+        } catch {
+            if timedOut { #expect(error.localizedDescription == "Git did not finish within the operation timeout.") }
+            else { #expect(error is CancellationError) }
+        }
+        #expect(parser.records.first?.files.isEmpty == true)
+        #expect(throws: (any Error).self) { try parser.finish() }
+    }
     @Test func canceledScanDoesNotPublishParsedCache() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
@@ -259,6 +400,30 @@ private final class ProcessFamilyCompletion: @unchecked Sendable {
     private var finished = false
     func finish() { lock.lock(); finished = true; lock.unlock() }
     var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
+}
+
+private final class ParserCheckpointGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let resume = DispatchSemaphore(value: 0)
+    private let pauseAt: Int
+    private var checks = 0
+    private var paused = false
+    private var error: (any Error)?
+    init(pauseAt: Int) { self.pauseAt = pauseAt }
+    func checkpoint(_ probe: @Sendable () throws -> Void) throws {
+        lock.lock()
+        checks += 1
+        let shouldPause = checks == pauseAt
+        if shouldPause { paused = true }
+        lock.unlock()
+        do {
+            if shouldPause { while resume.wait(timeout: .now() + .milliseconds(10)) == .timedOut { try probe() } }
+            try probe()
+        } catch { lock.lock(); self.error = error; lock.unlock(); throw error }
+    }
+    func release() { resume.signal() }
+    var isPaused: Bool { lock.lock(); defer { lock.unlock() }; return paused }
+    var interruption: (any Error)? { lock.lock(); defer { lock.unlock() }; return error }
 }
 
 struct HistoryFixture {
