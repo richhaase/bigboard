@@ -1,3 +1,5 @@
+> This document describes the retained Go/Wails reference app. For the Swift replacement, see the [native guide](../native/README.md).
+
 # Bigboard desktop development
 
 Bigboard is a native Wails app with a Go backend and embedded HTML, CSS, and

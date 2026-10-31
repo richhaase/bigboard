@@ -1,3 +1,5 @@
+> This document describes the retained Go/Wails reference app. For the Swift replacement, see the [native guide](../native/README.md).
+
 # Bigboard workflow coverage
 
 This checklist describes the GUI’s supported workflows. The detailed behavior

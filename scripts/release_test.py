@@ -168,7 +168,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("gh auth", result.stdout)
         self.assertNotIn('binary ', result.stdout)
         self.assertIn('darwin_universal.zip', result.stdout)
-        self.assertIn('depends_on macos: :ventura', result.stdout)
+        self.assertIn('depends_on macos: :golden_gate', result.stdout)
         syntax = subprocess.run(["ruby", "-c"], input=result.stdout, capture_output=True, text=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
@@ -182,6 +182,35 @@ class ReleaseTests(unittest.TestCase):
         result = self.run_script("build-macos.sh", "not-a-version")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid release version", result.stderr)
+
+    def test_native_publisher_json_is_validated_without_printing_values(self):
+        path = self.root / "publisher.json"
+        secret = "invalid private value"
+        path.write_text(json.dumps({"BIGBOARD_GITHUB_CLIENT_ID": "fixture-client", "BIGBOARD_GITHUB_CLIENT_SECRET": secret, "BIGBOARD_GITHUB_APP_SLUG": "fixture-app"}))
+        for key in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG", "BIGBOARD_PUBLISHER_LOADED"):
+            self.env.pop(key, None)
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(path)
+        result = self.run_script("build-swift.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing or malformed publisher setting: BIGBOARD_GITHUB_CLIENT_SECRET", result.stderr)
+        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_native_publisher_json_requires_string_fields(self):
+        path = self.root / "publisher.json"
+        path.write_text(json.dumps({"BIGBOARD_GITHUB_CLIENT_ID": ["wrong type"]}))
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(path)
+        self.env.pop("BIGBOARD_PUBLISHER_LOADED", None)
+        result = self.run_script("build-swift.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read publisher settings JSON", result.stderr)
+
+    def test_native_release_requires_publisher_configuration_before_build(self):
+        for key in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG", "BIGBOARD_PUBLISHER_LOADED"):
+            self.env.pop(key, None)
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(self.root / "absent.json")
+        result = self.run_script("build-macos.sh", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing publisher setting:", result.stderr)
 
     def test_release_auth_configuration_is_required_and_validated(self):
         for name in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG"):

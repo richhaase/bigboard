@@ -1,90 +1,75 @@
 # Bigboard
 
-A desktop app for understanding activity across your GitHub repositories:
+A native macOS app for understanding activity across your GitHub repositories:
 where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
-Bigboard reads default-branch history and open PRs into three connected boards.
-It maintains its own Git cache, leaving developer checkouts and working branches
-untouched. Available cached history appears before the startup refresh finishes.
+This branch replaces the Go/Wails app with Swift, SwiftUI, AppKit, and Charts.
+It requires **macOS 27**, Xcode 27, and Git 2.31 or newer. The app talks directly
+to GitHub and maintains owned bare Git caches; developer checkouts are untouched.
 
-![Bigboard Activity board showing repository change volume and scoped contributors](docs/images/activity.png)
-
-*Live data from the public [richhaase/bigboard](https://github.com/richhaase/bigboard)
-repository. See the [workflow guide](docs/visual-guide.md) for the other boards.*
-
-## Try this branch locally
-
-This branch prepares the next release with built-in GitHub sign-in. On macOS, build it
-with Go and the Xcode command line tools:
+## Build and run
 
 ```sh
 make build
-open desktop/build/bin/Bigboard.app
+open native/build/Bigboard.app
 ```
 
-Git 2.31 or newer is required for repository history. Bigboard connects directly
-to GitHub; GitHub CLI is not required. Open **Settings** and choose **Sign in with
-GitHub**. Authorize Bigboard in your browser, then use **Manage repository access**
-to select the repositories it may read. Click **Discover repositories**, choose
-what to track, and save your selection. Account and organization filters are optional.
-Organization approval and access policies still apply.
+The output is a locally signed development app. It is not installed or published.
+`make test` runs the native test suite; `make check` also builds optimized code.
+Open `native/Package.swift` in Xcode to develop or debug the app.
 
-Local builds need the publisher's GitHub App build settings to enable sign-in;
-see [publisher setup](docs/github-app.md). Homebrew releases include those settings.
-Settings edits `$XDG_CONFIG_HOME/bigboard/config.json` (default
-`~/.config/bigboard/config.json`), preserving advanced analysis preferences.
-You can also use **Cached history** without network requests. No sample records
-are substituted when data is missing.
+Live sign-in needs the publisher's existing `BIGBOARD_GITHUB_CLIENT_ID`,
+`BIGBOARD_GITHUB_CLIENT_SECRET`, and `BIGBOARD_GITHUB_APP_SLUG` in the build
+process environment. See [publisher setup](docs/github-app.md). These are build
+settings, not fields end users fill in. Do not put them in source control or chat.
+A build without them opens normally and explains why sign-in is unavailable.
 
-## Three views of the same work
+An explicit UI preview is available for visual checks without GitHub or Keychain:
+
+```sh
+open -n native/build/Bigboard.app --args --ui-preview
+```
+
+Preview data is labeled and used only with that argument. It never substitutes
+for missing live data.
+
+## Workflows
 
 | Board | Explore |
 | --- | --- |
-| Activity | Compare repositories, drill into directories and files, see which areas are busier or quieter than usual, and inspect scoped commits, contributors, and related work. |
-| Contributors | Select a person to see repository distribution, timelines, the activity calendar, and recent commits. |
-| Pull requests | Filter open PRs by author, review, checks, draft state, and work needing your attention. |
+| Activity | Repository volume, Heat trends, directories and files, scoped commits, people, and related PRs. |
+| Contributors | Repository distribution, timelines, activity calendars, and recent commits for each person. |
+| Pull requests | Open PRs, review/check state, individual review requests, and work needing your attention. |
 
-Date and repository viewing scope apply across all boards. Each board retains
-its own search, filters, sorting, and navigation. The initial range is **14 days**,
-or the saved configuration’s startup range. Change volume describes activity,
-not productivity; approved reviews and passing checks are not merge authorization.
+Date and repository viewing scope apply across boards. Each board retains its
+own search, sort, and selection. Settings manages tracked repositories, named
+groups, work areas, analysis rules, and offline mode. Repository controls manages
+session tracking and eligible cache removal. Identities merges email aliases
+without merging people merely because they share a display name.
 
-Use the sidebar and toolbar controls, or `a`, `c`, and `p` to switch boards.
-`f` opens Filters, `t` opens dates, `r` refreshes, and `?` or F1 opens the keyboard
-guide. Quit through the application menu or the usual macOS shortcut.
+The app uses native sidebar navigation, tables, inspectors, sheets, menus,
+clipboard actions, and Save dialogs. Activity is evidence, not a productivity
+score or a judgment that a PR is ready to merge.
 
-## Distribution
+## Fresh native workspace
 
-The next tagged release is configured to ship a signed, notarized universal
-macOS app for Apple silicon and Intel, with macOS 13 Ventura or newer required. The
-existing Homebrew cask name will install **Bigboard.app**, plus Git:
+There is **no legacy import**. Choose repositories again in the native app.
 
-```sh
-brew install --cask richhaase/tap/bigboard
-```
+- Durable workspace settings, access grants, and bookmarks: `~/Library/Application Support/com.richhaase.bigboard.native/accounts/<account-id>/`.
+- Rebuildable Git history and parsed scans: `~/Library/Caches/com.richhaase.bigboard.native/accounts/<account-id>/repos/`.
+- Credentials: the existing non-synchronizing Bigboard GitHub Keychain item.
 
-Until that release is published, use the local build above to try this version.
-Launch the app from Finder, Spotlight, or the Dock. The GUI distribution installs
-no `bigboard` command and needs no Go, Node, or separate web server at runtime.
+The replacement can reuse the existing sign-in when built with the same publisher
+settings. Keep the old app closed while testing: both versions share rotating
+credentials, and signing out removes the shared local credential. macOS may ask
+you to permit Keychain access because the development app has a different signature.
+Native settings and caches remain separate from the old app's files.
 
-This replaces the terminal product and its Linux downloads. Homebrew upgrades
-replace the old command with the app; scripts using `bigboard --export` must move
-to **Export JSON** on Contributors. Settings remain in the XDG configuration file. Repository evidence and bookmarks
-are isolated by GitHub account.
-
-## Development and documentation
-
-`make dev` runs native development mode. `make preview` starts an optional
-loopback web server for development; it is not how the installed app runs.
-`make test` checks both Go modules and the frontend models. See the
-[desktop development guide](desktop/README.md) for prerequisites and browser checks.
-
-- [GitHub app setup](docs/github-app.md): publisher registration and authentication boundaries.
-- [Workflow guide](docs/visual-guide.md): a tour of the boards and dialogs.
-- [User reference](docs/reference.md): settings, controls, identities, storage, and counting rules.
-- [Workflow coverage](desktop/parity.md): supported behavior and verification boundaries.
-- [Development context](CLAUDE.md): architecture and implementation contracts.
+See the [native development and verification guide](native/README.md) for the
+architecture, behavior contract, and live acceptance checks. The old Go and web
+sources remain in this worktree as a reference; they are not linked into the
+native app. Their tests can be run with `make legacy-test`.
 
 ## License
 

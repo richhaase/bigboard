@@ -56,13 +56,13 @@ Configure the publishing repository after registration:
 | `BIGBOARD_GITHUB_APP_SLUG` | Repository variable, from the app's public URL |
 | `BIGBOARD_GITHUB_CLIENT_SECRET` | Repository secret |
 
-The release workflow injects these publisher values into the native binary.
+The release workflow injects these publisher values into the native bundle metadata.
 `scripts/build-macos.sh` rejects missing or malformed configuration. End users
 have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
 The app bundle must be launched on macOS for native callback registration.
-The browser preview cannot complete native sign-in.
+The `--ui-preview` fixture mode does not access Keychain or complete sign-in.
 
 The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
 Registration and publishing-repository settings are configured separately from
@@ -98,23 +98,14 @@ only the resulting grant is saved afterward. If the process stops during that
 window or saving fails, restart requires a successful live refresh before cached
 evidence is available. A confirmed denial must not revive an older offline grant.
 
-## Security scan boundary
+## Native verification boundary
 
-The Linux security job scans the root Go module and excludes `desktop`, which
-is a separate Go module requiring macOS Keychain APIs. The `desktop-security`
-job independently runs govulncheck and gosec from `desktop` on macOS, including
-`keychain_darwin.go`. Excluding it from the Linux traversal prevents an invalid
-cross-platform scan; it does not remove desktop security coverage.
-
-G117 remains enabled except in `auth/keychain_payload.go`, which contains only
-the credential persistence method. Its JSON payload intentionally includes access
-and refresh tokens and is passed only to the backend Store. The native Store
-writes it to a non-synchronizing macOS Keychain item; it is not a frontend DTO,
-log entry, exported report, or settings file. All other security rules still
-scan this file. Keep this exception limited to that persistence boundary;
-new serialization elsewhere must remain checked by G117. Existing auth tests
-cover opaque status, storage failures, refresh-token rotation, and sign-out;
-desktop tests cover Keychain operations without real credentials.
+Swift authentication and GitHub tests use an isolated credential store and mock
+HTTP transports. Native storage tests use temporary directories, and Git tests
+use owned local fixture repositories. No real credentials are read by tests.
+The Go security jobs remain checks on retained reference code; they are not a
+security scan of the Swift replacement. Native dependencies are Apple frameworks
+and system Git, with no third-party Swift package dependencies.
 
 ## Required release verification
 

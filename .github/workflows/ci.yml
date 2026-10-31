@@ -1,4 +1,4 @@
-name: CI
+name: Legacy reference checks
 
 on:
   push:
@@ -72,7 +72,7 @@ jobs:
         go-version-file: 'go.mod'
         cache: false
     - name: Run lint
-      run: make lint-core
+      run: make -f Makefile.legacy lint-core
 
   staticcheck:
     name: Staticcheck
@@ -86,7 +86,7 @@ jobs:
         go-version-file: 'go.mod'
         cache: false
     - name: Run staticcheck
-      run: make staticcheck-core
+      run: make -f Makefile.legacy staticcheck-core
 
   vet:
     name: Vet
@@ -100,7 +100,7 @@ jobs:
         go-version-file: 'go.mod'
         cache: false
     - name: Run vet
-      run: make vet-core
+      run: make -f Makefile.legacy vet-core
 
   govulncheck:
     name: Vulnerability Check
@@ -138,17 +138,17 @@ jobs:
       working-directory: desktop
       run: go test -race -coverprofile=coverage.out ./...
     - name: Vet desktop
-      run: make vet-desktop
+      run: make -f Makefile.legacy vet-desktop
     - name: Lint desktop
-      run: make lint-desktop
+      run: make -f Makefile.legacy lint-desktop
     - name: Staticcheck desktop
-      run: make staticcheck-desktop
+      run: make -f Makefile.legacy staticcheck-desktop
     - name: Test frontend models
-      run: make test-frontend
+      run: make -f Makefile.legacy test-frontend
     - name: Test release packaging scripts
       run: python3 -B -m unittest discover -s scripts -p '*_test.py'
     - name: Build native application
-      run: fnm exec --using .node-version make build
+      run: fnm exec --using .node-version make -f Makefile.legacy build
     - name: Install browser for smoke tests
       working-directory: desktop
       run: fnm exec --using ../.node-version npx playwright install chromium
