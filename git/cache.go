@@ -691,6 +691,9 @@ func runCacheGitWithToken(ctx context.Context, dir, token string, args ...string
 		}
 		if token != "" {
 			message := strings.ToLower(stderr.String())
+			if strings.Contains(message, "repository not found") || strings.Contains(message, "error: 404") {
+				return "", github.ErrRepository
+			}
 			if strings.Contains(message, "authentication failed") || strings.Contains(message, "could not read username") || strings.Contains(message, "error: 401") || strings.Contains(message, "error: 403") {
 				return "", github.ErrAuthentication
 			}

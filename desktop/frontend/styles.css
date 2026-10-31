@@ -2234,5 +2234,5 @@ select {
 .heat-badge.new { color:var(--heat-first);background:rgba(255,226,168,.12); }
 .heat-grid .empty { margin:20px; }
 .heat-more { margin:12px 20px 4px;width:calc(100% - 40px); }
-@media(max-width:720px) { .heat-row { grid-template-columns:minmax(90px,120px) minmax(0,1fr) 44px 24px;padding-left:12px;gap:6px; } }
+@media(max-width:720px) { .heat-row { grid-template-columns:minmax(0,1fr) 44px 24px;padding-left:12px;gap:4px 6px; } .heat-label { grid-column:1/-1; } .heat-row.axis>span:first-child { display:none; } .heat-cells { gap:2px; } }
 @media(max-width:1150px) { .board-split.heat-split { grid-template-columns:minmax(0,1fr); } }

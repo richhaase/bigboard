@@ -24,7 +24,7 @@ cask "bigboard" do
   homepage "https://github.com/richhaase/bigboard"
 
   depends_on formula: "git"
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Bigboard.app"
 

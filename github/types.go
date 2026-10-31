@@ -120,3 +120,11 @@ type RepositoryRequest struct {
 	Repo     string
 	Previous []PullRequest
 }
+
+type InstallationAccessError struct {
+	Owner string
+	Err   error
+}
+
+func (e *InstallationAccessError) Error() string { return e.Err.Error() }
+func (e *InstallationAccessError) Unwrap() error { return e.Err }

@@ -141,3 +141,11 @@ func TestCacheFetchDoesNotExposeRemoteDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticatedGitNotFoundIsAuthoritative(t *testing.T) {
+	cacheAuthGit(t, "printf 'remote: Repository not found.' >&2\nexit 128\n")
+	cache := &RepositoryCache{TokenSource: func(context.Context) (string, error) { return "fixture-token", nil }}
+	if _, err := cache.git(t.Context(), "", "fetch", "https://github.com/example/project.git"); !errors.Is(err, github.ErrRepository) {
+		t.Fatalf("not-found denial hidden: %v", err)
+	}
+}

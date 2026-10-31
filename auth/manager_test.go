@@ -544,3 +544,31 @@ func TestQueuedAuthOperationsHonorCancellationDuringRefresh(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelInterruptsInFlightSignInWithoutPersisting(t *testing.T) {
+	store := &memoryStore{}
+	m := testManager(t, store)
+	u := begin(t, m)
+	started := make(chan struct{})
+	m.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		close(started)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})
+	complete := make(chan error, 1)
+	go func() { complete <- m.Complete(t.Context(), callback(u.Query().Get("state"))) }()
+	<-started
+	canceled := make(chan struct{})
+	go func() { m.Cancel(); close(canceled) }()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("cancel waited for the exchange timeout")
+	}
+	if err := <-complete; err == nil {
+		t.Fatal("canceled exchange succeeded")
+	}
+	if store.saves != 0 || m.Status(t.Context()).SignedIn || m.Status(t.Context()).Pending {
+		t.Fatal("canceled sign-in persisted credentials")
+	}
+}

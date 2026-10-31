@@ -29,7 +29,7 @@ func TestAccessibleDiscoveryReusesConditionalInstallationAndRepositoryPages(t *t
 	provider := NewProvider(client)
 	for range 2 {
 		got, err := provider.DiscoverAccessibleRepositories(t.Context())
-		if err != nil || !reflect.DeepEqual(got, []DiscoveredRepository{{Name: "example/api", DefaultBranch: "main"}}) {
+		if err != nil || !reflect.DeepEqual(got, []DiscoveredRepository{{OwnerType: "Organization", Name: "example/api", DefaultBranch: "main"}}) {
 			t.Fatalf("conditional discovery=%+v err=%v", got, err)
 		}
 	}

@@ -91,7 +91,7 @@ notarizes and staples it, then publishes
 command-line dependency. The app requires macOS 13 Ventura or newer. Users launch Bigboard
 from Finder, Spotlight, or the Dock.
 
-This branch targets v1.1.0. GitHub App registration and real native sign-in
+This branch targets the next release. GitHub App registration and real native sign-in
 validation must be completed before publishing it. No Windows or Linux application package is distributed
 by this workflow. Signing credentials belong in the release environment, never
 in source or local documentation.

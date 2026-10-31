@@ -202,3 +202,35 @@ func TestSnapshotStatusDoesNotExposeSignedOutOrChangedAccountData(t *testing.T) 
 		t.Fatal("signed-out status leaked counts")
 	}
 }
+
+type delayedCallbackAuthentication struct {
+	*fakeAuthentication
+	ready   chan struct{}
+	release chan struct{}
+}
+
+func (a *delayedCallbackAuthentication) Complete(ctx context.Context, callback string) error {
+	err := a.fakeAuthentication.Complete(ctx, callback)
+	close(a.ready)
+	<-a.release
+	return err
+}
+
+func TestLateNativeCallbackCannotUndoFailedSignOut(t *testing.T) {
+	a, manager := authenticatedTestApp(t)
+	manager.status.Pending = true
+	manager.signOutErr = errors.New("Keychain unavailable")
+	delayed := &delayedCallbackAuthentication{fakeAuthentication: manager, ready: make(chan struct{}), release: make(chan struct{})}
+	a.auth = delayed
+	done := make(chan struct{})
+	go func() { a.handleAuthURL(auth.CallbackURI + "?code=test&state=test"); close(done) }()
+	<-delayed.ready
+	if _, err := a.SignOut(); err == nil {
+		t.Fatal("expected failed credential deletion")
+	}
+	close(delayed.release)
+	<-done
+	if a.AuthStatus().SignedIn {
+		t.Fatal("late callback reopened the signed-out session")
+	}
+}

@@ -15,7 +15,7 @@ repository. See the [workflow guide](docs/visual-guide.md) for the other boards.
 
 ## Try this branch locally
 
-This branch prepares v1.1.0 with built-in GitHub sign-in. On macOS, build it
+This branch prepares the next release with built-in GitHub sign-in. On macOS, build it
 with Go and the Xcode command line tools:
 
 ```sh

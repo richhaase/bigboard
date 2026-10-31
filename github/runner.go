@@ -68,7 +68,9 @@ func classifyFailure(diagnostic string) error {
 		strings.Contains(message, "bad credentials"),
 		strings.Contains(message, "http 401"):
 		return ErrAuthentication
-	case strings.Contains(message, "could not resolve to a repository"), strings.Contains(message, "http 404"):
+	case strings.Contains(message, "forbidden"), strings.Contains(message, "resource not accessible"), strings.Contains(message, "http 403"):
+		return ErrPermission
+	case strings.Contains(message, "could not resolve to a repository"), strings.Contains(message, "not_found"), strings.Contains(message, "repository not found"), strings.Contains(message, "http 404"):
 		return ErrRepository
 	default:
 		return ErrRequest

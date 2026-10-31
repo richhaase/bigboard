@@ -124,3 +124,26 @@ func TestRepositoryProbePartialGraphQLErrorWithCLIExitIsIsolated(t *testing.T) {
 		t.Fatalf("partial CLI exit was not isolated: %+v", results)
 	}
 }
+
+func TestScopedGraphQLDenialsPreserveOtherAliases(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		want error
+	}{{"FORBIDDEN", ErrPermission}, {"NOT_FOUND", ErrRepository}} {
+		t.Run(tc.kind, func(t *testing.T) {
+			body := probePayload(t, map[string]any{"repo0": nil, "repo1": probeRepository("other/allowed", 0)}, map[string]any{"type": tc.kind, "message": "access unavailable", "path": []any{"repo0"}})
+			p := NewProvider(discoveryClientFunc(func(context.Context, Request) (Response, error) { return Response{StatusCode: 200, Body: body}, nil }))
+			rows := p.ProbeAll(t.Context(), []string{"one/private", "other/allowed"})
+			if !errors.Is(rows[0].Err, tc.want) || rows[1].Err != nil || rows[1].OpenPRCount == nil {
+				t.Fatalf("denial scope lost: %+v", rows)
+			}
+			inventoryBody := []byte(fmt.Sprintf(`{"data":{"repository":null},"errors":[{"type":%q,"path":["repository"]}]}`, tc.kind))
+			p = NewProvider(discoveryClientFunc(func(context.Context, Request) (Response, error) {
+				return Response{StatusCode: 200, Body: inventoryBody}, nil
+			}))
+			if result := p.Fetch(t.Context(), "one/private"); !errors.Is(result.Err, tc.want) {
+				t.Fatalf("inventory denial lost: %v", result.Err)
+			}
+		})
+	}
+}

@@ -82,7 +82,7 @@ func TestAccessibleDiscoveryPaginatesInstallationsAndRepositories(t *testing.T) 
 		client.steps = append(client.steps, repositoryPage(t, 0))
 	}
 	rows := make([]map[string]any, 100)
-	want := []DiscoveredRepository{{Name: "example/last", DefaultBranch: "trunk"}}
+	want := []DiscoveredRepository{{OwnerType: "Organization", Name: "example/last", DefaultBranch: "trunk"}}
 	for i := range rows {
 		name := fmt.Sprintf("example/repo-%03d", i)
 		rows[i] = repositoryRow(name)
@@ -90,7 +90,7 @@ func TestAccessibleDiscoveryPaginatesInstallationsAndRepositories(t *testing.T) 
 		rows[i]["private"] = i%2 == 0
 		rows[i]["fork"] = i%3 == 0
 		if i%10 != 0 {
-			want = append(want, DiscoveredRepository{Name: name, DefaultBranch: "main"})
+			want = append(want, DiscoveredRepository{OwnerType: "Organization", Name: name, DefaultBranch: "main"})
 		}
 	}
 	last := repositoryRow("EXAMPLE/Last")
@@ -215,7 +215,7 @@ func TestAccessibleDiscoveryPreservesPushTimeWithoutMetadataFallback(t *testing.
 	null["updated_at"] = "2026-10-27T12:00:00Z"
 	client := &discoveryClient{t: t, steps: []discoveryStep{installationPage(t, 1, installationRow(1, "example", "User")), repositoryPage(t, 3, null, known, missing)}}
 	got, err := NewProvider(client).DiscoverAccessibleRepositories(t.Context())
-	want := []DiscoveredRepository{{Name: "example/known", DefaultBranch: "main", PushedAt: pushed}, {Name: "example/missing", DefaultBranch: "main"}, {Name: "example/null", DefaultBranch: "main"}}
+	want := []DiscoveredRepository{{OwnerType: "User", Name: "example/known", DefaultBranch: "main", PushedAt: pushed}, {OwnerType: "User", Name: "example/missing", DefaultBranch: "main"}, {OwnerType: "User", Name: "example/null", DefaultBranch: "main"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("push times=%+v err=%v", got, err)
 	}
@@ -230,5 +230,14 @@ func TestAccessibleDiscoveryPreservesSafeStatusFailures(t *testing.T) {
 		if _, err := NewProvider(client).DiscoverAccessibleRepositories(t.Context()); !errors.Is(err, tc.want) {
 			t.Fatalf("status %d error=%v", tc.status, err)
 		}
+	}
+}
+
+func TestInstallationNotFoundCarriesOwnerScope(t *testing.T) {
+	client := &discoveryClient{t: t, steps: []discoveryStep{installationPage(t, 1, installationRow(1, "Example", "Organization")), {response: Response{StatusCode: 404}}}}
+	_, err := NewProvider(client).DiscoverAccessibleRepositories(t.Context())
+	var denial *InstallationAccessError
+	if !errors.As(err, &denial) || denial.Owner != "example" || !errors.Is(err, ErrRepository) {
+		t.Fatalf("missing installation denial scope: %v", err)
 	}
 }

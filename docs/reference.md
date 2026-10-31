@@ -92,7 +92,8 @@ Filtering uses the retained snapshot time and makes no network requests.
 
 ## Activity
 
-Activity ranks repositories by added plus removed lines. Its split bars always
+Activity opens on Heat (described below). Its **Directories** tab ranks
+repositories by added plus removed lines. Its split bars always
 show additions and removals, even when sorted by commits, recency, or name.
 Quiet tracked repositories remain visible. Search, contributor selection, and
 bot visibility apply to this board independently of Contributors.
@@ -104,8 +105,10 @@ paths remain visible at repository scope; a coverage notice explains why they
 cannot be assigned to individual directories. Breadcrumbs and Back return to
 broader scopes. Long file histories load additional commits in batches.
 
-The **Commits**, **People**, **Related**, and **Heat** tabs show evidence for the
-current scope; `1`, `2`, `3`, and `5` select them, and `4` returns to the ranking. People opens
+Activity opens on **Heat**, followed by **Directories**, **Commits**, **People**,
+and **Related**, each showing evidence for the current scope. `5` selects Heat,
+`4` the Directories ranking, and `1`, `2`, and `3` Commits, People, and Related.
+Per-repository PR counts appear on Directories rows. People opens
 a person’s scoped commits. Search matches contributor names/emails in the People
 list, and commit subjects or author names/emails in Commits and a selected
 person’s commit detail. Matching commits are filtered before pagination.

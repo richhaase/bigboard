@@ -273,10 +273,17 @@ func (a *App) handleAuthURL(address string) {
 		return
 	}
 	a.dropService()
+	a.session.mu.Lock()
+	generation := a.session.generation
+	a.session.mu.Unlock()
 	if err := a.auth.Complete(a.context(), address); err != nil {
 		return
 	}
 	a.session.mu.Lock()
+	if generation != a.session.generation {
+		a.session.mu.Unlock()
+		return
+	}
 	a.session.blocked = false
 	a.session.fresh = true
 	a.session.mu.Unlock()

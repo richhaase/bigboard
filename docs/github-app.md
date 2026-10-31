@@ -1,6 +1,6 @@
 # GitHub sign-in and publisher setup
 
-Bigboard v1.1.0 replaces the GitHub CLI dependency with a public GitHub App.
+The next Bigboard release replaces the GitHub CLI dependency with a public GitHub App.
 Homebrew users install Bigboard, choose **Sign in with GitHub**, and authorize
 repository access in their browser. After sign-in, a new workspace prompts them
 to choose an installation account and repositories on GitHub, then discovers
@@ -93,6 +93,10 @@ Cached repository evidence is separated by the stable GitHub account ID. A new
 sign-in verifies access before opening history; a restart with the same stored
 account can use its local cache offline, visibly cached/stale. Live work checks
 access again, and authoritative access denials do not become offline fallbacks.
+Before live authorization checks or refreshes, the persisted grant is invalidated;
+only the resulting grant is saved afterward. If the process stops during that
+window or saving fails, restart requires a successful live refresh before cached
+evidence is available. A confirmed denial must not revive an older offline grant.
 
 ## Security scan boundary
 
@@ -116,7 +120,7 @@ desktop tests cover Keychain operations without real credentials.
 
 Offline tests cover the authorization protocol, callback validation, token
 rotation, storage failures, HTTP boundaries, and account switching. Before
-publishing v1.1.0, verify the configured public registration with a signed app:
+publishing the native sign-in release, verify the configured public registration with a signed app:
 sign in through the browser, select public and private repositories, confirm an
 organization restriction is explained, restart to verify Keychain persistence,
 then sign out and sign in with another account. Confirm repository evidence does

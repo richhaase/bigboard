@@ -21,7 +21,13 @@ type accessProvider struct {
 }
 
 func (p *accessProvider) DiscoverAccessibleRepositories(context.Context) ([]gh.DiscoveredRepository, error) {
-	return p.rows, p.err
+	rows := append([]gh.DiscoveredRepository(nil), p.rows...)
+	for i := range rows {
+		if rows[i].OwnerType == "" {
+			rows[i].OwnerType = "Organization"
+		}
+	}
+	return rows, p.err
 }
 
 func TestAccountCacheAndBookmarkIsolation(t *testing.T) {
@@ -220,7 +226,7 @@ func (p *deniedAccessProvider) ProbeAll(context.Context, []string) []gh.Reposito
 }
 
 func TestAuthoritativeDenialDuringRefreshRemovesPersistedAccess(t *testing.T) {
-	for _, phase := range []string{"probe", "inventory", "git"} {
+	for _, phase := range []string{"probe", "inventory", "git", "not-found"} {
 		t.Run(phase, func(t *testing.T) {
 			s, cache, base := testService(t, "live")
 			s.accountID = "41"
@@ -229,6 +235,8 @@ func TestAuthoritativeDenialDuringRefreshRemovesPersistedAccess(t *testing.T) {
 			switch phase {
 			case "probe":
 				provider.probeErr = gh.ErrPermission
+			case "not-found":
+				provider.probeErr = gh.ErrRepository
 			case "git":
 				cache.refreshErr = gh.ErrAuthentication
 				cache.started = make(chan struct{})
@@ -290,5 +298,75 @@ func TestTransientTokenRefreshFailuresRetainCachedEvidenceAndGrants(t *testing.T
 				}
 			})
 		}
+	}
+}
+
+func TestFailedRevocationWriteCannotRestorePreviousGrant(t *testing.T) {
+	s, _, _ := testService(t, "cache")
+	s.accountID = "41"
+	allowed := map[string]git.Repository{"example/engine": {ID: "example/engine"}}
+	if err := s.replaceAccess(t.Context(), allowed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(s.cachePath, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(s.cachePath, 0700) })
+	if err := s.replaceAccess(t.Context(), map[string]git.Repository{}); err == nil {
+		t.Fatal("expected atomic replacement to fail in read-only directory")
+	}
+	if err := s.restoreAccess(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.authorized) != 0 {
+		t.Fatal("old grant returned after failed revocation save")
+	}
+}
+
+func TestInstallationDenialRetainsUnrelatedGrants(t *testing.T) {
+	s, _, base := testService(t, "cache")
+	s.accountID = "41"
+	if err := s.replaceAccess(t.Context(), map[string]git.Repository{"one/private": {ID: "one/private"}, "two/public": {ID: "two/public"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.provider = &accessProvider{fakeProvider: base, err: &gh.InstallationAccessError{Owner: "one", Err: gh.ErrRepository}}
+	if err := s.checkAccess(t.Context()); !errors.Is(err, gh.ErrRepository) {
+		t.Fatal(err)
+	}
+	if err := s.restoreAccess(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.authorized) != 1 || s.authorized["two/public"].ID == "" {
+		t.Fatal("scoped denial cleared unrelated access or kept revoked access")
+	}
+}
+
+func TestFilteredDiscoveryReusesVerifiedInventory(t *testing.T) {
+	s, _, base := testService(t, "live")
+	s.accountID = "41"
+	s.provider = &accessProvider{fakeProvider: base, rows: []gh.DiscoveredRepository{{OwnerType: "Organization", Name: "example/engine"}, {OwnerType: "User", Name: "viewer/personal"}}}
+	rows, err := s.Discover(Settings{Mode: "live", Organizations: []string{"example"}})
+	if err != nil || len(rows) != 1 || base.calls != 0 {
+		t.Fatalf("organization discovery repeated requests: %v %v calls=%d", rows, err, base.calls)
+	}
+	rows, err = s.Discover(Settings{Mode: "live", PersonalAccount: "viewer"})
+	if err != nil || len(rows) != 1 || base.calls != 1 {
+		t.Fatalf("personal discovery did more than verify login: %v %v calls=%d", rows, err, base.calls)
+	}
+	if _, err = s.Discover(Settings{Mode: "live", PersonalAccount: "example"}); err == nil {
+		t.Fatal("accepted wrong personal account")
+	}
+}
+
+func TestAuthorizedSnapshotOwnsWorkAreaRules(t *testing.T) {
+	s, _, _ := testService(t, "cache")
+	s.accountID = "41"
+	s.authorized = map[string]git.Repository{"example/engine": {ID: "example/engine"}}
+	s.analysis.WorkAreas = map[string][]stats.WorkAreaRule{"example/engine": {{Name: "core", Paths: []string{"src"}}}}
+	snapshot := s.Snapshot()
+	snapshot.WorkAreas["example/engine"][0].Name = "changed"
+	snapshot.WorkAreas["example/engine"][0].Paths[0] = "elsewhere"
+	if got := s.Snapshot().WorkAreas["example/engine"][0]; got.Name != "core" || got.Paths[0] != "src" {
+		t.Fatalf("snapshot exposed shared work areas: %+v", got)
 	}
 }

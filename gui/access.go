@@ -67,31 +67,68 @@ func (s *Service) checkAccess(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	if err := s.invalidateAccess(); err != nil {
+		return err
+	}
 	rows, err := reader.DiscoverAccessibleRepositories(ctx)
 	if err != nil {
 		if accessDenied(err) {
-			err = errors.Join(err, s.replaceAccess(context.WithoutCancel(ctx), map[string]git.Repository{}))
+			allowed := map[string]git.Repository{}
+			var denied *gh.InstallationAccessError
+			if errors.As(err, &denied) {
+				s.mu.Lock()
+				for id, repo := range s.authorized {
+					owner, _, _ := strings.Cut(id, "/")
+					if owner != denied.Owner {
+						allowed[id] = repo
+					}
+				}
+				s.mu.Unlock()
+			}
+			err = errors.Join(err, s.replaceAccess(context.WithoutCancel(ctx), allowed))
+		}
+		if !accessDenied(err) {
+			s.mu.Lock()
+			previous := make(map[string]git.Repository, len(s.authorized))
+			for id, repo := range s.authorized {
+				previous[id] = repo
+			}
+			s.mu.Unlock()
+			err = errors.Join(err, s.saveAccess(context.WithoutCancel(ctx), previous))
 		}
 		return err
 	}
 	allowed := make(map[string]git.Repository, len(rows))
+	owners := map[string]string{}
 	for _, row := range rows {
 		repo, err := s.cache.Repository(row.Name, row.DefaultBranch)
 		if err != nil {
 			return err
 		}
+		owner, _, _ := strings.Cut(repo.ID, "/")
+		owners[owner] = row.OwnerType
 		repo.PushedAt = row.PushedAt
 		allowed[repo.ID] = repo
 	}
+	s.mu.Lock()
+	s.authorizedOwners = owners
+	s.mu.Unlock()
 	return s.replaceAccess(ctx, allowed)
 }
 
 func accessDenied(err error) bool {
-	return errors.Is(err, gh.ErrAuthentication) || errors.Is(err, gh.ErrPermission)
+	return errors.Is(err, gh.ErrAuthentication) || errors.Is(err, gh.ErrPermission) || errors.Is(err, gh.ErrRepository)
 }
 
 func (s *Service) replaceAccess(ctx context.Context, allowed map[string]git.Repository) error {
 	s.mu.Lock()
+	restrictive := false
+	for id := range s.authorized {
+		if _, ok := allowed[id]; !ok {
+			restrictive = true
+			break
+		}
+	}
 	s.authorized = allowed
 	s.snapshot = s.restrictAccess(s.snapshot)
 	s.listed = slices.DeleteFunc(s.listed, func(repo git.Repository) bool { _, ok := allowed[repo.ID]; return !ok })
@@ -101,20 +138,37 @@ func (s *Service) replaceAccess(ctx context.Context, allowed map[string]git.Repo
 		}
 	}
 	s.mu.Unlock()
-	return s.saveAccess(ctx, allowed)
+	var invalidationErr error
+	if restrictive {
+		invalidationErr = s.invalidateAccess()
+	}
+	if err := s.saveAccess(ctx, allowed); err != nil {
+		return errors.Join(err, invalidationErr)
+	}
+	return nil
 }
 
 func (s *Service) discoverAuthorized(ctx context.Context, settings Settings) ([]git.Repository, error) {
 	if settings.Mode == "live" {
-		if len(settings.Organizations) > 0 {
-			if _, err := s.provider.DiscoverRepositories(ctx, settings.Organizations); err != nil {
+		if settings.PersonalAccount != "" {
+			login, err := s.provider.CurrentLogin(ctx)
+			if err != nil {
 				return nil, err
+			}
+			if !strings.EqualFold(login, settings.PersonalAccount) {
+				return nil, errors.New("the personal account filter must match your signed-in GitHub account")
 			}
 		}
-		if settings.PersonalAccount != "" {
-			if _, err := s.provider.DiscoverPersonalRepositories(ctx, settings.PersonalAccount); err != nil {
-				return nil, err
+		s.mu.Lock()
+		owners := s.authorizedOwners
+		s.mu.Unlock()
+		for _, owner := range settings.Organizations {
+			if owners[owner] != "Organization" {
+				return nil, gh.ErrPermission
 			}
+		}
+		if settings.PersonalAccount != "" && owners[settings.PersonalAccount] != "User" {
+			return nil, gh.ErrPermission
 		}
 	}
 	s.mu.Lock()
@@ -159,7 +213,7 @@ func (s *Service) accessibleSettings(settings Settings) Settings {
 
 func (s *Service) restrictAccess(snapshot Snapshot) Snapshot {
 	if s.accountID == "" {
-		return snapshot
+		return cloneSnapshot(snapshot)
 	}
 	before := len(snapshot.Repositories)
 	snapshot = cloneSnapshot(snapshot)
@@ -181,7 +235,10 @@ func (s *Service) restrictAccess(snapshot Snapshot) Snapshot {
 	snapshot.WorkAreas = map[string][]stats.WorkAreaRule{}
 	for id, rules := range s.analysis.WorkAreas {
 		if _, ok := s.authorized[id]; ok {
-			snapshot.WorkAreas[id] = rules
+			snapshot.WorkAreas[id] = slices.Clone(rules)
+			for i := range snapshot.WorkAreas[id] {
+				snapshot.WorkAreas[id][i].Paths = slices.Clone(rules[i].Paths)
+			}
 		}
 	}
 	return snapshot

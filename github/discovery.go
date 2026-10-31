@@ -8,6 +8,7 @@ import (
 )
 
 type DiscoveredRepository struct {
+	OwnerType     string
 	Name          string
 	DefaultBranch string
 	PushedAt      time.Time

@@ -12,7 +12,7 @@ func TestDiscoverRepositoriesFiltersInstalledAccessByConfiguredOrganizations(t *
 		repositoryPage(t, 1, repositoryRow("example/allowed")),
 	}}
 	got, err := NewProvider(client).DiscoverRepositories(t.Context(), []string{"EXAMPLE", "example"})
-	want := []DiscoveredRepository{{Name: "example/allowed", DefaultBranch: "main"}}
+	want := []DiscoveredRepository{{OwnerType: "Organization", Name: "example/allowed", DefaultBranch: "main"}}
 	if err != nil || !reflect.DeepEqual(got, want) || len(client.calls) != 2 {
 		t.Fatalf("filtered repositories=%+v err=%v", got, err)
 	}

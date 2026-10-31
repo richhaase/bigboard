@@ -19,10 +19,18 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 	if offline {
 		settings.Mode = "cache"
 	}
+	if s.accountID != "" && settings.Mode == "live" {
+		if err := s.invalidateAccess(); err != nil {
+			result = cloneSnapshot(previous)
+			result.Status.Phase = "partial"
+			result.Status.Errors = append(result.Status.Errors, "Preparing repository access: "+err.Error())
+			return result
+		}
+	}
 	denied := map[string]bool{}
 	denyAll := false
 	defer func() {
-		if s.accountID == "" || (!denyAll && len(denied) == 0) {
+		if s.accountID == "" || settings.Mode != "live" {
 			return
 		}
 		s.mu.Lock()
@@ -35,6 +43,9 @@ func (s *Service) refreshRepositories(previous Snapshot, offline, trackedOnly bo
 		s.mu.Unlock()
 		if err := s.replaceAccess(context.WithoutCancel(ctx), allowed); err != nil {
 			result.Status.Errors = append(result.Status.Errors, "Saving repository access: "+err.Error())
+		}
+		if !denyAll && len(denied) == 0 {
+			return
 		}
 		s.mu.Lock()
 		result = s.restrictAccess(result)

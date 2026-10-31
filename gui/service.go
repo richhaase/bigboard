@@ -31,30 +31,31 @@ type provider interface {
 }
 
 type Service struct {
-	accountID       string
-	authorized      map[string]git.Repository
-	mu              sync.Mutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	cache           repositoryCache
-	provider        provider
-	cachePath       string
-	path            string
-	analysis        analysisConfig
-	snapshot        Snapshot
-	busy            bool
-	now             func() time.Time
-	workers         sync.WaitGroup
-	listed          []git.Repository
-	inventoryReady  bool
-	group           string
-	sessionExcluded map[string]bool
-	prResults       map[string]gh.Result
-	configStore     *configStore
-	bookmarkPath    string
-	bookmarkError   string
-	bookmarks       map[string]time.Time
-	eligible        map[string]time.Time
+	accountID        string
+	authorized       map[string]git.Repository
+	authorizedOwners map[string]string
+	mu               sync.Mutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cache            repositoryCache
+	provider         provider
+	cachePath        string
+	path             string
+	analysis         analysisConfig
+	snapshot         Snapshot
+	busy             bool
+	now              func() time.Time
+	workers          sync.WaitGroup
+	listed           []git.Repository
+	inventoryReady   bool
+	group            string
+	sessionExcluded  map[string]bool
+	prResults        map[string]gh.Result
+	configStore      *configStore
+	bookmarkPath     string
+	bookmarkError    string
+	bookmarks        map[string]time.Time
+	eligible         map[string]time.Time
 }
 
 func NewService() (*Service, error) {
@@ -111,7 +112,7 @@ func (s *Service) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.decorateLocked(&s.snapshot)
-	return cloneSnapshot(s.restrictAccess(s.snapshot))
+	return s.restrictAccess(s.snapshot)
 }
 
 func (s *Service) SnapshotStatus() SnapshotStatus {
@@ -180,7 +181,7 @@ func (s *Service) Refresh() (Snapshot, error) {
 	if s.accountID != "" && len(s.snapshot.Settings.Repositories) == 0 {
 		s.snapshot.Status.Phase = "setup"
 		s.snapshot.Status.Message = "Choose repositories available to your GitHub account."
-		result := cloneSnapshot(s.restrictAccess(s.snapshot))
+		result := s.restrictAccess(s.snapshot)
 		s.mu.Unlock()
 		return result, nil
 	}
@@ -362,7 +363,7 @@ func (s *Service) refresh(previous Snapshot) (Snapshot, error) {
 	s.decorateLocked(&result)
 	s.snapshot = result
 	s.busy = false
-	result = cloneSnapshot(s.restrictAccess(result))
+	result = s.restrictAccess(result)
 	s.mu.Unlock()
 	return result, nil
 }

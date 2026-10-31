@@ -65,25 +65,29 @@ type credentials struct {
 }
 
 type pendingSignIn struct {
-	state     string
-	verifier  string
-	expiresAt time.Time
+	generation uint64
+	state      string
+	verifier   string
+	expiresAt  time.Time
 }
 
 type Manager struct {
-	gateOnce      sync.Once
-	gate          chan struct{}
-	config        Config
-	store         Store
-	client        *http.Client
-	now           func() time.Time
-	loaded        bool
-	credentials   credentials
-	pending       *pendingSignIn
-	unsaved       *credentials
-	message       string
-	retryAt       time.Time
-	limitFailures int
+	attemptMu         sync.Mutex
+	attemptGeneration uint64
+	attemptCancel     context.CancelFunc
+	gateOnce          sync.Once
+	gate              chan struct{}
+	config            Config
+	store             Store
+	client            *http.Client
+	now               func() time.Time
+	loaded            bool
+	credentials       credentials
+	pending           *pendingSignIn
+	unsaved           *credentials
+	message           string
+	retryAt           time.Time
+	limitFailures     int
 }
 
 func NewManager(config Config, store Store) *Manager {
@@ -242,9 +246,13 @@ func (m *Manager) Start(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	m.cancelAttempt()
 	state, verifier := randomValue(), randomValue()
 	challenge := sha256.Sum256([]byte(verifier))
-	m.pending = &pendingSignIn{state: state, verifier: verifier, expiresAt: m.now().Add(10 * time.Minute)}
+	m.attemptMu.Lock()
+	generation := m.attemptGeneration
+	m.attemptMu.Unlock()
+	m.pending = &pendingSignIn{generation: generation, state: state, verifier: verifier, expiresAt: m.now().Add(10 * time.Minute)}
 	m.message = ""
 	values := url.Values{"client_id": {m.config.ClientID}, "redirect_uri": {CallbackURI}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(challenge[:])}, "code_challenge_method": {"S256"}}
 	return "https://github.com/login/oauth/authorize?" + values.Encode(), nil
@@ -275,6 +283,15 @@ func (m *Manager) Complete(ctx context.Context, raw string) error {
 	if len(values["code"]) != 1 || !validSecret(values.Get("code")) {
 		return fail(ErrCallback)
 	}
+	m.attemptMu.Lock()
+	generation := pending.generation
+	ctx, cancel := context.WithCancel(ctx)
+	if generation != m.attemptGeneration {
+		cancel()
+	}
+	m.attemptCancel = cancel
+	m.attemptMu.Unlock()
+	defer cancel()
 	next, err := m.exchange(ctx, url.Values{"code": {values.Get("code")}, "redirect_uri": {CallbackURI}, "code_verifier": {pending.verifier}})
 	if err != nil {
 		return fail(err)
@@ -284,6 +301,12 @@ func (m *Manager) Complete(ctx context.Context, raw string) error {
 		return fail(err)
 	}
 	next.Login, next.AccountID = login, accountID
+	m.attemptMu.Lock()
+	defer m.attemptMu.Unlock()
+	if generation != m.attemptGeneration || ctx.Err() != nil {
+		return fail(context.Canceled)
+	}
+	m.attemptCancel = nil
 	if err := m.save(next); err != nil {
 		return fail(err)
 	}
@@ -291,7 +314,18 @@ func (m *Manager) Complete(ctx context.Context, raw string) error {
 	return nil
 }
 
+func (m *Manager) cancelAttempt() {
+	m.attemptMu.Lock()
+	defer m.attemptMu.Unlock()
+	m.attemptGeneration++
+	if m.attemptCancel != nil {
+		m.attemptCancel()
+		m.attemptCancel = nil
+	}
+}
+
 func (m *Manager) Cancel() {
+	m.cancelAttempt()
 	if err := m.acquire(context.Background()); err != nil {
 		return
 	}
@@ -301,6 +335,7 @@ func (m *Manager) Cancel() {
 }
 
 func (m *Manager) SignOut(ctx context.Context) error {
+	m.cancelAttempt()
 	if err := m.acquire(ctx); err != nil {
 		return err
 	}

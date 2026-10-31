@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -130,6 +131,9 @@ func (s *discoverySession) repositories(ctx context.Context, sources map[string]
 			endpoint := fmt.Sprintf("user/installations/%d/repositories?per_page=100&page=%d", installed.ID, page)
 			data, err := s.request(ctx, endpoint)
 			if err != nil {
+				if errors.Is(err, ErrPermission) || errors.Is(err, ErrRepository) {
+					return nil, &InstallationAccessError{Owner: strings.ToLower(installed.Account.Login), Err: err}
+				}
 				return nil, err
 			}
 			var response struct {
@@ -164,7 +168,7 @@ func (s *discoverySession) repositories(ctx context.Context, sources map[string]
 				installationSeen[name] = true
 				if !row.Archived && !seen[name] {
 					seen[name] = true
-					result = append(result, DiscoveredRepository{Name: name, DefaultBranch: row.DefaultBranch, PushedAt: row.PushedAt})
+					result = append(result, DiscoveredRepository{OwnerType: installed.Account.Type, Name: name, DefaultBranch: row.DefaultBranch, PushedAt: row.PushedAt})
 				}
 			}
 			if done {

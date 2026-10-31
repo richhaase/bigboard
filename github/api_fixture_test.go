@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
+	"testing"
 )
 
 type fixtureClient struct{ runner Runner }
@@ -36,7 +39,7 @@ func (f fixtureClient) Do(ctx context.Context, request Request) (Response, error
 			panic(err)
 		}
 		args = append(args, "-f", "query="+payload.Query)
-		for _, key := range []string{"owner", "name", "cursor", "number"} {
+		for _, key := range slices.Sorted(maps.Keys(payload.Variables)) {
 			if value, ok := payload.Variables[key]; ok {
 				flag := "-f"
 				if key == "number" {
@@ -89,4 +92,37 @@ func parseIncludedResponse(data []byte) (int, textproto.MIMEHeader, []byte, bool
 		header.Add(key, strings.TrimSpace(value))
 	}
 	return status, header, body, true
+}
+
+type responseClient struct {
+	t     *testing.T
+	steps []fakeStep
+	calls []Request
+}
+
+func (c *responseClient) Do(ctx context.Context, request Request) (Response, error) {
+	c.t.Helper()
+	assertDeadline(c.t, ctx)
+	c.calls = append(c.calls, request)
+	if len(c.steps) == 0 {
+		c.t.Fatalf("unexpected request %s", request.Endpoint)
+	}
+	step := c.steps[0]
+	c.steps = c.steps[1:]
+	return Response{StatusCode: 200, Body: step.data}, step.err
+}
+
+func TestLegacyFixtureAdapterPreservesAdditionalVariables(t *testing.T) {
+	called := false
+	client := fixtureClient{runner: batchRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		called = true
+		if value, ok := argValue(args, "futureVariable="); !ok || value != "kept" {
+			t.Fatal("adapter dropped an unfamiliar variable")
+		}
+		return []byte(`{}`), nil
+	})}
+	_, err := client.Do(t.Context(), Request{Method: "POST", Endpoint: "graphql", Body: []byte(`{"query":"query Fixture { viewer { login } }","variables":{"futureVariable":"kept"}}`)})
+	if err != nil || !called {
+		t.Fatal("fixture request failed")
+	}
 }

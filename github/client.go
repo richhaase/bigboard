@@ -187,7 +187,7 @@ func (p *Provider) apiRequest(ctx context.Context, request Request) (Response, e
 			}
 		}
 		for _, problem := range envelope.Errors {
-			if kind := classifyFailure(problem.Type + " " + problem.Message); kind == ErrRateLimited || kind == ErrAuthentication {
+			if kind := classifyFailure(problem.Type + " " + problem.Message); kind == ErrRateLimited || kind == ErrAuthentication || (len(problem.Path) == 0 && (kind == ErrPermission || kind == ErrRepository)) {
 				err = kind
 			}
 		}

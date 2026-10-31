@@ -20,7 +20,7 @@ func TestDiscoverPersonalRepositoriesFiltersInstalledOwnedRepositories(t *testin
 	}}
 	ctx := WithRequestBudget(t.Context(), 0)
 	got, err := NewProvider(client).DiscoverPersonalRepositories(ctx, "ExAmPlE")
-	want := []DiscoveredRepository{{Name: "example/private", DefaultBranch: "main"}, {Name: "example/public", DefaultBranch: "main"}}
+	want := []DiscoveredRepository{{OwnerType: "User", Name: "example/private", DefaultBranch: "main"}, {OwnerType: "User", Name: "example/public", DefaultBranch: "main"}}
 	if err != nil || !reflect.DeepEqual(got, want) || RequestCount(ctx) != 0 || len(client.calls) != 3 {
 		t.Fatalf("personal repositories=%+v err=%v budget=%d", got, err, RequestCount(ctx))
 	}

@@ -69,6 +69,9 @@ func (s *Service) restoreAccess() error {
 	if err != nil || len(data) > 4*1024*1024 {
 		return errors.New("cached repository access could not be read")
 	}
+	if len(data) == 0 {
+		return nil
+	}
 	var saved cachedAccess
 	if json.Unmarshal(data, &saved) != nil || saved.AccountID != s.accountID || saved.Repositories == nil {
 		return errors.New("cached repository access does not match this GitHub account")
@@ -126,4 +129,24 @@ func (s *Service) saveAccess(ctx context.Context, allowed map[string]git.Reposit
 		return err
 	}
 	return root.Rename(name, "access.json")
+}
+
+func (s *Service) invalidateAccess() error {
+	root, err := s.openAccessRoot(false)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.OpenFile("access.json", os.O_WRONLY|os.O_TRUNC, 0600)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	err = file.Sync()
+	return errors.Join(err, file.Close())
 }
