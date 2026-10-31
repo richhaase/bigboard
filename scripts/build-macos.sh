@@ -14,7 +14,7 @@ fi
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 auth_flags=$(bash "$repo_root/scripts/auth-ldflags.sh" required)
 cd "$repo_root/desktop"
-GOTOOLCHAIN="go$(awk '$1 == "go" { print $2; exit }' go.mod)" go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0 build -v 0 -platform darwin/universal -skipbindings -s -m -ldflags "-X main.version=$release_version $auth_flags"
+GOTOOLCHAIN="go$(awk '$1 == "go" { print $2; exit }' go.mod)" bash "$repo_root/scripts/wails.sh" build -v 0 -platform darwin/universal -skipbindings -s -m -ldflags "-X main.version=$release_version $auth_flags"
 app_path="$repo_root/desktop/build/bin/Bigboard.app"
 bundle_version=${release_version%%-*}
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $bundle_version" "$app_path/Contents/Info.plist"

@@ -111,6 +111,15 @@ func TestConcurrentAliasCompleteEvidenceWinsAndRequestsCountOnce(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("alias request did not start")
 	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for RequestCount(ctx) < 2 {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("canonical request did not reserve its budget")
+		}
+	}
 	close(release)
 	select {
 	case results := <-done:

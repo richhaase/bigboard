@@ -1,6 +1,6 @@
 .PHONY: help build dev preview test test-core test-desktop test-frontend test-coverage fmt fmt-check lint lint-core lint-desktop vet vet-core vet-desktop tidy clean staticcheck staticcheck-core staticcheck-desktop check gui gui-build gui-preview gui-test
 
-WAILS = go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
+WAILS = bash ../scripts/wails.sh
 NODE = fnm exec --using $(shell cat .node-version)
 LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 STATICCHECK = go run honnef.co/go/tools/cmd/staticcheck@latest

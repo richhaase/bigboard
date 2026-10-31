@@ -2,7 +2,9 @@
 
 Bigboard v1.1.0 replaces the GitHub CLI dependency with a public GitHub App.
 Homebrew users install Bigboard, choose **Sign in with GitHub**, and authorize
-repository access in their browser. They do not register an app, supply client
+repository access in their browser. After sign-in, a new workspace prompts them
+to choose an installation account and repositories on GitHub, then discovers
+those repositories when they continue in Bigboard. They do not register an app, supply client
 IDs, create personal access tokens, or install `gh`.
 
 ## One-time publisher registration
@@ -91,6 +93,24 @@ Cached repository evidence is separated by the stable GitHub account ID. A new
 sign-in verifies access before opening history; a restart with the same stored
 account can use its local cache offline, visibly cached/stale. Live work checks
 access again, and authoritative access denials do not become offline fallbacks.
+
+## Security scan boundary
+
+The Linux security job scans the root Go module and excludes `desktop`, which
+is a separate Go module requiring macOS Keychain APIs. The `desktop-security`
+job independently runs govulncheck and gosec from `desktop` on macOS, including
+`keychain_darwin.go`. Excluding it from the Linux traversal prevents an invalid
+cross-platform scan; it does not remove desktop security coverage.
+
+G117 remains enabled except in `auth/keychain_payload.go`, which contains only
+the credential persistence method. Its JSON payload intentionally includes access
+and refresh tokens and is passed only to the backend Store. The native Store
+writes it to a non-synchronizing macOS Keychain item; it is not a frontend DTO,
+log entry, exported report, or settings file. All other security rules still
+scan this file. Keep this exception limited to that persistence boundary;
+new serialization elsewhere must remain checked by G117. Existing auth tests
+cover opaque status, storage failures, refresh-token rotation, and sign-out;
+desktop tests cover Keychain operations without real credentials.
 
 ## Required release verification
 

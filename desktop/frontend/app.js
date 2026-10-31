@@ -133,10 +133,13 @@ function openModal(type){
 function closeModal(){state.modal=null;$('#modal-root').innerHTML='';if(lastFocus?.isConnected)lastFocus.focus();}
 function renderModal(){
  if(!state.modal){$('#modal-root').innerHTML='';return;}
- const titles={settings:'Workspace settings',repositories:'Repository scope',status:'Data status',help:'Keyboard guide',dates:'Date range',filters:'Filters',identities:'Contributor identities',identityReview:'Review identity changes',controls:'Repository controls',removeCache:'Remove cached repository',sort:'Sort pull requests'};
+ const titles={'github-setup':'Choose where to install Bigboard',settings:'Workspace settings',repositories:'Repository scope',status:'Data status',help:'Keyboard guide',dates:'Date range',filters:'Filters',identities:'Contributor identities',identityReview:'Review identity changes',controls:'Repository controls',removeCache:'Remove cached repository',sort:'Sort pull requests'};
  let content='';let footer='<button class="button" data-action="close-modal">Done</button>';
  const parity=renderParityModal();
- if(parity){content=parity.content;footer=parity.footer;}else if(state.modal==='settings'){
+ if(parity){content=parity.content;footer=parity.footer;}else if(state.modal==='github-setup'){
+ content=`<p><strong>Signed in as ${esc(state.snapshot.auth.login)}</strong></p><p class="modal-intro">Next, choose the personal account or organization where you want to install Bigboard Desktop, and which repositories it can read.</p><p>GitHub will ask you to approve read-only access. An organization may require administrator approval.</p><button class="button primary" data-action="manage-access">Choose account and repositories on GitHub ↗</button><p class="field-help">After installing, return here and continue. If Bigboard already has access to your repositories, you can continue now.</p>`;
+ footer='<button class="button" data-action="close-modal">Later</button><button class="button primary" data-action="continue-setup">Continue to workspace</button>';
+ }else if(state.modal==='settings'){
  const draft=state.settingsDraft;
  content=`${renderAccountSettings()}<p class="modal-intro">Choose the repositories and data source for your Bigboard workspace.</p><div class="mode-options" role="group" aria-label="Data source">${[['live','GitHub','Refresh repositories and PRs'],['cache','Cached history','Read your existing local cache']].map(([mode,title,description])=>`<button data-action="settings-mode" data-value="${mode}" class="mode-option ${draft.mode===mode?'selected':''}" aria-pressed="${draft.mode===mode}"><strong>${title}</strong><span>${description}</span></button>`).join('')}</div><div class="settings-fields"><label>Personal account<input id="personalAccount" name="personalAccount" autocomplete="off" value="${esc(draft.personalAccount)}" placeholder="GitHub username"></label><label>Organizations<input id="organizations" name="organizations" autocomplete="off" value="${esc((draft.organizations||[]).join(', '))}" placeholder="Separate names with commas"></label></div><p class="field-help">${draft.mode==='live'?'Choose repositories available to your GitHub sign-in. Leave account and organization filters blank to see all accessible repositories. Refresh reads default-branch history and open PRs.':'Reads owned Bigboard caches without network requests. Uncached repositories will have no history.'}</p><div class="section-heading"><h3>Tracked repositories</h3><button class="button small" data-action="discover" ${state.busy?'disabled':''}>${state.busy?'Working…':'Discover repositories'}</button></div><p class="field-help">Discover the full repository list for your current sources before reviewing, then choose at least one repository. Newly discovered repositories are included unless you exclude them.</p><div class="repository-choices">${state.discovered.length?state.discovered.map(r=>`<label><input type="checkbox" data-settings-repo="${esc(r.id)}" ${(draft.repositories||[]).includes(r.id)?'checked':''}><span>${esc(r.id)}${r.pushedAt?`<small class="repo-pushed">Last push ${esc(fullDate(r.pushedAt))}</small>`:''}</span></label>`).join(''):'<p class="muted-text">Discover repositories available to your GitHub account.</p>'}</div>`;
  if(state.settingsReview)content=`<p class="modal-intro">Review your workspace before saving.</p><dl class="status-facts"><div><dt>Data source</dt><dd>${esc(draft.mode)}</dd></div><div><dt>Account</dt><dd>${esc(draft.personalAccount||'None')}</dd></div><div><dt>Organizations</dt><dd>${esc((draft.organizations||[]).join(', ')||'None')}</dd></div><div><dt>Repositories</dt><dd>${draft.repositories.length?draft.repositories.map(esc).join('<br>'):'All discovered repositories'}</dd></div></dl><button class="text-button" data-action="edit-settings">Back to editing</button>`;
@@ -523,7 +526,7 @@ function resetSessionView(){
 async function openAuthenticatedWorkspace(){
  resetSessionView();state.snapshot=validSnapshot(await api('Snapshot'));applyPreferences();render();
  if(!state.snapshot.auth?.signedIn||state.snapshot.status.phase==='access')return;
- if(state.snapshot.status.phase==='setup'){openModal('settings');return;}
+ if(state.snapshot.status.phase==='setup'){openModal(state.snapshot.auth?.signedIn?'github-setup':'settings');return;}
  await refresh();
 }
 
@@ -539,9 +542,13 @@ function pollSignIn(){
  },700);
 }
 
+async function discoverSetupRepositories(){
+ await action({dataset:{action:'discover'}});
+}
+
 async function authAction(button){
  const action=button.dataset.action;
- if(!['sign-in','cancel-sign-in','sign-out','manage-access','retry-access'].includes(action))return false;
+ if(!['sign-in','cancel-sign-in','sign-out','manage-access','retry-access','continue-setup'].includes(action))return false;
  if(authWorking)return true;
  authWorking=true;state.error='';
  try{
@@ -550,13 +557,14 @@ async function authAction(button){
   if(action==='sign-out'){clearTimeout(authTimer);resetSessionView();const account={...state.snapshot.auth,signedIn:false,login:'',accountId:'',pending:false};state.snapshot=validSnapshot({auth:account,settings:{mode:'live'},status:{phase:'signin',errors:[]}});render();try{state.snapshot=validSnapshot(await api('SignOut'));}catch(error){state.signOutFailed=true;state.snapshot.auth=await api('AuthStatus');throw error;}render();}
   if(action==='manage-access'){await api('ManageGitHubAccess');toast('Choose repository access on GitHub, then return and discover repositories.');}
   if(action==='retry-access'){render();await openAuthenticatedWorkspace();}
- }catch(error){state.error=error.message;if(state.modal==='settings'){state.dialogError=error.message;renderModal();}else render();}
+  if(action==='continue-setup'){openModal('settings');await discoverSetupRepositories();}
+ }catch(error){state.error=error.message;if(state.modal){state.dialogError=error.message;renderModal();}else render();}
  finally{authWorking=false;if(!state.modal)render();}
  return true;
 }
 
 async function start(){
- try{state.snapshot=validSnapshot(await api('Snapshot'));applyPreferences();prEvidenceLoaded=state.snapshot.mode==='live'&&(state.snapshot.status.phase==='ready'||state.snapshot.pullRequests.length>0);render();if(state.snapshot.auth&&!state.snapshot.auth.signedIn)return;if(state.snapshot.status.phase==='access')return;if(state.snapshot.status.phase==='setup'){openModal('settings');return;}if(!dateValue(state.snapshot.generatedAt)||state.snapshot.status.phase==='initial')await refresh();}
+ try{state.snapshot=validSnapshot(await api('Snapshot'));applyPreferences();prEvidenceLoaded=state.snapshot.mode==='live'&&(state.snapshot.status.phase==='ready'||state.snapshot.pullRequests.length>0);render();if(state.snapshot.auth&&!state.snapshot.auth.signedIn)return;if(state.snapshot.status.phase==='access')return;if(state.snapshot.status.phase==='setup'){openModal(state.snapshot.auth?.signedIn?'github-setup':'settings');return;}if(!dateValue(state.snapshot.generatedAt)||state.snapshot.status.phase==='initial')await refresh();}
  catch(e){$('#app').innerHTML=`<div class="boot"><img class="brand-mark" src="brand.png" alt=""><h1>Unable to open the workspace</h1><p>${esc(e.message)}</p><button class="button primary" id="retry-start">Try again</button></div>`;$('#retry-start').addEventListener('click',start);}
 }
 start();

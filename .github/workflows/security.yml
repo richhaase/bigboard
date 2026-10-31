@@ -28,7 +28,7 @@ jobs:
     - name: Run gosec
       run: |
         echo "Running security analysis..."
-        go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude=G104,G204,G304 ./...
+        go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude-dir=desktop -exclude-rules='(^|/)auth/keychain_payload\.go$:G117' -exclude=G104,G204,G304 ./...
       continue-on-error: ${{ github.event_name == 'schedule' }}
     - name: Summary
       if: always()

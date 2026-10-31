@@ -687,9 +687,11 @@ try {
  await page.getByRole('dialog').waitFor();
  await page.getByText('Signed in as first-test-account',{exact:true}).waitFor();
  assert.equal(authRefreshes,0,'new sign-in requires repository selection before refresh');
+ await page.getByRole('heading',{name:'Choose where to install Bigboard',exact:true}).waitFor();
  await click('[data-action="manage-access"]');
- assert.equal(accessOpens,1,'access management is available before repository selection');
- await discoverSettings();
+ assert.equal(accessOpens,1,'installation selection is offered immediately after sign-in');
+ await click('[data-action="continue-setup"]');
+ await page.locator('[data-settings-repo]').first().waitFor();
  assert.equal(await page.locator('[data-settings-repo]').count(),2);
  await page.locator('[data-settings-repo="test-org/beta"]').uncheck();
  await click('[data-action="save-settings"]');
