@@ -154,33 +154,54 @@ struct HistoryTests {
             with open(sys.argv[1], "w") as ready:
                 ready.write("ready")
         time.sleep(20)
+        if child == 0:
+            with open(sys.argv[2], "w") as completed:
+                completed.write("completed")
         """
+    }
+    private func awaitProcessFamilyReady(_ ready: URL, completion: ProcessFamilyCompletion) async throws {
+        while !FileManager.default.fileExists(atPath: ready.path) && !completion.isFinished { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(FileManager.default.fileExists(atPath: ready.path))
     }
     @Test func cancellationStopsDescendantsHoldingOutputPipes() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let ready = directory.appendingPathComponent("ready")
-        let task = Task { try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, ready.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 5) }
+        let completed = directory.appendingPathComponent("completed")
+        let completion = ProcessFamilyCompletion()
+        let task = Task {
+            defer { completion.finish() }
+            return try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 5)
+        }
         defer { task.cancel() }
-        let deadline = Date().addingTimeInterval(3)
-        while !FileManager.default.fileExists(atPath: ready.path) && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(FileManager.default.fileExists(atPath: ready.path))
+        try await awaitProcessFamilyReady(ready, completion: completion)
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(start.duration(to: .now) < .seconds(3))
+        #expect(!FileManager.default.fileExists(atPath: completed.path))
     }
     @Test func timeoutStopsDescendantsHoldingOutputPipes() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let ready = directory.appendingPathComponent("ready")
+        let completed = directory.appendingPathComponent("completed")
+        let completion = ProcessFamilyCompletion()
+        let task = Task {
+            defer { completion.finish() }
+            return try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, ready.path, completed.path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 0.5)
+        }
+        defer { task.cancel() }
+        try await awaitProcessFamilyReady(ready, completion: completion)
         let start = ContinuousClock.now
         do {
-            _ = try await GitProcess.execute(URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", processFamilyFixture, directory.appendingPathComponent("ready").path], environment: ["PATH": "/usr/bin:/bin"], directory: directory, timeout: 0.5)
+            _ = try await task.value
             Issue.record("A hung Git process family did not time out.")
         } catch { #expect(error.localizedDescription.contains("timeout")) }
         #expect(start.duration(to: .now) < .seconds(3))
+        #expect(!FileManager.default.fileExists(atPath: completed.path))
     }
     @Test func canceledScanDoesNotPublishParsedCache() async throws {
         let fixture = try HistoryFixture()
@@ -194,6 +215,13 @@ struct HistoryTests {
     @Test func boundedGitOutput() async throws {
         await #expect(throws: (any Error).self) { try await GitProcess.run(["--version"], limit: 1) }
     }
+}
+
+private final class ProcessFamilyCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    func finish() { lock.lock(); finished = true; lock.unlock() }
+    var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
 }
 
 struct HistoryFixture {

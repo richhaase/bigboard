@@ -38,18 +38,19 @@ struct MainView: View {
             }.navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
-            ToolbarItem(id: "date-filter", placement: .primaryAction) { dateFilter }
-                .sharedBackgroundVisibility(.visible)
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(id: "repository-filter", placement: .primaryAction) { repositoryFilter.buttonStyle(.glass).buttonBorderShape(.capsule) }
-                .sharedBackgroundVisibility(.hidden)
-            if !workspace.configuration.groups.isEmpty {
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-                ToolbarItem(id: "group-filter", placement: .primaryAction) { groupFilter }
-                    .sharedBackgroundVisibility(.visible)
-            }
-            ToolbarItem(id: "refresh", placement: .primaryAction) {
-                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.glass).buttonBorderShape(.capsule).disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence").padding(.leading, 8)
+            ToolbarItem(id: "workspace-controls", placement: .primaryAction) {
+                HStack(spacing: 8) {
+                    dateFilter
+                    repositoryFilter
+                    if !workspace.configuration.groups.isEmpty { groupFilter }
+                    Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                        .labelStyle(.iconOnly)
+                        .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                        .help("Refresh repository evidence")
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .fixedSize(horizontal: true, vertical: false)
             }.sharedBackgroundVisibility(.hidden)
         }
         .sheet(item: $navigation.panel) { panel in WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation) }
@@ -68,6 +69,8 @@ struct MainView: View {
             Button("Since last look") { navigation.sinceLastLook = true }.disabled(workspace.snapshot.bookmark == nil)
             Button("Custom range…") { navigation.panel = .filters }
         } label: { Label(navigation.rangeLabel, systemImage: "calendar") }
+        .menuStyle(.button)
+        .menuIndicator(.visible)
         .labelStyle(.titleAndIcon)
         .help("Date filter for all boards")
     }
@@ -89,10 +92,16 @@ struct MainView: View {
         }
     }
     private var groupFilter: some View {
-        Picker("Group", selection: Binding(get: { workspace.activeGroup }, set: { name in Task { await workspace.selectGroup(name) } })) {
-            Text("All groups").tag("")
-            ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
-        }.frame(maxWidth: 180).disabled(workspace.busy)
+        Menu {
+            Picker("Group", selection: Binding(get: { workspace.activeGroup }, set: { name in Task { await workspace.selectGroup(name) } })) {
+                Text("All groups").tag("")
+                ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { Text($0).tag($0) }
+            }
+        } label: { Text(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup) }
+        .menuStyle(.button)
+        .menuIndicator(.visible)
+        .disabled(workspace.busy)
+        .help("Choose workspace group")
     }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn, signedIn: workspace.authStatus.signedIn, error: workspace.error)

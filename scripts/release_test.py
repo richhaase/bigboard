@@ -222,7 +222,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing publisher setting:", result.stderr)
 
-    def test_native_release_build_uses_native_assets_and_artifact_paths(self):
+    def test_native_default_and_release_builds_use_native_assets_and_artifact_paths(self):
         repo = self.root / "native-repo"
         (repo / "scripts").mkdir(parents=True)
         (repo / "native/Assets").mkdir(parents=True)
@@ -235,8 +235,15 @@ class ReleaseTests(unittest.TestCase):
         binary_root.mkdir()
         (binary_root / "Bigboard").write_bytes(b"fixture native executable")
         self.env.update(TEST_SWIFT_BIN=str(binary_root), BIGBOARD_PUBLISHER_CONFIG=str(self.root / "absent.json"), BIGBOARD_GITHUB_CLIENT_ID="fixture-client", BIGBOARD_GITHUB_CLIENT_SECRET="fixture-public-parameter", BIGBOARD_GITHUB_APP_SLUG="fixture-app")
-        self.env.pop("BIGBOARD_PUBLISHER_LOADED", None)
-        result = subprocess.run(["bash", str(repo / "scripts/build-macos.sh"), "1.2.3"], env=self.env, capture_output=True, text=True)
+        for key in ("BIGBOARD_PUBLISHER_LOADED", "UNIVERSAL", "CONFIGURATION", "REQUIRE_AUTH"):
+            self.env.pop(key, None)
+        result = subprocess.run(["/bin/bash", str(repo / "scripts/build-swift.sh"), "1.2.3"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        default_builds = [command for command in self.commands() if command[:2] == ["swift", "build"]]
+        self.assertEqual(len(default_builds), 2)
+        self.assertTrue(all("debug" in command and "--arch" not in command for command in default_builds))
+        Path(self.env["TEST_LOG"]).unlink()
+        result = subprocess.run(["/bin/bash", str(repo / "scripts/build-macos.sh"), "1.2.3"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         app = repo / "native/build/Bigboard.app"
         self.assertEqual((app / "Contents/MacOS/Bigboard").read_bytes(), b"fixture native executable")

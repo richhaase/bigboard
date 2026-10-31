@@ -146,6 +146,32 @@ Sign-out and account-switch tests change the shared credential, so schedule them
 after the initial reuse test. The development app is locally signed; a signed
 release still needs an end-to-end OAuth callback check and distribution checks.
 
+### Installed-upgrade Keychain validation
+
+Normal published upgrades must reuse the existing sign-in without another
+Keychain permission prompt. Initial permission is acceptable. For the first
+native release, Rich will validate by upgrading to the published version and
+report any regression for a follow-up patch. This is not a pre-release gate:
+
+1. Install the prior Developer ID-signed Bigboard release at its normal location.
+   With the login Keychain unlocked, establish the existing credential and
+   approve persistent access once if needed.
+2. Quit it and replace it through the normal upgrade path with the signed
+   candidate. Both apps must use the same publisher Team ID, bundle identifier,
+   compatible designated requirement, and existing Keychain entry. Do not delete
+   or recreate the entry to make the test pass.
+3. Launch the candidate, verify the same signed-in account is reused, then quit
+   and restart. Neither launch may request Keychain access again while the login
+   Keychain remains unlocked.
+
+Local builds use ad-hoc signing: their designated requirement is tied to the
+binary's code hash and can change after a rebuild. Published Developer ID builds
+need a stable code identity across versions. Ad-hoc rebuilds do not prove this
+upgrade behavior. See [Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
+
+This validation is pending the first published native upgrade; the local test
+environment has no publisher Developer ID signing identity available.
+
 ## Verification recorded for this branch
 
 On 2026-10-31, the replacement was built locally with Xcode 27.2 for arm64 and

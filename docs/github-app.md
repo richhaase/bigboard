@@ -106,11 +106,29 @@ Native dependencies are Apple frameworks and system Git, with no third-party
 Swift package dependencies. Automated tests and local signature verification do
 not establish release signing, notarization, or the live OAuth exchange.
 
-## Required release verification
+## Signed-release validation
+
+Normal installed upgrades must not repeat the Keychain permission prompt.
+The first native release will be validated by Rich upgrading from the installed
+Developer ID-signed prior release to the published native version. Follow up with
+a patch if a regression appears; this check does not block that initial release.
+Compare the installed prior release with the signed native version
+from the same publisher Team ID and bundle identifier, with compatible designated
+requirements and the existing Keychain entry intact. Approve persistent access
+once on the initial installation if needed, perform the normal replacement
+upgrade, and verify that both launch and restart reuse the signed-in account
+without another prompt while the login Keychain is unlocked.
+
+Ad-hoc local builds have code-hash-based identity that can change on rebuild;
+they are not proof of continuity for published releases. Developer ID upgrades
+must retain a stable designated requirement. See [Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+and the [installed-upgrade acceptance steps](../native/README.md#installed-upgrade-keychain-validation).
+This validation remains pending for the native replacement: the publisher signing
+identity is not available in the local test environment.
 
 Offline tests cover the authorization protocol, callback validation, token
-rotation, storage failures, HTTP boundaries, and account switching. Before
-publishing the native sign-in release, verify the configured public registration with a signed app:
+rotation, storage failures, HTTP boundaries, and account switching. During
+signed-release validation, verify the configured public registration with the signed app:
 sign in through the browser, select public and private repositories, confirm an
 organization restriction is explained, restart to verify Keychain persistence,
 then sign out and sign in with another account. Confirm repository evidence does

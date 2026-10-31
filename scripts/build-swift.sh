@@ -40,10 +40,10 @@ if any(values):
    print("Missing or malformed publisher setting: " + key, file=sys.stderr)
    sys.exit(1)
 CHECK
-arch_flags=()
-if [[ "${UNIVERSAL:-0}" == 1 ]]; then arch_flags=(--arch arm64 --arch x86_64); fi
-swift build --package-path "$repo_root/native" -c "$configuration" "${arch_flags[@]}"
-bin_dir=$(swift build --package-path "$repo_root/native" -c "$configuration" "${arch_flags[@]}" --show-bin-path)
+build_args=(--package-path "$repo_root/native" -c "$configuration")
+if [[ "${UNIVERSAL:-0}" == 1 ]]; then build_args+=(--arch arm64 --arch x86_64); fi
+swift build "${build_args[@]}"
+bin_dir=$(swift build "${build_args[@]}" --show-bin-path)
 app_path="$repo_root/native/build/Bigboard.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp "$bin_dir/Bigboard" "$app_path/Contents/MacOS/Bigboard"
