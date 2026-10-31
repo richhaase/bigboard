@@ -48,9 +48,8 @@ struct MainView: View {
                 ToolbarItem(id: "group-filter", placement: .primaryAction) { groupFilter }
                     .sharedBackgroundVisibility(.visible)
             }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(id: "refresh", placement: .primaryAction) {
-                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.glass).buttonBorderShape(.capsule).disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence")
+                Button { Task { await workspace.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.glass).buttonBorderShape(.capsule).disabled(workspace.busy || !workspace.authStatus.signedIn).help("Refresh repository evidence").padding(.leading, 8)
             }.sharedBackgroundVisibility(.hidden)
         }
         .sheet(item: $navigation.panel) { panel in WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation) }
@@ -74,7 +73,10 @@ struct MainView: View {
     }
     private var repositoryFilter: some View {
         Button { navigation.toggleRepositoryPopover() } label: {
-            Label("Repository filter: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
+            HStack(spacing: 6) {
+                Label("Repository filter: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
         }
         .labelStyle(.titleAndIcon)
         .help("Filter loaded repositories across all boards")
