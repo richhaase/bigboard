@@ -85,6 +85,78 @@ struct AnalysisTests {
             }
         }
     }
+    @Test func directoryRowsPreserveScopedEvidenceAcrossMixedHistory() throws {
+        var known = commit("shared", days: 5, files: [
+            FileChange(path: "src/core/a.swift", added: 5, removed: 1),
+            FileChange(path: "src/core/b.swift", added: 7, removed: 2),
+            FileChange(path: "src/core/image.bin", binary: true),
+            FileChange(path: "src/core/deeper/test.swift", added: 8),
+            FileChange(path: "src/core/generated.swift", added: 900, excludedReason: "attribute"),
+            FileChange(path: "src/core2/neighbor.swift", added: 90),
+            FileChange(path: "src/ui/window.swift", added: 10),
+            FileChange(path: "src/direct.swift", previousPath: "old/direct.swift", added: 4),
+            FileChange(path: "src/legacy", removed: 3),
+            FileChange(path: "src/legacy/new.swift", added: 11),
+            FileChange(path: "src2/miss.swift", added: 91),
+            FileChange(path: "tools/tool.swift", added: 6)
+        ])
+        known.ai = true; known.bot = true
+        var incompleteCopy = known; incompleteCopy.linesUnknown = true
+        var unknownLines = commit("unknown-lines", days: 2, files: [FileChange(path: "src/core/a.swift", added: 777)])
+        unknownLines.linesUnknown = true
+        var unknownPaths = commit("unknown-paths", files: [FileChange(path: "src/unknown/file.swift", added: 999)])
+        unknownPaths.pathsUnknown = true
+        let unnamed = commit("", days: 3, files: [FileChange(path: "src/core/a.swift", added: 2)])
+        let unnamedLater = commit("", days: 1, files: [FileChange(path: "src/core/a.swift", added: 2)])
+        let records = [incompleteCopy, unknownPaths, known, unknownLines, unnamed, unnamedLater, commit("other-repo", repo: "o/b", files: known.files), commit("empty")]
+        let areas = ["o/a": [WorkArea(name: "Sources", paths: ["src/"]), WorkArea(name: "Engine", paths: ["src/core/", "tools/"]), WorkArea(name: "Deep", paths: ["src/core/deeper"])]]
+        let cases: [(ActivityScope, Set<String>)] = [
+            (ActivityScope(repo: "o/a"), ["directory:src", "directory:src2", "directory:tools"]),
+            (ActivityScope(repo: "o/a", path: "src"), ["directory:src/core", "directory:src/core2", "directory:src/ui", "directory:src/legacy", "file:src/direct.swift", "file:src/legacy"]),
+            (ActivityScope(repo: "o/a", areaName: "Engine"), ["directory:src", "directory:tools"]),
+            (ActivityScope(repo: "o/a", path: "src", areaName: "Engine"), ["directory:src/core"]),
+            (ActivityScope(repo: "o/a", path: "src/core", areaName: "Engine"), ["file:src/core/a.swift", "file:src/core/b.swift", "file:src/core/image.bin"])
+        ]
+        for (scope, ids) in cases {
+            let rows = Analysis.activityRows(records, repositories: [], scope: scope, workAreas: areas)
+            #expect(Set(rows.map(\.id)) == ids)
+            for row in rows {
+                let expected = Analysis.scoped(records, scope: row.scope, workAreas: areas)
+                #expect(row.records == expected)
+                #expect(row.totals == Analysis.totals(expected))
+                #expect(row.latest == expected.map(\.date).max())
+                #expect(row.scope.areaName == scope.areaName)
+            }
+        }
+        let core = try #require(Analysis.activityRows(records, repositories: [], scope: ActivityScope(repo: "o/a", path: "src", areaName: "Engine"), workAreas: areas).first)
+        #expect(core.records.map(\.id) == ["shared", "shared", "unknown-lines", "", ""])
+        #expect(core.totals.commits == 4 && core.totals.added == 16 && core.totals.removed == 3 && core.totals.unknown)
+        #expect(core.latest == unnamedLater.date)
+        #expect(core.records[1].ai && core.records[1].bot && core.records[1].files.contains { $0.binary })
+    }
+    @Test func wideDirectoryRowsAndHeatRetainOneScopedRecordPerCommit() throws {
+        let count = 2048
+        let initialFiles = (0..<count).flatMap { index in [FileChange(path: "src/unit\(index)/a.swift", added: 1), FileChange(path: "src/unit\(index)/b.swift", added: 2)] }
+        let updatedFiles = stride(from: 0, to: count, by: 2).map { FileChange(path: "src/unit\($0)/a.swift", removed: 1) }
+        let records = [commit("initial", days: 2, files: initialFiles), commit("update", days: 1, files: updatedFiles)]
+        let scope = ActivityScope(repo: "o/a", path: "src")
+        let rows = Analysis.activityRows(records, repositories: [], scope: scope)
+        #expect(rows.count == count && Set(rows.map(\.id)).count == count)
+        #expect(rows.allSatisfy { $0.totals.added == 3 && $0.records.first?.files.count == 2 && $0.records.first?.id == "initial" })
+        #expect(rows.reduce(0) { $0 + $1.totals.commits } == count + count / 2)
+        #expect(rows.reduce(0) { $0 + $1.totals.removed } == count / 2)
+        let updated = try #require(rows.first { $0.id == "directory:src/unit0" })
+        #expect(updated.records.map(\.id) == ["initial", "update"])
+        #expect(updated.records.map { $0.files.count } == [2, 1])
+        #expect(updated.latest == records[1].date)
+        let heat = Analysis.heatRows(records, repositories: [], scope: scope, now: now)
+        #expect(heat.count == count)
+        #expect(Set(heat.map(\.id)) == Set(rows.map(\.id)))
+        #expect(heat.reduce(0) { $0 + $1.heat.total } == Double(count * 3 + count / 2))
+        let files = Analysis.activityRows(records, repositories: [], scope: ActivityScope(repo: "o/a", path: "src/unit0"))
+        #expect(Set(files.map(\.id)) == ["file:src/unit0/a.swift", "file:src/unit0/b.swift"])
+        #expect(files.reduce(0) { $0 + $1.totals.change } == 4)
+    }
     @Test func relatedPullRequestsDistinguishHistoricalFileAndDirectoryPaths() {
         let paths = ["component", "component/new.swift", "componentary/other.swift"]
         let prs = paths.enumerated().map { index, path in PullRequest(repo: "o/a", number: index + 1, title: path, author: "A", url: "", updatedAt: now, files: [path]) }

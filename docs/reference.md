@@ -29,6 +29,10 @@ field. Its sections are:
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
 | Storage | Inspect owned caches and remove eligible unavailable repositories. |
 
+Area paths are repository-relative prefixes. A trailing slash is optional, so
+`src` and `src/` cannot be assigned separately. Existing conflicting settings
+remain openable; edit the paths in Groups & areas before applying changes.
+
 Credentials are stored in macOS Keychain. Sign out removes the local credential;
 GitHub authorization is revoked separately in GitHub's application settings.
 There is no import of settings or history from previous Bigboard versions. A

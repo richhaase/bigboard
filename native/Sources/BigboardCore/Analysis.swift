@@ -142,7 +142,7 @@ enum Analysis {
     static func classifyWorkArea(_ path: String, rules: [WorkArea]) -> String {
         var selected = "", length = -1
         for rule in rules { for raw in rule.paths {
-            let prefix = raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+            let prefix = WorkArea.canonicalPrefix(raw)
             if (path == prefix || path.hasPrefix(prefix + "/")) && prefix.utf8.count > length { selected = rule.name; length = prefix.utf8.count }
         } }
         return selected
@@ -176,19 +176,26 @@ enum Analysis {
             return repositories.map { repo in let rows = grouped[repo.id] ?? []; return ActivityRow(id: repo.id, label: repo.id, kind: "repository", scope: ActivityScope(repo: repo.id), records: rows, totals: totals(rows), latest: rows.map(\.date).max()) }
         }
         guard !scope.isFile else { return [] }
-        let input = scope.areaName.isEmpty ? commits : scoped(commits, scope: scope, workAreas: workAreas)
         let prefix = scope.path.isEmpty ? "" : scope.path + "/"
-        var locations: Set<ActivityScope> = []
-        for commit in input where commit.repo == scope.repo && !commit.pathsUnknown {
+        let rules = workAreas[scope.repo] ?? []
+        var grouped: [ActivityScope: [Commit]] = [:]
+        for commit in commits where commit.repo == scope.repo && !commit.pathsUnknown {
+            var changes: [ActivityScope: [FileChange]] = [:]
             for file in commit.files where file.excludedReason.isEmpty && file.path.hasPrefix(prefix) {
+                if !scope.areaName.isEmpty && classifyWorkArea(file.path, rules: rules) != scope.areaName { continue }
                 let remainder = String(file.path.dropFirst(prefix.count))
                 guard let first = remainder.split(separator: "/", omittingEmptySubsequences: false).first, !first.isEmpty else { continue }
                 let path = prefix + first
-                locations.insert(ActivityScope(repo: scope.repo, path: path, isFile: !remainder.contains("/"), areaName: scope.areaName))
+                let location = ActivityScope(repo: scope.repo, path: path, isFile: !remainder.contains("/"), areaName: scope.areaName)
+                changes[location, default: []].append(file)
+            }
+            for (location, files) in changes {
+                var record = commit
+                record.files = files; record.added = files.reduce(0) { $0 + $1.added }; record.removed = files.reduce(0) { $0 + $1.removed }
+                grouped[location, default: []].append(record)
             }
         }
-        return locations.map { location in
-            let records = scoped(input, scope: location, workAreas: workAreas)
+        return grouped.map { location, records in
             let kind = location.isFile ? "file" : "directory"
             return ActivityRow(id: kind + ":" + location.path, label: String(location.path.split(separator: "/").last ?? ""), kind: kind, scope: location, records: records, totals: totals(records), latest: records.map(\.date).max())
         }.sorted { $0.totals.change != $1.totals.change ? $0.totals.change > $1.totals.change : literalLess($0.id, $1.id) }

@@ -1,7 +1,11 @@
 import Foundation
 
 struct IdentityRule: Codable, Sendable, Equatable { var aliases: [String] = []; var name: String = "" }
-struct WorkArea: Codable, Sendable, Equatable { var name: String; var paths: [String] }
+struct WorkArea: Codable, Sendable, Equatable {
+    var name: String
+    var paths: [String]
+    static func canonicalPrefix(_ path: String) -> String { path.hasSuffix("/") ? String(path.dropLast()) : path }
+}
 struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var schemaVersion = 1
     var repositories: [String] = []
