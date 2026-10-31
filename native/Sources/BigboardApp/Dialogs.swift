@@ -19,7 +19,7 @@ struct WorkspacePanel: View {
                 case .status: StatusPanel(workspace: workspace)
                 case .help: HelpPanel()
                 case .identities: IdentitiesPanel(workspace: workspace)
-                case .repositories: RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation)
+                case .repositories: ScrollView { RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation) }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.frame(width: 780, height: 700)
@@ -249,19 +249,19 @@ struct StatusPanel: View {
 struct RepositoryFilterPanel: View {
     var repositories: [Repository]
     @Bindable var navigation: BoardState
+    var repositoryListHeightLimit: CGFloat? = nil
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Choose which loaded repositories appear across Activity, Contributors, and Pull requests. Changes take effect immediately.").foregroundStyle(.secondary)
-                RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), preferredRepository: navigation.contextualRepository ?? (navigation.scope.repo.isEmpty ? nil : navigation.scope.repo))
-            }.padding(24)
-        }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Choose which loaded repositories appear across Activity, Contributors, and Pull requests. Changes take effect immediately.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            RepositoryFilterSelection(repositories: repositories, selection: Binding(get: { navigation.repositories }, set: { navigation.setRepositoryFilter($0, available: repositories) }), preferredRepository: navigation.contextualRepository ?? (navigation.scope.repo.isEmpty ? nil : navigation.scope.repo), listHeightLimit: repositoryListHeightLimit)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
     }
 }
 struct RepositoryFilterSelection: View {
     var repositories: [Repository]
     @Binding var selection: Set<String>
     var preferredRepository: String? = nil
+    var listHeightLimit: CGFloat? = nil
     @State private var query = ""
     private var available: Set<String> { Set(repositories.map(\.id)) }
     private var visible: [Repository] { repositories.sorted { $0.id < $1.id }.filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) } }
@@ -271,8 +271,8 @@ struct RepositoryFilterSelection: View {
             Picker("Show", selection: showsAll) {
                 Text("All loaded repositories (\(repositories.count))").tag(true)
                 Text("Selected repositories").tag(false).disabled(repositories.isEmpty)
-            }.pickerStyle(.radioGroup)
-            if repositories.isEmpty { Text("No repository data is loaded. Choose repositories in Settings to get started.").foregroundStyle(.secondary) }
+            }.pickerStyle(.radioGroup).frame(maxWidth: .infinity, alignment: .leading)
+            if repositories.isEmpty { Text("No repository data is loaded. Choose repositories in Settings to get started.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             else if !selection.isEmpty {
                 HStack {
                     Text("\(selection.intersection(available).count) of \(repositories.count) selected").foregroundStyle(.secondary)
@@ -280,13 +280,23 @@ struct RepositoryFilterSelection: View {
                     Button("Select all loaded") { selection = available }
                 }
                 TextField("Search loaded repositories", text: $query).textFieldStyle(.roundedBorder)
-                ForEach(visible) { repo in
-                    Toggle(repo.id, isOn: membership(repo.id, $selection)).toggleStyle(.checkbox)
-                        .disabled(selection.intersection(available) == [repo.id])
-                }
                 if visible.isEmpty { Text("No loaded repositories match this search.").foregroundStyle(.secondary) }
+                else if let listHeightLimit {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(visible) { repo in repositoryRow(repo).lineLimit(1).help(repo.id).frame(height: 24) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(height: min(CGFloat(visible.count) * 30 - 6, listHeightLimit))
+                } else {
+                    ForEach(visible) { repo in repositoryRow(repo) }
+                }
             }
-        }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func repositoryRow(_ repo: Repository) -> some View {
+        Toggle(repo.id, isOn: membership(repo.id, $selection)).toggleStyle(.checkbox)
+            .disabled(selection.intersection(available) == [repo.id])
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 struct StorageSettingsPanel: View {

@@ -201,6 +201,6 @@ subsequent walkthrough fixes add focused repository-filter and settings tests.
 The first usability pass adds a persistent multi-select repository popover,
 a board-only sidebar, toolbar scope controls, footer data status, recent-push repository
 sorting, and direct Apply with background refresh. The combined native suite
-passes 83 tests after these changes; the optimized universal bundle builds and
+passes 85 tests after these changes; the optimized universal bundle builds and
 passes local signature verification. Contributor rhythm and calendar behavior
 were intentionally retained for further evaluation.
