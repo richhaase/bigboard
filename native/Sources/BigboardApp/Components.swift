@@ -74,14 +74,26 @@ struct ActivityCalendar: View {
             ScrollView(.horizontal) {
                 LazyHGrid(rows: Array(repeating: GridItem(.fixed(10), spacing: 3), count: 7), spacing: 3) {
                     ForEach(0..<padding, id: \.self) { _ in Color.clear.frame(width: 10, height: 10) }
-                    ForEach(points, id: \.date) { point in
-                        RoundedRectangle(cornerRadius: 2).fill(point.commits == 0 ? Color.secondary.opacity(0.1) : Color.accentColor.opacity(min(1, 0.25 + Double(point.commits) / 12)))
-                            .frame(width: 10, height: 10)
-                            .help("\(point.date.formatted(date: .abbreviated, time: .omitted)): \(point.commits) commits")
-                            .accessibilityLabel("\(point.date.formatted(date: .abbreviated, time: .omitted)): \(point.commits) commits")
-                    }
+                    ForEach(points, id: \.date) { point in ActivityCalendarCell(point: point) }
                 }.frame(height: 88)
             }
         }.accessibilityLabel("Activity calendar for the latest year")
+    }
+}
+private struct ActivityCalendarCell: View {
+    var point: TimelinePoint
+    private var color: Color {
+        if point.commits == 0 { return Color.secondary.opacity(0.1) }
+        let intensity: Double = min(1.0, 0.25 + Double(point.commits) / 12.0)
+        return Color.accentColor.opacity(intensity)
+    }
+    var body: some View {
+        let date: String = point.date.formatted(date: .abbreviated, time: .omitted)
+        let description: String = "\(date): \(point.commits) commits"
+        return RoundedRectangle(cornerRadius: 2)
+            .fill(color)
+            .frame(width: 10, height: 10)
+            .help(Text(verbatim: description))
+            .accessibilityLabel(Text(verbatim: description))
     }
 }
