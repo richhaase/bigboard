@@ -1,11 +1,10 @@
 # GitHub sign-in and publisher setup
 
-The next Bigboard release replaces the GitHub CLI dependency with a public GitHub App.
-Homebrew users install Bigboard, choose **Sign in with GitHub**, and authorize
-repository access in their browser. After sign-in, a new workspace prompts them
-to choose an installation account and repositories on GitHub, then discovers
-those repositories when they continue in Bigboard. They do not register an app, supply client
-IDs, create personal access tokens, or install `gh`.
+Bigboard signs in through a public GitHub App. Users choose **Sign in with
+GitHub**, authorize in their browser, and use **Manage access…** to
+choose installation repositories on GitHub. Back in Bigboard, they refresh the
+repository list and select what to collect in Settings. They do not register an
+app, supply client IDs, create personal access tokens, or install `gh`.
 
 ## One-time publisher registration
 
@@ -56,13 +55,13 @@ Configure the publishing repository after registration:
 | `BIGBOARD_GITHUB_APP_SLUG` | Repository variable, from the app's public URL |
 | `BIGBOARD_GITHUB_CLIENT_SECRET` | Repository secret |
 
-The release workflow injects these publisher values into the native binary.
+The release workflow injects these publisher values into the native bundle metadata.
 `scripts/build-macos.sh` rejects missing or malformed configuration. End users
 have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
 The app bundle must be launched on macOS for native callback registration.
-The browser preview cannot complete native sign-in.
+The `--ui-preview` fixture mode does not access Keychain or complete sign-in.
 
 The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
 Registration and publishing-repository settings are configured separately from
@@ -73,14 +72,14 @@ secret and callback before release readiness is established.
 
 User access is the intersection of the signed-in user's GitHub permissions and
 repositories selected for the app's installations. Discovery pages through
-`/user/installations` and each installation's repositories. **Manage repository
-access** opens GitHub's app installation page; return to Bigboard and discover
-again after selecting repositories or receiving an organization's approval.
+`/user/installations` and each installation's repositories. **Manage access…**
+opens GitHub's app installation page; return to Bigboard and refresh the
+repository list after selecting repositories or receiving an organization's approval.
 Organization policy, SSO, and administrator approval still apply. Bigboard does
 not bypass them or request write permissions to work around a denial.
 
-Access and refresh tokens stay in the native backend and macOS Keychain. They
-are absent from settings JSON, frontend state, diagnostic messages, repository
+Access and refresh tokens stay in the authentication service and macOS Keychain. They
+are absent from settings JSON, interface state, diagnostic messages, repository
 URLs, and command arguments. Expiring user tokens refresh under a serialized
 lock; refresh-token rotation is persisted before the new token is used. API
 requests are serialized, bounded, and respect GitHub retry/reset headers and
@@ -93,34 +92,46 @@ Cached repository evidence is separated by the stable GitHub account ID. A new
 sign-in verifies access before opening history; a restart with the same stored
 account can use its local cache offline, visibly cached/stale. Live work checks
 access again, and authoritative access denials do not become offline fallbacks.
-Before live authorization checks or refreshes, the persisted grant is invalidated;
-only the resulting grant is saved afterward. If the process stops during that
-window or saving fails, restart requires a successful live refresh before cached
-evidence is available. A confirmed denial must not revive an older offline grant.
+The last verified grant remains available while a live access check is pending,
+so quitting during a refresh does not discard offline access. A completed check
+replaces that grant; a confirmed denial removes the affected access. The old
+grant is invalidated immediately before saving an authoritative replacement.
+If saving fails after invalidation, restart requires successful live verification
+before cached evidence is available. Cancellation never restores a grant after
+sign-out or an account change, and confirmed denials remain authoritative.
 
-## Security scan boundary
+## Native verification boundary
 
-The Linux security job scans the root Go module and excludes `desktop`, which
-is a separate Go module requiring macOS Keychain APIs. The `desktop-security`
-job independently runs govulncheck and gosec from `desktop` on macOS, including
-`keychain_darwin.go`. Excluding it from the Linux traversal prevents an invalid
-cross-platform scan; it does not remove desktop security coverage.
+Swift authentication and GitHub tests use an isolated credential store and mock
+HTTP transports. Native storage tests use temporary directories, and Git tests
+use owned local fixture repositories. No real credentials are read by tests.
+Native dependencies are Apple frameworks and system Git, with no third-party
+Swift package dependencies. Automated tests and local signature verification do
+not establish release signing, notarization, or the live OAuth exchange.
 
-G117 remains enabled except in `auth/keychain_payload.go`, which contains only
-the credential persistence method. Its JSON payload intentionally includes access
-and refresh tokens and is passed only to the backend Store. The native Store
-writes it to a non-synchronizing macOS Keychain item; it is not a frontend DTO,
-log entry, exported report, or settings file. All other security rules still
-scan this file. Keep this exception limited to that persistence boundary;
-new serialization elsewhere must remain checked by G117. Existing auth tests
-cover opaque status, storage failures, refresh-token rotation, and sign-out;
-desktop tests cover Keychain operations without real credentials.
+## Signed-release validation
 
-## Required release verification
+Normal installed upgrades must not repeat the Keychain permission prompt.
+The first native release will be validated by Rich upgrading from the installed
+Developer ID-signed prior release to the published native version. Follow up with
+a patch if a regression appears; this check does not block that initial release.
+Compare the installed prior release with the signed native version
+from the same publisher Team ID and bundle identifier, with compatible designated
+requirements and the existing Keychain entry intact. Approve persistent access
+once on the initial installation if needed, perform the normal replacement
+upgrade, and verify that both launch and restart reuse the signed-in account
+without another prompt while the login Keychain is unlocked.
+
+Ad-hoc local builds have code-hash-based identity that can change on rebuild;
+they are not proof of continuity for published releases. Developer ID upgrades
+must retain a stable designated requirement. See [Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+and the [installed-upgrade acceptance steps](../native/README.md#installed-upgrade-keychain-validation).
+This validation remains pending for the native replacement: the publisher signing
+identity is not available in the local test environment.
 
 Offline tests cover the authorization protocol, callback validation, token
-rotation, storage failures, HTTP boundaries, and account switching. Before
-publishing the native sign-in release, verify the configured public registration with a signed app:
+rotation, storage failures, HTTP boundaries, and account switching. During
+signed-release validation, verify the configured public registration with the signed app:
 sign in through the browser, select public and private repositories, confirm an
 organization restriction is explained, restart to verify Keychain persistence,
 then sign out and sign in with another account. Confirm repository evidence does

@@ -12,10 +12,6 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Go workspace
-go.work
-go.work.sum
-
 # Env
 .env
 
@@ -25,3 +21,10 @@ dist/
 
 # Editor
 .claude/settings.local.json
+
+# Native Swift build products
+native/.build/
+native/build/
+native/.swiftpm/
+
+native/publisher.local.json

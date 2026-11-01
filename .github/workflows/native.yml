@@ -1,0 +1,21 @@
+name: Native Swift
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify macOS SDK
+        run: |
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          test "${sdk%%.*}" -ge 26
+      - name: Test
+        run: swift test --package-path native
+      - name: Test release packaging
+        run: python3 -B -m unittest discover -s scripts -p '*_test.py'
+      - name: Build native application
+        run: bash scripts/build-swift.sh

@@ -2,93 +2,80 @@
 
 [README](../README.md) · [User reference](reference.md)
 
-Screenshots show live data from the public
-[richhaase/bigboard](https://github.com/richhaase/bigboard) repository, captured on
-October 29, 2026. The selected date range is visible in each board.
+## Choose the workspace
 
-## Start with a question
+Sign in with GitHub, then open Settings from the app menu or with Command-comma.
+In Repositories, manage GitHub access if needed, refresh the repository list,
+and select what to collect. Sort by Recent push to find active repositories.
+Apply saves the choices and closes Settings while data loads in the main window.
+The status and timestamp at the bottom right form one clickable control for
+coverage details. It spins during refresh, while progress also appears at the
+top of the main screen.
 
-| Question | Where to start |
-| --- | --- |
-| Where did change happen? | Activity |
-| What did one person contribute? | Contributors |
-| Which open PRs need attention? | Pull requests |
+Use the toolbar Repository filter to focus on a few already loaded repositories.
+All loaded repositories start checked in one checklist. Uncheck the repositories
+you want to hide; changes apply immediately while the picker stays open. The
+last checked repository cannot be unchecked until you check another. Search
+finds repositories, and **Select all loaded** restores every checkmark. Close and
+reopen the picker to see the current selection. These are viewing changes only,
+without refreshing data or saving collection settings.
 
-The sidebar switches boards. Date and repository controls at the top apply to
-all three, while each board keeps its own search, sort, filters, and selection.
-The initial date range is 14 days unless your configuration specifies another.
+## Follow a change through the code
 
-## Follow activity into its evidence
+1. Open **Activity → Heat**. Look for an area whose recent activity differs from
+   its own baseline. Select Lines, Commits, or People according to the question.
+2. Explore the repository, then a directory. Heat keeps 26 weeks of context;
+   its Change badge compares four recent weeks with the preceding twelve.
+3. Switch to **Directories** for measured additions/removals under the shared
+   date range, then explore a file to see its commits.
+4. Use **People** to inspect contributors to that scope and their commits.
+5. Use **Related** to find shared commits or contributor overlap with other
+   areas, then open the matching evidence.
+6. Open repository PRs for current review/check context. **Back to Activity**
+   returns to the code exploration and restores the normal PR filters.
 
-![Activity board with repository change bars and a scoped contributor inspector](images/activity.png)
+Breadcrumbs and Back preserve your filters. Open commit links or a verified path
+on GitHub when you need the source evidence. Line volume and overlap help locate
+work; neither establishes ownership or productivity.
 
-On **Activity**, select a repository to inspect its contributors and recent
-history. Use the row’s arrow, double-click, or Enter to explore directories and
-files. Added and removed lines share one split bar; sorting by commits or recency
-does not change what the bar measures.
+## Understand a contributor's activity
 
-![Directory activity with file-scoped change totals and contributor evidence](images/directories.png)
+Choose **Contributors** and select a person. The detail shows commits,
+repositories, active days, additions/removals, contribution rhythm, a daily
+calendar, and recent commits. Select a repository under **Where work happened**
+to continue in Activity.
 
-Activity opens on the **Heat** tab, followed by **Directories**, **Commits**,
-**People**, and **Related**, each showing evidence for the current scope. Heat
-colors each of the last 26 weeks against that row’s own previous 12 weeks, so
-rising, falling, and new areas stand out. People opens a contributor’s scoped
-commits. Related can compare exact shared commits or historical contributor
-overlap; open a result to see its matching evidence. Breadcrumbs return to
-broader scopes without clearing filters.
+The rhythm chart follows the selected evidence. The calendar uses a fixed
+past-year grid; dates outside the selected range remain empty. Hovering a day
+shows its date and commit count. Expand the shared date range when investigating
+longer patterns.
 
-The inspector includes related open PRs and links to GitHub. **View repository
-PRs** temporarily opens that repository’s PR view; **Back to Activity** restores
-the normal PR filters. A `?` count means missing or stale evidence, not zero.
+If the same person appears under multiple email addresses, open **Identities**,
+select the aliases and primary email, stage the rule, review, and save. The
+mapping applies across collected history. Shared display names alone do not
+merge contributors.
 
-## Inspect a contributor
+## Review pull requests
 
-![Contributors board with repository distribution, timeline, and activity calendar](images/contributors.png)
+Choose **Pull requests** and use **Mine** to find your authored work, individual
+review requests, or changes since your last known review. Combine it with Review,
+Checks, State, and Author filters. Select a row to inspect the evidence before
+opening GitHub.
 
-On **Contributors**, select a person from the list. The detail pane shows totals,
-repository distribution, contribution rhythm, a calendar, and recent commits.
-Use the repository breakdown to jump into Activity. Bot visibility is separate
-from Activity’s bot filter.
+Treat `+ ?` counts and incomplete coverage as missing evidence. Data Status
+separates missing inventory from missing files or reviewers. GitHub remains the
+place to review, comment, approve, or merge.
 
-**Identities** lets you review a display-name change or merge email identities.
-**Export JSON** saves all-time statistics for the currently tracked repositories;
-the visible date and search filters do not limit that export. The copy button
-instead copies the current view as Markdown.
+## Return after time away
 
-## Triage pull requests
+Choose **Since last look** in the date menu once a bookmark exists. The baseline
+stays fixed during your session, so refresh does not move the starting point.
+A normal quit records eligible live snapshots for the next session.
 
-![Pull requests board with review and check evidence beside the selected PR](images/pull-requests.png)
+Copy the current view as Markdown with `y`, or export all loaded contributor
+history as JSON from Contributors. Exports do not make network requests.
 
-On **Pull requests**, select a row to inspect checks, reviews, changed files,
-requested reviewers, and merge-conflict evidence. **Open on GitHub** opens the
-actual PR. Search and facets narrow the list; the Mine filter offers attention,
-authored, review-requested, and updated-since-my-review views.
-
-Sort by Updated, Repository, Author, Title, or Attention and use the arrow button
-to reverse it. Your author login is highlighted. An age marked `!` has no update
-for at least 14 days at the recorded check time; `+` means updated since your
-last-look bookmark. Neither marker means the data itself is stale.
-
-## Adjust scope and inspect gaps
-
-![Filters dialog with shared viewing scope and board-specific choices](images/filters.png)
-
-**Filters** stages shared dates/repositories alongside the current board’s
-facets. Choose **Apply filters** or **Cancel**. **Custom…** adds custom days and
-Since last look. **Reset this board** and **Reset shared** affect different parts
-of the draft.
-
-![Data status showing refresh coverage, storage, and bookmark information](images/data-status.png)
-
-**Data status** explains refresh failures, coverage, cache storage, and bookmarks.
-Use **Refresh** after resolving a problem; there is no periodic remote refresh.
-**Settings** saves collection choices, while **Repository controls** changes
-tracking only for this session. The shared repository picker only changes what
-you see.
-
-## Find keyboard controls
-
-![Bigboard keyboard guide](images/help.png)
-
-Use the keyboard guide (`?` or F1) for shortcuts. Normal Tab navigation and
-buttons work throughout the app; F1 also works while typing.
+For offline inspection, enable cached history in Settings → General. Use
+Settings → Storage for eligible local cache removal. For incomplete or stale
+results, click the bottom-right status and timestamp to inspect Data Status
+before interpreting an empty view as no activity.

@@ -1,6 +1,8 @@
 import base64
 import json
 import os
+import plistlib
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -35,7 +37,7 @@ elif name == "security" and args[0] == "find-identity":
     print('1) ' + 'A' * 40 + ' "Developer ID Application: Test Fixture"')
 elif name == "openssl":
     print("fixture-password")
-elif name == "codesign" and "--sign" in args:
+elif name == "codesign" and "--sign" in args and "--keychain" in args:
     keychains = json.loads(Path(os.environ["TEST_KEYCHAINS"]).read_text())
     keychain = args[args.index("--keychain") + 1]
     if keychain not in keychains or os.environ.get("TEST_CODESIGN_FAILURE"):
@@ -47,6 +49,14 @@ elif name == "xcrun" and args[:2] == ["stapler", "staple"]:
     (Path(args[2]) / "stapled").touch()
 elif name == "ditto":
     Path(args[-1]).write_text("stapled" if (Path(args[-2]) / "stapled").exists() else "unstapled")
+elif name == "swift" and "--show-bin-path" in args:
+    print(os.environ["TEST_SWIFT_BIN"])
+elif name == "sips":
+    Path(args[args.index("--out") + 1]).write_bytes(b"fixture icon")
+elif name == "iconutil":
+    Path(args[args.index("-o") + 1]).write_bytes(b"fixture icns")
+elif name == "lipo":
+    print("arm64 x86_64")
 '''
 
 
@@ -78,7 +88,7 @@ class ReleaseTests(unittest.TestCase):
         self.env["QUILL_NOTARY_ISSUER"] = "fixture-issuer"
         binaries = self.root / "bin"
         binaries.mkdir()
-        for name in ("uname", "security", "openssl", "codesign", "ditto", "xcrun", "spctl"):
+        for name in ("uname", "security", "openssl", "codesign", "ditto", "xcrun", "spctl", "swift", "sips", "iconutil", "lipo"):
             tool = binaries / name
             tool.write_text(MOCK_TOOL)
             tool.chmod(0o755)
@@ -163,12 +173,14 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(hashlib.sha256(self.archive.read_bytes()).hexdigest(), result.stdout)
         self.assertIn('app "Bigboard.app"', result.stdout)
-        self.assertIn('depends_on formula: "git"', result.stdout)
+        self.assertNotIn('depends_on formula: "git"', result.stdout)
+        self.assertIn("Apple Command Line Tools", result.stdout)
+        self.assertIn("xcode-select --install", result.stdout)
         self.assertNotIn('depends_on formula: "gh"', result.stdout)
         self.assertNotIn("gh auth", result.stdout)
         self.assertNotIn('binary ', result.stdout)
         self.assertIn('darwin_universal.zip', result.stdout)
-        self.assertIn('depends_on macos: :ventura', result.stdout)
+        self.assertIn('depends_on macos: :tahoe', result.stdout)
         syntax = subprocess.run(["ruby", "-c"], input=result.stdout, capture_output=True, text=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
@@ -183,20 +195,75 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid release version", result.stderr)
 
-    def test_release_auth_configuration_is_required_and_validated(self):
-        for name in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG"):
-            self.env.pop(name, None)
-        result = self.run_script("auth-ldflags.sh", "required")
+    def test_native_publisher_json_is_validated_without_printing_values(self):
+        path = self.root / "publisher.json"
+        secret = "invalid private value"
+        path.write_text(json.dumps({"BIGBOARD_GITHUB_CLIENT_ID": "fixture-client", "BIGBOARD_GITHUB_CLIENT_SECRET": secret, "BIGBOARD_GITHUB_APP_SLUG": "fixture-app"}))
+        for key in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG", "BIGBOARD_PUBLISHER_LOADED"):
+            self.env.pop(key, None)
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(path)
+        result = self.run_script("build-swift.sh")
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(self.run_script("auth-ldflags.sh").returncode, 0)
-        self.env.update(BIGBOARD_GITHUB_CLIENT_ID="fixture-client", BIGBOARD_GITHUB_CLIENT_SECRET="fixture-public-parameter", BIGBOARD_GITHUB_APP_SLUG="fixture-app")
-        result = self.run_script("auth-ldflags.sh", "required")
+        self.assertIn("Missing or malformed publisher setting: BIGBOARD_GITHUB_CLIENT_SECRET", result.stderr)
+        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_native_publisher_json_requires_string_fields(self):
+        path = self.root / "publisher.json"
+        path.write_text(json.dumps({"BIGBOARD_GITHUB_CLIENT_ID": ["wrong type"]}))
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(path)
+        self.env.pop("BIGBOARD_PUBLISHER_LOADED", None)
+        result = self.run_script("build-swift.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read publisher settings JSON", result.stderr)
+
+    def test_native_release_requires_publisher_configuration_before_build(self):
+        for key in ("BIGBOARD_GITHUB_CLIENT_ID", "BIGBOARD_GITHUB_CLIENT_SECRET", "BIGBOARD_GITHUB_APP_SLUG", "BIGBOARD_PUBLISHER_LOADED"):
+            self.env.pop(key, None)
+        self.env["BIGBOARD_PUBLISHER_CONFIG"] = str(self.root / "absent.json")
+        result = self.run_script("build-macos.sh", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing publisher setting:", result.stderr)
+
+    def test_native_default_and_release_builds_use_native_assets_and_artifact_paths(self):
+        repo = self.root / "native-repo"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "native/Assets").mkdir(parents=True)
+        for name in ("build-swift.sh", "build-macos.sh"):
+            shutil.copyfile(SCRIPTS / name, repo / "scripts" / name)
+        source_icon = SCRIPTS.parent / "native/Assets/AppIcon.png"
+        self.assertTrue(source_icon.is_file())
+        shutil.copyfile(source_icon, repo / "native/Assets/AppIcon.png")
+        binary_root = self.root / "compiled"
+        binary_root.mkdir()
+        (binary_root / "Bigboard").write_bytes(b"fixture native executable")
+        self.env.update(TEST_SWIFT_BIN=str(binary_root), BIGBOARD_PUBLISHER_CONFIG=str(self.root / "absent.json"), BIGBOARD_GITHUB_CLIENT_ID="fixture-client", BIGBOARD_GITHUB_CLIENT_SECRET="fixture-public-parameter", BIGBOARD_GITHUB_APP_SLUG="fixture-app")
+        for key in ("BIGBOARD_PUBLISHER_LOADED", "UNIVERSAL", "CONFIGURATION", "REQUIRE_AUTH"):
+            self.env.pop(key, None)
+        result = subprocess.run(["/bin/bash", str(repo / "scripts/build-swift.sh"), "1.2.3"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("-X main.githubClientID=fixture-client", result.stdout)
-        self.assertIn("-X main.githubAppSlug=fixture-app", result.stdout)
-        self.env["BIGBOARD_GITHUB_CLIENT_SECRET"] = "invalid whitespace parameter"
-        result = self.run_script("auth-ldflags.sh", "required")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertNotIn(self.env["BIGBOARD_GITHUB_CLIENT_SECRET"], result.stderr)
+        default_builds = [command for command in self.commands() if command[:2] == ["swift", "build"]]
+        self.assertEqual(len(default_builds), 2)
+        self.assertTrue(all("debug" in command and "--arch" not in command for command in default_builds))
+        Path(self.env["TEST_LOG"]).unlink()
+        result = subprocess.run(["/bin/bash", str(repo / "scripts/build-macos.sh"), "1.2.3"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        app = repo / "native/build/Bigboard.app"
+        self.assertEqual((app / "Contents/MacOS/Bigboard").read_bytes(), b"fixture native executable")
+        self.assertTrue((app / "Contents/Resources/AppIcon.icns").is_file())
+        with (app / "Contents/Info.plist").open("rb") as source:
+            info = plistlib.load(source)
+        self.assertEqual(info["CFBundleIdentifier"], "com.richhaase.bigboard")
+        self.assertEqual(info["LSMinimumSystemVersion"], "26.0")
+        self.assertEqual(info["BIGBOARD_GITHUB_CLIENT_ID"], "fixture-client")
+        self.assertEqual(info["BIGBOARD_GITHUB_CLIENT_SECRET"], "fixture-public-parameter")
+        self.assertEqual(info["BIGBOARD_GITHUB_APP_SLUG"], "fixture-app")
+        commands = self.commands()
+        builds = [command for command in commands if command[:2] == ["swift", "build"]]
+        self.assertTrue(builds)
+        self.assertTrue(all("arm64" in command and "x86_64" in command and "release" in command for command in builds))
+        self.assertTrue(any(command[:2] == ["lipo", "-archs"] and command[-1] == str(app / "Contents/MacOS/Bigboard") for command in commands))
+        self.assertFalse((repo / "desktop").exists())
+        for name in (".github/workflows/release.yml", ".goreleaser.yaml"):
+            definition = (SCRIPTS.parent / name).read_text()
+            self.assertIn("native/build/Bigboard_", definition)
+            self.assertNotIn("desktop/build", definition)
