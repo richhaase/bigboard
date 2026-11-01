@@ -132,10 +132,22 @@ values override the file. The build validates values without printing them.
 
 `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; override
 it for another Xcode installation. `UNIVERSAL=1 CONFIGURATION=release bash
-scripts/build-swift.sh` builds both CPU architectures. The existing tag workflow
-packages `native/build/Bigboard.app`, signs/notarizes it, and creates
-`native/build/Bigboard_<version>_darwin_universal.zip` for the app-only Homebrew
-cask. No publication is part of local validation.
+scripts/build-swift.sh` builds both CPU architectures. The Release workflow
+builds the tagged source's `native/build/Bigboard.app`, signs, notarizes, and staples
+it, then creates `release-artifacts/Bigboard_<version>_darwin_universal.zip`. A Python publisher uses
+GitHub CLI to upload the ZIP and `checksums.txt` to a draft, verify the uploaded
+bytes, and publish. Stable releases update the app-only Homebrew cask directly;
+the cask requires macOS Tahoe and explains the app's Apple Command Line Tools
+requirement, with no Homebrew Git dependency. No publication is part of local
+validation.
+
+New version tags trigger that workflow. To resume an existing tag after fixing
+release automation on `main`, dispatch the same workflow with its `tag` input:
+`gh workflow run release.yml --repo richhaase/bigboard --ref main -f tag=vX.Y.Z`.
+The automation checkout and tagged application source are separate, so recovery
+uses the corrected workflow while preserving the original tag and source commit.
+It reuses verified uploaded archives and refuses conflicting assets. A completed
+release can finish a failed tap update without replacing the published app.
 
 Automated fixtures do not establish live GitHub, real Keychain access, release
 signing, notarization, or large-account performance. Before replacing an installed

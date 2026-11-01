@@ -4,15 +4,54 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish or recover
+        required: true
+        type: string
+
+concurrency:
+  group: bigboard-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
   macos:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: macos-26
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Checkout release tools
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: release-tools
+          persist-credentials: false
+      - name: Resolve release source
+        id: target
+        working-directory: release-tools
+        run: python3 scripts/release-target.py --github-output "$GITHUB_OUTPUT" -- "$RELEASE_TAG"
+      - name: Test release tooling
+        working-directory: release-tools
+        run: python3 -B -m unittest discover -s scripts -p '*_test.py'
+      - name: Checkout exact release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.target.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - name: Inspect existing release
+        id: prepare
+        env:
+          RELEASE_COMMIT: ${{ steps.target.outputs.commit }}
+        run: python3 release-tools/scripts/publish-release.py prepare --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --output-dir "$GITHUB_WORKSPACE/release-artifacts" --github-output "$GITHUB_OUTPUT"
       - name: Check release secrets
+        if: steps.prepare.outputs.needs_build == 'true'
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
@@ -29,53 +68,46 @@ jobs:
             fi
           done
           exit "$missing"
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: Verify native Swift package
-        run: swift test --package-path native
+        if: steps.prepare.outputs.needs_build == 'true'
+        run: swift test --package-path source/native
       - name: Build universal macOS application
+        if: steps.prepare.outputs.needs_build == 'true'
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
           BIGBOARD_GITHUB_CLIENT_ID: ${{ vars.BIGBOARD_GITHUB_CLIENT_ID }}
           BIGBOARD_GITHUB_CLIENT_SECRET: ${{ secrets.BIGBOARD_GITHUB_CLIENT_SECRET }}
           BIGBOARD_GITHUB_APP_SLUG: ${{ vars.BIGBOARD_GITHUB_APP_SLUG }}
-        run: bash scripts/build-macos.sh "${RELEASE_TAG#v}"
+        run: bash source/scripts/build-macos.sh "${RELEASE_TAG#v}"
       - name: Sign and notarize application
+        if: steps.prepare.outputs.needs_build == 'true'
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
           QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
           QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
           QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
           QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
           QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
-        run: bash scripts/sign-macos.sh native/build/Bigboard.app "native/build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip"
+        run: bash source/scripts/sign-macos.sh source/native/build/Bigboard.app "$GITHUB_WORKSPACE/release-artifacts/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip"
+      - name: Verify release archive
+        run: bash release-tools/scripts/verify-release.sh "$RELEASE_TAG" "$GITHUB_WORKSPACE/release-artifacts/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" source/native/Package.swift
       - name: Publish GitHub release
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
+        id: publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ steps.target.outputs.commit }}
+        run: python3 release-tools/scripts/publish-release.py publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --output-dir "$GITHUB_WORKSPACE/release-artifacts" --github-output "$GITHUB_OUTPUT"
       - name: Checkout Homebrew tap
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: steps.publish.outputs.update_tap == 'true'
         uses: actions/checkout@v7
         with:
           repository: richhaase/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           path: homebrew-tap
       - name: Update Homebrew cask
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+        if: steps.publish.outputs.update_tap == 'true'
         run: |
           mkdir -p homebrew-tap/Casks
-          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "native/build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
-          ruby -c homebrew-tap/Casks/bigboard.rb
-          git -C homebrew-tap config user.name goreleaserbot
-          git -C homebrew-tap config user.email bot@goreleaser.com
+          python3 release-tools/scripts/update-homebrew-cask.py "$RELEASE_TAG" "$GITHUB_WORKSPACE/release-artifacts/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" homebrew-tap/Casks/bigboard.rb source/scripts/homebrew-cask.sh
+          git -C homebrew-tap config user.name github-actions[bot]
+          git -C homebrew-tap config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -C homebrew-tap add Casks/bigboard.rb
           if git -C homebrew-tap diff --cached --quiet; then
             exit 0

@@ -1,24 +1,44 @@
 ---
 name: bigboard-release
-description: Release richhaase/bigboard through its existing tag-triggered GitHub Actions workflow. Use when asked to publish a new Bigboard version or resume a failed Bigboard release.
+description: Publish a Bigboard version or resume a failed release through richhaase/bigboard's GitHub Actions Release workflow.
 ---
 
 # Bigboard release
 
-Use the user-provided checkout, or locate the repository root from the current working directory with `git rev-parse --show-toplevel`. Verify that its origin identifies `richhaase/bigboard` (accept SSH or HTTPS remote URLs). If the current repository is unrelated and no checkout was provided, ask for the Bigboard checkout location; do not assume a home directory, username, or filesystem layout. Run repository commands from that verified root. Read applicable repository instructions, `.github/workflows/release.yml`, and `.goreleaser.yaml` before acting; these are authoritative if the process changes.
+Use the supplied checkout, or locate it with `git rev-parse --show-toplevel`. Verify that origin identifies `richhaase/bigboard`; ask for the checkout only if it is unrelated. Read applicable repository instructions, `.github/workflows/release.yml`, `scripts/publish-release.py`, and the build/sign/cask scripts before acting. They define the current process.
 
-1. Check branch and working-tree state. Release clean `main`; preserve unrelated work and stop if updating would overwrite it. Run `git pull --ff-only origin main` and `git fetch origin --tags`. Do not infer the latest release from stale local tags.
-2. Query GitHub releases and remote tags with `gh`/`git`. Compare the latest stable release commit with updated `main`. If there are no new commits, report that there is nothing new to release. Inspect changes since the latest stable release. Honor a requested version; otherwise choose a patch for fixes or a minor for new features under the current 0.x convention. Announce the version and included changes.
-3. Verify Native Swift and any other required checks succeeded for the **exact commit** being released, using workflow run `headSha` and conclusion. Wait for pending runs; resolve or report failures before publishing. Run `goreleaser check` when available. Existing successful CI can supply native and packaging test validation; follow additional local checks required by repository instructions. For the first native release, the owner will validate Keychain continuity by upgrading the published app and report any regression for a follow-up patch. Keep that check in `native/README.md` as post-release validation, not an additional pre-release gate. Ad-hoc local builds do not establish signed-upgrade behavior.
-4. Publishing requires a user request to release, not merely inspect the process or create this skill. A release request authorizes the normal tag push and automated tap update; do not add another confirmation unless permissions or a material ambiguity require it. Verify the chosen tag is absent locally and remotely, then create an annotated tag on the verified commit and push only that tag:
+Publishing requires a user request to release or resume a release. That request authorizes the normal tag push or recovery dispatch and automated tap update; do not add another confirmation without a material ambiguity or permission requirement. Inspecting or editing this skill does not authorize publishing. Keep credentials out of output.
+
+## New release
+
+1. Release clean, updated `main`. Preserve unrelated work; use `git pull --ff-only origin main` and `git fetch origin --tags` without overwriting it.
+2. Query GitHub releases and remote tags. Compare the latest stable release with updated `main`; if no new commits exist, report that there is nothing to release. Honor a requested version. Otherwise choose a patch for fixes, a minor for compatible features, or a major for breaking compatibility changes, using the current published version rather than stale local tags. Announce the version and scope.
+3. Verify required CI succeeded for the **exact source commit**, using each run's `headSha` and conclusion. Existing successful CI can supply native and packaging test validation. Changes to publishing also require its regression tests: `python3 -B -m unittest discover -s scripts -p '*_test.py'`.
+4. Confirm the chosen tag is absent locally and remotely. Create an annotated tag on that verified commit and push only the tag:
 
    ```sh
    git tag -a <vX.Y.Z> <verified-commit> -m 'Release <vX.Y.Z>'
    git push origin refs/tags/<vX.Y.Z>
    ```
 
-   No version-file bump or manual GitHub release is needed. The tag workflow tests the Swift package, builds one universal macOS `Bigboard.app` with `scripts/build-macos.sh`, and signs, notarizes, staples, and archives it with `scripts/sign-macos.sh`. GoReleaser publishes `Bigboard_<version>_darwin_universal.zip` and `checksums.txt`; the workflow then directly updates `richhaase/homebrew-tap/Casks/bigboard.rb` using `scripts/homebrew-cask.sh`. The app and release archives are built under `native/build`. The cask installs the app only, uses the minimum macOS version declared by the native package and packaging scripts, and declares a Git dependency. Prereleases skip the stable tap. Do not introduce a tap PR or run a second publishing path.
-5. Find the Release workflow run for this tag and commit and monitor through completion, with brief progress updates and spaced checks. On failure, inspect logs and report the concrete failure; do not delete/move a published tag, invent another version, change secrets, or rerun publishing blindly. For a requested retry, first inspect existing assets and tap state to determine what already published.
-6. Verify the GitHub release is published with the expected prerelease status, the universal macOS app ZIP, and `checksums.txt`. Verify the ZIP checksum and that the workflow completed the universal build, Developer ID signing, notarization, and stapling steps. For stable releases, verify the remote cask version and ZIP checksum match the release, its artifact is `app "Bigboard.app"`, and its minimum macOS version matches the native package and it retains the Git dependency without installing a Bigboard command. Report the release link, version, main change, and workflow/tap outcome. Do not call a pushed tag a completed release.
+There is no version-file bump. The Release workflow builds a universal `Bigboard.app`, signs with Developer ID, notarizes, staples, and archives it. Its Python publisher uses GitHub CLI to upload `Bigboard_<version>_darwin_universal.zip` and `checksums.txt` to a draft, verify their bytes, and publish. The stable release then directly updates `richhaase/homebrew-tap/Casks/bigboard.rb`; prereleases skip that tap. The cask installs only `Bigboard.app`, requires macOS Tahoe, and explains the Apple Command Line Tools requirement. It does not install Homebrew Git or a Bigboard command.
 
-Use normal permission escalation for network or `.git` writes when required; never bypass a rejected action. Do not print credential values. This skill's creation or validation must not publish a release.
+## Resume a failed release
+
+Inspect the failed run, existing release/assets, remote tag commit, and tap before retrying. Do not move or delete the tag, invent another version, change secrets, overwrite conflicting assets, or publish locally through a second path.
+
+If a workflow correction is needed, merge and verify it on `main`. Use the same Release workflow's `workflow_dispatch` input to resume the existing tag:
+
+```sh
+gh workflow run release.yml --repo richhaase/bigboard --ref main -f tag=<existing-tag>
+```
+
+The workflow keeps its automation checkout separate from the exact tagged application source. On a recovery dispatch, the workflow's `headSha` can therefore differ from the released source SHA; verify the resolved source SHA in the run as well. Rerunning an old failed job does not pick up a workflow correction on `main`.
+
+The publisher reuses a verified uploaded archive rather than replacing it with a newly signed ZIP. Conflicting existing bytes stop recovery. If the release already published correctly, the same workflow can finish the tap update without republishing the app. Keep release concurrency serialized to prevent competing tap updates.
+
+## Verify completion
+
+Monitor the Release run to completion with spaced checks and brief updates. Verify the published version/prerelease status, expected ZIP and checksum file, ZIP SHA256, and successful universal build, Developer ID signing, notarization, and stapling (or verified reuse of the previously signed artifact). For a stable release, verify the remote cask's version, URL, SHA256, app artifact, and minimum macOS requirement match the release. A pushed tag or draft with uploaded assets is not a completed release.
+
+Report the version, release link, main change, and workflow/tap result. For the first native release, the owner validates signed-upgrade Keychain continuity after publishing and reports regressions for a patch, as documented in `native/README.md`. Ad-hoc local builds do not establish that behavior; do not add it as a pre-release gate.

@@ -263,7 +263,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(all("arm64" in command and "x86_64" in command and "release" in command for command in builds))
         self.assertTrue(any(command[:2] == ["lipo", "-archs"] and command[-1] == str(app / "Contents/MacOS/Bigboard") for command in commands))
         self.assertFalse((repo / "desktop").exists())
-        for name in (".github/workflows/release.yml", ".goreleaser.yaml"):
-            definition = (SCRIPTS.parent / name).read_text()
-            self.assertIn("native/build/Bigboard_", definition)
-            self.assertNotIn("desktop/build", definition)
+        definition = (SCRIPTS.parent / ".github/workflows/release.yml").read_text()
+        self.assertIn("source/native/build/Bigboard.app", definition)
+        self.assertNotIn("desktop/build", definition)
+        self.assertFalse((SCRIPTS.parent / ".goreleaser.yaml").exists())
