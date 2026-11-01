@@ -35,8 +35,7 @@ struct SettingsPanel: View {
     @State private var repositorySort = SettingsRepositorySort.recent
     @State private var tab = "repositories"
     @State private var query = ""
-    @State private var groupName = ""
-    @State private var groupRepositories = ""
+    @State private var groupEditor = SettingsGroupEditor()
     @State private var areaEditor = SettingsWorkAreaEditor()
     private var repositoryRows: [Repository] { SettingsRepositories.rows(available: workspace.discovered, saved: Array(Set(draft.repositories).union(selected)), sort: repositorySort, query: query) }
     private var availableIDs: Set<String> { Set(workspace.discovered.map(\.id)) }
@@ -123,11 +122,15 @@ struct SettingsPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionTitle(title: "Repository groups", detail: "Switch groups in the toolbar")
             ForEach(draft.groups.keys.sorted(), id: \.self) { name in
-                HStack { VStack(alignment: .leading) { Text(name).fontWeight(.medium); Text((draft.groups[name] ?? []).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { groupName = name; groupRepositories = (draft.groups[name] ?? []).joined(separator: "\n") }; Button("Remove", role: .destructive) { draft.groups.removeValue(forKey: name) } }
+                HStack { VStack(alignment: .leading) { Text(name).fontWeight(.medium); Text((draft.groups[name] ?? []).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { groupEditor.edit(name: name, repositories: draft.groups[name] ?? []) }; Button("Remove", role: .destructive) { groupEditor.remove(name: name, from: &draft.groups) } }
             }
-            TextField("Group name", text: $groupName)
-            TextField("Repository IDs, separated by commas", text: $groupRepositories)
-            Button("Add or update group") { draft.groups[groupName.trimmingCharacters(in: .whitespaces)] = entries(groupRepositories); groupName = ""; groupRepositories = "" }.disabled(groupName.trimmingCharacters(in: .whitespaces).isEmpty || entries(groupRepositories).isEmpty)
+            TextField("Group name", text: $groupEditor.name)
+            TextField("Repository IDs, separated by commas", text: $groupEditor.repositories)
+            if !groupEditor.error.isEmpty { Text(groupEditor.error).font(.callout).foregroundStyle(.orange) }
+            HStack {
+                Button(groupEditor.isEditing ? "Update group" : "Add or update group") { groupEditor.save(to: &draft.groups) }.disabled(!groupEditor.canSave)
+                if groupEditor.isEditing { Button("Cancel edit") { groupEditor.reset() } }
+            }
             Divider()
             SectionTitle(title: "Work areas", detail: "Named groups of literal paths")
             ForEach(draft.workAreas.keys.sorted(), id: \.self) { repo in

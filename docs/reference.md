@@ -38,6 +38,11 @@ Paths containing `.` components or repeated slashes are rejected when saving.
 Previously saved dot components, repeated slashes, or conflicting prefixes remain
 openable for repair.
 
+To rename a repository group, choose **Edit**, change its name, then **Update
+group**. This replaces the original group in the draft. An existing group name
+is rejected without overwriting either group. **Cancel edit** discards the edit;
+**Apply** saves the settings draft.
+
 To rename or move a work area, choose **Edit**, change its name or repository,
 then **Update area**. This replaces the original entry in the draft; an existing
 destination area is preserved and reported as a conflict. **Cancel edit** leaves
@@ -180,7 +185,12 @@ that a repository is unavailable. Removal affects the owned local mirror, not
 GitHub. Settings discovery and cached-history mode alone do not authorize it.
 
 Since last look uses a fixed baseline for the session. A normal quit saves
-eligible live snapshot times for the workspace/group as the next baseline.
+the latest eligible live snapshot time for the workspace/group as the next baseline.
+Every repository in that collected scope must have current Git history and a
+complete, nonstale PR list, with some commit history loaded. An incomplete refresh
+keeps the previous eligible time so recovered activity stays in the catch-up range.
+PR file and reviewer details can remain partial; those limits stay visible in Data
+Status and do not block the bookmark. Viewing filters do not narrow this requirement.
 Offline scans, identity rescans, and export do not advance it.
 
 ## Counting and export

@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private let storage: WorkspaceStorage
     private let auth: AuthManager
     private let transport: any GitHubTransport
+    private let refreshHistory: @Sendable (GitHistory, Repository, String) async throws -> Repository
     private var github: GitHubService?
     private var history: GitHistory?
     private var account = ""
@@ -35,8 +36,8 @@ final class WorkspaceModel {
     private var pendingGitDenials: Set<String> = []
     private var pendingGitAuthentication = false
     private var bookmarkKey: String { activeGroup.isEmpty ? "all" : "group:\(activeGroup)" }
-    init(storage: WorkspaceStorage = .system(), preview: Bool = false, authentication: AuthManager? = nil, transport: any GitHubTransport = URLSessionGitHubTransport()) {
-        self.storage = storage; self.isPreview = preview; self.transport = transport; self.checkingSignIn = !preview
+    init(storage: WorkspaceStorage = .system(), preview: Bool = false, authentication: AuthManager? = nil, transport: any GitHubTransport = URLSessionGitHubTransport(), refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { try await $0.refresh($1, token: $2) }) {
+        self.storage = storage; self.isPreview = preview; self.transport = transport; self.refreshHistory = refreshHistory; self.checkingSignIn = !preview
         if preview { self.auth = AuthManager(configuration: AuthConfiguration(clientID: "", clientSecret: "", appSlug: ""), store: PreviewCredentialStore()) }
         else { self.auth = authentication ?? AuthManager(configuration: AuthConfiguration.fromBundle(), store: KeychainCredentialStore()) }
     }
@@ -170,7 +171,12 @@ final class WorkspaceModel {
             current.coverage.message = current.coverage.errors.isEmpty ? "Repository evidence is current." : "Some evidence is incomplete. See Data Status."
             current.cachedOnly = false; current.bookmark = baseline[bookmarkKey]
             snapshot = current; restrictSnapshot()
-            if !current.commits.isEmpty, current.repositories.contains(where: { !$0.stale }) { eligible[bookmarkKey] = current.generatedAt }
+            let expected = Set(repos.map(\.id))
+            if !expected.isEmpty, !snapshot.commits.isEmpty,
+               Set(snapshot.repositories.map(\.id)) == expected,
+               snapshot.repositories.allSatisfy({ !$0.stale && $0.prInventoryComplete && !$0.prStale }) {
+                eligible[bookmarkKey] = snapshot.generatedAt
+            }
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
             if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
@@ -196,12 +202,13 @@ final class WorkspaceModel {
             if Task.isCancelled { break }
             let batch = Array(repos[start..<min(start + 8, repos.count)])
             let auth = self.auth
+            let refreshHistory = self.refreshHistory
             let outcomes = await withTaskGroup(of: (Repository, [Commit], Bool).self, returning: [(Repository, [Commit], Bool)].self) { group in
                 for repo in batch {
                     group.addTask {
                         var current = repo
                         do {
-                            if live { current = try await history.refresh(repo, token: auth.token()) }
+                            if live { current = try await refreshHistory(history, repo, auth.token()) }
                             let scanned = try await history.scan(current, configuration: configuration)
                             return (scanned.0, scanned.1, false)
                         } catch {

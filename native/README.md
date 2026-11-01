@@ -61,8 +61,12 @@ store and temporary workspace and labels its fixture data.
   retain previously authorized stale evidence. Unlisted cache removal requires a
   successful live refresh and verifies cache ownership; it is available in
   Workspace Settings → Storage.
-- Session bookmark baselines remain fixed. Normal quit saves eligible live
-  snapshot times per global/group scope; offline scans and exports do not advance them.
+- Session bookmark baselines remain fixed. Normal quit saves a live snapshot
+  time only when every repository in the collected global/group scope has current
+  Git history and complete, nonstale PR inventory, with some commit history loaded.
+  Failed or incomplete collection preserves the last eligible time. Bounded PR
+  file/reviewer details remain qualified without blocking the bookmark. Viewing
+  filters, offline scans, and exports do not advance it.
 - JSON export aggregates all loaded tracked history; Markdown copies current
   view context. Neither initiates network access.
 
