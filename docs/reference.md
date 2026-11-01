@@ -32,9 +32,16 @@ field. Its sections are:
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
 | Storage | Inspect owned caches and remove eligible unavailable repositories. |
 
-Area paths are repository-relative prefixes. A trailing slash is optional, so
-`src` and `src/` cannot be assigned separately. Existing conflicting settings
-remain openable; edit the paths in Groups & areas before applying changes.
+Area paths are repository-relative prefixes, such as `src/ui` or `docs`. One
+trailing slash is optional, so `src` and `src/` cannot be assigned separately.
+Paths containing `.` components or repeated slashes are rejected when saving.
+Previously saved dot components, repeated slashes, or conflicting prefixes remain
+openable for repair.
+
+To rename or move a work area, choose **Edit**, change its name or repository,
+then **Update area**. This replaces the original entry in the draft; an existing
+destination area is preserved and reported as a conflict. **Cancel edit** leaves
+the draft unchanged. **Apply** saves the complete settings draft.
 
 Credentials are stored in macOS Keychain. Sign out removes the local credential;
 if removal fails, the account remains signed in and Settings stays open so you

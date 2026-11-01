@@ -116,6 +116,68 @@ struct StorageTests {
         #expect(Analysis.classifyWorkArea("src/main.swift", rules: rules) == "Sources")
         #expect(Analysis.classifyWorkArea("src/core/parser.swift", rules: rules) == "Core")
     }
+    @Test(arguments: [".", "./", "./src", "src/.", "src/./", "src/./ui", "src//ui", "src//", "src///", "src//\u{301}ui", "src/./\u{301}ui", "./\u{301}src"])
+    func noncanonicalWorkAreaPathsRequireRepairBeforeSaving(path: String) throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        var original = try storage.loadConfiguration("42")
+        original.workAreas = ["owner/repo": [WorkArea(name: "UI", paths: ["src/ui/"])]]
+        try storage.saveConfiguration(original, account: "42")
+        let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+        let saved = try Data(contentsOf: file)
+        var malformed = original
+        malformed.workAreas["owner/repo"]?[0].paths = [path]
+        do {
+            try storage.validate(malformed)
+            Issue.record("Accepted noncanonical work-area path")
+        } catch {
+            #expect(error.localizedDescription.contains("owner/repo"))
+            #expect(error.localizedDescription.contains(path))
+            #expect(error.localizedDescription.contains("components"))
+        }
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(malformed, account: "42") }
+        #expect(try Data(contentsOf: file) == saved)
+        #expect(try storage.loadConfiguration("42") == original)
+        let existing = try JSONEncoder().encode(malformed)
+        try existing.write(to: file)
+        let loaded = try storage.loadConfiguration("42")
+        #expect(loaded == malformed)
+        #expect(try Data(contentsOf: file) == existing)
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(loaded, account: "42") }
+        #expect(try Data(contentsOf: file) == existing)
+        var repaired = loaded
+        repaired.workAreas["owner/repo"]?[0].paths = ["src/ui/"]
+        try storage.saveConfiguration(repaired, account: "42")
+        #expect(try storage.loadConfiguration("42") == original)
+        #expect(Analysis.classifyWorkArea("src/ui/view.swift", rules: repaired.workAreas["owner/repo"] ?? []) == "UI")
+    }
+    @Test(arguments: [".github/workflows/", "src/.../ui", "src/ spaced /ui ", "src/line\nbreak", "src/back\\slash", "src/\u{301}ui", "src/\u{301}ui/", "\u{301}src/ui", "src/.\u{301}/ui", "src/..\u{301}/ui"])
+    func literalWorkAreaPathComponentsRoundTripUnchanged(path: String) throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        var config = try storage.loadConfiguration("42")
+        config.workAreas = ["owner/repo": [WorkArea(name: "Literal", paths: [path])]]
+        try storage.saveConfiguration(config, account: "42")
+        let loaded = try storage.loadConfiguration("42")
+        #expect(loaded == config)
+        let file = WorkArea.canonicalPrefix(path) + "/file.swift"
+        #expect(Analysis.classifyWorkArea(file, rules: loaded.workAreas["owner/repo"] ?? []) == "Literal")
+    }
+    @Test(arguments: ["", "/", "/src", "..", "../src", "src/../ui", "src/..", "src/../", "src/\0ui", "/\u{301}src", "src/../\u{301}ui", "../\u{301}src", "src/\0\u{301}ui"])
+    func unsafeWorkAreaPathsRemainRejectedOnLoadAndSave(path: String) throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        var config = try storage.loadConfiguration("42")
+        config.workAreas = ["owner/repo": [WorkArea(name: "Unsafe", paths: [path])]]
+        #expect(throws: (any Error).self) { try storage.validate(config) }
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(config, account: "42") }
+        let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let existing = try JSONEncoder().encode(config)
+        try existing.write(to: file)
+        #expect(throws: (any Error).self) { try storage.loadConfiguration("42") }
+        #expect(try Data(contentsOf: file) == existing)
+    }
     @Test(arguments: [false, true]) func previouslySavedAmbiguousWorkAreasCanBeOpenedAndRepaired(externalEdit: Bool) throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }

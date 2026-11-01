@@ -30,7 +30,7 @@ final class WorkspaceStorage: @unchecked Sendable {
         let url = try accountRoot(id).appendingPathComponent("workspace.json")
         guard let data = try read(url) else { expected.removeValue(forKey: id); return WorkspaceConfiguration() }
         let value = try JSONDecoder().decode(WorkspaceConfiguration.self, from: data)
-        try validate(value, requireDistinctWorkAreaPrefixes: false)
+        try validate(value, forSaving: false)
         expected[id] = data
         return value
     }
@@ -45,9 +45,9 @@ final class WorkspaceStorage: @unchecked Sendable {
         expected[id] = data
     }
     func validate(_ config: WorkspaceConfiguration) throws {
-        try validate(config, requireDistinctWorkAreaPrefixes: true)
+        try validate(config, forSaving: true)
     }
-    private func validate(_ config: WorkspaceConfiguration, requireDistinctWorkAreaPrefixes: Bool) throws {
+    private func validate(_ config: WorkspaceConfiguration, forSaving: Bool) throws {
         guard config.schemaVersion == 1 else { throw BigboardError.message("This workspace was created by an unsupported BigBoard version.") }
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else { throw BigboardError.message("Invalid request budget or startup range.") }
         for id in config.repositories + config.excludedRepositories + config.groups.values.flatMap({$0}) {
@@ -66,9 +66,13 @@ final class WorkspaceStorage: @unchecked Sendable {
             for area in areas {
                 guard !area.name.isEmpty, names.insert(area.name).inserted, !area.paths.isEmpty else { throw BigboardError.message("Work-area names must be unique and contain paths.") }
                 for path in area.paths {
-                    guard !path.hasPrefix("/"), !path.split(separator: "/").contains(".."), !path.contains("\0"), !path.isEmpty, paths.insert(path).inserted else { throw BigboardError.message("Work-area paths must be unique literal repository paths.") }
-                    if requireDistinctWorkAreaPrefixes {
+                    let bytes = path.utf8
+                    let components = bytes.split(separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
+                    guard bytes.first != UInt8(ascii: "/"), !components.contains(where: { $0.elementsEqual("..".utf8) }), !bytes.contains(0), !bytes.isEmpty, paths.insert(path).inserted else { throw BigboardError.message("Work-area paths must be unique literal repository paths.") }
+                    if forSaving {
                         let prefix = WorkArea.canonicalPrefix(path)
+                        let prefixComponents = prefix.utf8.split(separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
+                        guard prefixComponents.allSatisfy({ !$0.isEmpty && !$0.elementsEqual(".".utf8) }) else { throw BigboardError.message("Work-area path \(path) in \(repo) must not contain empty or '.' components. A single trailing slash is allowed.") }
                         guard prefixes.insert(prefix).inserted else { throw BigboardError.message("Work-area path \(path) duplicates the prefix \(prefix) in \(repo). A trailing slash does not make a separate prefix.") }
                     }
                 }

@@ -37,9 +37,7 @@ struct SettingsPanel: View {
     @State private var query = ""
     @State private var groupName = ""
     @State private var groupRepositories = ""
-    @State private var areaRepo = ""
-    @State private var areaName = ""
-    @State private var areaPaths = ""
+    @State private var areaEditor = SettingsWorkAreaEditor()
     private var repositoryRows: [Repository] { SettingsRepositories.rows(available: workspace.discovered, saved: Array(Set(draft.repositories).union(selected)), sort: repositorySort, query: query) }
     private var availableIDs: Set<String> { Set(workspace.discovered.map(\.id)) }
     private var selectableVisibleIDs: Set<String> { Set(repositoryRows.map(\.id)).intersection(availableIDs) }
@@ -133,18 +131,18 @@ struct SettingsPanel: View {
             Divider()
             SectionTitle(title: "Work areas", detail: "Named groups of literal paths")
             ForEach(draft.workAreas.keys.sorted(), id: \.self) { repo in
-                ForEach(Array((draft.workAreas[repo] ?? []).enumerated()), id: \.offset) { index, area in
-                    HStack { VStack(alignment: .leading) { Text("\(repo) · \(area.name)").fontWeight(.medium); Text(area.paths.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { areaRepo = repo; areaName = area.name; areaPaths = area.paths.joined(separator: ", ") }; Button("Remove", role: .destructive) { draft.workAreas[repo]?.remove(at: index); if draft.workAreas[repo]?.isEmpty == true { draft.workAreas.removeValue(forKey: repo) } } }
+                ForEach(draft.workAreas[repo] ?? [], id: \.name) { area in
+                    HStack { VStack(alignment: .leading) { Text("\(repo) · \(area.name)").fontWeight(.medium); Text(area.paths.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { areaEditor.edit(repository: repo, area: area) }; Button("Remove", role: .destructive) { areaEditor.remove(repository: repo, name: area.name, from: &draft.workAreas) } }
                 }
             }
-            TextField("Repository owner/name", text: $areaRepo)
-            TextField("Area name", text: $areaName)
-            TextField("Paths, separated by commas (for example src/ui, docs)", text: $areaPaths)
-            Button("Add or update area") {
-                let repo = areaRepo.trimmingCharacters(in: .whitespaces), name = areaName.trimmingCharacters(in: .whitespaces)
-                var areas = draft.workAreas[repo] ?? []; areas.removeAll { $0.name == name }; areas.append(WorkArea(name: name, paths: entries(areaPaths))); draft.workAreas[repo] = areas
-                areaRepo = ""; areaName = ""; areaPaths = ""
-            }.disabled(areaRepo.isEmpty || areaName.isEmpty || entries(areaPaths).isEmpty)
+            TextField("Repository owner/name", text: $areaEditor.repository)
+            TextField("Area name", text: $areaEditor.name)
+            TextField("Paths, separated by commas (for example src/ui, docs)", text: $areaEditor.paths)
+            if !areaEditor.error.isEmpty { Text(areaEditor.error).font(.callout).foregroundStyle(.orange) }
+            HStack {
+                Button(areaEditor.isEditing ? "Update area" : "Add or update area") { areaEditor.save(to: &draft.workAreas) }.disabled(!areaEditor.canSave)
+                if areaEditor.isEditing { Button("Cancel edit") { areaEditor.reset() } }
+            }
         }.textFieldStyle(.roundedBorder)
     }
     private var general: some View {
