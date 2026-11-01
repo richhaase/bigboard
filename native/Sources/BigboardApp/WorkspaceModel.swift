@@ -307,7 +307,7 @@ final class WorkspaceModel {
     }
     func discover() async {
         guard !isPreview, !busy, let github, !account.isEmpty else { return }
-        busy = true; error = ""; discoveryVerified = false
+        busy = true; error = ""; discoveryVerified = false; inventoryVerified = false
         let operation = generation, id = account
         let task = Task { await self.performDiscovery(github, account: id, operation: operation) }
         discoveryTask = task

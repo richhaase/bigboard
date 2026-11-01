@@ -60,6 +60,41 @@ import Testing
         #expect(!Set(fixture.workspace.configuration.repositories).contains(new))
     }
 
+    @Test func settingsDiscoveryRequiresFullRefreshBeforeRemovingNewlyUnlistedCache() async throws {
+        let ids = ["owner/chosen", "owner/removed"]
+        let config = SettingsRepositories.applying(Set(ids), available: Set(ids), to: WorkspaceConfiguration())
+        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids, refreshHistory: { _, repo, _ in repo })
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        try #require(fixture.workspace.snapshot.coverage.phase == "ready")
+        #expect(Set(fixture.workspace.snapshot.repositories.map(\.id)) == Set(ids))
+        #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == Set(ids))
+        #expect(Set(fixture.workspace.cachedRepositoryRows.map(\.id)) == Set(ids))
+        #expect(fixture.workspace.removableCacheIDs.isEmpty)
+        try #require(ids.allSatisfy { fixture.cacheExists($0) && fixture.scanExists($0) })
+
+        await fixture.network.setRepositories([ids[0]])
+        await fixture.workspace.discover()
+        try #require(fixture.workspace.error.isEmpty)
+        #expect(fixture.workspace.discovered.map(\.id) == [ids[0]])
+        #expect(fixture.workspace.removableCacheIDs.isEmpty)
+        await fixture.workspace.removeCache(ids[1])
+        #expect(fixture.workspace.error == "Refresh live access before removing an unlisted cache.")
+        #expect(ids.allSatisfy { fixture.cacheExists($0) && fixture.scanExists($0) })
+        #expect(Set(fixture.workspace.cachedRepositoryRows.map(\.id)) == Set(ids))
+
+        await fixture.workspace.refresh()
+        try #require(fixture.workspace.snapshot.coverage.phase == "ready")
+        try #require(fixture.workspace.error.isEmpty)
+        #expect(fixture.workspace.removableCacheIDs == [ids[1]])
+        await fixture.workspace.removeCache(ids[1])
+        #expect(fixture.workspace.error.isEmpty)
+        #expect(!fixture.cacheExists(ids[1]) && !fixture.scanExists(ids[1]))
+        #expect(fixture.cacheExists(ids[0]) && fixture.scanExists(ids[0]))
+        #expect(fixture.workspace.cachedRepositoryRows.map(\.id) == [ids[0]])
+        #expect(fixture.workspace.removableCacheIDs.isEmpty)
+    }
+
     @Test func freshSetupDiscoversChoicesWithoutScanningGrantedCaches() async throws {
         let ids = ["owner/chosen", "owner/new-private"]
         let fixture = try CollectionFixture(config: WorkspaceConfiguration(), granted: [ids[0]], cached: [ids[0]], discovered: ids)
@@ -123,7 +158,7 @@ import Testing
     let repositoryRoot: URL
     let network: CollectionTransport
     let workspace: WorkspaceModel
-    init(config: WorkspaceConfiguration, granted: [String], cached: [String], discovered: [String]? = nil) throws {
+    init(config: WorkspaceConfiguration, granted: [String], cached: [String], discovered: [String]? = nil, refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { try await $0.refresh($1, token: $2) }) throws {
         let history = try HistoryFixture()
         base = history.base
         let storage = WorkspaceStorage(supportRoot: base.appendingPathComponent("support"), cacheRoot: base.appendingPathComponent("workspace-cache"))
@@ -139,19 +174,21 @@ import Testing
         try storage.saveGrant(granted.map { Repository(id: $0) }, account: "123")
         network = CollectionTransport(repositories: discovered ?? granted)
         let auth = AuthManager(configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"), store: try CollectionCredentials(), transport: network)
-        workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
+        workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: refreshHistory)
     }
+    func cacheExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("github.com/" + id + ".git/bigboard-cache").path) }
     func scanExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("scans/" + hash(id) + ".json").path) }
     func lockExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("locks/" + hash(id) + ".lock").path) }
     private func hash(_ id: String) -> String { SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
 
 private actor CollectionTransport: GitHubTransport {
-    private let repositories: [String]
+    private var repositories: [String]
     private var discoveryFails = false
     private(set) var calls = 0
     private(set) var graphRepositories: [String] = []
     init(repositories: [String]) { self.repositories = repositories }
+    func setRepositories(_ repositories: [String]) { self.repositories = repositories }
     func failDiscovery() { discoveryFails = true }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         calls += 1
