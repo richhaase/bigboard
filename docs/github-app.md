@@ -92,10 +92,13 @@ Cached repository evidence is separated by the stable GitHub account ID. A new
 sign-in verifies access before opening history; a restart with the same stored
 account can use its local cache offline, visibly cached/stale. Live work checks
 access again, and authoritative access denials do not become offline fallbacks.
-Before live authorization checks or refreshes, the persisted grant is invalidated;
-only the resulting grant is saved afterward. If the process stops during that
-window or saving fails, restart requires a successful live refresh before cached
-evidence is available. A confirmed denial must not revive an older offline grant.
+The last verified grant remains available while a live access check is pending,
+so quitting during a refresh does not discard offline access. A completed check
+replaces that grant; a confirmed denial removes the affected access. The old
+grant is invalidated immediately before saving an authoritative replacement.
+If saving fails after invalidation, restart requires successful live verification
+before cached evidence is available. Cancellation never restores a grant after
+sign-out or an account change, and confirmed denials remain authoritative.
 
 ## Native verification boundary
 

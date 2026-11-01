@@ -179,9 +179,9 @@ actor AuthManager {
         guard let saved = credentials else { throw GitHubFailure.auth }
         let expected = generation
         let user = try await github.viewer()
-        try Task.checkCancellation()
         guard generation == expected else { throw CancellationError() }
         guard var current = unsaved ?? credentials, current.accountID == saved.accountID, String(user.id) == saved.accountID else { throw GitHubFailure.auth }
+        try Task.checkCancellation()
         if current.login != user.login { current.login = user.login; try save(current) }
         let state = status()
         guard state.signedIn else { throw GitHubFailure.auth }

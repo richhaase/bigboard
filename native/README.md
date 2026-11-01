@@ -54,9 +54,11 @@ store and temporary workspace and labels its fixture data.
 - PR inventory, file and reviewer completeness remain independent. The request
   budget and pagination bounds qualify unfinished work. Attention uses available
   individual evidence and does not infer team membership.
-- Account-scoped offline grants are invalidated before checking live access.
-  Confirmed denials remove visible evidence; transient failure can retain a
-  previously authorized stale snapshot. Unlisted cache removal requires a
+- Account-scoped offline grants remain available while live access checks are
+  pending, including when the app quits mid-refresh. Completed verification
+  replaces the grant; confirmed denials remove affected access. A failed save
+  after invalidation requires live verification again. Transient failure can
+  retain previously authorized stale evidence. Unlisted cache removal requires a
   successful live refresh and verifies cache ownership; it is available in
   Workspace Settings → Storage.
 - Session bookmark baselines remain fixed. Normal quit saves eligible live

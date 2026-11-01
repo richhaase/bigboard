@@ -161,9 +161,10 @@ transient failure and labels stale or incomplete evidence.
 
 **Settings → General → Use cached history only** reads eligible owned history
 without GitHub refreshes. After verified access, a restart with the same account
-can use its saved offline grant. New sign-in and account changes require live
-verification. Confirmed access denials hide affected evidence rather than
-reviving an older offline grant.
+can use its saved offline grant. Quitting while an access check is pending keeps
+that previously verified offline access. New sign-in and account changes require
+live verification. Confirmed access denials hide affected evidence; a failed save
+of the replacement access list may require live verification again.
 
 Durable account-scoped JSON lives in Application Support; rebuildable Git
 mirrors and parsed scans live in Caches. The app never scans developer checkouts.

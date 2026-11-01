@@ -27,6 +27,8 @@ final class WorkspaceModel {
     private var eligible: [String: Date] = [:]
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
+    private var discoveryTask: Task<Void, Never>?
+    private var shutdownOperation: Int?
     private var started = false
     private var inventoryVerified = false
     private var discoveryVerified = false
@@ -76,7 +78,7 @@ final class WorkspaceModel {
         let operation = generation
         let task = Task {
             await self.performRefresh(operation: operation)
-            if operation == self.generation { self.refreshTask = nil }
+            if operation == self.generation { self.refreshTask = nil; self.busy = false }
         }
         refreshTask = task
         return task
@@ -97,7 +99,6 @@ final class WorkspaceModel {
     private func performRefresh(operation: Int) async {
         guard operation == generation, let history, let github, !account.isEmpty else { return }
         let id = account, config = configuration
-        defer { if operation == generation { busy = false } }
         error = ""
         let cacheRows = (try? await history.cachedRepositories()) ?? []
         guard operation == generation, !Task.isCancelled else { return }
@@ -125,32 +126,9 @@ final class WorkspaceModel {
             return
         }
         do {
-            let previousGrant = authorized
             discoveryVerified = false
-            try storage.invalidateGrant(id)
-            do {
-                let state = try await auth.refreshViewer(using: github)
-                guard operation == generation, !Task.isCancelled else { return }
-                authStatus = state; snapshot.viewer = state.login
-                let repos = try await github.discover()
-                guard operation == generation, !Task.isCancelled else { return }
-                authorized = repos
-                try storage.saveGrant(repos, account: id)
-                discovered = repos; inventoryVerified = true; discoveryVerified = true
-            } catch {
-                guard operation == generation, !Task.isCancelled else { return }
-                if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
-                if let failure = error as? GitHubFailure, failure.isAccessDenied {
-                    if let owner = failure.installationOwner {
-                        authorized = previousGrant.filter { $0.id.split(separator: "/").first.map(String.init) != owner }
-                    } else { authorized = [] }
-                    try storage.saveGrant(authorized, account: id)
-                } else {
-                    authorized = previousGrant
-                    try storage.saveGrant(previousGrant, account: id)
-                }
-                throw error
-            }
+            guard let rows = try await verifyAccess(github, account: id, operation: operation) else { return }
+            discovered = rows; inventoryVerified = true; discoveryVerified = true
             restrictSnapshot()
             current = snapshot
             let repos = selected(authorized)
@@ -195,6 +173,7 @@ final class WorkspaceModel {
             if !current.commits.isEmpty, current.repositories.contains(where: { !$0.stale }) { eligible[bookmarkKey] = current.generatedAt }
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
+            if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
             restrictSnapshot()
             snapshot.coverage.phase = "partial"
             snapshot.coverage.message = "Refresh could not finish. Retained evidence may be stale."
@@ -260,7 +239,7 @@ final class WorkspaceModel {
         let id = account
         generation += 1
         let invalidation = generation
-        refreshTask?.cancel(); refreshTask = nil; busy = false
+        refreshTask?.cancel(); refreshTask = nil; discoveryTask?.cancel(); discoveryTask = nil; busy = false
         authorized = []; discovered = []; cachedRepositoryRows = []; configuration = WorkspaceConfiguration()
         snapshot = Snapshot(); snapshot.coverage = Coverage(phase: "signin", message: GitHubFailure.auth.localizedDescription)
         account = ""; history = nil; github = nil; baseline = [:]; eligible = [:]
@@ -286,29 +265,55 @@ final class WorkspaceModel {
         snapshot.pullRequests.removeAll { !collected.contains($0.repo) }
         discovered.removeAll { !allowed.contains($0.id) }
     }
+    private func canRecordAccess(account id: String, operation: Int) -> Bool {
+        account == id && (operation == generation || (shutdownOperation == operation && generation == operation + 1))
+    }
+    private func verifyAccess(_ github: GitHubService, account id: String, operation: Int) async throws -> [Repository]? {
+        guard operation == generation, account == id, !Task.isCancelled else { return nil }
+        let previousGrant = authorized
+        let rows: [Repository]
+        do {
+            let state = try await auth.refreshViewer(using: github)
+            guard operation == generation, !Task.isCancelled else { return nil }
+            authStatus = state; snapshot.viewer = state.login
+            rows = try await github.discover()
+        } catch {
+            if canRecordAccess(account: id, operation: operation), let failure = error as? GitHubFailure, failure.isAccessDenied {
+                if failure == .auth {
+                    if operation == generation { await invalidateAuthentication(operation: operation) }
+                    else { try storage.invalidateGrant(id) }
+                } else {
+                    let remaining = failure.installationOwner.map { owner in previousGrant.filter { $0.id.split(separator: "/").first.map(String.init) != owner } } ?? []
+                    if operation == generation { authorized = remaining; restrictSnapshot() }
+                    try storage.invalidateGrant(id)
+                    try storage.saveGrant(remaining, account: id)
+                }
+            }
+            throw error
+        }
+        guard canRecordAccess(account: id, operation: operation) else { return nil }
+        if operation == generation { authorized = rows; restrictSnapshot() }
+        try storage.invalidateGrant(id)
+        try storage.saveGrant(rows, account: id)
+        guard operation == generation, !Task.isCancelled else { return nil }
+        return rows
+    }
     func discover() async {
         guard !isPreview, !busy, let github, !account.isEmpty else { return }
         busy = true; error = ""; discoveryVerified = false
-        let operation = generation
-        defer { if operation == generation { busy = false } }
+        let operation = generation, id = account
+        let task = Task { await self.performDiscovery(github, account: id, operation: operation) }
+        discoveryTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if operation == generation { discoveryTask = nil; busy = false }
+    }
+    private func performDiscovery(_ github: GitHubService, account id: String, operation: Int) async {
         do {
-            try storage.invalidateGrant(account)
-            let state = try await auth.refreshViewer(using: github)
-            guard operation == generation, !Task.isCancelled else { return }
-            authStatus = state; snapshot.viewer = state.login
-            let rows = try await github.discover()
-            guard operation == generation, !Task.isCancelled else { return }
-            authorized = rows; discovered = rows; discoveryVerified = true
-            try storage.saveGrant(rows, account: account)
-            restrictSnapshot()
+            guard let rows = try await verifyAccess(github, account: id, operation: operation) else { return }
+            discovered = rows; discoveryVerified = true
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
             if error as? GitHubFailure == .auth { await invalidateAuthentication(operation: operation); return }
-            if let failure = error as? GitHubFailure, failure.isAccessDenied {
-                if let owner = failure.installationOwner { authorized.removeAll { $0.id.split(separator: "/").first.map(String.init) == owner } } else { authorized = [] }
-                restrictSnapshot()
-            }
-            do { try storage.saveGrant(authorized, account: account) } catch { self.error = error.localizedDescription }
             self.error = error.localizedDescription
         }
     }
@@ -415,7 +420,7 @@ final class WorkspaceModel {
         guard !isPreview, !signingOut else { return false }
         signingOut = true
         let interruptedRefresh = refreshTask != nil || snapshot.coverage.phase == "refreshing"
-        generation += 1; refreshTask?.cancel(); refreshTask = nil
+        generation += 1; refreshTask?.cancel(); refreshTask = nil; discoveryTask?.cancel(); discoveryTask = nil
         let operation = generation
         busy = true
         defer { signingOut = false; if operation == generation { busy = false } }
@@ -447,7 +452,7 @@ final class WorkspaceModel {
         do {
             try await auth.complete(url)
             guard operation == generation else { return }
-            generation += 1; operation = generation; refreshTask?.cancel(); refreshTask = nil; busy = false
+            generation += 1; operation = generation; refreshTask?.cancel(); refreshTask = nil; discoveryTask?.cancel(); discoveryTask = nil; busy = false
             account = ""; history = nil; github = nil; snapshot = Snapshot(); cachedRepositoryRows = []
             let state = await auth.status()
             guard operation == generation else { return }
@@ -475,9 +480,14 @@ final class WorkspaceModel {
         return url
     }
     func shutdown() async {
-        guard !isPreview else { return }
-        generation += 1; refreshTask?.cancel()
-        await refreshTask?.value
+        guard !isPreview, shutdownOperation == nil else { return }
+        shutdownOperation = generation
+        generation += 1
+        let refresh = refreshTask, discovery = discoveryTask
+        refresh?.cancel(); discovery?.cancel()
+        await refresh?.value
+        await discovery?.value
+        shutdownOperation = nil
         if !account.isEmpty { do { try storage.saveBookmarks(eligible, account: account) } catch { self.error = error.localizedDescription } }
     }
     func exportJSON() throws -> Data {

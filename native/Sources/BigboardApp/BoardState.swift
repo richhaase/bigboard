@@ -167,6 +167,10 @@ struct RepositoryChecklist {
     func returnToActivity() { restorePRFilters(); board = .activity }
     func restorePRFilters() { if let savedPRFilters { prs = savedPRFilters }; savedPRFilters = nil; contextualRepository = nil }
     func switchBoard(_ value: Board) { dismissToolbarPopover(); restorePRFilters(); board = value }
+    func togglePRMine(_ value: String) {
+        guard board == .pullRequests else { return }
+        prs.mine = prs.mine == [value] ? [] : [value]
+    }
     func resetBoard() { let old = currentFilters; currentFilters = BoardFilters(sort: old.sort, reversed: old.reversed) }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
         dismissToolbarPopover()

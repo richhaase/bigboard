@@ -33,6 +33,42 @@ import Testing
         #expect(state.contextualRepository == nil)
         #expect(state.prs.query == "release")
     }
+    @Test func prMineShortcutsDoNotChangeFiltersOnOtherBoards() {
+        let state = BoardState()
+        state.activity.query = "source"; state.activity.people = ["alex@example.test"]
+        state.contributors.query = "alex"; state.contributors.hideBots = true
+        state.prs.query = "release"; state.prs.mine = ["authored", "requested"]
+        let activity = state.activity, contributors = state.contributors, prs = state.prs
+        for board in [Board.activity, .contributors] {
+            state.switchBoard(board)
+            for value in ["attention", "authored", "requested"] {
+                state.togglePRMine(value)
+                #expect(state.board == board)
+                #expect(state.activity == activity)
+                #expect(state.contributors == contributors)
+                #expect(state.prs == prs)
+            }
+        }
+        state.switchBoard(.pullRequests)
+        #expect(state.prs == prs)
+    }
+    @Test func prMineShortcutsToggleOnlyTheirFilterOnPullRequests() {
+        let state = BoardState()
+        state.activity.query = "source"; state.contributors.query = "alex"
+        state.prs.query = "release"; state.prs.checks = ["FAILURE"]
+        let activity = state.activity, contributors = state.contributors, prs = state.prs
+        state.switchBoard(.pullRequests)
+        for value in ["attention", "authored", "requested"] {
+            state.prs.mine = ["authored", "requested"]
+            state.togglePRMine(value)
+            var expected = prs; expected.mine = [value]
+            #expect(state.prs == expected)
+            state.togglePRMine(value)
+            #expect(state.prs == prs)
+            #expect(state.activity == activity)
+            #expect(state.contributors == contributors)
+        }
+    }
     @Test func heatKeepsHistoryWhileHonoringSharedRepositoriesAndPeople() {
         let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100), commit("other", repo: "acme/other"), commit("otherperson", email: "sam@example.test")], bookmark: now.addingTimeInterval(-2 * 86400))
         let state = BoardState(); state.repositories = ["acme/app"]; state.activity.people = ["alex@example.test"]; state.sinceLastLook = true

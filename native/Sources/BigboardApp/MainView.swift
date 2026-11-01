@@ -184,9 +184,9 @@ struct MainView: View {
         case "\u{1b}", "left": navigation.back()
         case "1", "2", "3", "4", "5": if navigation.board == .activity { navigation.setLens(["1": .commits, "2": .people, "3": .related, "4": .directories, "5": .heat][key]!) }
         case "b": navigation.currentFilters.hideBots.toggle()
-        case "m": if navigation.board == .contributors { navigation.panel = .identities } else if navigation.board == .activity { navigation.relatedMode = navigation.relatedMode == "commits" ? "people" : "commits" } else { navigation.prs.mine = navigation.prs.mine == ["attention"] ? [] : ["attention"] }
-        case "M": navigation.prs.mine = navigation.prs.mine == ["authored"] ? [] : ["authored"]
-        case "n": navigation.prs.mine = navigation.prs.mine == ["requested"] ? [] : ["requested"]
+        case "m": if navigation.board == .contributors { navigation.panel = .identities } else if navigation.board == .activity { navigation.relatedMode = navigation.relatedMode == "commits" ? "people" : "commits" } else { navigation.togglePRMine("attention") }
+        case "M": navigation.togglePRMine("authored")
+        case "n": navigation.togglePRMine("requested")
         case "v": if navigation.board == .activity && !navigation.scope.repo.isEmpty { navigation.showPRs(repo: navigation.scope.repo) } else if navigation.board == .pullRequests { navigation.panel = .filters }
         case "u", "k", "d", "z": if navigation.board == .pullRequests { navigation.panel = .filters }
         case "s":
