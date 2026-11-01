@@ -71,7 +71,8 @@ store and temporary workspace and labels its fixture data.
   view context. Neither initiates network access.
 
 The [user reference](../docs/reference.md) and [workflow guide](../docs/visual-guide.md)
-describe the native interface. Time-range comparison, a new catch-up board,
+describe the native interface, including Activity’s two-period Git-history
+comparison. A new catch-up board,
 persistent acknowledge/snooze/pin, and historical PR statistics remain separate
 future features.
 
@@ -239,3 +240,21 @@ sorting, and direct Apply with background refresh. The combined native suite
 passes 86 tests after these changes; the optimized universal bundle builds and
 passes local signature verification. Contributor rhythm and calendar behavior
 were intentionally retained for further evaluation.
+
+## Time-range comparison verification
+
+On 2026-11-01, option 2 was verified with 211 passing native tests, an optimized
+build, 45 passing packaging tests, and a universal app build. An 8,000-commit,
+20-area comparison fixture completed in approximately 0.28 seconds locally;
+this is fixture evidence, not a guarantee for every workspace.
+
+The actual native app was exercised with `--ui-preview` in a separately identified,
+ad-hoc-signed temporary bundle. Verification covered the comparison date sheet,
+presets, custom unequal ranges, invalid-range rejection, overlap and partial-day
+notices, paired totals, single-row selection and inspector updates, repository →
+directory → file drill-down, A/B commits and historical timelines, contributor
+comparisons, elapsed-duration rates, board switching, Heat suspension, and
+selected-period Related evidence. Reapplying dates at file scope was confirmed
+to retain the commit view after fixing a regression found during the walkthrough.
+Screenshots were inspected for native layout. The user's running live app and
+credentials were left untouched; no network collection was needed for comparison.

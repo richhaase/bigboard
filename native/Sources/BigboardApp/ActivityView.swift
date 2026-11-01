@@ -12,6 +12,9 @@ struct ActivityBoard: View {
     var title: String { navigation.scope.areaName.isEmpty ? navigation.scope.path.isEmpty ? navigation.scope.repo.isEmpty ? "All repositories" : navigation.scope.repo : navigation.scope.path : navigation.scope.areaName }
     var body: some View {
         VStack(spacing: 0) {
+            if navigation.comparison != nil {
+                HStack { Text("Comparison paused · Heat uses its own historical baseline.").font(.caption); Spacer(); Button("Resume comparison") { navigation.setLens(.directories) }; Button("Exit comparison") { navigation.exitComparison() } }.padding(.horizontal, 12).padding(.bottom, 8)
+            }
             HStack {
                 Button { navigation.back() } label: { Image(systemName: "chevron.left") }.disabled(navigation.scope.repo.isEmpty && navigation.lens == .heat)
                 Button("Repositories") { navigation.explore(ActivityScope()) }.buttonStyle(.link)

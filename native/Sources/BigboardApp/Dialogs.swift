@@ -5,7 +5,7 @@ struct WorkspacePanel: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     @Environment(\.dismiss) private var dismiss
-    var title: String { switch panel { case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities"; case .repositories: "Repository filter" } }
+    var title: String { switch panel { case .comparison: "Compare periods"; case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities"; case .repositories: "Repository filter" } }
     var body: some View {
         VStack(spacing: 0) {
             HStack { Text(title).font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
@@ -14,6 +14,7 @@ struct WorkspacePanel: View {
             if workspace.busy, panel != .settings { ProgressView().controlSize(.small).padding(8) }
             Group {
                 switch panel {
+                case .comparison: ComparisonPanel(snapshot: workspace.snapshot, navigation: navigation)
                 case .settings: SettingsPanel(workspace: workspace)
                 case .filters: FiltersPanel(workspace: workspace, navigation: navigation)
                 case .status: StatusPanel(workspace: workspace)
@@ -193,19 +194,24 @@ struct FiltersPanel: View {
         VStack {
             Form {
                 Section("Shared scope") {
-                    Toggle("Since last look", isOn: $since).disabled(workspace.snapshot.bookmark == nil)
-                    LabeledContent("Last days (0 for all time)") { TextField("Days", value: $days, format: .number).frame(width: 100).disabled(since) }
+                    if navigation.comparisonActive { Text("Activity uses its comparison periods. Edit them from the comparison header; ordinary dates are retained for other boards.").font(.callout).foregroundStyle(.secondary) }
+                    else {
+                        Toggle("Since last look", isOn: $since).disabled(workspace.snapshot.bookmark == nil)
+                        LabeledContent("Last days (0 for all time)") { TextField("Days", value: $days, format: .number).frame(width: 100).disabled(since) }
+                    }
                     DisclosureGroup("Repository filter (\(repositories.isEmpty ? "all" : "\(repositories.count) selected"))") {
                         RepositoryFilterSelection(repositories: workspace.snapshot.repositories, selection: $repositories)
                     }
                 }
                 Section(navigation.board.rawValue) {
                     TextField("Search", text: $filters.query)
-                    Picker("Sort", selection: $filters.sort) {
-                        if navigation.board == .pullRequests { Text("Updated").tag("updated"); Text("Repository").tag("repository"); Text("Author").tag("author"); Text("Title").tag("title"); Text("Attention").tag("attention") }
-                        else { Text("Lines changed").tag("change"); Text("Commits").tag("commits"); Text("Name").tag("name"); Text("Recent").tag("recent"); if navigation.board == .contributors { Text("Additions").tag("added"); Text("Removals").tag("removed"); Text("Net lines").tag("net"); Text("AI share").tag("ai") } }
-                    }
-                    Toggle("Reverse sort", isOn: $filters.reversed)
+                    if !navigation.comparisonActive {
+                        Picker("Sort", selection: $filters.sort) {
+                            if navigation.board == .pullRequests { Text("Updated").tag("updated"); Text("Repository").tag("repository"); Text("Author").tag("author"); Text("Title").tag("title"); Text("Attention").tag("attention") }
+                            else { Text("Lines changed").tag("change"); Text("Commits").tag("commits"); Text("Name").tag("name"); Text("Recent").tag("recent"); if navigation.board == .contributors { Text("Additions").tag("added"); Text("Removals").tag("removed"); Text("Net lines").tag("net"); Text("AI share").tag("ai") } }
+                        }
+                        Toggle("Reverse sort", isOn: $filters.reversed)
+                    } else { Text("Choose comparison measure and sorting in Activity.").font(.caption).foregroundStyle(.secondary) }
                     if navigation.board != .pullRequests {
                         Toggle("Hide bots", isOn: $filters.hideBots)
                         DisclosureGroup("People (\(filters.people.isEmpty ? "all" : "\(filters.people.count)"))") {

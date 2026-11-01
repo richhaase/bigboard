@@ -11,7 +11,7 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum ToolbarPopover: Equatable { case date, repositories, groups }
-enum Panel: String, Identifiable { case settings, filters, status, help, identities, repositories; var id: String { rawValue } }
+enum Panel: String, Identifiable { case settings, filters, status, help, identities, repositories, comparison; var id: String { rawValue } }
 struct RelatedEvidence: Equatable { var mode: String; var values: Set<String> }
 struct BoardFilters: Equatable {
     var query = ""
@@ -40,6 +40,18 @@ struct RepositoryChecklist {
 }
 @MainActor @Observable final class BoardState {
     var board: Board = .activity
+    var comparison: HistoryComparison?
+    var comparisonPeriodA = true
+    var comparisonMeasure: ComparisonMeasure = .lines
+    var comparisonOrder: ComparisonOrder = .difference
+    var comparisonRates = false
+    var comparisonActive: Bool { board == .activity && lens != .heat && comparison != nil }
+    func applyComparison(_ value: HistoryComparison) {
+        comparison = value; comparisonPeriodA = true; lens = scope.isFile ? .commits : .directories
+        activitySelection = nil; scopedPerson = nil; relatedEvidence = nil
+        comparisonOrder = .difference
+    }
+    func exitComparison() { comparison = nil; relatedEvidence = nil; scopedPerson = nil; activitySelection = nil }
     var days = 14
     var sinceLastLook = false
     var repositories: Set<String> = []
@@ -174,6 +186,7 @@ struct RepositoryChecklist {
     func resetBoard() { let old = currentFilters; currentFilters = BoardFilters(sort: old.sort, reversed: old.reversed) }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
         dismissToolbarPopover()
+        comparison = nil; comparisonPeriodA = true; comparisonRates = false
         days = configuration.sinceDays; sinceLastLook = false; repositories = []
         activity = BoardFilters(); contributors = BoardFilters(sort: configuration.contributorSort); prs = BoardFilters(sort: "updated")
         scope = ActivityScope(); lens = .heat; activitySelection = nil; contributorSelection = nil; prSelection = nil
@@ -182,12 +195,12 @@ struct RepositoryChecklist {
     func reconcile(_ snapshot: Snapshot) {
         let available = Set(snapshot.repositories.map(\.id))
         repositories.formIntersection(available)
-        if !scope.repo.isEmpty && !available.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; scopedPerson = nil; relatedEvidence = nil; lens = .heat }
+        if !scope.repo.isEmpty && !available.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; scopedPerson = nil; relatedEvidence = nil; lens = comparison == nil ? .heat : .directories }
         if let contextualRepository, !available.contains(contextualRepository) { restorePRFilters() }
         reconcile()
     }
     func reconcile() {
-        if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; scopedPerson = nil; relatedEvidence = nil; lens = .heat }
+        if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) { scope = ActivityScope(); activitySelection = nil; scopedPerson = nil; relatedEvidence = nil; lens = comparison == nil ? .heat : .directories }
         if let contextualRepository, !repositories.isEmpty && !repositories.contains(contextualRepository) { restorePRFilters() }
     }
 }

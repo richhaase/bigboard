@@ -27,7 +27,9 @@ struct MainView: View {
                     }.padding(12)
                     Group {
                         switch navigation.board {
-                        case .activity: ActivityBoard(workspace: workspace, navigation: navigation)
+                        case .activity:
+                            if navigation.comparisonActive { ComparisonBoard(workspace: workspace, navigation: navigation) }
+                            else { ActivityBoard(workspace: workspace, navigation: navigation) }
                         case .contributors: ContributorsBoard(workspace: workspace, navigation: navigation)
                         case .pullRequests: PullRequestsBoard(workspace: workspace, navigation: navigation)
                         }
@@ -67,16 +69,22 @@ struct MainView: View {
     }
     private var dateFilter: some View {
         Button { navigation.toggleToolbarPopover(.date) } label: {
-            ToolbarControlLabel(title: navigation.rangeLabel, symbol: "calendar", disclosure: true)
+            ToolbarControlLabel(title: navigation.comparisonActive ? "Compare periods" : navigation.rangeLabel, symbol: "calendar", disclosure: true)
         }
         .accessibilityLabel("Date filter")
-        .accessibilityValue(navigation.rangeLabel)
-        .help("Date filter for all boards")
+        .accessibilityValue(navigation.comparisonActive ? "Compare periods" : navigation.rangeLabel)
+        .help(navigation.comparisonActive ? "Activity comparison periods; other boards retain ordinary dates" : "Date filter for all boards")
         .popover(isPresented: toolbarPopover(.date), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Date filter").font(.headline).padding(8)
+                if navigation.board == .activity {
+                    ToolbarChoiceRow(title: "Compare periods…") { navigation.panel = .comparison }
+                    if navigation.comparison != nil { ToolbarChoiceRow(title: "Exit comparison") { navigation.exitComparison(); navigation.dismissToolbarPopover() } }
+                    Divider()
+                }
                 ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
                     ToolbarChoiceRow(title: days == 0 ? "All time" : "Last \(days) days", selected: !navigation.sinceLastLook && navigation.days == days) {
+                        if navigation.board == .activity { navigation.exitComparison() }
                         navigation.days = days
                         navigation.sinceLastLook = false
                         navigation.dismissToolbarPopover()
@@ -84,10 +92,11 @@ struct MainView: View {
                 }
                 Divider().padding(.vertical, 4)
                 ToolbarChoiceRow(title: "Since last look", selected: navigation.sinceLastLook) {
+                    if navigation.board == .activity { navigation.exitComparison() }
                     navigation.sinceLastLook = true
                     navigation.dismissToolbarPopover()
                 }.disabled(workspace.snapshot.bookmark == nil)
-                ToolbarChoiceRow(title: "Custom range…") { navigation.panel = .filters }
+                ToolbarChoiceRow(title: "Custom range…") { if navigation.board == .activity { navigation.exitComparison() }; navigation.panel = .filters }
             }.padding(8).frame(width: 220).buttonStyle(.automatic)
         }
     }

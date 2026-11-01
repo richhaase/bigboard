@@ -79,3 +79,13 @@ For offline inspection, enable cached history in Settings → General. Use
 Settings → Storage for eligible local cache removal. For incomplete or stale
 results, click the bottom-right status and timestamp to inspect Data Status
 before interpreting an empty view as no activity.
+
+## Compare two periods
+
+From Activity's date control, choose **Compare periods…**. Apply a preset or two
+custom calendar ranges. The comparison header retains both ranges as you explore
+areas, files, commits, and people. Choose A or B for underlying evidence, and use
+**Per 24 hours** to compare activity rates across unequal durations. Heat keeps
+its own baseline; **Exit comparison** returns to ordinary dates. Current PR context
+is labeled separately from historical Git evidence. See the [reference](reference.md#compare-git-history-periods)
+for date boundaries, incomplete evidence, and counting rules.

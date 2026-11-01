@@ -120,6 +120,53 @@ in the local cache before opening it. Missing paths report an error. Repository
 PR context opens Pull requests for the selected repository; **Back to Activity**
 restores the previous PR filters and Activity location.
 
+## Compare Git-history periods
+
+In Activity's date menu, choose **Compare periods…**. Presets compare the last
+7, 14, 30, 90, or 365 complete calendar days with the preceding equivalent period.
+A finite existing date preset supplies the initial day count; All time and Since
+last look start with 14 days. Choose custom start/end dates for A and B, or use
+**Previous equivalent period** and **Swap periods**, then **Apply comparison**.
+Dates include the selected end day in the displayed timezone. Invalid or wholly
+future periods cannot be applied. Today is allowed but ends at the retained
+snapshot time and is labeled partial. Overlapping periods count independently.
+
+Activity shows A, B, and A − B for commits, additions, removals, lines changed,
+and distinct contributors. Directories lists paths active in either period,
+including areas active only in B; quiet tracked repositories remain visible.
+Choose a measure and sort by largest absolute difference, commit difference,
+A volume, B volume, or name. A positive difference means more activity in A,
+not greater productivity. Zero baselines use “Activity only in A/B” or “No
+activity in either”; these do not establish file creation or deletion.
+
+**Per 24 hours** normalizes commits and lines by each period's effective elapsed
+duration. Contributors remain distinct counts. Calendar-day periods can have
+23- or 25-hour days across daylight-saving changes; the header shows elapsed
+24-hour days. Raw totals are the default. Unknown line counts, stale/unavailable
+history, and unassignable paths qualify totals and suppress unreliable relative
+claims. Current identity and generated-file rules apply equally to both periods.
+Historical paths are not stitched across renames into a single file identity.
+
+Explore repositories, directories, and files without losing the pair. Commits,
+People, and Related offer **Period A / Period B** evidence selection. People
+includes contributors active in either period. Related shows existing relationships
+for the selected period, not changes in relationships. The inspector includes
+bounded historical activity and explicitly current open PRs, not historical PR
+statistics. Current repository/path links still verify the retained revision;
+a historically changed path may no longer exist at that revision.
+
+Comparison is transient Activity state. Ordinary Contributors and PR boards
+keep their shared date filter. Heat suspends comparison and keeps its own
+baseline; resume through Directories or **Resume comparison**. Returning to
+Activity restores the pair. **Exit comparison** restores ordinary dates. Account
+changes clear comparison. Refresh retains selected dates and updates evidence;
+it does not slide the pair forward. Repository viewing filters apply to both
+periods without fetching; changing groups refreshes the collection as usual.
+Comparison does not change bookmarks, credentials, settings, or history storage.
+**Copy view** includes periods, units, differences, and coverage qualifications;
+contributor JSON export remains all-time. Saved comparisons, comparative chart
+overlays, and historical PR statistics are not included.
+
 ## Contributors and identities
 
 Select a contributor to inspect totals, contribution rhythm, the daily calendar,
