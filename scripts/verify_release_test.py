@@ -2,7 +2,6 @@ import json
 import os
 from pathlib import Path
 import plistlib
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -48,7 +47,7 @@ class VerifyReleaseTests(unittest.TestCase):
     def verify(self):
         with (self.app / "Contents/Info.plist").open("wb") as target:
             plistlib.dump(self.info, target)
-        return subprocess.run(["bash", str(SCRIPT), "v2.0.0", str(self.root / "archive.zip"), str(self.package)], env=self.env, capture_output=True, text=True)
+        return subprocess.run(["/bin/bash", str(SCRIPT), "v2.0.0", str(self.root / "archive.zip"), str(self.package)], env=self.env, capture_output=True, text=True)
 
     def test_verifies_both_architectures_signature_developer_id_ticket_and_gatekeeper(self):
         result = self.verify()
