@@ -210,6 +210,13 @@ input is limited to 4 MiB and 20,000 generated/vendored rules, with a shared
 matching-work budget for each history scan. Cancellation and timeouts interrupt
 parsing as well as Git. Exceeding a limit reports a scan error and retains stale
 evidence when available; rules are never silently truncated or skipped.
+Each repository scan also permits at most 50,000 commits, 100,000 file changes,
+and 16 MiB of retained metadata and path text. Exceeding these limits rejects the
+scan rather than presenting truncated history as complete. Parsed JSON caches
+are limited to 16 MiB on read; oversized older caches are ignored and history is
+parsed again under the current limits. A conservative size estimate bounds JSON
+encoding before it starts. When the estimate exceeds the cache limit, the complete
+scan can still be displayed without replacing the optional parsed cache.
 The app supports its own complete bare caches, not arbitrary shallow/partial
 caches or developer checkouts. The initial port verification covered 73 native tests and 12 packaging tests;
 subsequent walkthrough fixes add focused repository-filter and settings tests.

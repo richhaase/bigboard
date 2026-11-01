@@ -75,6 +75,61 @@ struct StorageTests {
         #expect(!WorkspaceStorage.validRepository("owner/repo/extra"))
         #expect(throws: (any Error).self) { try storage.accountRoot("../../outside") }
     }
+    @Test(arguments: ["repositories", "excludedRepositories", "groups", "workAreas"])
+    func mixedCaseRepositoryReferencesRequireRepairBeforeSaving(field: String) throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        let area = WorkArea(name: "Sources", paths: ["src/"])
+        var original = try storage.loadConfiguration("42")
+        original.repositories = ["owner/repo"]
+        original.excludedRepositories = ["other/repo"]
+        original.groups = ["Focus": ["owner/repo"]]
+        original.workAreas = ["owner/repo": [area]]
+        try storage.saveConfiguration(original, account: "42")
+        try storage.saveConfiguration(original, account: "43")
+        let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+        let saved = try Data(contentsOf: file)
+        var mixed = original
+        switch field {
+        case "repositories": mixed.repositories = ["Owner/Repo"]
+        case "excludedRepositories": mixed.excludedRepositories = ["Other/Repo"]
+        case "groups": mixed.groups["Focus"] = ["Owner/Repo", "owner/repo"]
+        default: mixed.workAreas = ["Owner/Repo": [area]]
+        }
+        do {
+            try storage.validate(mixed)
+            Issue.record("Accepted a mixed-case repository reference")
+        } catch {
+            #expect(error.localizedDescription.contains("lowercase"))
+        }
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(mixed, account: "42") }
+        #expect(try Data(contentsOf: file) == saved)
+        let existing = try JSONEncoder().encode(mixed)
+        try existing.write(to: file)
+        var repaired = try storage.loadConfiguration("42")
+        #expect(repaired == mixed)
+        #expect(try Data(contentsOf: file) == existing)
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(repaired, account: "42") }
+        #expect(try Data(contentsOf: file) == existing)
+        switch field {
+        case "repositories", "excludedRepositories":
+            repaired = SettingsRepositories.applying(Set(repaired.repositories), available: [], to: repaired)
+        case "groups":
+            var editor = SettingsGroupEditor()
+            editor.edit(name: "Focus", repositories: repaired.groups["Focus"]!)
+            let didSave = editor.save(to: &repaired.groups)
+            #expect(didSave)
+        default:
+            var editor = SettingsWorkAreaEditor()
+            editor.edit(repository: "Owner/Repo", area: area)
+            let didSave = editor.save(to: &repaired.workAreas)
+            #expect(didSave)
+        }
+        try storage.saveConfiguration(repaired, account: "42")
+        let reopened = WorkspaceStorage(supportRoot: storage.supportRoot, cacheRoot: storage.cacheRoot)
+        #expect(try reopened.loadConfiguration("42") == original)
+        #expect(try reopened.loadConfiguration("43") == original)
+    }
     @Test func equivalentWorkAreaPrefixesCannotReplaceSavedSettings() throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }

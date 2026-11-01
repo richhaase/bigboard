@@ -44,7 +44,7 @@ struct SettingsGroupEditorTests {
         var groups = ["Focus": ["owner/app"], "Other": ["other/repo"]]
         var editor = SettingsGroupEditor()
         editor.edit(name: "Focus", repositories: groups["Focus"]!)
-        editor.repositories = "owner/library, owner/service\nowner/library"
+        editor.repositories = " Owner/Library, OWNER/Service\nowner/library "
 
         let didSave = editor.save(to: &groups)
         #expect(didSave)
@@ -57,7 +57,7 @@ struct SettingsGroupEditorTests {
         if updateExisting { groups["Focus"] = ["owner/old"] }
         var editor = SettingsGroupEditor()
         editor.name = " Focus "
-        editor.repositories = "owner/app, owner/library"
+        editor.repositories = " Owner/App, OWNER/Library\nowner/app "
 
         let didSave = editor.save(to: &groups)
         #expect(didSave)
@@ -136,11 +136,12 @@ struct SettingsGroupEditorTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         var original = WorkspaceConfiguration()
-        original.repositories = ["owner/app", "owner/library"]
+        original.repositories = ["owner/app", "owner/library", "other/repo"]
         original.groups = ["Focus": ["owner/app"], "Other": ["owner/library"]]
         original.cachedOnly = true
         try storage.saveConfiguration(original, account: "123")
         try storage.saveConfiguration(original, account: "456")
+        try storage.saveGrant(original.repositories.map { Repository(id: $0) }, account: "123")
         let now = Date()
         let credentials = AuthCredentials(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: now.addingTimeInterval(3600), refreshExpiresAt: now.addingTimeInterval(86400), login: "fixture", accountID: "123", clientID: "fixture-client")
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
@@ -153,7 +154,7 @@ struct SettingsGroupEditorTests {
         var editor = SettingsGroupEditor()
         editor.edit(name: "Focus", repositories: draft.groups["Focus"]!)
         editor.name = "Product"
-        editor.repositories = "owner/library, owner/app"
+        editor.repositories = " Owner/Library, OWNER/App\nowner/library "
         let didSave = editor.save(to: &draft.groups)
         #expect(didSave)
         draft = SettingsRepositories.applying(Set(original.repositories), available: [], to: draft)
@@ -161,6 +162,14 @@ struct SettingsGroupEditorTests {
         #expect(try storage.loadConfiguration("123") == original)
 
         let applied = await workspace.saveConfiguration(draft)
+        for _ in 0..<100 {
+            if !workspace.busy { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(!workspace.busy)
+        await workspace.selectGroup("Product")
+        #expect(workspace.activeGroup == "Product")
+        #expect(Set(workspace.snapshot.repositories.map(\.id)) == ["owner/app", "owner/library"])
         await workspace.shutdown()
 
         #expect(applied)

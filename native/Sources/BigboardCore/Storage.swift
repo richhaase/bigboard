@@ -52,6 +52,7 @@ final class WorkspaceStorage: @unchecked Sendable {
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else { throw BigboardError.message("Invalid request budget or startup range.") }
         for id in config.repositories + config.excludedRepositories + config.groups.values.flatMap({$0}) {
             guard Self.validRepository(id) else { throw BigboardError.message("Repository must be owner/name: \(id)") }
+            guard !forSaving || canonicalGitHubRepository(id) == id else { throw BigboardError.message("Repository must use lowercase owner/name: \(id)") }
         }
         var identities = Set<String>()
         for (email, rule) in config.identities {
@@ -62,6 +63,7 @@ final class WorkspaceStorage: @unchecked Sendable {
         }
         for (repo, areas) in config.workAreas {
             guard Self.validRepository(repo) else { throw BigboardError.message("Invalid work-area repository.") }
+            guard !forSaving || canonicalGitHubRepository(repo) == repo else { throw BigboardError.message("Work-area repository must use lowercase owner/name: \(repo)") }
             var names = Set<String>(), paths = Set<String>(), prefixes = Set<String>()
             for area in areas {
                 guard !area.name.isEmpty, names.insert(area.name).inserted, !area.paths.isEmpty else { throw BigboardError.message("Work-area names must be unique and contain paths.") }
@@ -80,8 +82,7 @@ final class WorkspaceStorage: @unchecked Sendable {
         }
     }
     static func validRepository(_ id: String) -> Bool {
-        let parts = id.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) } }
+        canonicalGitHubRepository(id) != nil
     }
     func loadGrant(_ id: String) throws -> [Repository] {
         guard let data = try read(accountRoot(id).appendingPathComponent("access.json")), !data.isEmpty else { return [] }

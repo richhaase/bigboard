@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Bigboard
 
@@ -28,7 +29,7 @@ struct SettingsWorkAreaEditorTests {
         var workAreas = ["owner/repo": keepSourceSibling ? [original, sibling] : [original], "other/repo": [destination], "third/repo": [sibling]]
         var editor = SettingsWorkAreaEditor()
         editor.edit(repository: "owner/repo", area: original)
-        editor.repository = " other/repo "
+        editor.repository = " Other/Repo "
         editor.name = "Engine"
         editor.paths = "src/core, tools"
 
@@ -123,7 +124,7 @@ struct SettingsWorkAreaEditorTests {
         let sibling = WorkArea(name: "Tests", paths: ["tests"])
         var workAreas = ["owner/repo": updateExisting ? [original, sibling] : [sibling], "other/repo": [original]]
         var editor = SettingsWorkAreaEditor()
-        editor.repository = "owner/repo"
+        editor.repository = " Owner/Repo "
         editor.name = "Sources"
         editor.paths = "src/core, tools"
 
@@ -169,5 +170,98 @@ struct SettingsWorkAreaEditorTests {
         editor.remove(repository: "owner/repo", name: original.name, from: &workAreas)
         #expect(!editor.isEditing && !editor.canSave)
         #expect(workAreas.isEmpty)
+    }
+    @Test(arguments: ["Owner/Repo", "owner/repo"]) func caseEquivalentDestinationCollisionPreservesBothStoredKeys(sourceRepository: String) {
+        let destinationRepository = sourceRepository == "owner/repo" ? "Owner/Repo" : "owner/repo"
+        let original = WorkArea(name: "Sources", paths: ["src/"])
+        let sibling = WorkArea(name: "Tests", paths: ["tests/"])
+        let occupied = WorkArea(name: "Sources", paths: ["docs/"])
+        var workAreas = [sourceRepository: [original, sibling], destinationRepository: [occupied]]
+        let before = workAreas
+        var editor = SettingsWorkAreaEditor()
+        editor.edit(repository: sourceRepository, area: original)
+        editor.repository = " OWNER/REPO "
+        editor.paths = "src/core"
+
+        let rejectedSave = editor.save(to: &workAreas)
+        #expect(!rejectedSave)
+        #expect(workAreas == before)
+        #expect(editor.original == SettingsWorkAreaEditor.Identity(repository: sourceRepository, name: original.name))
+        #expect(editor.error.contains("Sources") && editor.error.contains("owner/repo"))
+
+        editor.name = "Engine"
+        let didSave = editor.save(to: &workAreas)
+        #expect(didSave)
+        #expect(workAreas[sourceRepository]?.contains(sibling) == true)
+        #expect(workAreas[destinationRepository]?.contains(occupied) == true)
+        #expect(workAreas["owner/repo"]?.contains(WorkArea(name: "Engine", paths: ["src/core"])) == true)
+        #expect(workAreas[sourceRepository]?.contains(original) == false)
+    }
+    @Test(arguments: [false, true]) func newAreaCannotOverwriteCaseEquivalentStoredIdentity(hasCanonicalArea: Bool) {
+        let original = WorkArea(name: "Sources", paths: ["src"])
+        var workAreas = ["Owner/Repo": [original]]
+        if hasCanonicalArea { workAreas["owner/repo"] = [WorkArea(name: "Sources", paths: ["docs"])] }
+        let before = workAreas
+        var editor = SettingsWorkAreaEditor()
+        editor.repository = " OWNER/REPO "
+        editor.name = "Sources"
+        editor.paths = "src/core"
+
+        let rejectedSave = editor.save(to: &workAreas)
+        #expect(!rejectedSave)
+        #expect(workAreas == before)
+        #expect(!editor.isEditing && editor.canSave)
+        #expect(editor.error.contains("Sources") && editor.error.contains("owner/repo"))
+    }
+    @Test(arguments: [false, true]) func canonicalRepositoryRoundTripsIntoActivityProjection(repairStoredRepository: Bool) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        let original = WorkArea(name: "Sources", paths: ["src/"])
+        let sibling = WorkArea(name: "Tests", paths: ["tests/"])
+        var configuration = WorkspaceConfiguration()
+        configuration.repositories = ["owner/repo"]
+        configuration.workAreas = ["other/repo": [original]]
+        var editor = SettingsWorkAreaEditor()
+        if repairStoredRepository {
+            configuration.workAreas["Owner/Repo"] = [original, sibling]
+            let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(configuration).write(to: file)
+            configuration = try storage.loadConfiguration("42")
+            editor.edit(repository: "Owner/Repo", area: original)
+            #expect(editor.original?.repository == "Owner/Repo")
+        } else {
+            configuration.workAreas["owner/repo"] = [sibling]
+            editor.repository = " Owner/Repo "
+            editor.name = original.name
+            editor.paths = original.paths.joined(separator: ", ")
+        }
+
+        let didSave = editor.save(to: &configuration.workAreas)
+        #expect(didSave)
+        if repairStoredRepository {
+            #expect(configuration.workAreas["Owner/Repo"] == [sibling])
+            #expect(throws: (any Error).self) { try storage.saveConfiguration(configuration, account: "42") }
+            editor.edit(repository: "Owner/Repo", area: sibling)
+            let savedSibling = editor.save(to: &configuration.workAreas)
+            #expect(savedSibling)
+        }
+        try storage.saveConfiguration(configuration, account: "42")
+        let reopened = WorkspaceStorage(supportRoot: storage.supportRoot, cacheRoot: storage.cacheRoot)
+        let loaded = try reopened.loadConfiguration("42")
+        #expect(loaded == configuration)
+        #expect(loaded.workAreas["Owner/Repo"] == nil)
+        #expect(Set(loaded.workAreas.keys) == ["owner/repo", "other/repo"])
+        #expect(loaded.workAreas["other/repo"] == [original])
+        let commit = Commit(id: "fixture", repo: "owner/repo", author: "Author", email: "author@example.com", date: Date(), subject: "Fixture", added: 5, files: [FileChange(path: "src/main.swift", added: 3), FileChange(path: "tests/test.swift", added: 2)])
+        let scope = ActivityScope(repo: "owner/repo", areaName: "Sources")
+        let scoped = Analysis.scoped([commit], scope: scope, workAreas: loaded.workAreas)
+        #expect(scoped.count == 1)
+        #expect(scoped.first?.files.map(\.path) == ["src/main.swift"])
+        #expect(scoped.first?.added == 3)
+        let rows = Analysis.activityRows([commit], repositories: [Repository(id: "owner/repo")], scope: scope, workAreas: loaded.workAreas)
+        #expect(rows.map(\.label) == ["src"])
+        #expect(rows.first?.totals.added == 3)
     }
 }

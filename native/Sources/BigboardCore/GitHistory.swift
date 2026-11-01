@@ -265,24 +265,134 @@ enum HistoryRules {
     }
 }
 
+struct HistoryLimits: Sendable {
+    var commits = 50_000
+    var fileChanges = 100_000
+    var retainedStringBytes = 16 * 1024 * 1024
+    var cacheBytes = 16 * 1024 * 1024
+}
+
+private struct HistoryRetentionBudget {
+    private var commits: Int
+    private var fileChanges: Int
+    private var stringBytes: Int
+    init(_ limits: HistoryLimits) {
+        commits = max(0, limits.commits); fileChanges = max(0, limits.fileChanges); stringBytes = max(0, limits.retainedStringBytes)
+    }
+    mutating func commit() throws {
+        guard commits > 0 else { throw BigboardError.message("Git history exceeded the commit safety limit.") }
+        commits -= 1
+    }
+    mutating func fileChange() throws {
+        guard fileChanges > 0 else { throw BigboardError.message("Git history exceeded the file-change safety limit.") }
+        fileChanges -= 1
+    }
+    mutating func retain(_ value: String) throws {
+        let bytes = value.utf8.count
+        guard bytes <= stringBytes else { throw BigboardError.message("Git history exceeded the retained-text safety limit.") }
+        stringBytes -= bytes
+    }
+    mutating func release(_ bytes: Int) { stringBytes += bytes }
+}
+
+struct HistoryScanCache: Codable {
+    var schema: Int
+    var fingerprint: String
+    var scannedAt: Date
+    var records: [Commit]
+    static func read(_ url: URL, limits: HistoryLimits = HistoryLimits(), checkpoint: () throws -> Void = {}) throws -> HistoryScanCache {
+        try checkpoint()
+        let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        let maximum = max(0, limits.cacheBytes)
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size >= 0, info.st_size <= Int64(maximum) else { throw BigboardError.message("Git history cache exceeded the file safety limit.") }
+        var data = Data()
+        while true {
+            try checkpoint()
+            let count = min(64 * 1024, maximum - data.count) + 1
+            guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else { break }
+            guard chunk.count <= maximum - data.count else { throw BigboardError.message("Git history cache exceeded the file safety limit.") }
+            data.append(chunk)
+        }
+        try checkpoint()
+        let cache = try JSONDecoder().decode(HistoryScanCache.self, from: data)
+        try cache.validate(limits, checkpoint: checkpoint)
+        return cache
+    }
+    private func validate(_ limits: HistoryLimits, checkpoint: () throws -> Void) throws {
+        var budget = HistoryRetentionBudget(limits)
+        for record in records {
+            try checkpoint(); try budget.commit()
+            for value in [record.id, record.repo, record.author, record.email, record.subject] { try budget.retain(value) }
+            for file in record.files {
+                try checkpoint(); try budget.fileChange()
+                for value in [file.path, file.previousPath, file.excludedReason] { try budget.retain(value) }
+            }
+        }
+        try checkpoint()
+    }
+    func encoded(limits: HistoryLimits = HistoryLimits(), checkpoint: () throws -> Void = {}) throws -> Data? {
+        try validate(limits, checkpoint: checkpoint)
+        var remaining = max(0, limits.cacheBytes)
+        func reserve(_ count: Int) -> Bool {
+            guard count <= remaining else { return false }
+            remaining -= count; return true
+        }
+        func reserveString(_ value: String) -> Bool {
+            let bytes = value.utf8.count
+            guard bytes <= remaining / 6 else { return false }
+            return reserve(bytes * 6)
+        }
+        guard reserve(256), reserveString(fingerprint) else { return nil }
+        for record in records {
+            try checkpoint()
+            guard reserve(512) else { return nil }
+            for value in [record.id, record.repo, record.author, record.email, record.subject] { guard reserveString(value) else { return nil } }
+            for file in record.files {
+                try checkpoint()
+                guard reserve(192) else { return nil }
+                for value in [file.path, file.previousPath, file.excludedReason] { guard reserveString(value) else { return nil } }
+            }
+        }
+        try checkpoint()
+        let data = try JSONEncoder().encode(self)
+        try checkpoint()
+        guard data.count <= limits.cacheBytes else { return nil }
+        return data
+    }
+    @discardableResult func write(to url: URL, limits: HistoryLimits = HistoryLimits(), checkpoint: () throws -> Void = {}) throws -> Bool {
+        guard let data = try encoded(limits: limits, checkpoint: checkpoint) else { return false }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try checkpoint()
+        try data.write(to: url, options: .atomic)
+        return true
+    }
+}
+
 final class GitLogParser: @unchecked Sendable {
     private var buffer = Data()
     private var offset = 0
     private var metadata: [String] = []
+    private var metadataBytes = 0
     private var pendingFile: FileChange?
     private var awaitingPreviousPath = false
     private let repo: String
     private let configuration: WorkspaceConfiguration
     private let attributes: [AttributeRule]
     private var remainingAttributeWork: Int
+    private var retention: HistoryRetentionBudget
     private var attributeDecisions: [Data: AttributeDecision] = [:]
     private var cachedPathBytes = 0
     private var failure: (any Error)?
     private var identityMap: [String: (String, String)] = [:]
     private(set) var records: [Commit] = []
-    init(repo: String, configuration: WorkspaceConfiguration, attributes: [AttributeRule] = [], matchingWorkLimit: Int = HistoryRules.maximumAttributeWork) {
+    init(repo: String, configuration: WorkspaceConfiguration, attributes: [AttributeRule] = [], matchingWorkLimit: Int = HistoryRules.maximumAttributeWork, limits: HistoryLimits = HistoryLimits()) {
         self.repo = repo; self.configuration = configuration; self.attributes = attributes
         remainingAttributeWork = max(0, matchingWorkLimit)
+        retention = HistoryRetentionBudget(limits)
         for (email, rule) in configuration.identities { for alias in [email] + rule.aliases { identityMap[alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = (email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), rule.name.trimmingCharacters(in: .whitespacesAndNewlines)) } }
     }
     func feed(_ data: Data, checkpoint: @Sendable () throws -> Void = {}) throws {
@@ -293,6 +403,7 @@ final class GitLogParser: @unchecked Sendable {
             buffer.append(data)
             while let end = buffer[offset...].firstIndex(of: 0) {
                 try checkpoint()
+                guard end - offset <= 4 * 1024 * 1024 else { throw BigboardError.message("Git history contains an oversized field.") }
                 let token = String(decoding: buffer[offset..<end], as: UTF8.self)
                 offset = end + 1
                 try consume(token, checkpoint: checkpoint)
@@ -309,18 +420,23 @@ final class GitLogParser: @unchecked Sendable {
     }
     private func consume(_ raw: String, checkpoint: @Sendable () throws -> Void) throws {
         if !metadata.isEmpty {
+            try retention.retain(raw); metadataBytes += raw.utf8.count
             metadata.append(raw)
             if metadata.count == 6 {
                 guard let seconds = Int64(metadata[3]) else { throw BigboardError.message("Git history contains an invalid author date.") }
                 var name = metadata[1].trimmingCharacters(in: .whitespacesAndNewlines), email = metadata[2].trimmingCharacters(in: .whitespacesAndNewlines)
                 if let mapped = identityMap[email.lowercased()] { email = mapped.0; if !mapped.1.isEmpty { name = mapped.1 } }
                 let ai = HistoryRules.isAI(email, extra: configuration.aiIdentities) || metadata[4].split(separator: "\u{1f}").contains { HistoryRules.isAI(String($0), extra: configuration.aiIdentities) }
-                records.append(Commit(id: metadata[0], repo: repo, author: name, email: email, date: Date(timeIntervalSince1970: Double(seconds)), subject: metadata[5], ai: ai, bot: HistoryRules.isBot(name: name, email: email, extra: configuration.botIdentities)))
-                metadata = []
+                let commit = Commit(id: metadata[0], repo: repo, author: name, email: email, date: Date(timeIntervalSince1970: Double(seconds)), subject: metadata[5], ai: ai, bot: HistoryRules.isBot(name: name, email: email, extra: configuration.botIdentities))
+                retention.release(metadataBytes)
+                for value in [commit.id, commit.repo, commit.author, commit.email, commit.subject] { try retention.retain(value) }
+                records.append(commit)
+                metadata = []; metadataBytes = 0
             }
             return
         }
         if var file = pendingFile {
+            try retention.retain(raw)
             if awaitingPreviousPath { file.previousPath = raw; pendingFile = file; awaitingPreviousPath = false }
             else { file.path = raw; pendingFile = nil; try append(file, checkpoint: checkpoint) }
             return
@@ -329,10 +445,12 @@ final class GitLogParser: @unchecked Sendable {
         if token.isEmpty { return }
         if !token.contains("\t") {
             guard GitHistory.validOID(token) else { throw BigboardError.message("Git history contains an invalid commit identifier.") }
-            metadata = [token]; return
+            try retention.commit(); try retention.retain(token)
+            metadata = [token]; metadataBytes = token.utf8.count; return
         }
         let pieces = token.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
         guard pieces.count == 3, !records.isEmpty else { throw BigboardError.message("Git history contains an invalid file-change record.") }
+        try retention.fileChange(); try retention.retain(pieces[2])
         var file = FileChange(path: pieces[2])
         if pieces[0] == "-" || pieces[1] == "-" { file.binary = true }
         else {
@@ -359,6 +477,7 @@ final class GitLogParser: @unchecked Sendable {
             }
         }
         file.excludedReason = HistoryRules.exclusion(file, allFiles: configuration.allFiles, attribute: attribute)
+        try retention.retain(file.excludedReason)
         let index = records.count - 1
         if file.excludedReason.isEmpty { records[index].added += file.added; records[index].removed += file.removed }
         records[index].files.append(file)
@@ -374,12 +493,12 @@ private final class RepositoryLock: @unchecked Sendable {
 
 actor GitHistory {
     let root: URL
+    private let limits: HistoryLimits
     private var active: Set<String> = []
-    init(root: URL) { self.root = root.standardizedFileURL }
+    init(root: URL, limits: HistoryLimits = HistoryLimits()) { self.root = root.standardizedFileURL; self.limits = limits }
     static func validOID(_ value: String) -> Bool { [40, 64].contains(value.utf8.count) && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }
     static func validID(_ id: String) -> Bool {
-        let parts = id.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." && !$0.hasPrefix("-") && $0.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0) } }
+        canonicalGitHubRepository(id) != nil && !id.hasPrefix("-")
     }
     private func location(_ id: String) throws -> URL {
         guard Self.validID(id) else { throw BigboardError.message("Repository must use a valid owner/name identifier.") }
@@ -511,7 +630,6 @@ actor GitHistory {
             var result = repo; result.revision = oid; result.stale = false; result.error = ""; return result
         } catch { if replace { try? manager.removeItem(at: path) }; throw error }
     }
-    private struct ScanCache: Codable { var schema: Int; var fingerprint: String; var scannedAt: Date; var records: [Commit] }
     private func scanPath(_ id: String) -> URL { root.appendingPathComponent("scans").appendingPathComponent(SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() + ".json") }
     private func externalScanInputs(_ path: URL) async throws -> [Data] {
         let prefix = ["--git-dir=" + path.path]
@@ -579,7 +697,7 @@ actor GitHistory {
         let key = try await scanFingerprint(path, revision: revision, configuration: configuration, version: version)
         let cachePath = scanPath(repo.id)
         try safePath(cachePath)
-        if let key, let data = try? Data(contentsOf: cachePath), let cache = try? JSONDecoder().decode(ScanCache.self, from: data), cache.schema == 2, cache.fingerprint == key {
+        if let key, let cache = try? HistoryScanCache.read(cachePath, limits: limits, checkpoint: { try Task.checkCancellation() }), cache.schema == 2, cache.fingerprint == key {
             try Task.checkCancellation()
             var result = repo; result.revision = revision; result.scannedAt = cache.scannedAt; return (result, cache.records)
         }
@@ -590,7 +708,7 @@ actor GitHistory {
             let data = try await GitProcess.run(prefix + ["cat-file", "blob", revision + ":.gitattributes"], limit: HistoryRules.maximumAttributeBytes)
             attributes = try HistoryRules.attributes(String(decoding: data, as: UTF8.self), checkpoint: { try Task.checkCancellation() })
         }
-        let parser = GitLogParser(repo: repo.id, configuration: configuration, attributes: attributes)
+        let parser = GitLogParser(repo: repo.id, configuration: configuration, attributes: attributes, limits: limits)
         let args = ["log", "--no-merges", "--root", "-M50%", "-C50%", "-l0", "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--no-show-signature", "--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none", "--format=%x00%H%x00%aN%x00%aE%x00%at%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00", "--numstat", "-z", revision, "--"]
         _ = try await GitProcess.run(prefix + args, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
         let records = try parser.finish()
@@ -598,9 +716,8 @@ actor GitHistory {
         let after = try await GitProcess.text(prefix + ["rev-parse", "--verify", "HEAD^{commit}"])
         var result = repo; result.revision = after == revision ? revision : ""; result.scannedAt = Date()
         if let key, after == revision, try await scanFingerprint(path, revision: revision, configuration: configuration, version: version) == key {
-            try FileManager.default.createDirectory(at: cachePath.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let cache = ScanCache(schema: 2, fingerprint: key, scannedAt: result.scannedAt!, records: records)
-            if let data = try? JSONEncoder().encode(cache) { try Task.checkCancellation(); try? data.write(to: cachePath, options: .atomic) }
+            let cache = HistoryScanCache(schema: 2, fingerprint: key, scannedAt: result.scannedAt!, records: records)
+            _ = try? cache.write(to: cachePath, limits: limits, checkpoint: { try Task.checkCancellation() })
         }
         try Task.checkCancellation()
         return (result, records)

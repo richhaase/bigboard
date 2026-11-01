@@ -32,6 +32,11 @@ field. Its sections are:
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
 | Storage | Inspect owned caches and remove eligible unavailable repositories. |
 
+Repository IDs entered in groups and work areas are saved in lowercase, matching
+GitHub discovery. Existing mixed-case settings remain openable for repair; edit
+and update those entries before applying settings. Repository names beginning
+with a hyphen, such as `owner/-repo`, are supported.
+
 Area paths are repository-relative prefixes, such as `src/ui` or `docs`. One
 trailing slash is optional, so `src` and `src/` cannot be assigned separately.
 Paths containing `.` components or repeated slashes are rejected when saving.

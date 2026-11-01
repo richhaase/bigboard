@@ -6,8 +6,9 @@ struct SettingsGroupEditor {
     private(set) var original: String?
     private(set) var error = ""
     var isEditing: Bool { original != nil }
-    var canSave: Bool { !destination.isEmpty && !entries(repositories).isEmpty }
+    var canSave: Bool { !destination.isEmpty && !parsedRepositories.isEmpty }
     private var destination: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var parsedRepositories: [String] { Array(Set(entries(repositories).map { $0.lowercased() })).sorted() }
 
     mutating func edit(name: String, repositories: [String]) {
         self.name = name
@@ -30,7 +31,7 @@ struct SettingsGroupEditor {
             }
             if target != original { groups.removeValue(forKey: original) }
         }
-        groups[target] = entries(repositories)
+        groups[target] = parsedRepositories
         reset()
         return true
     }
