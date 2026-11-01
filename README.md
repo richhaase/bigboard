@@ -5,7 +5,8 @@ where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
 Bigboard is built with Swift, SwiftUI, AppKit, and Charts.
-It requires **macOS 26 Tahoe or later** and Git 2.31 or newer. The app talks directly
+It requires **macOS 26 Tahoe or later** and Apple's Command Line Tools
+(`xcode-select --install`) for Git history. The app talks directly
 to GitHub and maintains owned bare Git caches; developer checkouts are untouched.
 
 ## Build and run

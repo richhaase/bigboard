@@ -92,11 +92,17 @@ private func callback(for url: URL) throws -> URL {
     #expect(try await auth.token() == "new-access")
     #expect(await network.count == 1)
 }
-@Test func signOutFailureStillBlocksCredentialUse() async throws {
+@Test func signOutFailurePreservesCredentialForRetry() async throws {
     let store = MemoryCredentials(try storedCredentials()); store.failingDelete(true)
     let auth = AuthManager(configuration: testConfiguration, store: store, transport: ScriptedGitHub([]), now: { testNow })
     #expect(await auth.status().signedIn)
     do { try await auth.signOut(); Issue.record("Expected storage error") } catch {}
+    #expect(await auth.status().signedIn)
+    #expect(!(await auth.status().error).isEmpty)
+    #expect(try await auth.token() == "old-access")
+    store.failingDelete(false)
+    try await auth.signOut()
+    #expect(try store.load() == nil)
     #expect(await auth.status().signedIn == false)
     do { _ = try await auth.token(); Issue.record("Credential remained usable") } catch {}
 }

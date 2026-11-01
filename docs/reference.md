@@ -9,14 +9,17 @@ Choose **Sign in with GitHub** and authorize Bigboard in your browser. In
 installation page. Select the repositories it may read, return to Bigboard, and
 choose **Refresh repository list**. Repository access is limited by both your
 GitHub permissions and the installation; organization approval and SSO still
-apply. GitHub CLI and personal access tokens are not required. Git 2.31 or newer
-is required to collect history.
+apply. GitHub CLI and personal access tokens are not required. History collection
+requires Apple's Command Line Tools, installed with `xcode-select --install`.
+Bigboard verifies and uses their Git executable.
 
 Select repositories individually or use **Select all**, then **Apply**. The
 list supports search, recent-push and name sorting, and visible last-push dates.
 Push dates can reflect branches outside the default-branch history shown on the
 boards. Apply saves the workspace and closes Settings; collection continues in
-the main window. Errors keep the draft open. Cancel discards the draft.
+the main window. Errors keep the draft open. Cancel discards the draft. Newly
+available repositories remain unchecked until you select and apply them.
+Repository exclusion patterns in Advanced can further narrow the saved selection.
 
 Open Settings from the app menu, with Command-comma, or with `,` outside a text
 field. Its sections are:
@@ -34,7 +37,8 @@ Area paths are repository-relative prefixes. A trailing slash is optional, so
 remain openable; edit the paths in Groups & areas before applying changes.
 
 Credentials are stored in macOS Keychain. Sign out removes the local credential;
-GitHub authorization is revoked separately in GitHub's application settings.
+if removal fails, the account remains signed in and Settings stays open so you
+can retry. GitHub authorization is revoked separately in GitHub's application settings.
 There is no import of settings or history from previous Bigboard versions. A
 compatible existing Keychain sign-in can be reused, but keep the old app closed
 because both versions share rotating credentials.
@@ -56,7 +60,8 @@ Closing the picker keeps the selection already applied.
 
 This filter does not fetch history, make network requests, change saved
 collection choices, or unload caches. Use Settings to change what the app
-collects. Changing a named group changes collection scope and refreshes.
+collects. Changing a named group narrows collection to its saved, selected
+repositories and refreshes; it never adds unchecked repositories.
 
 The date menu offers 1, 7, 14, 30, 90, and 365 days, All time, Since last look,
 and a custom range through Filters. The default is 14 days unless changed in

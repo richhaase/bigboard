@@ -224,8 +224,8 @@ actor AuthManager {
         cancelOperations(); credentials = nil; loaded = true; message = AuthFailure.expired.localizedDescription
     }
     func signOut() throws {
-        cancelOperations(); credentials = nil; loaded = true; message = ""
         do { try store.delete() } catch { message = AuthFailure.storage.localizedDescription; throw AuthFailure.storage }
+        cancelOperations(); credentials = nil; loaded = true; message = ""
     }
     func installationURL() -> URL? { configuration.valid ? URL(string: "https://github.com/apps/\(configuration.appSlug)/installations/new") : nil }
     private func exchange(_ fields: [String: String]) async throws -> AuthCredentials {

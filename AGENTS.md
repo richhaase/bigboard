@@ -25,7 +25,8 @@ There is no Go/web runtime or legacy data import.
 
 ## Checks
 
-Requires Xcode 26 or later. Override `DEVELOPER_DIR` when needed.
+Requires Xcode 26 or later and Apple Command Line Tools for Git history.
+Override `DEVELOPER_DIR` for Swift builds when needed.
 
 ```sh
 make test

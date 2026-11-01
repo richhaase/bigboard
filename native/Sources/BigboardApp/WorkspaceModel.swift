@@ -8,6 +8,7 @@ final class WorkspaceModel {
     var authStatus = AuthStatus()
     var checkingSignIn = true
     var busy = false
+    private(set) var signingOut = false
     var error = ""
     var discovered: [Repository] = []
     var cachedRepositoryRows: [Repository] = []
@@ -85,9 +86,8 @@ final class WorkspaceModel {
         let excluded = Set(configuration.excludedRepositories)
         let group = activeGroup.isEmpty ? nil : Set(configuration.groups[activeGroup] ?? [])
         return repositories.filter { repo in
-            if excluded.contains(repo.id) { return false }
+            if !configured.contains(repo.id) || excluded.contains(repo.id) { return false }
             if let group, !group.contains(repo.id) { return false }
-            if configured.contains(repo.id) { return true }
             let name = String(repo.id.split(separator: "/").last ?? "")
             return !configuration.exclude.contains { pattern in
                 fnmatch(pattern, repo.id, 0) == 0 || fnmatch(pattern, name, 0) == 0
@@ -280,9 +280,10 @@ final class WorkspaceModel {
     }
     private func restrictSnapshot() {
         let allowed = Set(authorized.map(\.id))
-        snapshot.repositories.removeAll { !allowed.contains($0.id) }
-        snapshot.commits.removeAll { !allowed.contains($0.repo) }
-        snapshot.pullRequests.removeAll { !allowed.contains($0.repo) }
+        let collected = Set(selected(authorized).map(\.id))
+        snapshot.repositories.removeAll { !collected.contains($0.id) }
+        snapshot.commits.removeAll { !collected.contains($0.repo) }
+        snapshot.pullRequests.removeAll { !collected.contains($0.repo) }
         discovered.removeAll { !allowed.contains($0.id) }
     }
     func discover() async {
@@ -337,6 +338,7 @@ final class WorkspaceModel {
             try storage.saveConfiguration(config, account: account)
             configuration = config; eligible = [:]; error = ""
             reconcileActiveGroup()
+            restrictSnapshot()
             _ = beginRefresh()
             return true
         } catch {
@@ -366,7 +368,9 @@ final class WorkspaceModel {
     }
     func selectGroup(_ name: String) async {
         guard !busy, name.isEmpty || configuration.groups[name] != nil else { return }
-        activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]; await refresh()
+        activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]
+        if !isPreview { restrictSnapshot() }
+        await refresh()
     }
     func removeCache(_ id: String) async {
         guard !isPreview else { return }
@@ -406,19 +410,36 @@ final class WorkspaceModel {
         let state = await auth.status()
         if operation == generation { authStatus = state }
     }
-    func signOut() async {
-        guard !isPreview else { return }
+    @discardableResult
+    func signOut() async -> Bool {
+        guard !isPreview, !signingOut else { return false }
+        signingOut = true
+        let interruptedRefresh = refreshTask != nil || snapshot.coverage.phase == "refreshing"
         generation += 1; refreshTask?.cancel(); refreshTask = nil
         let operation = generation
+        busy = true
+        defer { signingOut = false; if operation == generation { busy = false } }
+        do { try await auth.signOut() }
+        catch {
+            let state = await auth.status()
+            guard operation == generation else { return false }
+            authStatus = state
+            let retained = state.signedIn ? "You are still signed in." : "Your saved sign-in could not be removed."
+            self.error = "Could not sign out. \(retained) \(error.localizedDescription) Try signing out again."
+            if interruptedRefresh {
+                snapshot.coverage.phase = "partial"
+                snapshot.coverage.message = "Refresh canceled. Retained evidence may be stale."
+                for index in snapshot.repositories.indices { snapshot.repositories[index].stale = true; snapshot.repositories[index].prStale = true }
+            }
+            return false
+        }
+        guard operation == generation else { return false }
         snapshot = Snapshot(); configuration = WorkspaceConfiguration(); discovered = []; authorized = []; cachedRepositoryRows = []
-        account = ""; history = nil; github = nil; baseline = [:]; eligible = [:]; busy = false
+        account = ""; history = nil; github = nil; baseline = [:]; eligible = [:]
         activeGroup = ""; pendingGitDenials = []; pendingGitAuthentication = false; inventoryVerified = false; discoveryVerified = false
-        checkingSignIn = false
-        authStatus.signedIn = false; authStatus.login = ""; authStatus.accountID = ""; authStatus.pending = false
-        do { try await auth.signOut() } catch { if operation == generation { self.error = error.localizedDescription } }
-        let state = await auth.status()
-        guard operation == generation else { return }
-        authStatus = state; authStatus.signedIn = false
+        checkingSignIn = false; error = ""
+        authStatus.signedIn = false; authStatus.login = ""; authStatus.accountID = ""; authStatus.pending = false; authStatus.error = ""
+        return true
     }
     func handleCallback(_ url: URL) async {
         guard !isPreview else { return }

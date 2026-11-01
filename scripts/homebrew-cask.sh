@@ -23,12 +23,13 @@ cask "bigboard" do
   desc "Explore work areas, contributors, and commit evidence across GitHub repositories"
   homepage "https://github.com/richhaase/bigboard"
 
-  depends_on formula: "git"
   depends_on macos: :tahoe
 
   app "Bigboard.app"
 
   caveats <<~EOS
+    Bigboard requires Apple Command Line Tools for repository history.
+    If they are missing, run xcode-select --install before opening Bigboard.
     Open Bigboard and choose Sign in with GitHub to connect your repositories.
   EOS
 end

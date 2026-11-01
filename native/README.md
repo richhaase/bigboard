@@ -5,7 +5,8 @@ Swift packages or embedded browser runtime.
 SwiftUI supplies the interface; AppKit supplies lifecycle, clipboard, browser,
 and Save dialog integration; Security supplies Keychain; Foundation supplies
 HTTP and filesystem operations. Git runs as a cancellable child process against
-app-owned bare repositories.
+app-owned bare repositories. History collection uses the Apple-signed Git in
+`/Library/Developer/CommandLineTools`, installed with `xcode-select --install`.
 
 ## Source layout
 
@@ -44,9 +45,10 @@ store and temporary workspace and labels its fixture data.
   ranges; local calendar weeks/days; future-dated evidence retained where applicable.
 - Canonical shared-commit selection, repository associations, mailmap followed
   by saved identities, excluded generated/vendored/bulk volume and unknown lines.
-- Saved collection settings and named groups determine collection scope. The shared
-  Repository filter only narrows loaded data; there is no session-tracking layer.
-  Exact repository exclusions win over includes and patterns.
+- Only saved, selected repositories are collected. Exact exclusions, exclusion
+  patterns, and named groups can further narrow that selection. Newly discovered
+  repositories stay unchecked until explicitly saved. The shared Repository
+  filter only narrows loaded data; there is no session-tracking layer.
 - Heat uses its own 26-week context, with recent four-week and preceding
   twelve-week averages, independent of the shared date range.
 - PR inventory, file and reviewer completeness remain independent. The request
@@ -70,7 +72,7 @@ future features.
 ## Repository collection and viewing
 
 Use **Workspace Settings → Repositories** to save what Bigboard collects. Named
-groups keep their existing collection behavior. These choices are separate from
+groups intersect that saved selection. These choices are separate from
 **Repository filter**, available as a persistent toolbar popover, in the Boards
 menu, or through `i`. The popover stays open across selections. The sidebar contains
 only Activity, Contributors, and Pull requests. Workspace Settings lives in the

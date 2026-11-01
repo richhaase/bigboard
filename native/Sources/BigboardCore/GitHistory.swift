@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Darwin
+import Security
 
 struct GitCommandFailure: LocalizedError, Sendable {
     var status: Int32
@@ -50,19 +51,55 @@ private final class ProcessRead: @unchecked Sendable {
     var bytes = Data()
     var error: (any Error)?
 }
+struct GitExecutableMetadata: Sendable {
+    var owner: uid_t
+    var mode: mode_t
+    var writable: Bool
+    var executable: Bool
+}
+enum GitExecutable {
+    static let path = URL(fileURLWithPath: "/Library/Developer/CommandLineTools/usr/bin/git")
+    static func select(inspect: (URL) throws -> GitExecutableMetadata = metadata, verify: (URL) throws -> Void = verifySignature) throws -> URL {
+        do {
+            var current = path
+            while true {
+                let attributes = try inspect(current)
+                let kind = current == path ? mode_t(S_IFREG) : mode_t(S_IFDIR)
+                guard attributes.owner == 0, attributes.mode & S_IFMT == kind, attributes.mode & (S_IWGRP | S_IWOTH) == 0, !attributes.writable, current != path || attributes.executable else { throw BigboardError.message("Untrusted Git installation.") }
+                if current.path == "/" { break }
+                current.deleteLastPathComponent()
+            }
+            try verify(path)
+            return path
+        } catch { throw BigboardError.message("Trusted Apple Git is unavailable. Install or update Apple Command Line Tools with xcode-select --install, then reopen Bigboard.") }
+    }
+    static func metadata(_ url: URL) throws -> GitExecutableMetadata {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        return GitExecutableMetadata(owner: info.st_uid, mode: info.st_mode, writable: access(url.path, W_OK) == 0, executable: access(url.path, X_OK) == 0)
+    }
+    static func verifySignature(_ url: URL) throws {
+        var code: SecStaticCode?, requirement: SecRequirement?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString("anchor apple and identifier \"com.apple.git\"" as CFString, [], &requirement) == errSecSuccess, let requirement,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate), requirement) == errSecSuccess else { throw BigboardError.message("Git does not have a valid Apple signature.") }
+    }
+}
 enum GitProcess {
     static func executable() throws -> URL {
-        let paths = ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"]
-        guard let path = paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw BigboardError.message("Git is required. Install Git, then reopen Bigboard.") }
-        return URL(fileURLWithPath: path)
+        try GitExecutable.select()
+    }
+    static func environment(_ inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = inherited.filter { ["HOME", "TMPDIR", "XDG_CONFIG_HOME"].contains($0.key) }
+        environment.merge(["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_ASKPASS": "", "SSH_ASKPASS": "", "SSH_ASKPASS_REQUIRE": "never", "LC_ALL": "C"]) { _, new in new }
+        return environment
     }
     static func run(_ arguments: [String], directory: URL? = nil, token: String = "", timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, stream: (@Sendable (Data, @Sendable () throws -> Void) throws -> Void)? = nil) async throws -> Data {
         let executable = try executable()
         var pinned = ["-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.interactive=false", "-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "http.sslVerify=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never"]
         if !token.isEmpty { pinned += ["--config-env=http.https://github.com/.extraHeader=BIGBOARD_GIT_AUTHORIZATION"] }
         let gitDirectory = arguments.first(where: { $0.hasPrefix("--git-dir=") }).map { URL(fileURLWithPath: String($0.dropFirst("--git-dir=".count))) }
-        var environment = ProcessInfo.processInfo.environment.filter { key, _ in !key.hasPrefix("GIT_") && !key.hasPrefix("GH_") && !["GITHUB_TOKEN", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "BIGBOARD_GIT_AUTHORIZATION", "SSLKEYLOGFILE"].contains(key) }
-        environment.merge(["GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_ASKPASS": "", "SSH_ASKPASS": "", "SSH_ASKPASS_REQUIRE": "never", "LC_ALL": "C"]) { _, new in new }
+        var environment = Self.environment()
         if !token.isEmpty { environment["BIGBOARD_GIT_AUTHORIZATION"] = "Authorization: Basic " + Data("x-access-token:\(token)".utf8).base64EncodedString() }
         return try await execute(executable, arguments: pinned + arguments, environment: environment, directory: directory ?? gitDirectory ?? URL(fileURLWithPath: "/"), timeout: timeout, limit: limit, authenticated: !token.isEmpty, stream: stream)
     }

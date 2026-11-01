@@ -90,7 +90,7 @@ struct SettingsPanel: View {
                 VStack(alignment: .leading) { Text(workspace.authStatus.signedIn ? "Signed in as \(workspace.authStatus.login)" : "GitHub account").font(.headline); Text("Only repositories available through the Bigboard GitHub App are listed.").foregroundStyle(.secondary) }
                 Spacer()
                 if workspace.checkingSignIn { ProgressView("Checking saved sign-in…").controlSize(.small) }
-                else if workspace.authStatus.signedIn { Button("Manage access…") { Task { await workspace.manageAccess() } }; Button("Sign out") { Task { await workspace.signOut(); dismiss() } } }
+                else if workspace.authStatus.signedIn { Button("Manage access…") { Task { await workspace.manageAccess() } }; Button("Sign out") { Task { if await workspace.signOut() { dismiss() } } }.disabled(workspace.signingOut) }
                 else { Button("Sign in") { Task { await workspace.signIn() } }.disabled(!workspace.authStatus.configured) }
             }
             HStack {
@@ -166,7 +166,7 @@ struct SettingsPanel: View {
             stringList("Exclude repository patterns", values: $draft.exclude)
             stringList("Additional AI identities", values: $draft.aiIdentities)
             stringList("Additional bot identities", values: $draft.botIdentities)
-            Text("Enter one rule per line. Repository exclusions use glob patterns. AI rules use author/coauthor email addresses or @domain; bot rules also accept exact names.").font(.caption).foregroundStyle(.secondary)
+            Text("Enter one rule per line. Repository glob patterns exclude matches from your saved selection. AI rules use author/coauthor email addresses or @domain; bot rules also accept exact names.").font(.caption).foregroundStyle(.secondary)
         }
     }
     private func prepare() {
