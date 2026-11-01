@@ -88,7 +88,7 @@ class ReleaseTests(unittest.TestCase):
         self.env["QUILL_NOTARY_ISSUER"] = "fixture-issuer"
         binaries = self.root / "bin"
         binaries.mkdir()
-        for name in ("uname", "security", "openssl", "codesign", "ditto", "xcrun", "spctl", "swift", "sips", "iconutil", "lipo"):
+        for name in ("uname", "security", "openssl", "codesign", "ditto", "xcrun", "spctl", "swift", "sips", "iconutil", "lipo", "gh"):
             tool = binaries / name
             tool.write_text(MOCK_TOOL)
             tool.chmod(0o755)
@@ -195,6 +195,31 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid release version", result.stderr)
 
+    def test_release_builds_tagged_source_and_publishes_zip_and_checksum(self):
+        import hashlib
+        repo = self.root / "release-repo"
+        (repo / "scripts").mkdir(parents=True)
+        shutil.copyfile(SCRIPTS / "release.sh", repo / "scripts/release.sh")
+        build = repo / "scripts/build-macos.sh"
+        build.write_text('set -eu\nmkdir -p "$(dirname "$0")/../native/build/Bigboard.app"\nprintf tagged > "$(dirname "$0")/../native/build/Bigboard.app/content"\n')
+        (repo / "scripts/sign-macos.sh").write_text('set -eu\ncp "$1/content" "$2"\n')
+        for args in (("init", "-q"), ("add", "."), ("-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "fixture"), ("-c", "tag.gpgsign=false", "tag", "v2.0.1")):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        build.write_text('exit 99\n')
+        result = subprocess.run(["/bin/bash", str(repo / "scripts/release.sh"), "v2.0.1"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        archive = repo / "native/build/Bigboard_2.0.1_darwin_universal.zip"
+        self.assertEqual(archive.read_bytes(), b"tagged")
+        checksums = repo / "native/build/checksums.txt"
+        self.assertEqual(checksums.read_text(), f"{hashlib.sha256(b'tagged').hexdigest()}  {archive.name}\n")
+        publish = next(command for command in self.commands() if command[0] == "gh")
+        self.assertEqual(publish[:4], ["gh", "release", "create", "v2.0.1"])
+        self.assertIn(str(archive), publish)
+        self.assertIn(str(checksums), publish)
+        self.assertIn("--verify-tag", publish)
+        self.assertNotIn("--target", publish)
+        self.assertFalse(list(self.root.glob("bigboard-release.*")))
+
     def test_native_publisher_json_is_validated_without_printing_values(self):
         path = self.root / "publisher.json"
         secret = "invalid private value"
@@ -264,6 +289,6 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(any(command[:2] == ["lipo", "-archs"] and command[-1] == str(app / "Contents/MacOS/Bigboard") for command in commands))
         self.assertFalse((repo / "desktop").exists())
         definition = (SCRIPTS.parent / ".github/workflows/release.yml").read_text()
-        self.assertIn("source/native/build/Bigboard.app", definition)
+        self.assertIn('bash scripts/release.sh "$RELEASE_TAG"', definition)
         self.assertNotIn("desktop/build", definition)
         self.assertFalse((SCRIPTS.parent / ".goreleaser.yaml").exists())
