@@ -7,21 +7,21 @@ import AppKit
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateNow }
         terminating = true
-        Task { if workspace?.isPreview != true { await workspace?.shutdown() }; sender.reply(toApplicationShouldTerminate: true) }
+        Task { await workspace?.shutdown(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 @main struct BigboardApp: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
-    @State private var workspace = CommandLine.arguments.contains("--ui-preview") ? PreviewFixture.make() : WorkspaceModel()
+    @State private var workspace = WorkspaceModel()
     @State private var navigation = BoardState()
     var body: some Scene {
         Window("Bigboard", id: "main") {
             MainView(workspace: workspace, navigation: navigation)
                 .frame(minWidth: 900, minHeight: 620)
-                .task { delegate.workspace = workspace; if !workspace.isPreview { await workspace.start() } }
-                .onOpenURL { url in Task { if !workspace.isPreview { await workspace.handleCallback(url) } } }
+                .task { delegate.workspace = workspace; await workspace.start() }
+                .onOpenURL { url in Task { await workspace.handleCallback(url) } }
         }
         .defaultSize(width: 1360, height: 900)
         .commands {

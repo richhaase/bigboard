@@ -61,7 +61,6 @@ have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
 The app bundle must be launched on macOS for native callback registration.
-The `--ui-preview` fixture mode does not access Keychain or complete sign-in.
 
 The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
 Registration and publishing-repository settings are configured separately from
@@ -105,7 +104,7 @@ sign-out or an account change, and confirmed denials remain authoritative.
 Swift authentication and GitHub tests use an isolated credential store and mock
 HTTP transports. Native storage tests use temporary directories, and Git tests
 use owned local fixture repositories. No real credentials are read by tests.
-Native dependencies are Apple frameworks and system Git, with no third-party
+Native dependencies are Apple frameworks and a usable Git installation, with no third-party
 Swift package dependencies. Automated tests and local signature verification do
 not establish release signing, notarization, or the live OAuth exchange.
 

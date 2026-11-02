@@ -28,8 +28,8 @@ cask "bigboard" do
   app "Bigboard.app"
 
   caveats <<~EOS
-    Bigboard requires Apple Command Line Tools for repository history.
-    If they are missing, run xcode-select --install before opening Bigboard.
+    Bigboard requires Git for repository history (Homebrew or Xcode Git).
+    Install Git if it is missing before opening Bigboard.
     Open Bigboard and choose Sign in with GitHub to connect your repositories.
   EOS
 end
