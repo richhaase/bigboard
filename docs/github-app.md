@@ -61,7 +61,6 @@ have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
 The app bundle must be launched on macOS for native callback registration.
-The `--ui-preview` fixture mode does not access Keychain or complete sign-in.
 
 The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
 Registration and publishing-repository settings are configured separately from

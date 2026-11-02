@@ -28,15 +28,6 @@ process environment. See [publisher setup](docs/github-app.md). These are build
 settings, not fields end users fill in. Do not put them in source control or chat.
 A build without them opens normally and explains why sign-in is unavailable.
 
-An explicit UI preview is available for visual checks without GitHub or Keychain:
-
-```sh
-open -n native/build/Bigboard.app --args --ui-preview
-```
-
-Preview data is labeled and used only with that argument. It never substitutes
-for missing live data.
-
 ## Workflows
 
 | Board | Explore |

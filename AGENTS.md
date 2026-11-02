@@ -35,7 +35,7 @@ python3 -B -m unittest discover -s scripts -p '*_test.py'
 make build
 ```
 
-The app is built at `native/build/Bigboard.app`; `--ui-preview` uses isolated
-fixtures. See the [native guide](native/README.md) for behavior and live checks,
+The app is built at `native/build/Bigboard.app`. See the
+[native guide](native/README.md) for behavior and live checks,
 and [publisher setup](docs/github-app.md) for authentication and signing.
 Publish only when requested, using the existing tag-triggered release workflow.

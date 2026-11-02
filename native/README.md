@@ -32,10 +32,8 @@ and parsed scans live in Caches because they can be rebuilt. No credentials are
 stored in either location. A future historical PR store may justify SQLite;
 that feature and its schema are outside this port.
 
-`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override native paths for isolated
-testing. They do not redirect Keychain; use `--ui-preview` to exercise the UI
-without touching credentials or network. The preview uses an isolated credential
-store and temporary workspace and labels its fixture data.
+`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override native storage paths.
+They do not redirect Keychain. The app uses real account and repository data.
 
 ## Preserved behavior
 
@@ -121,7 +119,7 @@ make build
 make test
 make check
 python3 -B -m unittest discover -s scripts -p '*_test.py'
-open -n native/build/Bigboard.app --args --ui-preview
+open native/build/Bigboard.app
 ```
 
 Publisher settings may be placed in the ignored `native/publisher.local.json`
@@ -194,10 +192,8 @@ environment has no publisher Developer ID signing identity available.
 ## Verification recorded for this branch
 
 On 2026-10-31, the replacement was built locally with Xcode 27.2 for arm64 and
-x86_64, and the bundle signature was verified. Activity/Heat, Contributors,
-Pull requests, and Settings were inspected in the isolated preview. A configured
-build reused the existing `richhaase` Keychain sign-in, discovered installation
-repositories, and saved a fresh single-repository workspace for
+x86_64, and the bundle signature was verified. A configured build reused the
+existing `richhaase` Keychain sign-in, discovered installation repositories, and saved a fresh single-repository workspace for
 `richhaase/bigboard`. The live refresh loaded 187 commits and reported complete
 PR inventory, files, and reviewers, with no data errors.
 
