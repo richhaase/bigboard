@@ -45,7 +45,7 @@ struct ContributorsBoard: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(formatted(person.totals.change)).monospacedDigit()
+                        Text(person.totals.change.formatted()).monospacedDigit()
                     }
                     .padding(.vertical, 6).tag(person.id)
                 }
@@ -74,7 +74,7 @@ struct ContributorsBoard: View {
                 }
             }
             HStack {
-                MetricView(title: "Commits", value: formatted(person.totals.commits))
+                MetricView(title: "Commits", value: person.totals.commits.formatted())
                 MetricView(title: "Repositories", value: "\(person.repos.count)")
                 MetricView(
                     title: "Active days",

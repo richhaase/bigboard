@@ -22,7 +22,7 @@ struct SettingsWorkAreaEditor {
         if let originalPaths, paths.utf8.elementsEqual(originalPaths.joined(separator: ", ").utf8) {
             originalPaths
         } else {
-            entries(paths)
+            parseListEntries(paths)
         }
     }
 

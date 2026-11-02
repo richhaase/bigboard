@@ -1,3 +1,5 @@
+import AppKit
+import Darwin
 import Foundation
 import Observation
 
@@ -705,5 +707,3 @@ final class WorkspaceModel {
         return try ActivityExport.json(snapshot.commits, configuration: configuration)
     }
 }
-import AppKit
-import Darwin

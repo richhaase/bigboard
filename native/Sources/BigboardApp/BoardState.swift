@@ -314,4 +314,16 @@ struct RepositoryChecklist {
             restorePRFilters()
         }
     }
+
+    func pullRequests(_ snapshot: Snapshot) -> [PullRequest] {
+        let filters = PRFilters(
+            query: prs.query, repos: repositories, days: days, since: sinceLastLook ? snapshot.bookmark : nil,
+            authors: prs.authors, reviews: prs.reviews, checks: prs.checks, states: prs.states,
+            mine: prs.mine, sort: prs.sort, reverse: prs.reversed)
+        return
+            Analysis.filterPRs(
+                snapshot.pullRequests, viewer: snapshot.viewer, filters: filters, now: snapshot.generatedAt
+            )
+            .filter { contextualRepository == nil || $0.repo == contextualRepository }
+    }
 }

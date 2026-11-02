@@ -9,7 +9,7 @@ struct SettingsGroupEditor {
     var canSave: Bool { !destination.isEmpty && !parsedRepositories.isEmpty }
     private var destination: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var parsedRepositories: [String] {
-        Array(Set(entries(repositories).map { $0.lowercased() })).sorted()
+        Array(Set(parseListEntries(repositories).map { $0.lowercased() })).sorted()
     }
 
     mutating func edit(name: String, repositories: [String]) {
