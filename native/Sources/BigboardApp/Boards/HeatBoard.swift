@@ -6,17 +6,18 @@ struct HeatBoard: View {
     var workAreas: [String: [WorkArea]]
     @Bindable var navigation: BoardState
     var now: Date
-    var rows: [HeatRow] {
-        Analysis.heatRows(
-            records, repositories: repositories, scope: navigation.scope, workAreas: workAreas,
-            metric: navigation.heatMetric, now: now
-        )
-        .filter {
-            navigation.activity.query.isEmpty
-                || $0.label.localizedCaseInsensitiveContains(navigation.activity.query)
-        }
-    }
     var body: some View {
+        let query = navigation.activity.query
+        let rows =
+            Analysis.heatRows(
+                records,
+                repositories: repositories,
+                scope: navigation.scope,
+                workAreas: workAreas,
+                metric: navigation.heatMetric,
+                now: now
+            )
+            .filter { query.isEmpty || $0.label.localizedCaseInsensitiveContains(query) }
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Change relative to usual").font(.title2.bold())
@@ -90,7 +91,6 @@ struct HeatBoard: View {
         return ratio < 0.1 ? "<0.1×" : String(format: "%.1f×", ratio)
     }
 }
-
 private struct HeatStrip: View {
     var series: HeatSeries
     var body: some View {
