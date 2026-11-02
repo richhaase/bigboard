@@ -25,7 +25,7 @@ There is no Go/web runtime or legacy data import.
 
 ## Checks
 
-Requires Xcode 26 or later and Apple Command Line Tools for Git history.
+Requires Xcode 26 or later and a usable Git installation for Git history.
 Override `DEVELOPER_DIR` for Swift builds when needed.
 
 ```sh
@@ -35,7 +35,6 @@ python3 -B -m unittest discover -s scripts -p '*_test.py'
 make build
 ```
 
-The app is built at `native/build/Bigboard.app`; `--ui-preview` uses isolated
-fixtures. See the [native guide](native/README.md) for behavior and live checks,
+The app is built at `native/build/Bigboard.app`. See the [native guide](native/README.md) for behavior and live checks,
 and [publisher setup](docs/github-app.md) for authentication and signing.
 Publish only when requested, using the existing tag-triggered release workflow.

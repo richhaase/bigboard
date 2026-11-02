@@ -4,22 +4,6 @@ import Testing
 @testable import Bigboard
 
 @MainActor struct CollectionScopeTests {
-    @Test func previewGroupsPreserveIsolatedFixtureEvidence() async {
-        let workspace = PreviewFixture.make()
-        let repositories = workspace.snapshot.repositories
-        let commits = workspace.snapshot.commits
-        let pullRequests = workspace.snapshot.pullRequests
-        let discovered = workspace.discovered
-        for group in workspace.configuration.groups.keys.sorted() + [""] {
-            await workspace.selectGroup(group)
-            #expect(workspace.activeGroup == group)
-            #expect(workspace.snapshot.repositories == repositories)
-            #expect(workspace.snapshot.commits == commits)
-            #expect(workspace.snapshot.pullRequests == pullRequests)
-            #expect(workspace.discovered == discovered)
-        }
-    }
-
     @Test func cachedStartupAndGroupsOnlyCollectSavedRepositories() async throws {
         let ids = ["owner/chosen", "owner/unchecked", "owner/new-private"]
         var config = SettingsRepositories.applying([ids[0]], available: Set(ids.prefix(2)), to: WorkspaceConfiguration())

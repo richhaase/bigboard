@@ -190,7 +190,7 @@ class Publisher:
             migration = "\nThis native Swift replacement starts a fresh workspace without importing legacy settings or caches. Existing GitHub sign-in can be reused.\n"
         return (
             f"## Bigboard {self.tag}\n\n"
-            "Native Bigboard for macOS 26 Tahoe or later. Apple Command Line Tools are required for repository history; install them with `xcode-select --install` if needed.\n"
+            "Native Bigboard for macOS 26 Tahoe or later. Git is required for repository history; install it through Homebrew or Xcode Command Line Tools if needed.\n"
             + migration + "\n" + body + "\n\n## Installation\n\n"
             "```sh\nbrew install --cask richhaase/tap/bigboard\n```\n\n"
             "Or download the universal macOS ZIP, extract it, and move Bigboard.app to Applications. "

@@ -116,7 +116,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(create["target_commitish"], COMMIT)
         self.assertIn("macOS 26", create["body"])
         self.assertIn("without importing legacy", create["body"])
-        self.assertIn("xcode-select --install", create["body"])
+        self.assertIn("Homebrew or Xcode Command Line Tools", create["body"])
 
     def test_published_retry_downloads_verified_assets_without_mutation(self):
         self.seed_release(draft=False)

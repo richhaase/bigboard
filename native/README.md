@@ -5,8 +5,8 @@ Swift packages or embedded browser runtime.
 SwiftUI supplies the interface; AppKit supplies lifecycle, clipboard, browser,
 and Save dialog integration; Security supplies Keychain; Foundation supplies
 HTTP and filesystem operations. Git runs as a cancellable child process against
-app-owned bare repositories. History collection uses the Apple-signed Git in
-`/Library/Developer/CommandLineTools`, installed with `xcode-select --install`.
+app-owned bare repositories. History collection discovers Git from PATH and standard Homebrew/system locations.
+Install Git through Homebrew or Xcode Command Line Tools if it is unavailable.
 
 ## Source layout
 
@@ -33,9 +33,10 @@ stored in either location. A future historical PR store may justify SQLite;
 that feature and its schema are outside this port.
 
 `BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override native paths for isolated
-testing. They do not redirect Keychain; use `--ui-preview` to exercise the UI
-without touching credentials or network. The preview uses an isolated credential
-store and temporary workspace and labels its fixture data.
+testing. They do not redirect Keychain. Normal app launches use the configured
+account. Use a build without publisher configuration to inspect the signed-out UI
+without loading Keychain credentials; use a separate macOS user account for
+isolated authenticated UI verification.
 
 ## Preserved behavior
 
@@ -122,7 +123,7 @@ make build
 make test
 make check
 python3 -B -m unittest discover -s scripts -p '*_test.py'
-open -n native/build/Bigboard.app --args --ui-preview
+open native/build/Bigboard.app
 ```
 
 Publisher settings may be placed in the ignored `native/publisher.local.json`
@@ -138,7 +139,7 @@ builds the tagged source's `native/build/Bigboard.app`, signs, notarizes, and st
 it, then creates `release-artifacts/Bigboard_<version>_darwin_universal.zip`. A Python publisher uses
 GitHub CLI to upload the ZIP and `checksums.txt` to a draft, verify the uploaded
 bytes, and publish. Stable releases update the app-only Homebrew cask directly;
-the cask requires macOS Tahoe and explains the app's Apple Command Line Tools
+the cask requires macOS Tahoe and explains the app's Git
 requirement, with no Homebrew Git dependency. No publication is part of local
 validation.
 
@@ -218,18 +219,17 @@ notarization, and a new browser OAuth exchange still require joint testing.
 
 Git operations isolate global/system Git configuration and inherited `GIT_*`
 settings. Repository mailmap and native identity rules apply. Each command has
-a 120-second deadline and 256 MiB output bound. Repository `.gitattributes`
+a 120-second deadline. Buffered command output has a 256 MiB bound; streamed
+history has no total-output ceiling. Repository `.gitattributes`
 input is limited to 4 MiB and 20,000 generated/vendored rules, with a shared
 matching-work budget for each history scan. Cancellation and timeouts interrupt
 parsing as well as Git. Exceeding a limit reports a scan error and retains stale
 evidence when available; rules are never silently truncated or skipped.
-Each repository scan also permits at most 50,000 commits, 100,000 file changes,
-and 16 MiB of retained metadata and path text. Exceeding these limits rejects the
-scan rather than presenting truncated history as complete. Parsed JSON caches
-are limited to 16 MiB on read; oversized older caches are ignored and history is
-parsed again under the current limits. A conservative size estimate bounds JSON
-encoding before it starts. When the estimate exceeds the cache limit, the complete
-scan can still be displayed without replacing the optional parsed cache.
+History has no fixed commit-count, file-change-count, or retained-text ceiling.
+Parsed JSON caches are optional and limited to 16 MiB on read; oversized older
+caches are ignored and complete history is parsed again. A conservative size
+estimate bounds JSON encoding before it starts. When the estimate exceeds the
+cache limit, the complete scan is displayed without replacing the parsed cache.
 The app supports its own complete bare caches, not arbitrary shallow/partial
 caches or developer checkouts. The initial port verification covered 73 native tests and 12 packaging tests;
 subsequent walkthrough fixes add focused repository-filter and settings tests.
@@ -248,7 +248,8 @@ build, 45 passing packaging tests, and a universal app build. An 8,000-commit,
 20-area comparison fixture completed in approximately 0.28 seconds locally;
 this is fixture evidence, not a guarantee for every workspace.
 
-The actual native app was exercised with `--ui-preview` in a separately identified,
+Before removal of the production preview runtime, the native app was exercised
+with the former preview mode in a separately identified,
 ad-hoc-signed temporary bundle. Verification covered the comparison date sheet,
 presets, custom unequal ranges, invalid-range rejection, overlap and partial-day
 notices, paired totals, single-row selection and inspector updates, repository →
@@ -258,3 +259,19 @@ selected-period Related evidence. Reapplying dates at file scope was confirmed
 to retain the commit view after fixing a regression found during the walkthrough.
 Screenshots were inspected for native layout. The user's running live app and
 credentials were left untouched; no network collection was needed for comparison.
+
+## Cleanup verification
+
+On 2026-11-02, removal of the production preview runtime, Apple-only Git
+selection, and history retention ceilings passed 203 native tests and 45
+packaging tests, plus an optimized Swift build and local app packaging. A parser
+regression retains 50,001 commits and 150,003 file changes with more than 16 MiB
+of metadata, while skipping the optional oversized parsed cache. Streaming tests
+verify that the buffered-output bound does not cap history streams, and existing
+cancellation, timeout, cache-boundary, and credential-isolation tests remain.
+
+The rebuilt normal app was launched without publisher configuration and visually
+inspected at startup and in Settings, then quit. It showed the normal unconfigured
+sign-in state with no synthetic workspace or preview banner. No other Bigboard
+was running, and real credentials were not loaded or modified. Authenticated UI
+refresh and a large live repository scan were not performed during this cleanup.
