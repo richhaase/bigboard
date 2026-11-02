@@ -15,11 +15,13 @@ import AppKit
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
-@main struct BigboardApp: App {
+public struct BigboardApplication: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
     @State private var workspace = WorkspaceModel()
     @State private var navigation = BoardState()
-    var body: some Scene {
+    public init() {}
+
+    public var body: some Scene {
         Window("Bigboard", id: "main") {
             MainView(workspace: workspace, navigation: navigation)
                 .frame(minWidth: 900, minHeight: 620)
