@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct ActivityBoard: View {
     @Bindable var workspace: WorkspaceModel
@@ -13,7 +12,7 @@ struct ActivityBoard: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button { navigation.back() } label: { Image(systemName: "chevron.left") }.disabled(navigation.scope.repo.isEmpty && navigation.lens == .heat)
+                Button { navigation.back() } label: { Image(systemName: "chevron.left") }.disabled(!navigation.canGoBackInActivity)
                 Button("Repositories") { navigation.explore(ActivityScope()) }.buttonStyle(.link)
                 if !navigation.scope.repo.isEmpty { Text("/").foregroundStyle(.tertiary); Button(navigation.scope.repo) { navigation.explore(ActivityScope(repo: navigation.scope.repo)) }.buttonStyle(.link) }
                 if !navigation.scope.path.isEmpty || !navigation.scope.areaName.isEmpty { Text("/").foregroundStyle(.tertiary); Text(navigation.scope.areaName.isEmpty ? navigation.scope.path : navigation.scope.areaName).lineLimit(1).truncationMode(.middle) }
@@ -131,7 +130,9 @@ struct ActivityBoard: View {
                 ForEach(related.prefix(5)) { pr in Button { navigation.showPRs(repo: pr.repo, selected: pr.id) } label: { Text("#\(pr.number) \(pr.title)").multilineTextAlignment(.leading) }.buttonStyle(.link) }
                 if !inspectScope.repo.isEmpty {
                     Button("View repository PRs") { navigation.showPRs(repo: inspectScope.repo) }
-                    Button(inspectScope.path.isEmpty ? "Open repository on GitHub" : "Open path on GitHub", systemImage: "arrow.up.right") { Task { do { let url = try await workspace.openPath(inspectScope); NSWorkspace.shared.open(url) } catch { workspace.error = error.localizedDescription } } }
+                    let scope = inspectScope
+                    Button(scope.path.isEmpty ? "Open repository on GitHub" : "Open path on GitHub", systemImage: "arrow.up.right") { openGitHub(scope, workspace: workspace) }
+                        .focusedSceneValue(\.selectedActivityScope, scope)
                 }
             }.padding(16)
         }

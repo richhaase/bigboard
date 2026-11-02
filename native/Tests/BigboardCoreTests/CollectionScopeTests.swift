@@ -44,6 +44,23 @@ import Testing
         #expect(!Set(fixture.workspace.configuration.repositories).contains(new))
     }
 
+    @Test func onlyTypedGitDenialRemovesRepositoryAccess() async throws {
+        let denied = "owner/denied", transient = "owner/transient"
+        let ids = [denied, transient]
+        let config = WorkspaceConfiguration(repositories: ids)
+        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids, refreshHistory: { _, repo, _ in
+            if repo.id == denied { throw GitHubFailure.permission }
+            throw BigboardError.message("Access denied: local Git process could not start.")
+        })
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [transient])
+        #expect(fixture.workspace.snapshot.repositories.first?.stale == true)
+        #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == [transient])
+        let storage = WorkspaceStorage(supportRoot: fixture.base.appendingPathComponent("support"), cacheRoot: fixture.base.appendingPathComponent("workspace-cache"))
+        #expect(try storage.loadGrant("123").map(\.id) == [transient])
+    }
+
     @Test func settingsDiscoveryRequiresFullRefreshBeforeRemovingNewlyUnlistedCache() async throws {
         let ids = ["owner/chosen", "owner/removed"]
         let config = SettingsRepositories.applying(Set(ids), available: Set(ids), to: WorkspaceConfiguration())

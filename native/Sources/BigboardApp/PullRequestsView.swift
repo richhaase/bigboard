@@ -62,6 +62,7 @@ struct PullRequestsBoard: View {
             Text(pr.title).font(.title2.bold()).textSelection(.enabled)
             Text(pr.repo).foregroundStyle(.secondary)
             Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }.buttonStyle(.borderedProminent)
+                .focusedSceneValue(\.selectedPullRequestURL, pr.url)
             LabeledContent("Author", value: pr.author)
             LabeledContent("State", value: pr.draft ? "Draft" : "Open")
             LabeledContent("Review") { StateBadge(value: pr.review) }

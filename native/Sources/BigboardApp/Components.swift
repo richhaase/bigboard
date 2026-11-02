@@ -7,6 +7,16 @@ func openGitHub(_ raw: String) {
     guard let url = URL(string: raw), url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil, !raw.contains("\n"), !raw.contains("\r") else { return }
     NSWorkspace.shared.open(url)
 }
+@MainActor func openGitHub(_ scope: ActivityScope, workspace: WorkspaceModel) {
+    Task {
+        do {
+            let url = try await workspace.openPath(scope)
+            NSWorkspace.shared.open(url)
+        } catch {
+            workspace.error = error.localizedDescription
+        }
+    }
+}
 struct DeltaView: View {
     var added: Int; var removed: Int; var unknown = false
     var body: some View { HStack(spacing: 5) { Text("+\(formatted(added))").foregroundStyle(.green); Text("−\(formatted(removed))").foregroundStyle(.red); if unknown { Text("?").help("Some line counts are unavailable") } }.font(.system(.callout, design: .monospaced)).monospacedDigit() }
@@ -64,19 +74,25 @@ struct ActivityTimeline: View {
     }
 }
 struct ActivityCalendar: View {
-    var records: [Commit]; var now: Date
-    var points: [TimelinePoint] { Analysis.daily(records, days: 365, now: now) }
-    var padding: Int { guard let first = points.first else { return 0 }; return (Calendar.current.component(.weekday, from: first.date) - Calendar.current.firstWeekday + 7) % 7 }
+    var records: [Commit]
+    var days: Int
+    var since: Date?
+    var now: Date
+    var rangeLabel: String
+    @Environment(\.calendar) private var calendar
+
     var body: some View {
+        let points = Analysis.daily(records, days: days, since: since, now: now, calendar: calendar)
+        let padding = points.first.map { (calendar.component(.weekday, from: $0.date) - calendar.firstWeekday + 7) % 7 } ?? 0
         VStack(alignment: .leading, spacing: 6) {
-            Text("Daily activity · past year").font(.caption).foregroundStyle(.secondary)
+            Text("Daily activity · \(rangeLabel)").font(.caption).foregroundStyle(.secondary)
             ScrollView(.horizontal) {
                 LazyHGrid(rows: Array(repeating: GridItem(.fixed(10), spacing: 3), count: 7), spacing: 3) {
                     ForEach(0..<padding, id: \.self) { _ in Color.clear.frame(width: 10, height: 10) }
                     ForEach(points, id: \.date) { point in ActivityCalendarCell(point: point) }
                 }.frame(height: 88)
             }
-        }.accessibilityLabel("Activity calendar for the latest year")
+        }.accessibilityLabel("Activity calendar · \(rangeLabel)")
     }
 }
 private struct ActivityCalendarCell: View {

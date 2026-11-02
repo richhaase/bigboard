@@ -5,10 +5,16 @@ struct WorkspacePanel: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     @Environment(\.dismiss) private var dismiss
-    var title: String { switch panel { case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities"; case .repositories: "Repository filter" } }
+    var title: String { switch panel { case .settings: "Workspace settings"; case .filters: "Filters"; case .status: "Data status"; case .help: "Keyboard guide"; case .identities: "Contributor identities" } }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text(title).font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
+            HStack {
+                Text(title).font(.title2.bold())
+                Spacer()
+                if panel != .settings {
+                    Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+            }.padding(20)
             Divider()
             if !workspace.error.isEmpty { Text(workspace.error).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
             if workspace.busy, panel != .settings { ProgressView().controlSize(.small).padding(8) }
@@ -19,7 +25,6 @@ struct WorkspacePanel: View {
                 case .status: StatusPanel(workspace: workspace)
                 case .help: HelpPanel()
                 case .identities: IdentitiesPanel(workspace: workspace)
-                case .repositories: ScrollView { RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation) }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.frame(width: 780, height: 700)
@@ -58,15 +63,14 @@ struct SettingsPanel: View {
                     else { general }
                 }.padding(20)
             }.disabled(applying)
-            if tab != "storage" {
-                Divider()
-                HStack {
-                    if applying { ProgressView("Applying settings…").controlSize(.small) }
-                    Spacer()
-                    Button("Cancel") { dismiss() }.disabled(applying)
+            Divider()
+            HStack {
+                if applying { ProgressView("Applying settings…").controlSize(.small) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(applying)
+                if tab != "storage" {
                     Button("Apply") {
-                        prepare()
-                        let candidate = draft
+                        let candidate = preparedConfiguration()
                         applying = true
                         Task {
                             let saved = await workspace.saveConfiguration(candidate)
@@ -74,9 +78,9 @@ struct SettingsPanel: View {
                             if saved { dismiss() }
                         }
                     }.buttonStyle(.borderedProminent).disabled(applying || workspace.busy || !workspace.authStatus.signedIn || selected.isEmpty)
-                }.padding()
-            }
-        }.onAppear {
+                }
+            }.padding()
+        }.interactiveDismissDisabled(applying).onAppear {
             guard !initialized else { return }
             initialized = true; draft = workspace.configuration; selected = Set(draft.repositories)
         }
@@ -170,11 +174,12 @@ struct SettingsPanel: View {
             Text("Enter one rule per line. Repository glob patterns exclude matches from your saved selection. AI rules use author/coauthor email addresses or @domain; bot rules also accept exact names.").font(.caption).foregroundStyle(.secondary)
         }
     }
-    private func prepare() {
-        draft = SettingsRepositories.applying(selected, available: availableIDs, to: draft)
-        draft.exclude = entries(draft.exclude.joined(separator: "\n"))
-        draft.aiIdentities = entries(draft.aiIdentities.joined(separator: "\n"))
-        draft.botIdentities = entries(draft.botIdentities.joined(separator: "\n"))
+    private func preparedConfiguration() -> WorkspaceConfiguration {
+        var candidate = SettingsRepositories.applying(selected, available: availableIDs, to: draft)
+        candidate.exclude = entries(draft.exclude.joined(separator: "\n"))
+        candidate.aiIdentities = entries(draft.aiIdentities.joined(separator: "\n"))
+        candidate.botIdentities = entries(draft.botIdentities.joined(separator: "\n"))
+        return candidate
     }
     private func stringList(_ label: String, values: Binding<[String]>) -> some View { VStack(alignment: .leading) { Text(label); TextEditor(text: Binding(get: { values.wrappedValue.joined(separator: "\n") }, set: { values.wrappedValue = $0.components(separatedBy: .newlines) })).font(.body.monospaced()).frame(height: 65).border(.quaternary) } }
 }
@@ -261,6 +266,9 @@ struct RepositoryFilterSelection: View {
     @Binding var selection: Set<String>
     var listHeightLimit: CGFloat? = nil
     @State private var query = ""
+    @State private var highlightedRepository: String?
+    @FocusState private var searchFocused: Bool
+    @FocusState private var listFocused: Bool
     private var available: Set<String> { Set(repositories.map(\.id)) }
     private var checklist: RepositoryChecklist { RepositoryChecklist(selection: selection, available: available) }
     private var visible: [Repository] { repositories.sorted { $0.id < $1.id }.filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) } }
@@ -273,23 +281,40 @@ struct RepositoryFilterSelection: View {
                     Spacer()
                     Button("Select all loaded") { selection = [] }
                 }
-                TextField("Search loaded repositories", text: $query).textFieldStyle(.roundedBorder)
+                TextField("Search loaded repositories", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
+                    .onAppear { if listHeightLimit != nil { searchFocused = true } }
+                    .onSubmit {
+                        guard listHeightLimit != nil, let first = visible.first else { return }
+                        highlightedRepository = first.id
+                        listFocused = true
+                    }
                 if visible.isEmpty { Text("No loaded repositories match this search.").foregroundStyle(.secondary) }
                 else if let listHeightLimit {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(visible) { repo in repositoryRow(repo).lineLimit(1).help(repo.id).frame(height: 24) }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(height: min(CGFloat(visible.count) * 30 - 6, listHeightLimit))
+                    List(visible, selection: $highlightedRepository) { repo in
+                        repositoryRow(repo).lineLimit(1).help(repo.id).tag(repo.id)
+                    }
+                    .listStyle(.plain)
+                    .focused($listFocused)
+                    .frame(height: min(CGFloat(visible.count) * 26 + 8, listHeightLimit))
+                    .onKeyPress(.space) {
+                        guard let id = highlightedRepository, visible.contains(where: { $0.id == id }) else { return .ignored }
+                        setChecked(id, checked: !checklist.checked.contains(id))
+                        return .handled
+                    }
                 } else {
                     ForEach(visible) { repo in repositoryRow(repo) }
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    private func setChecked(_ id: String, checked: Bool) {
+        if let updated = checklist.setting(id, checked: checked) { selection = updated }
+    }
     private func repositoryRow(_ repo: Repository) -> some View {
         Toggle(repo.id, isOn: Binding(get: { checklist.checked.contains(repo.id) }, set: { checked in
-            if let updated = checklist.setting(repo.id, checked: checked) { selection = updated }
+            setChecked(repo.id, checked: checked)
         })).toggleStyle(.checkbox)
             .disabled(checklist.checked == [repo.id])
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -355,8 +380,23 @@ struct IdentitiesPanel: View {
     }
 }
 struct HelpPanel: View {
-    let commands: [(String, String)] = [("A / C / P", "Activity / Contributors / Pull requests"), ("⌘R or R", "Refresh repository evidence"), ("/", "Focus search"), ("F or T", "Open filters"), ("E", "Data status"), ("I", "Repository filter"), ("⌘, or ,", "Workspace settings"), ("? or F1", "Keyboard guide"), ("X", "Reset this board’s filters"), ("Y", "Copy the current view as Markdown"), ("B", "Show or hide bots"), ("S / Shift-S", "Cycle sort / reverse sort order"), ("Return / →", "Directories: explore the selected row"), ("O", "Open the selected path or PR on GitHub"), ("1 / 2 / 3 / 4 / 5", "Activity: commits / people / related / directories / heat"), ("Escape or ←", "Move back through Activity context"), ("V", "Activity: open repository pull requests"), ("M", "Activity: switch related evidence; Contributors: edit identities; PRs: needs attention"), ("Shift-M / N", "PRs: authored by me / review requested")]
+    let commands: [(String, String)] = [
+        ("⌘1 / ⌘2 / ⌘3", "Activity / Contributors / Pull requests"),
+        ("⌘F", "Find on the current board"),
+        ("⌘⇧F", "Open Filters"),
+        ("⌘⇧I", "Repository Filter"),
+        ("⌘⇧D", "Data Status"),
+        ("⌘R", "Refresh repository evidence"),
+        ("⌘,", "Workspace Settings"),
+        ("⌘[", "Back in Activity"),
+        ("⌘⇧C", "Copy view as Markdown"),
+        ("⌘Return", "Open selection on GitHub"),
+        ("⌘⌥1–5", "Activity: Heat, Directories, Commits, People, Related"),
+        ("⌘⌥M / ⌘⌥A / ⌘⌥R", "PRs: needs my attention / authored by me / review requested"),
+        ("Return / →", "Explore the selected directory row"),
+        ("Esc", "Dismiss the active popover or sheet")
+    ]
     var body: some View {
-        ScrollView { VStack(alignment: .leading, spacing: 14) { Text("Shortcuts work when you are not editing text. Use standard macOS list navigation, window controls, and menu commands throughout the app.").foregroundStyle(.secondary); ForEach(commands, id: \.0) { key, action in HStack { Text(key).font(.body.monospaced()).frame(width: 180, alignment: .leading); Text(action); Spacer() }; Divider() }; Text("Heat compares each area with its own recent history. Contribution totals describe changes; they do not measure productivity. Pull-request evidence may be partial; Data status explains coverage.").foregroundStyle(.secondary) }.padding(24) }
+        ScrollView { VStack(alignment: .leading, spacing: 14) { Text("The Boards menu lists shortcuts for the current board. Use Tab to move focus and Space to toggle a focused checkbox.").foregroundStyle(.secondary); ForEach(commands, id: \.0) { key, action in HStack { Text(key).font(.body.monospaced()).frame(width: 180, alignment: .leading); Text(action); Spacer() }; Divider() }; Text("Heat compares each area with its own recent history. Contribution totals describe changes; they do not measure productivity. Pull-request evidence may be partial; Data status explains coverage.").foregroundStyle(.secondary) }.padding(24) }
     }
 }

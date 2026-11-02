@@ -190,6 +190,13 @@ final class WorkspaceModel {
         authStatus = state
         if !state.signedIn { await invalidateAuthentication(operation: operation) }
     }
+    private struct ScanOutcome: Sendable {
+        enum Access: Sendable { case unchanged, denied, authenticationRequired }
+
+        var repository: Repository
+        var commits: [Commit]
+        var access: Access = .unchanged
+    }
     private func scan(_ repos: [Repository], previous: Snapshot, history: GitHistory, configuration: WorkspaceConfiguration, live: Bool) async -> Snapshot {
         let scanGeneration = generation
         var result = Snapshot(generatedAt: Date(), accountID: previous.accountID, viewer: previous.viewer)
@@ -201,36 +208,47 @@ final class WorkspaceModel {
             let batch = Array(repos[start..<min(start + 8, repos.count)])
             let auth = self.auth
             let refreshHistory = self.refreshHistory
-            let outcomes = await withTaskGroup(of: (Repository, [Commit], Bool).self, returning: [(Repository, [Commit], Bool)].self) { group in
+            let outcomes = await withTaskGroup(of: ScanOutcome.self, returning: [ScanOutcome].self) { group in
                 for repo in batch {
                     group.addTask {
                         var current = repo
                         do {
                             if live { current = try await refreshHistory(history, repo, auth.token()) }
                             let scanned = try await history.scan(current, configuration: configuration)
-                            return (scanned.0, scanned.1, false)
+                            return ScanOutcome(repository: scanned.0, commits: scanned.1)
                         } catch {
                             current.stale = true; current.error = error.localizedDescription
-                            if let failure = error as? GitHubFailure, failure.isAccessDenied { current.error = "Access denied: " + current.error }
                             let prior = previous.repositories.first { $0.id == repo.id }
                             current.revision = prior?.revision ?? ""; current.scannedAt = prior?.scannedAt
-                            if let failure = error as? GitHubFailure, failure.isAccessDenied { return (current, [], failure == .auth) }
+                            if let failure = error as? GitHubFailure, failure.isAccessDenied {
+                                current.error = "Access denied: " + current.error
+                                return ScanOutcome(repository: current, commits: [], access: failure == .auth ? .authenticationRequired : .denied)
+                            }
                             if live, !Task.isCancelled, let cached = try? await history.scan(repo, configuration: configuration) {
                                 current.revision = cached.0.revision; current.scannedAt = cached.0.scannedAt
-                                return (current, cached.1, false)
+                                return ScanOutcome(repository: current, commits: cached.1)
                             }
-                            return (current, previous.commits.filter { $0.repo == repo.id }, false)
+                            return ScanOutcome(repository: current, commits: previous.commits.filter { $0.repo == repo.id })
                         }
                     }
                 }
-                var values: [(Repository,[Commit],Bool)] = []
+                var values: [ScanOutcome] = []
                 for await value in group { values.append(value) }
                 return values
             }
-            for (repo, commits, authenticationRequired) in outcomes.sorted(by: {$0.0.id < $1.0.id}) {
-                if scanGeneration == generation, authenticationRequired { pendingGitAuthentication = true }
-                if scanGeneration == generation, repo.error.hasPrefix("Access denied:") { pendingGitDenials.insert(repo.id) }
-                result.repositories.append(repo); result.commits += commits
+            for outcome in outcomes.sorted(by: { $0.repository.id < $1.repository.id }) {
+                let repo = outcome.repository
+                if scanGeneration == generation {
+                    switch outcome.access {
+                    case .unchanged: break
+                    case .denied: pendingGitDenials.insert(repo.id)
+                    case .authenticationRequired:
+                        pendingGitAuthentication = true
+                        pendingGitDenials.insert(repo.id)
+                    }
+                }
+                result.repositories.append(repo)
+                result.commits += outcome.commits
                 if !repo.error.isEmpty { result.coverage.errors.append("\(repo.id): \(repo.error)") }
             }
             if scanGeneration == generation, pendingGitAuthentication { break }

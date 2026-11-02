@@ -1,6 +1,12 @@
 import Foundation
+import AppKit
 
 @MainActor enum BoardMarkdown {
+    static func copy(snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState) {
+        let text = render(snapshot: snapshot, configuration: configuration, navigation: navigation)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
     static func render(snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState) -> String {
         var lines = ["# Bigboard · \(navigation.board.rawValue)", "", "Snapshot: \(snapshot.generatedAt.formatted(.iso8601))", "Range: \(navigation.lens == .heat && navigation.board == .activity ? "Heat historical window" : navigation.rangeLabel)", "Repositories: \(navigation.repositories.isEmpty ? "All tracked" : navigation.repositories.sorted().joined(separator: ", "))"]
         if !navigation.currentFilters.query.isEmpty { lines.append("Search: \(navigation.currentFilters.query)") }

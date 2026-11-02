@@ -45,10 +45,9 @@ repositories, active days, additions/removals, contribution rhythm, a daily
 calendar, and recent commits. Select a repository under **Where work happened**
 to continue in Activity.
 
-The rhythm chart follows the selected evidence. The calendar uses a fixed
-past-year grid; dates outside the selected range remain empty. Hovering a day
-shows its date and commit count. Expand the shared date range when investigating
-longer patterns.
+The rhythm chart and calendar follow the selected date range. Weeks start on
+your first weekday. Hover over a day to see its date and commit count. Expand
+the shared date range to investigate longer patterns.
 
 If the same person appears under multiple email addresses, open **Identities**,
 select the aliases and primary email, stage the rule, review, and save. The
@@ -72,7 +71,7 @@ Choose **Since last look** in the date menu once a bookmark exists. The baseline
 stays fixed during your session, so refresh does not move the starting point.
 A normal quit records eligible live snapshots for the next session.
 
-Copy the current view as Markdown with `y`, or export all loaded contributor
+Copy the current view as Markdown with Command-Shift-C, or export all loaded contributor
 history as JSON from Contributors. Exports do not make network requests.
 
 For offline inspection, enable cached history in Settings → General. Use
