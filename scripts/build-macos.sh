@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-release_version=${1:?Usage: build-macos.sh VERSION}
-if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then printf 'Invalid release version\n' >&2; exit 1; fi
+
+configuration=${1:-Debug}
+case "$configuration" in
+  Debug|Development|Release) ;;
+  *)
+    printf 'Usage: build-macos.sh [Debug|Development|Release]\n' >&2
+    exit 1
+    ;;
+esac
+
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-CONFIGURATION=release UNIVERSAL=1 REQUIRE_AUTH=1 bash "$repo_root/scripts/build-swift.sh" "$release_version"
-architectures=$(lipo -archs "$repo_root/native/build/Bigboard.app/Contents/MacOS/Bigboard")
-[[ " $architectures " == *" arm64 "* && " $architectures " == *" x86_64 "* ]]
+export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
+
+xcodebuild -quiet \
+  -project "$repo_root/native/Bigboard.xcodeproj" \
+  -scheme "Bigboard App" \
+  -configuration "$configuration" \
+  -derivedDataPath "$repo_root/native/build/DerivedData" \
+  -destination 'generic/platform=macOS' \
+  CONFIGURATION_BUILD_DIR="$repo_root/native/build" \
+  build

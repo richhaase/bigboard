@@ -23,7 +23,8 @@ running `make dev` again; its state persists across rebuilds. The installed
 release can remain open because it uses separate credentials and local data.
 The command does not install or publish the app.
 `make test` runs the native test suite; `make check` also builds optimized code.
-Open `native/Package.swift` in Xcode to develop or debug the app.
+Open `native/Bigboard.xcodeproj` in Xcode and select the **Bigboard Dev** scheme
+to develop or debug the app.
 
 For live sign-in, add `com.richhaase.bigboard.dev://oauth/github` as a second
 callback URL on the existing publisher GitHub App, retaining the release callback

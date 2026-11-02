@@ -28,3 +28,6 @@ native/build/
 native/.swiftpm/
 
 native/publisher.local.json
+
+xcuserdata/
+*.xcuserstate

@@ -56,7 +56,8 @@ Configure the publishing repository after registration:
 | `BIGBOARD_GITHUB_CLIENT_SECRET` | Repository secret |
 
 The release workflow injects these publisher values into the native bundle metadata.
-`scripts/build-macos.sh` rejects missing or malformed configuration. End users
+`scripts/configure-publisher.swift` validates publisher settings during the Xcode
+build. Release archives require all three settings. End users
 have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
@@ -150,3 +151,18 @@ References: [user access tokens](https://docs.github.com/en/apps/creating-github
 [token refresh](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens),
 [Git permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app#choosing-permissions-for-git-access),
 [REST API practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).
+
+## Release signing inputs
+
+The release workflow maps the existing GitHub secrets to the signing action and
+Apple's notarization tools. `QUILL_SIGN_P12` holds the base64-encoded Developer ID
+certificate and private key, and `QUILL_SIGN_PASSWORD` unlocks that file.
+`QUILL_NOTARY_KEY` holds the notarization API key as PEM text or base64,
+with `QUILL_NOTARY_KEY_ID` and `QUILL_NOTARY_ISSUER` identifying it.
+These existing secret names are retained in GitHub Actions.
+
+The certificate action creates and cleans up a temporary keychain. The workflow
+selects the single Developer ID Application identity and derives its Team ID.
+`release.sh` receives `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and
+`NOTARY_KEY_PATH`, `NOTARY_KEY_ID`, and `NOTARY_ISSUER`.
+The temporary notarization key is removed even if the release fails.

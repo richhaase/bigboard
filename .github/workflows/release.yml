@@ -22,18 +22,57 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Build, sign, and publish
+      - name: Import signing certificate
+        id: signing
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.QUILL_SIGN_P12 }}
+          p12-password: ${{ secrets.QUILL_SIGN_PASSWORD }}
+      - name: Prepare release credentials
+        env:
+          SIGNING_IDENTITIES: ${{ steps.signing.outputs.identities }}
+          NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          identity=$(jq -er '
+            [.[] | select(.name | startswith("Developer ID Application:"))]
+            | if length == 1 then .[0].hash
+              else error("Expected one Developer ID Application identity")
+              end
+          ' <<< "$SIGNING_IDENTITIES")
+          team=$(jq -er '
+            .[]
+            | select(.name | startswith("Developer ID Application:"))
+            | .name
+            | capture("\\((?<team>[A-Z0-9]{10})\\)$").team
+          ' <<< "$SIGNING_IDENTITIES")
+          key_path="$RUNNER_TEMP/bigboard-notary.p8"
+          case "$NOTARY_KEY" in
+            "-----BEGIN "*)
+              printf '%s' "$NOTARY_KEY" > "$key_path"
+              ;;
+            *)
+              printf '%s' "$NOTARY_KEY" | base64 --decode > "$key_path"
+              ;;
+          esac
+          {
+            echo "SIGNING_IDENTITY=$identity"
+            echo "DEVELOPMENT_TEAM=$team"
+            echo "NOTARY_KEY_PATH=$key_path"
+          } >> "$GITHUB_ENV"
+      - name: Archive, notarize, and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BIGBOARD_GITHUB_CLIENT_ID: ${{ vars.BIGBOARD_GITHUB_CLIENT_ID }}
           BIGBOARD_GITHUB_CLIENT_SECRET: ${{ secrets.BIGBOARD_GITHUB_CLIENT_SECRET }}
           BIGBOARD_GITHUB_APP_SLUG: ${{ vars.BIGBOARD_GITHUB_APP_SLUG }}
-          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
-          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
-          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
-          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
-          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
+          NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
         run: bash scripts/release.sh "$RELEASE_TAG"
+      - name: Remove notarization key
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/bigboard-notary.p8"
       - name: Checkout Homebrew tap
         if: ${{ !contains(env.RELEASE_TAG, '-') }}
         uses: actions/checkout@v7

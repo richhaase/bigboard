@@ -1,6 +1,7 @@
 # Native Bigboard
 
-Bigboard is a Swift 6 package targeting macOS 26 Tahoe or later. It has no third-party
+Bigboard uses an Xcode macOS app target and a local Swift 6 library package,
+targeting macOS 26 Tahoe or later. It has no third-party
 Swift packages or embedded browser runtime.
 SwiftUI supplies the interface; AppKit supplies lifecycle, clipboard, browser,
 and Save dialog integration; Security supplies Keychain; Foundation supplies
@@ -22,7 +23,10 @@ Install Git through Homebrew or Xcode Command Line Tools if it is unavailable.
 | `Sources/BigboardCore/Analysis.swift` | Canonical deduplication, scoped totals, Heat, people, calendars and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Versioned JSON, account isolation, atomic writes, conflicts, access and bookmarks. |
 | `Tests/App/`, `Tests/Core/`, `Tests/Workspace/` | Board and settings state, core logic, and workspace flows across Git, storage, and mocked GitHub. |
-| `Assets/AppIcon.png` | Source app icon used by local and release packaging. |
+| `Bigboard.xcodeproj`, `App/` | Application target and launcher, linking the local Bigboard package. |
+| `Config/` | Development and release build settings, bundle metadata, and archive export options. |
+| `Assets.xcassets/` | App icon sizes compiled by Xcode. |
+| `Assets/AppIcon.png` | Original artwork for updating the asset catalog. |
 
 ## Storage choice
 
@@ -67,11 +71,10 @@ or revoking GitHub authorization still affects the shared GitHub App.
 
 `make build` retains its production identity and output at
 `native/build/Bigboard.app`; close the installed release before launching that
-bundle. The packaging script's `--development` option selects the development
-identity explicitly. Compiler optimization (`CONFIGURATION`) is independent of
-application identity. Opening the Swift package directly in Xcode does not
-package a development bundle or register its callback; use `make dev` for the
-authenticated app walkthrough.
+bundle. The **Bigboard Dev** scheme selects the Development configuration and
+its separate identity. Debug and Release use the production identity.
+Use `make dev` or run the **Bigboard Dev** scheme for the authenticated app
+walkthrough.
 
 Local builds are ad hoc signed. macOS may ask for Keychain permission after a
 rebuild; this does not establish the signed-release upgrade behavior below.
@@ -169,10 +172,23 @@ and `BIGBOARD_GITHUB_APP_SLUG`). Restrict it to your account with `chmod 600`.
 values override the file. The build validates values without printing them.
 
 `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; override
-it for another Xcode installation. `UNIVERSAL=1 CONFIGURATION=release bash
-scripts/build-swift.sh` builds both CPU architectures. The Release workflow runs
-`scripts/release.sh` to test and build the tagged source, sign, notarize, and staple
-the app, and publish `native/build/Bigboard_<version>_darwin_universal.zip` plus
+it for another Xcode installation. `bash scripts/build-macos.sh Release` builds
+an optimized universal app for arm64 and x86_64. `make test` runs the library
+package tests without launching the app. `make check` runs those tests and the
+universal app build.
+
+Open `Bigboard.xcodeproj` and select **Bigboard Dev** for local development.
+The **Bigboard App** scheme uses the production identity. Run package tests with
+`make test`, or open `Package.swift` separately in Xcode. Both schemes link the same
+local library package, which owns the implementation and tests. Xcode processes
+`Config/Info.plist` and the icon asset catalog, then runs
+`scripts/configure-publisher.swift` to validate and embed publisher settings
+before code signing. The same configuration loader runs for Xcode and Make builds.
+
+The Release workflow imports the Developer ID certificate with
+`apple-actions/import-codesign-certs`. It runs `scripts/release.sh` to test the
+tagged source, archive and export with `xcodebuild`, notarize and staple with
+Apple's command-line tools, and publish `native/build/Bigboard_<version>_darwin_universal.zip` plus
 `checksums.txt` using `gh release create`. Stable releases update the Homebrew cask;
 the cask requires macOS Tahoe and explains the app's Git
 requirement, with no Homebrew Git dependency. No publication is part of local

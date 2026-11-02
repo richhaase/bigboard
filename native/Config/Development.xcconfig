@@ -1,0 +1,4 @@
+#include "Debug.xcconfig"
+PRODUCT_NAME = Bigboard Dev
+PRODUCT_BUNDLE_IDENTIFIER = com.richhaase.bigboard.dev
+BIGBOARD_DISPLAY_NAME = Bigboard Dev

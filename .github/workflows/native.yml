@@ -13,7 +13,5 @@ jobs:
         run: |
           sdk=$(xcrun --sdk macosx --show-sdk-version)
           test "${sdk%%.*}" -ge 26
-      - name: Test
-        run: swift test --package-path native
-      - name: Build native application
-        run: bash scripts/build-swift.sh
+      - name: Test and build application
+        run: make check

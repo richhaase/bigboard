@@ -4,13 +4,14 @@ export DEVELOPER_DIR
 help:
 	@echo "build: native Bigboard.app; dev: build and open Bigboard Dev.app; test/check: Swift tests"
 build:
-	bash scripts/build-swift.sh
+	bash scripts/build-macos.sh
 dev:
-	bash scripts/build-swift.sh --development
+	bash scripts/build-macos.sh Development
 	open "native/build/Bigboard Dev.app"
 test:
 	swift test --package-path native
 check: test
-	swift build --package-path native -c release
+	bash scripts/build-macos.sh Release
 clean:
 	swift package --package-path native clean
+	rm -rf native/build
