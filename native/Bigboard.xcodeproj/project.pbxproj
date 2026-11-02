@@ -164,7 +164,7 @@
 			);
 			dependencies = (
 			);
-			name = Bigboard;
+			name = BigboardDesktop;
 			buildRules = (
 			);
 		};
