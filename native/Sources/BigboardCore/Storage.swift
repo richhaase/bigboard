@@ -10,10 +10,9 @@ final class WorkspaceStorage: @unchecked Sendable {
     let cacheRoot: URL
     private var expected: [String: Data] = [:]
     private let lock = NSLock()
-    static func system() -> WorkspaceStorage {
-        let env = ProcessInfo.processInfo.environment
-        let support = env["BIGBOARD_DATA_ROOT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("com.richhaase.bigboard.native")
-        let cache = env["BIGBOARD_CACHE_ROOT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("com.richhaase.bigboard.native")
+    static func system(identity: ApplicationIdentity = .fromBundle(), environment: [String: String] = ProcessInfo.processInfo.environment) -> WorkspaceStorage {
+        let support = environment["BIGBOARD_DATA_ROOT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(identity.storageDirectory)
+        let cache = environment["BIGBOARD_CACHE_ROOT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(identity.storageDirectory)
         return WorkspaceStorage(supportRoot: support, cacheRoot: cache)
     }
     init(supportRoot: URL, cacheRoot: URL) { self.supportRoot = supportRoot.resolvingSymlinksInPath(); self.cacheRoot = cacheRoot.resolvingSymlinksInPath() }

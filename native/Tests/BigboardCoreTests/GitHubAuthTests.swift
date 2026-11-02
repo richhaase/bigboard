@@ -40,26 +40,84 @@ private func storedCredentials(expired: Bool = false) throws -> Data {
 }
 private let tokenResponse = #"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"bearer","expires_in":28800,"refresh_token_expires_in":15811200}"#
 private func callback(for url: URL) throws -> URL {
-    let state = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "state" })?.value)
-    return try #require(URL(string: "com.richhaase.bigboard://oauth/github?state=\(state)&code=authorization-code"))
+    let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+    let state = try #require(query.first(where: { $0.name == "state" })?.value)
+    let redirect = try #require(query.first(where: { $0.name == "redirect_uri" })?.value)
+    var callback = try #require(URLComponents(string: redirect))
+    callback.queryItems = [URLQueryItem(name: "state", value: state), URLQueryItem(name: "code", value: "authorization-code")]
+    return try #require(callback.url)
 }
 
-@Test func authUsesPKCEAndSingleUseCallback() async throws {
+@Test(arguments: ApplicationIdentity.allCases) func authUsesPKCEAndSingleUseCallback(identity: ApplicationIdentity) async throws {
     let store = MemoryCredentials()
     let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"rich","id":123}"#)])
-    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    var configuration = testConfiguration
+    configuration.identity = identity
+    let auth = AuthManager(configuration: configuration, store: store, transport: network, now: { testNow })
     let url = try await auth.start()
     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
     #expect(query.first(where: { $0.name == "code_challenge_method" })?.value == "S256")
     #expect(query.first(where: { $0.name == "code_challenge" })?.value?.count == 43)
+    #expect(query.first(where: { $0.name == "redirect_uri" })?.value == identity.callbackURI)
     #expect(!url.absoluteString.contains("secret"))
     let redirect = try callback(for: url)
     try await auth.complete(redirect)
+    let exchange = try #require(await network.first)
+    let body = try #require(exchange.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+    let fields = try #require(URLComponents(string: "?" + body)?.queryItems)
+    #expect(fields.first(where: { $0.name == "redirect_uri" })?.value == identity.callbackURI)
+    #expect(fields.first(where: { $0.name == "code_verifier" })?.value?.count == 43)
     let state = await auth.status()
     #expect(state.signedIn && state.accountID == "123")
     #expect(try await auth.token() == "new-access")
     do { try await auth.complete(redirect); Issue.record("A callback was replayed") } catch { #expect(error is AuthFailure) }
     #expect(await network.count == 2)
+}
+@Test(arguments: ApplicationIdentity.allCases, ["other-build", "host", "path", "encoded-path", "port", "user", "password", "fragment", "duplicate-state", "duplicate-code"])
+func authRejectsOtherBuildAndMalformedCallback(identity: ApplicationIdentity, alteration: String) async throws {
+    var configuration = testConfiguration
+    configuration.identity = identity
+    let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"rich","id":123}"#)])
+    let auth = AuthManager(configuration: configuration, store: MemoryCredentials(), transport: network, now: { testNow })
+    let redirect = try callback(for: await auth.start())
+    var parts = try #require(URLComponents(url: redirect, resolvingAgainstBaseURL: false))
+    switch alteration {
+    case "other-build": parts.scheme = identity == .production ? ApplicationIdentity.development.rawValue : ApplicationIdentity.production.rawValue
+    case "host": parts.host = "other"
+    case "path": parts.path = "/other"
+    case "encoded-path": parts.percentEncodedPath = "/%67ithub"
+    case "port": parts.port = 443
+    case "user": parts.user = "user"
+    case "password": parts.password = "password"
+    case "fragment": parts.fragment = "fragment"
+    case "duplicate-state": parts.queryItems?.append(URLQueryItem(name: "state", value: "other"))
+    default: parts.queryItems?.append(URLQueryItem(name: "code", value: "other"))
+    }
+    do { try await auth.complete(try #require(parts.url)); Issue.record("Accepted a mismatched or malformed callback") }
+    catch { #expect(error as? AuthFailure == .callback) }
+    #expect(await network.count == 0)
+    if alteration != "duplicate-code" {
+        try await auth.complete(redirect)
+        #expect(await auth.status().signedIn)
+    }
+}
+@Test func developmentSignInAndSignOutLeaveProductionCredentialsIntact() async throws {
+    let original = try storedCredentials()
+    let productionStore = MemoryCredentials(original)
+    let developmentStore = MemoryCredentials()
+    let production = AuthManager(configuration: testConfiguration, store: productionStore, transport: ScriptedGitHub([]), now: { testNow })
+    var configuration = testConfiguration
+    configuration.identity = .development
+    let development = AuthManager(configuration: configuration, store: developmentStore, transport: ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"rich","id":123}"#)]), now: { testNow })
+    #expect(await development.status().signedIn == false)
+    try await development.complete(callback(for: await development.start()))
+    #expect(await development.status().signedIn)
+    #expect(try productionStore.load() == original)
+    try await development.signOut()
+    #expect(try developmentStore.load() == nil)
+    #expect(try productionStore.load() == original)
+    #expect(await production.status().signedIn)
+    #expect(try await production.token() == "old-access")
 }
 @Test func authRejectsWrongCallbackWithoutConsumingAttempt() async throws {
     let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"rich","id":123}"#)])

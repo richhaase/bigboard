@@ -33,10 +33,47 @@ stored in either location. A future historical PR store may justify SQLite;
 that feature and its schema are outside this port.
 
 `BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override native paths for isolated
-testing. They do not redirect Keychain. Normal app launches use the configured
-account. Use a build without publisher configuration to inspect the signed-out UI
-without loading Keychain credentials; use a separate macOS user account for
-isolated authenticated UI verification.
+testing. They do not redirect Keychain. The packaged bundle identity selects
+the default data directories, Keychain service, and OAuth callback together.
+Use Bigboard Dev for authenticated local testing alongside the installed release.
+
+## Local development
+
+Run `make dev` from the repository root to build and open
+`native/build/Bigboard Dev.app`. Quit Bigboard Dev before rebuilding and running
+the command again. Development sign-in, settings, and caches persist across builds.
+
+For the one-time GitHub setup, add
+`com.richhaase.bigboard.dev://oauth/github` as a second callback URL on the
+existing Bigboard Desktop GitHub App. Keep the release callback
+`com.richhaase.bigboard://oauth/github` and leave wildcard matching disabled.
+Use the existing publisher settings described below; no separate GitHub App,
+account, or credential file is needed. Sign in once in Bigboard Dev, choose your
+actual repositories in Settings, and Apply.
+
+| Identity | Production | Development |
+| --- | --- | --- |
+| Bundle identifier | `com.richhaase.bigboard` | `com.richhaase.bigboard.dev` |
+| Keychain service | `com.richhaase.bigboard.github` | `com.richhaase.bigboard.dev.github` |
+| Application Support and Caches directory | `com.richhaase.bigboard.native` | `com.richhaase.bigboard.dev.native` |
+
+Development starts with a fresh workspace and does not copy production tokens,
+settings, grants, bookmarks, or caches. Both apps access the same GitHub App
+installations and can collect the same repositories, but their local state is
+independent. The installed release can stay open during development. Sign-out
+removes only the current build's local credential; changing installation access
+or revoking GitHub authorization still affects the shared GitHub App.
+
+`make build` retains its production identity and output at
+`native/build/Bigboard.app`; close the installed release before launching that
+bundle. The packaging script's `--development` option selects the development
+identity explicitly. Compiler optimization (`CONFIGURATION`) is independent of
+application identity. Opening the Swift package directly in Xcode does not
+package a development bundle or register its callback; use `make dev` for the
+authenticated app walkthrough.
+
+Local builds are ad hoc signed. macOS may ask for Keychain permission after a
+rebuild; this does not establish the signed-release upgrade behavior below.
 
 ## Preserved behavior
 
@@ -144,8 +181,9 @@ New version tag pushes trigger that workflow. It builds the checked-out commit;
 there is no manual old-tag publishing option.
 
 Automated fixtures do not establish live GitHub, real Keychain access, release
-signing, notarization, or large-account performance. Before replacing an installed
-app, test together with the old app closed:
+signing, notarization, or large-account performance. For ordinary local
+verification, use `make dev` and its independent workspace. For production-identity
+upgrade verification, test with the installed app closed:
 
 1. Build with the existing publisher configuration and launch the native bundle.
 2. Allow Keychain access if macOS asks; confirm the expected account is reused.
