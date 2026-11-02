@@ -14,13 +14,14 @@ Install Git through Homebrew or Xcode Command Line Tools if it is unavailable.
 | --- | --- |
 | `Sources/BigboardApp/WorkspaceModel.swift` | Account-scoped snapshots, refresh orchestration, settings, grants, bookmarks, export and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared view scope and independent board state. |
-| `Sources/BigboardApp/*View.swift`, `Dialogs.swift`, `Components.swift` | Native boards, inspectors and sheets. |
+| `Sources/BigboardApp/Boards/` | Activity, Heat, Contributors, Pull Requests, and their shared charts and commit list. |
+| `Sources/BigboardApp/Panels/`, `Settings/` | Workspace sheets, repository filters, and settings editors. |
 | `Sources/BigboardCore/Authentication.swift` | PKCE, callback validation, serialized rotation, opaque Keychain persistence. |
 | `Sources/BigboardCore/GitHub.swift` | Paginated installation discovery, bounded PR evidence, request budgets and cooldowns. |
-| `Sources/BigboardCore/GitHistory.swift` | Owned caches, default-branch probes/fetches, NUL-safe commit parsing, file rules, identities and parsed scan cache. |
+| `Sources/BigboardCore/History/` | Git subprocesses, app-owned mirrors, commit parsing, history rules, and the parsed scan cache. |
 | `Sources/BigboardCore/Analysis.swift` | Canonical deduplication, scoped totals, Heat, people, calendars and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Versioned JSON, account isolation, atomic writes, conflicts, access and bookmarks. |
-| `Tests/BigboardCoreTests/` | Mock HTTP/auth, real temporary Git repositories, projections, UI state and storage tests. |
+| `Tests/App/`, `Tests/Core/`, `Tests/Workspace/` | Board and settings state, core logic, and workspace flows across Git, storage, and mocked GitHub. |
 | `Assets/AppIcon.png` | Source app icon used by local and release packaging. |
 
 ## Storage choice

@@ -7,7 +7,10 @@ import AppKit
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateNow }
         terminating = true
-        Task { await workspace?.shutdown(); sender.reply(toApplicationShouldTerminate: true) }
+        Task {
+            await workspace?.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
         return .terminateLater
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -20,7 +23,10 @@ import AppKit
         Window("Bigboard", id: "main") {
             MainView(workspace: workspace, navigation: navigation)
                 .frame(minWidth: 900, minHeight: 620)
-                .task { delegate.workspace = workspace; await workspace.start() }
+                .task {
+                    delegate.workspace = workspace
+                    await workspace.start()
+                }
                 .onOpenURL { url in Task { await workspace.handleCallback(url) } }
         }
         .defaultSize(width: 1360, height: 900)
@@ -79,12 +85,15 @@ private struct BoardCommands: Commands {
             Divider()
             Button("Back in Activity") { navigation.back() }
                 .keyboardShortcut("[")
-                .disabled(modalOpen || !hasData || navigation.board != .activity || !navigation.canGoBackInActivity)
+                .disabled(
+                    modalOpen || !hasData || navigation.board != .activity || !navigation.canGoBackInActivity)
             Button("Copy View as Markdown") {
-                BoardMarkdown.copy(snapshot: workspace.snapshot, configuration: workspace.configuration, navigation: navigation)
+                BoardMarkdown.copy(
+                    snapshot: workspace.snapshot, configuration: workspace.configuration,
+                    navigation: navigation)
             }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(modalOpen || !hasData)
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .disabled(modalOpen || !hasData)
             Button("Open Selection on GitHub") {
                 if let scope = selectedActivityScope {
                     openGitHub(scope, workspace: workspace)
@@ -92,14 +101,16 @@ private struct BoardCommands: Commands {
                     openGitHub(url)
                 }
             }
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(modalOpen || (selectedActivityScope == nil && selectedPullRequestURL == nil))
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(modalOpen || (selectedActivityScope == nil && selectedPullRequestURL == nil))
             Menu("Activity View") {
                 ForEach(Array(ActivityLens.allCases.enumerated()), id: \.element) { index, lens in
                     Button(lens.rawValue) { navigation.setLens(lens) }
-                        .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
+                        .keyboardShortcut(
+                            KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
                 }
-            }.disabled(modalOpen || !hasData || navigation.board != .activity)
+            }
+            .disabled(modalOpen || !hasData || navigation.board != .activity)
             Menu("My Pull Requests") {
                 Button("Needs My Attention") { navigation.togglePRMine("attention") }
                     .keyboardShortcut("m", modifiers: [.command, .option])
@@ -107,7 +118,8 @@ private struct BoardCommands: Commands {
                     .keyboardShortcut("a", modifiers: [.command, .option])
                 Button("Review Requested") { navigation.togglePRMine("requested") }
                     .keyboardShortcut("r", modifiers: [.command, .option])
-            }.disabled(modalOpen || !hasData || navigation.board != .pullRequests)
+            }
+            .disabled(modalOpen || !hasData || navigation.board != .pullRequests)
         }
         CommandGroup(replacing: .help) {
             Button("Keyboard Guide") { navigation.panel = .help }.disabled(modalOpen)

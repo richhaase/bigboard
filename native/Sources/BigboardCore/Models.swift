@@ -1,10 +1,15 @@
 import Foundation
 
-struct IdentityRule: Codable, Sendable, Equatable { var aliases: [String] = []; var name: String = "" }
+struct IdentityRule: Codable, Sendable, Equatable {
+    var aliases: [String] = []
+    var name: String = ""
+}
 struct WorkArea: Codable, Sendable, Equatable {
     var name: String
     var paths: [String]
-    static func canonicalPrefix(_ path: String) -> String { path.hasSuffix("/") ? String(path.dropLast()) : path }
+    static func canonicalPrefix(_ path: String) -> String {
+        path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
 }
 struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var schemaVersion = 1
@@ -44,7 +49,10 @@ struct Commit: Codable, Sendable, Identifiable, Equatable {
     var linesUnknown = false
     var pathsUnknown = false
     var files: [FileChange] = []
-    var identity: String { email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(repo):\(author)" : email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    var identity: String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "\(repo):\(author)" : email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
     var change: Int { added + removed }
 }
 struct Repository: Codable, Sendable, Identifiable, Equatable {
@@ -63,7 +71,11 @@ struct Repository: Codable, Sendable, Identifiable, Equatable {
     var prStale = false
     var name: String { id }
 }
-struct Review: Codable, Sendable, Equatable { var author: String; var state: String; var submittedAt: Date? }
+struct Review: Codable, Sendable, Equatable {
+    var author: String
+    var state: String
+    var submittedAt: Date?
+}
 struct PullRequest: Codable, Sendable, Identifiable, Equatable {
     var repo: String
     var number: Int
@@ -113,7 +125,9 @@ struct ActivityScope: Hashable, Sendable {
     var path = ""
     var isFile = false
     var areaName = ""
-    func contains(_ candidate: String) -> Bool { path.isEmpty || (isFile ? candidate == path : candidate.hasPrefix(path + "/")) }
+    func contains(_ candidate: String) -> Bool {
+        path.isEmpty || (isFile ? candidate == path : candidate.hasPrefix(path + "/"))
+    }
 }
 struct AuthStatus: Sendable {
     var configured = false
@@ -125,5 +139,9 @@ struct AuthStatus: Sendable {
 }
 enum BigboardError: LocalizedError, Sendable {
     case message(String)
-    var errorDescription: String? { switch self { case .message(let value): value } }
+    var errorDescription: String? {
+        switch self {
+        case .message(let value): value
+        }
+    }
 }
