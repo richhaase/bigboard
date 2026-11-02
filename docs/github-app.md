@@ -60,7 +60,16 @@ The release workflow injects these publisher values into the native bundle metad
 have no configuration fields for these values. A local development build may
 omit all three, in which case sign-in is unavailable; supplying all three as
 environment variables enables the same flow through `make build` or `make dev`.
-The app bundle must be launched on macOS for native callback registration.
+For everyday local development, add
+`com.richhaase.bigboard.dev://oauth/github` as a second callback URL on this same
+GitHub App, with wildcard matching disabled and the release callback retained.
+Run `make dev` to launch Bigboard Dev and sign in separately using your normal
+GitHub account and repositories. The ignored `native/publisher.local.json` can
+hold the same publisher settings instead of supplying environment variables;
+see the [local development guide](../native/README.md#local-development).
+Development has its own Keychain credential and local data. `make build` keeps
+the production identity. The app bundle must be launched on macOS for native
+callback registration.
 
 The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
 Registration and publishing-repository settings are configured separately from

@@ -14,19 +14,28 @@ to GitHub and maintains owned bare Git caches; developer checkouts are untouched
 Building requires Xcode 26 or later with the macOS 26 SDK or newer.
 
 ```sh
-make build
-open native/build/Bigboard.app
+make dev
 ```
 
-The output is a locally signed development app. It is not installed or published.
+This builds and opens `native/build/Bigboard Dev.app`, a locally signed app with
+its own sign-in, settings, and caches. Quit Bigboard Dev before rebuilding and
+running `make dev` again; its state persists across rebuilds. The installed
+release can remain open because it uses separate credentials and local data.
+The command does not install or publish the app.
 `make test` runs the native test suite; `make check` also builds optimized code.
 Open `native/Package.swift` in Xcode to develop or debug the app.
 
-Live sign-in needs the publisher's existing `BIGBOARD_GITHUB_CLIENT_ID`,
-`BIGBOARD_GITHUB_CLIENT_SECRET`, and `BIGBOARD_GITHUB_APP_SLUG` in the build
-process environment. See [publisher setup](docs/github-app.md). These are build
-settings, not fields end users fill in. Do not put them in source control or chat.
-A build without them opens normally and explains why sign-in is unavailable.
+For live sign-in, add `com.richhaase.bigboard.dev://oauth/github` as a second
+callback URL on the existing publisher GitHub App, retaining the release callback
+and disabling wildcard matching. Reuse its publisher settings through the ignored
+`native/publisher.local.json` or build environment, then sign in once in Bigboard
+Dev and select your normal repositories. See the [local development setup](native/README.md#local-development).
+Publisher settings are build inputs, not fields end users fill in; keep them out
+of source control and chat. A build without them opens with sign-in unavailable.
+
+`make build` still packages `native/build/Bigboard.app` with the production
+identity. Keep the installed release closed when running that production-identity
+local bundle because they share credentials and data.
 
 ## Workflows
 
@@ -65,11 +74,11 @@ There is **no legacy import**. Choose repositories again in the native app.
 - Rebuildable Git history and parsed scans: `~/Library/Caches/com.richhaase.bigboard.native/accounts/<account-id>/repos/`.
 - Credentials: the existing non-synchronizing Bigboard GitHub Keychain item.
 
-The replacement can reuse the existing sign-in when built with the same publisher
-settings. Keep the old app closed while testing: both versions share rotating
-credentials, and signing out removes the shared local credential. macOS may ask
-you to permit Keychain access because the development app has a different signature.
-Native settings and caches remain separate from the old app's files.
+These are the production locations. Bigboard Dev uses
+`com.richhaase.bigboard.dev.native` instead of `com.richhaase.bigboard.native`
+for both data directories and its own GitHub Keychain service. It starts with a
+fresh sign-in and workspace; production tokens and state are never copied.
+macOS may ask for Keychain permission after a locally signed rebuild.
 
 See the [workflow guide](docs/visual-guide.md) for a first session, the
 [user reference](docs/reference.md) for controls and data semantics, and the

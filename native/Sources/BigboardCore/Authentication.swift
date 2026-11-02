@@ -6,11 +6,12 @@ struct AuthConfiguration: Sendable {
     var clientID: String
     var clientSecret: String
     var appSlug: String
-    var callbackURI = "com.richhaase.bigboard://oauth/github"
-    var valid: Bool { validAuthValue(clientID) && validAuthValue(clientSecret) && !appSlug.isEmpty && appSlug.utf8.count <= 100 && appSlug.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 } && callbackURI == "com.richhaase.bigboard://oauth/github" }
-    static func fromBundle() -> AuthConfiguration {
-        func value(_ key: String) -> String { ProcessInfo.processInfo.environment[key] ?? Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "" }
-        return AuthConfiguration(clientID: value("BIGBOARD_GITHUB_CLIENT_ID"), clientSecret: value("BIGBOARD_GITHUB_CLIENT_SECRET"), appSlug: value("BIGBOARD_GITHUB_APP_SLUG"))
+    var identity: ApplicationIdentity = .production
+    var callbackURI: String { identity.callbackURI }
+    var valid: Bool { validAuthValue(clientID) && validAuthValue(clientSecret) && !appSlug.isEmpty && appSlug.utf8.count <= 100 && appSlug.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 } }
+    static func fromBundle(_ bundle: Bundle = .main) -> AuthConfiguration {
+        func value(_ key: String) -> String { ProcessInfo.processInfo.environment[key] ?? bundle.object(forInfoDictionaryKey: key) as? String ?? "" }
+        return AuthConfiguration(clientID: value("BIGBOARD_GITHUB_CLIENT_ID"), clientSecret: value("BIGBOARD_GITHUB_CLIENT_SECRET"), appSlug: value("BIGBOARD_GITHUB_APP_SLUG"), identity: .fromBundle(bundle))
     }
 }
 protocol CredentialStore: Sendable {
@@ -19,7 +20,8 @@ protocol CredentialStore: Sendable {
     func delete() throws
 }
 struct KeychainCredentialStore: CredentialStore {
-    var service = "com.richhaase.bigboard.github"
+    let service: String
+    init(identity: ApplicationIdentity = .fromBundle()) { service = identity.keychainService }
     private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "github.com", kSecAttrSynchronizable as String: false] }
     func load() throws -> Data? {
         var request = query
@@ -139,7 +141,7 @@ actor AuthManager {
     }
     func complete(_ url: URL) async throws {
         guard configuration.valid else { throw AuthFailure.configuration }
-        guard url.absoluteString.utf8.count <= 16384, let parts = URLComponents(url: url, resolvingAgainstBaseURL: false), parts.scheme == "com.richhaase.bigboard", parts.host == "oauth", parts.path == "/github", parts.percentEncodedPath == "/github", parts.port == nil, parts.user == nil, parts.password == nil, parts.fragment == nil, let attempt = pending, attempt.expires > now() else { throw AuthFailure.callback }
+        guard url.absoluteString.utf8.count <= 16384, let parts = URLComponents(url: url, resolvingAgainstBaseURL: false), parts.scheme == configuration.identity.rawValue, parts.host == "oauth", parts.path == "/github", parts.percentEncodedPath == "/github", parts.port == nil, parts.user == nil, parts.password == nil, parts.fragment == nil, let attempt = pending, attempt.expires > now() else { throw AuthFailure.callback }
         let items = parts.queryItems ?? []
         let states = items.filter { $0.name == "state" }
         guard states.count == 1, constantEqual(states[0].value ?? "", attempt.state) else { throw AuthFailure.callback }

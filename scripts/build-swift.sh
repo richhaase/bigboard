@@ -22,6 +22,8 @@ os.execve("/bin/bash",["bash",sys.argv[1],*sys.argv[2:]],environment)
 CONFIG
 fi
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
+development=0
+if [[ "${1:-}" == --development ]]; then development=1; shift; fi
 version=${1:-0.0.0-dev}
 configuration=${CONFIGURATION:-debug}
 if [[ "${REQUIRE_AUTH:-0}" == 1 ]]; then
@@ -45,12 +47,15 @@ if [[ "${UNIVERSAL:-0}" == 1 ]]; then build_args+=(--arch arm64 --arch x86_64); 
 swift build "${build_args[@]}"
 bin_dir=$(swift build "${build_args[@]}" --show-bin-path)
 app_path="$repo_root/native/build/Bigboard.app"
+if [[ "$development" == 1 ]]; then app_path="$repo_root/native/build/Bigboard Dev.app"; fi
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp "$bin_dir/Bigboard" "$app_path/Contents/MacOS/Bigboard"
-python3 - "$app_path/Contents/Info.plist" "$version" <<'PY'
+python3 - "$app_path/Contents/Info.plist" "$version" "$development" <<'PY'
 import os, plistlib, sys
 version=sys.argv[2]
 info={"CFBundleName":"Bigboard","CFBundleDisplayName":"Bigboard Native","CFBundleIdentifier":"com.richhaase.bigboard","CFBundleExecutable":"Bigboard","CFBundlePackageType":"APPL","CFBundleShortVersionString":version.split('-')[0],"CFBundleVersion":version.split('-')[0],"LSMinimumSystemVersion":"26.0","NSHighResolutionCapable":True,"NSPrincipalClass":"NSApplication","CFBundleIconFile":"AppIcon","CFBundleURLTypes":[{"CFBundleURLName":"com.richhaase.bigboard.oauth","CFBundleURLSchemes":["com.richhaase.bigboard"],"CFBundleTypeRole":"Viewer"}]}
+if sys.argv[3] == "1":
+ info.update(CFBundleName="Bigboard Dev",CFBundleDisplayName="Bigboard Dev",CFBundleIdentifier="com.richhaase.bigboard.dev",CFBundleURLTypes=[{"CFBundleURLName":"com.richhaase.bigboard.dev.oauth","CFBundleURLSchemes":["com.richhaase.bigboard.dev"],"CFBundleTypeRole":"Viewer"}])
 for key in ("BIGBOARD_GITHUB_CLIENT_ID","BIGBOARD_GITHUB_CLIENT_SECRET","BIGBOARD_GITHUB_APP_SLUG"):
  if os.environ.get(key): info[key]=os.environ[key]
 with open(sys.argv[1],'wb') as f: plistlib.dump(info,f)

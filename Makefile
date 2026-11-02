@@ -2,11 +2,12 @@
 DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 export DEVELOPER_DIR
 help:
-	@echo "build: native Bigboard.app; dev: build and open; test/check: Swift tests"
+	@echo "build: native Bigboard.app; dev: build and open Bigboard Dev.app; test/check: Swift tests"
 build:
 	bash scripts/build-swift.sh
-dev: build
-	open native/build/Bigboard.app
+dev:
+	bash scripts/build-swift.sh --development
+	open "native/build/Bigboard Dev.app"
 test:
 	swift test --package-path native
 check: test
