@@ -8,7 +8,9 @@ struct SettingsGroupEditor {
     var isEditing: Bool { original != nil }
     var canSave: Bool { !destination.isEmpty && !parsedRepositories.isEmpty }
     private var destination: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var parsedRepositories: [String] { Array(Set(entries(repositories).map { $0.lowercased() })).sorted() }
+    private var parsedRepositories: [String] {
+        Array(Set(entries(repositories).map { $0.lowercased() })).sorted()
+    }
 
     mutating func edit(name: String, repositories: [String]) {
         self.name = name
@@ -18,7 +20,10 @@ struct SettingsGroupEditor {
     }
     mutating func reset() { self = Self() }
     @discardableResult mutating func save(to groups: inout [String: [String]]) -> Bool {
-        guard canSave else { error = "Enter a group name and at least one repository."; return false }
+        guard canSave else {
+            error = "Enter a group name and at least one repository."
+            return false
+        }
         let target = destination
         if let original {
             guard groups[original] != nil else {
