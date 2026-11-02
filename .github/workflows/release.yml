@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag
-        required: true
-        type: string
 
 concurrency:
   group: bigboard-release
@@ -22,7 +16,7 @@ jobs:
   macos:
     runs-on: macos-26
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
         with:

@@ -195,30 +195,33 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid release version", result.stderr)
 
-    def test_release_builds_tagged_source_and_publishes_zip_and_checksum(self):
+    def test_release_builds_checkout_and_publishes_zip_and_checksum(self):
         import hashlib
         repo = self.root / "release-repo"
         (repo / "scripts").mkdir(parents=True)
         shutil.copyfile(SCRIPTS / "release.sh", repo / "scripts/release.sh")
+        (repo / "docs").mkdir()
+        shutil.copyfile(SCRIPTS.parent / "docs/release-notes.md", repo / "docs/release-notes.md")
         build = repo / "scripts/build-macos.sh"
         build.write_text('set -eu\nmkdir -p "$(dirname "$0")/../native/build/Bigboard.app"\nprintf tagged > "$(dirname "$0")/../native/build/Bigboard.app/content"\n')
         (repo / "scripts/sign-macos.sh").write_text('set -eu\ncp "$1/content" "$2"\n')
-        for args in (("init", "-q"), ("add", "."), ("-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "fixture"), ("-c", "tag.gpgsign=false", "tag", "v2.0.1")):
-            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
-        build.write_text('exit 99\n')
         result = subprocess.run(["/bin/bash", str(repo / "scripts/release.sh"), "v2.0.1"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         archive = repo / "native/build/Bigboard_2.0.1_darwin_universal.zip"
         self.assertEqual(archive.read_bytes(), b"tagged")
         checksums = repo / "native/build/checksums.txt"
         self.assertEqual(checksums.read_text(), f"{hashlib.sha256(b'tagged').hexdigest()}  {archive.name}\n")
-        publish = next(command for command in self.commands() if command[0] == "gh")
+        publish = next(command for command in self.commands() if command[:3] == ["gh", "release", "create"])
         self.assertEqual(publish[:4], ["gh", "release", "create", "v2.0.1"])
         self.assertIn(str(archive), publish)
         self.assertIn(str(checksums), publish)
         self.assertIn("--verify-tag", publish)
         self.assertNotIn("--target", publish)
-        self.assertFalse(list(self.root.glob("bigboard-release.*")))
+        self.assertIn("--generate-notes", publish)
+        notes = repo / "docs/release-notes.md"
+        self.assertEqual(publish[publish.index("--notes-file") + 1], str(notes))
+        self.assertIn("brew install --cask richhaase/tap/bigboard", notes.read_text())
+        self.assertIn("move Bigboard.app to Applications", notes.read_text())
 
     def test_native_publisher_json_is_validated_without_printing_values(self):
         path = self.root / "publisher.json"

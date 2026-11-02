@@ -140,11 +140,8 @@ the cask requires macOS Tahoe and explains the app's Apple Command Line Tools
 requirement, with no Homebrew Git dependency. No publication is part of local
 validation.
 
-New version tags trigger that workflow. To resume an existing tag after fixing
-release automation on `main`, dispatch the same workflow with its `tag` input:
-`gh workflow run release.yml --repo richhaase/bigboard --ref main -f tag=vX.Y.Z`.
-The script builds a temporary copy of the tagged source. Existing releases and
-assets are not overwritten.
+New version tag pushes trigger that workflow. It builds the checked-out commit;
+there is no manual old-tag publishing option.
 
 Automated fixtures do not establish live GitHub, real Keychain access, release
 signing, notarization, or large-account performance. Before replacing an installed

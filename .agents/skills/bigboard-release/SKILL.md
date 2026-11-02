@@ -19,10 +19,8 @@ Verify the checkout's origin is `richhaase/bigboard`. Read `AGENTS.md`,
 5. Verify the published release, ZIP checksum, successful signing/notarization,
    and matching Homebrew version/checksum. Report the release link.
 
-For an unpublished existing tag, the same workflow can be dispatched from main:
-`gh workflow run release.yml --repo richhaase/bigboard --ref main -f tag=vX.Y.Z`.
-Inspect any existing release first; the script does not overwrite releases or
-assets. On failure, report the actual failing command and prefer the smallest fix.
+The workflow runs on new tag pushes only. On failure, report the actual failing
+command, make the smallest fix, and use a new version for the next release.
 Do not build recovery infrastructure for a one-off release failure.
 
 No Go toolchain is needed. Publisher settings and signing credentials stay in
