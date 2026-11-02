@@ -16,8 +16,7 @@ mkdir -p "$output_dir"
 bash "$repo_root/scripts/sign-macos.sh" "$repo_root/native/build/Bigboard.app" "$output_dir/$archive_name"
 (cd "$output_dir" && shasum -a 256 "$archive_name" > checksums.txt)
 
-python3 "$repo_root/scripts/release_notes.py" "$release_tag" > "$output_dir/release-notes.md"
-release_flags=(--verify-tag --notes-file "$output_dir/release-notes.md" --title "Bigboard $release_tag")
+release_flags=(--verify-tag --generate-notes --notes-file "$repo_root/docs/release-notes.md" --title "Bigboard $release_tag")
 if [[ "$release_tag" == *-* ]]; then release_flags+=(--prerelease); fi
 gh release create "$release_tag" "$output_dir/$archive_name" "$output_dir/checksums.txt" \
   --repo richhaase/bigboard "${release_flags[@]}"
