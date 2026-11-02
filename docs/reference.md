@@ -10,8 +10,8 @@ installation page. Select the repositories it may read, return to Bigboard, and
 choose **Refresh repository list**. Repository access is limited by both your
 GitHub permissions and the installation; organization approval and SSO still
 apply. GitHub CLI and personal access tokens are not required. History collection
-requires Apple's Command Line Tools, installed with `xcode-select --install`.
-Bigboard verifies and uses their Git executable.
+requires Git, available through Homebrew or Xcode Command Line Tools.
+Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
 Select repositories individually or use **Select all**, then **Apply**. The
 list supports search, recent-push and name sorting, and visible last-push dates.

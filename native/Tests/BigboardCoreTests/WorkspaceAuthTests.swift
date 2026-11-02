@@ -62,27 +62,6 @@ private func workspaceTestStore() throws -> WorkspaceTestCredentials {
     #expect(workspace.busy == false)
     #expect(try storage.loadGrant("123").isEmpty)
 }
-@Test @MainActor func previewActionsCannotTouchCredentialsNetworkOrPersistentWorkspace() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-    let store = try workspaceTestStore()
-    let network = DelayedWorkspaceTransport()
-    let workspace = WorkspaceModel(storage: storage, preview: true, authentication: workspaceTestAuth(store), transport: network)
-    workspace.authStatus = AuthStatus(configured: true, signedIn: true, login: "preview", accountID: "123")
-    workspace.snapshot = Snapshot(accountID: "123", viewer: "preview")
-    await workspace.start(); await workspace.refresh(); await workspace.discover()
-    await workspace.signIn(); await workspace.cancelSignIn(); await workspace.signOut()
-    await workspace.handleCallback(URL(string: "com.richhaase.bigboard://oauth/github?code=unused&state=unused")!)
-    await workspace.manageAccess(); await workspace.removeCache("private/repo"); await workspace.shutdown()
-    var config = WorkspaceConfiguration(); config.repositories = ["fixture/repo"]
-    await workspace.saveConfiguration(config)
-    #expect(workspace.configuration.repositories == ["fixture/repo"])
-    #expect(workspace.authStatus.signedIn)
-    #expect(store.count == 0)
-    #expect(await network.count == 0)
-    #expect(!FileManager.default.fileExists(atPath: root.path))
-}
 private actor SequenceWorkspaceTransport: GitHubTransport {
     private var responses: [GitHubHTTPResponse]
     init(_ statuses: [Int]) {

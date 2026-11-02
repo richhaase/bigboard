@@ -15,7 +15,6 @@ final class WorkspaceModel {
     var removableCacheIDs: Set<String> { inventoryVerified ? Set(cachedRepositoryRows.map(\.id)).subtracting(authorized.map(\.id)) : [] }
     var activeGroup = ""
     var storageDescription: String { "Settings: \(storage.supportRoot.path)\nHistory: \(storage.cacheRoot.path)" }
-    let isPreview: Bool
     private let storage: WorkspaceStorage
     private let auth: AuthManager
     private let transport: any GitHubTransport
@@ -36,13 +35,12 @@ final class WorkspaceModel {
     private var pendingGitDenials: Set<String> = []
     private var pendingGitAuthentication = false
     private var bookmarkKey: String { activeGroup.isEmpty ? "all" : "group:\(activeGroup)" }
-    init(storage: WorkspaceStorage = .system(), preview: Bool = false, authentication: AuthManager? = nil, transport: any GitHubTransport = URLSessionGitHubTransport(), refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { try await $0.refresh($1, token: $2) }) {
-        self.storage = storage; self.isPreview = preview; self.transport = transport; self.refreshHistory = refreshHistory; self.checkingSignIn = !preview
-        if preview { self.auth = AuthManager(configuration: AuthConfiguration(clientID: "", clientSecret: "", appSlug: ""), store: PreviewCredentialStore()) }
-        else { self.auth = authentication ?? AuthManager(configuration: AuthConfiguration.fromBundle(), store: KeychainCredentialStore()) }
+    init(storage: WorkspaceStorage = .system(), authentication: AuthManager? = nil, transport: any GitHubTransport = URLSessionGitHubTransport(), refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { try await $0.refresh($1, token: $2) }) {
+        self.storage = storage; self.transport = transport; self.refreshHistory = refreshHistory
+        self.auth = authentication ?? AuthManager(configuration: AuthConfiguration.fromBundle(), store: KeychainCredentialStore())
     }
     func start() async {
-        guard !isPreview, !started else { return }; started = true
+        guard !started else { return }; started = true
         let operation = generation
         let state = await auth.status()
         guard operation == generation else { return }
@@ -72,7 +70,7 @@ final class WorkspaceModel {
         await beginRefresh()?.value
     }
     private func beginRefresh() -> Task<Void, Never>? {
-        guard !isPreview, !busy, history != nil, github != nil, !account.isEmpty else { return nil }
+        guard !busy, history != nil, github != nil, !account.isEmpty else { return nil }
         busy = true
         snapshot.coverage.phase = "refreshing"
         snapshot.coverage.message = "Refreshing workspace…"
@@ -306,7 +304,7 @@ final class WorkspaceModel {
         return rows
     }
     func discover() async {
-        guard !isPreview, !busy, let github, !account.isEmpty else { return }
+        guard !busy, let github, !account.isEmpty else { return }
         busy = true; error = ""; discoveryVerified = false; inventoryVerified = false
         let operation = generation, id = account
         let task = Task { await self.performDiscovery(github, account: id, operation: operation) }
@@ -326,7 +324,6 @@ final class WorkspaceModel {
     }
     @discardableResult
     func saveConfiguration(_ config: WorkspaceConfiguration) async -> Bool {
-        if isPreview { configuration = config; reconcileActiveGroup(); return true }
         guard !busy, !account.isEmpty, authStatus.signedIn else {
             error = busy ? "Wait for the current operation to finish before applying settings." : "Sign in before applying settings."
             return false
@@ -359,7 +356,6 @@ final class WorkspaceModel {
         }
     }
     func saveIdentities(_ rules: [String: IdentityRule]) async {
-        if isPreview { configuration.identities = rules; return }
         guard !busy, let history else { return }
         do {
             var next = configuration; next.identities = rules
@@ -381,11 +377,10 @@ final class WorkspaceModel {
     func selectGroup(_ name: String) async {
         guard !busy, name.isEmpty || configuration.groups[name] != nil else { return }
         activeGroup = name; snapshot.bookmark = baseline[bookmarkKey]
-        if !isPreview { restrictSnapshot() }
+        restrictSnapshot()
         await refresh()
     }
     func removeCache(_ id: String) async {
-        guard !isPreview else { return }
         guard !busy, inventoryVerified, !authorized.contains(where: {$0.id == id}), let history else { error = "Refresh live access before removing an unlisted cache."; return }
         let operation = generation
         do {
@@ -396,13 +391,12 @@ final class WorkspaceModel {
         } catch { if operation == generation { self.error = error.localizedDescription } }
     }
     func cachedRepositories() async -> [Repository] {
-        if isPreview { return cachedRepositoryRows }
         let operation = generation
         let rows = (try? await history?.cachedRepositories()) ?? []
         return operation == generation ? rows : []
     }
     func signIn() async {
-        guard !isPreview, !checkingSignIn else { return }
+        guard !checkingSignIn else { return }
         let operation = generation
         do {
             let url = try await auth.start()
@@ -416,7 +410,6 @@ final class WorkspaceModel {
         }
     }
     func cancelSignIn() async {
-        guard !isPreview else { return }
         let operation = generation
         await auth.cancel()
         let state = await auth.status()
@@ -424,7 +417,7 @@ final class WorkspaceModel {
     }
     @discardableResult
     func signOut() async -> Bool {
-        guard !isPreview, !signingOut else { return false }
+        guard !signingOut else { return false }
         signingOut = true
         let interruptedRefresh = refreshTask != nil || snapshot.coverage.phase == "refreshing"
         generation += 1; refreshTask?.cancel(); refreshTask = nil; discoveryTask?.cancel(); discoveryTask = nil
@@ -454,7 +447,6 @@ final class WorkspaceModel {
         return true
     }
     func handleCallback(_ url: URL) async {
-        guard !isPreview else { return }
         var operation = generation
         do {
             try await auth.complete(url)
@@ -475,7 +467,6 @@ final class WorkspaceModel {
         }
     }
     func manageAccess() async {
-        guard !isPreview else { return }
         let operation = generation
         if let url = await auth.installationURL(), operation == generation { NSWorkspace.shared.open(url) }
     }
@@ -487,7 +478,7 @@ final class WorkspaceModel {
         return url
     }
     func shutdown() async {
-        guard !isPreview, shutdownOperation == nil else { return }
+        guard shutdownOperation == nil else { return }
         shutdownOperation = generation
         generation += 1
         let refresh = refreshTask, discovery = discoveryTask
@@ -504,9 +495,3 @@ final class WorkspaceModel {
 }
 import AppKit
 import Darwin
-
-private struct PreviewCredentialStore: CredentialStore {
-    func load() throws -> Data? { nil }
-    func save(_ data: Data) throws { throw AuthFailure.storage }
-    func delete() throws {}
-}

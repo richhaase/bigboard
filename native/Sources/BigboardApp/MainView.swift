@@ -12,7 +12,6 @@ struct MainView: View {
             }.navigationTitle("Bigboard").navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
         } detail: {
             VStack(spacing: 0) {
-                if workspace.isPreview { Text("Interface preview · Synthetic data · No account or repository access").font(.caption).frame(maxWidth: .infinity).padding(6).background(.yellow.opacity(0.15)) }
                 if !workspace.error.isEmpty { HStack { Image(systemName: "exclamationmark.triangle"); Text(workspace.error).textSelection(.enabled); Spacer(); Button("Dismiss") { workspace.error = "" } }.padding(10).background(.orange.opacity(0.12)) }
                 if workspace.busy { HStack { ProgressView().controlSize(.small); Text(workspace.snapshot.coverage.message.isEmpty ? "Loading repository evidence…" : workspace.snapshot.coverage.message).font(.callout); Spacer() }.padding(10) }
                 if !workspace.snapshot.coverage.errors.isEmpty { Button { navigation.panel = .status } label: { HStack { Image(systemName: "exclamationmark.circle"); Text("\(workspace.snapshot.coverage.errors.count) data issues · Some results may be incomplete"); Spacer(); Image(systemName: "chevron.right") }.padding(10) }.buttonStyle(.plain).foregroundStyle(.orange) }

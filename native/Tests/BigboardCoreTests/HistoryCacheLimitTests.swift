@@ -15,48 +15,32 @@ struct HistoryCacheLimitTests {
         #expect(throws: (any Error).self) { try parser.finish() }
         #expect(throws: (any Error).self) { try parser.feed(Data()) }
     }
-    @Test func commitLimitAccumulatesAcrossChunks() throws {
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), limits: HistoryLimits(commits: 2))
-        try parser.feed(payload())
-        for byte in payload(id: "b") { try parser.feed(Data([byte])) }
-        #expect(parser.records.count == 2)
-        terminalFailure(parser, payload(id: "c"), message: "Git history exceeded the commit safety limit.")
-        #expect(parser.records.count == 2)
+    @Test func completeHistoryExceedsFormerRetentionCeilings() throws {
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration())
+        let subject = String(repeating: "é", count: 180)
+        for index in 0..<50_001 {
+            let fields = ["", String(format: "%040x", index + 1), "A", "a@x", "1700000000", "", subject, "1\t0\ta.swift", "2\t1\tb.swift", "0\t0\t", "old.swift", "new.swift", ""]
+            try parser.feed(Data(fields.joined(separator: "\0").utf8))
+        }
+        let records = try parser.finish()
+        #expect(records.count == 50_001)
+        #expect(records.reduce(0) { $0 + $1.files.count } == 150_003)
+        #expect(records.last?.subject == subject)
+        #expect(records.last?.files.last?.previousPath == "old.swift")
+        let cache = HistoryScanCache(schema: 2, fingerprint: "large", scannedAt: Date(), records: records)
+        #expect(try cache.encoded() == nil)
     }
-    @Test func fileChangeLimitIncludesExcludedFilesAndPendingRenames() throws {
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), limits: HistoryLimits(fileChanges: 2))
-        try parser.feed(payload(files: ["1\t0\tvendor/generated.swift"]))
-        try parser.feed(payload(id: "b", files: ["0\t0\t", "old.swift", "new.swift"]))
-        #expect(parser.records.flatMap(\.files).count == 2)
-        #expect(parser.records.first?.files.first?.excludedReason == "path")
-        terminalFailure(parser, Data("0\t0\t\0".utf8), message: "Git history exceeded the file-change safety limit.")
-        #expect(parser.records.flatMap(\.files).count == 2)
-    }
-    @Test func retainedPathBudgetCountsUTF8BytesAcrossChunks() throws {
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), limits: HistoryLimits(retainedStringBytes: 112))
-        let path = String(repeating: "é", count: 32)
-        for byte in payload(files: ["1\t0\t" + path]) { try parser.feed(Data([byte])) }
-        #expect(parser.records.first?.files.first?.path == path)
-        terminalFailure(parser, Data("1\t0\tx\0".utf8), message: "Git history exceeded the retained-text safety limit.")
-        #expect(parser.records.first?.files.count == 1)
-    }
-    @Test func retainedMetadataBudgetAccumulatesAcrossCommits() throws {
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), limits: HistoryLimits(retainedStringBytes: 167))
-        let subject = String(repeating: "é", count: 16)
-        try parser.feed(payload(author: "α", subject: subject))
-        for byte in payload(id: "b", author: "α", subject: subject) { try parser.feed(Data([byte])) }
-        #expect(parser.records.count == 2)
-        terminalFailure(parser, payload(id: "c", author: "α", subject: subject), message: "Git history exceeded the retained-text safety limit.")
-        #expect(parser.records.count == 2)
-    }
-    @Test func retainedBudgetIncludesBothRenamePathsAndPreviousCommits() throws {
-        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), limits: HistoryLimits(retainedStringBytes: 175))
-        try parser.feed(payload(files: ["1\t0\t" + String(repeating: "x", count: 16)]))
-        try parser.feed(payload(id: "b", files: ["0\t0\t", String(repeating: "é", count: 16)]))
-        #expect(parser.records.count == 2)
-        #expect(parser.records.last?.files.isEmpty == true)
-        terminalFailure(parser, Data((String(repeating: "y", count: 32) + "\0").utf8), message: "Git history exceeded the retained-text safety limit.")
-        #expect(parser.records.last?.files.isEmpty == true)
+    @Test func streamingHistoryHasNoBufferedOutputCeiling() async throws {
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("history")
+        try payload(files: ["1\t0\ta.swift"]).write(to: log)
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration())
+        _ = try await GitProcess.execute(URL(fileURLWithPath: "/bin/cat"), arguments: [log.path], environment: [:], directory: directory, limit: 1, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
+        #expect(try parser.finish().count == 1)
+        await #expect(throws: (any Error).self) {
+            _ = try await GitProcess.execute(URL(fileURLWithPath: "/bin/cat"), arguments: [log.path], environment: [:], directory: directory, limit: 1)
+        }
     }
     @Test func oversizedTerminatedFieldFailsBeforeRetention() throws {
         let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration())
@@ -90,7 +74,7 @@ struct HistoryCacheLimitTests {
         let url = directory.appendingPathComponent("scan.json")
         try Data(repeating: 120, count: 1025).write(to: url)
         do {
-            _ = try HistoryScanCache.read(url, limits: HistoryLimits(cacheBytes: 1024))
+            _ = try HistoryScanCache.read(url, limits: HistoryCacheLimits(cacheBytes: 1024))
             Issue.record("An oversized cache reached JSON decoding.")
         } catch { #expect(error.localizedDescription == "Git history cache exceeded the file safety limit.") }
     }
@@ -101,22 +85,11 @@ struct HistoryCacheLimitTests {
         try #require(mkfifo(url.path, mode_t(0o600)) == 0)
         #expect(throws: (any Error).self) { try HistoryScanCache.read(url) }
     }
-    @Test func decodedCacheMustFitAllRetentionLimits() throws {
-        let directory = try directory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("scan.json")
-        var original = cache()
-        original.records.append(original.records[0])
-        try JSONEncoder().encode(original).write(to: url)
-        for limits in [HistoryLimits(commits: 1), HistoryLimits(fileChanges: 1), HistoryLimits(retainedStringBytes: 1)] {
-            #expect(throws: (any Error).self) { try HistoryScanCache.read(url, limits: limits) }
-        }
-    }
     @Test func oversizedEstimateSkipsJSONEncoding() throws {
         var original = cache()
         original.scannedAt = Date(timeIntervalSince1970: .infinity)
         #expect(throws: (any Error).self) { try JSONEncoder().encode(original) }
-        #expect(try original.encoded(limits: HistoryLimits(cacheBytes: 512)) == nil)
+        #expect(try original.encoded(limits: HistoryCacheLimits(cacheBytes: 512)) == nil)
     }
     @Test func rejectedOrCanceledCacheWritePreservesPreviousCache() throws {
         let directory = try directory()
@@ -126,23 +99,9 @@ struct HistoryCacheLimitTests {
         let before = try Data(contentsOf: url)
         var replacement = original
         replacement.records[0].subject = String(repeating: "new", count: 1000)
-        #expect(try !replacement.write(to: url, limits: HistoryLimits(cacheBytes: 1024)))
+        #expect(try !replacement.write(to: url, limits: HistoryCacheLimits(cacheBytes: 1024)))
         #expect(try Data(contentsOf: url) == before)
         #expect(throws: CancellationError.self) { try replacement.write(to: url, checkpoint: { throw CancellationError() }) }
-        #expect(try Data(contentsOf: url) == before)
-    }
-    @Test func scanLimitFailurePreservesPreviousCache() async throws {
-        let fixture = try HistoryFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.base) }
-        let repo = Repository(id: "owner/repo")
-        _ = try await GitHistory(root: fixture.root).scan(repo, configuration: WorkspaceConfiguration())
-        let files = try FileManager.default.contentsOfDirectory(at: fixture.root.appendingPathComponent("scans"), includingPropertiesForKeys: nil)
-        let url = try #require(files.first)
-        let before = try Data(contentsOf: url)
-        do {
-            _ = try await GitHistory(root: fixture.root, limits: HistoryLimits(commits: 1)).scan(repo, configuration: WorkspaceConfiguration())
-            Issue.record("A scan published incomplete history after exceeding its commit limit.")
-        } catch { #expect(error.localizedDescription == "Git history exceeded the commit safety limit.") }
         #expect(try Data(contentsOf: url) == before)
     }
     @Test func scanCanReturnCompleteHistoryWithoutReplacingAnOversizedCache() async throws {
@@ -153,7 +112,7 @@ struct HistoryCacheLimitTests {
         let files = try FileManager.default.contentsOfDirectory(at: fixture.root.appendingPathComponent("scans"), includingPropertiesForKeys: nil)
         let url = try #require(files.first)
         let before = try Data(contentsOf: url)
-        let result = try await GitHistory(root: fixture.root, limits: HistoryLimits(cacheBytes: 1)).scan(repo, configuration: WorkspaceConfiguration())
+        let result = try await GitHistory(root: fixture.root, limits: HistoryCacheLimits(cacheBytes: 1)).scan(repo, configuration: WorkspaceConfiguration())
         #expect(result.1 == original.1)
         #expect(result.0.revision == original.0.revision)
         #expect(try Data(contentsOf: url) == before)

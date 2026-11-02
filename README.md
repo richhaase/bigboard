@@ -5,8 +5,8 @@ where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
 Bigboard is built with Swift, SwiftUI, AppKit, and Charts.
-It requires **macOS 26 Tahoe or later** and Apple's Command Line Tools
-(`xcode-select --install`) for Git history. The app talks directly
+It requires **macOS 26 Tahoe or later** and a usable Git installation (Homebrew or Xcode Git)
+for Git history. The app talks directly
 to GitHub and maintains owned bare Git caches; developer checkouts are untouched.
 
 ## Build and run
@@ -27,15 +27,6 @@ Live sign-in needs the publisher's existing `BIGBOARD_GITHUB_CLIENT_ID`,
 process environment. See [publisher setup](docs/github-app.md). These are build
 settings, not fields end users fill in. Do not put them in source control or chat.
 A build without them opens normally and explains why sign-in is unavailable.
-
-An explicit UI preview is available for visual checks without GitHub or Keychain:
-
-```sh
-open -n native/build/Bigboard.app --args --ui-preview
-```
-
-Preview data is labeled and used only with that argument. It never substitutes
-for missing live data.
 
 ## Workflows
 
