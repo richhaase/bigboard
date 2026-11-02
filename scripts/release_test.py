@@ -57,6 +57,8 @@ elif name == "iconutil":
     Path(args[args.index("-o") + 1]).write_bytes(b"fixture icns")
 elif name == "lipo":
     print("arm64 x86_64")
+elif name == "gh" and args[0] == "api":
+    print(os.environ["TEST_COMPARE_PAGES"])
 '''
 
 
@@ -199,7 +201,18 @@ class ReleaseTests(unittest.TestCase):
         import hashlib
         repo = self.root / "release-repo"
         (repo / "scripts").mkdir(parents=True)
-        shutil.copyfile(SCRIPTS / "release.sh", repo / "scripts/release.sh")
+        for name in ("release.sh", "release_notes.py"):
+            shutil.copyfile(SCRIPTS / name, repo / "scripts" / name)
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args], check=True, capture_output=True, text=True)
+        git("init")
+        for tag in ("v2.0.0", "v2.0.1"):
+            git("commit", "--allow-empty", "-m", tag)
+            git("tag", tag)
+        self.env["TEST_COMPARE_PAGES"] = json.dumps([
+            {"commits": [{"sha": "a" * 40, "commit": {"message": "fix: first page"}, "author": {"login": "fixture"}}]},
+            {"commits": [{"sha": "b" * 40, "commit": {"message": "fix: second page"}, "author": {"login": "fixture"}}]},
+        ])
         build = repo / "scripts/build-macos.sh"
         build.write_text('set -eu\nmkdir -p "$(dirname "$0")/../native/build/Bigboard.app"\nprintf tagged > "$(dirname "$0")/../native/build/Bigboard.app/content"\n')
         (repo / "scripts/sign-macos.sh").write_text('set -eu\ncp "$1/content" "$2"\n')
@@ -209,12 +222,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(archive.read_bytes(), b"tagged")
         checksums = repo / "native/build/checksums.txt"
         self.assertEqual(checksums.read_text(), f"{hashlib.sha256(b'tagged').hexdigest()}  {archive.name}\n")
-        publish = next(command for command in self.commands() if command[0] == "gh")
+        compare = next(command for command in self.commands() if command[:2] == ["gh", "api"])
+        self.assertEqual(compare, ["gh", "api", "--paginate", "--slurp", "repos/richhaase/bigboard/compare/v2.0.0...v2.0.1?per_page=100"])
+        publish = next(command for command in self.commands() if command[:3] == ["gh", "release", "create"])
         self.assertEqual(publish[:4], ["gh", "release", "create", "v2.0.1"])
         self.assertIn(str(archive), publish)
         self.assertIn(str(checksums), publish)
         self.assertIn("--verify-tag", publish)
         self.assertNotIn("--target", publish)
+        self.assertNotIn("--generate-notes", publish)
+        notes = repo / "native/build/release-notes.md"
+        self.assertEqual(publish[publish.index("--notes-file") + 1], str(notes))
+        for subject in ("fix: first page", "fix: second page"):
+            self.assertIn(subject, notes.read_text())
+        self.assertIn("brew install --cask richhaase/tap/bigboard", notes.read_text())
 
     def test_native_publisher_json_is_validated_without_printing_values(self):
         path = self.root / "publisher.json"
