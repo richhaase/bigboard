@@ -8,16 +8,12 @@ if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
 fi
 release_version=${release_tag#v}
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-source_dir=$(mktemp -d "${TMPDIR:-/tmp}/bigboard-release.XXXXXX")
-trap 'rm -rf "$source_dir"' EXIT
-git -C "$repo_root" archive "refs/tags/$release_tag" | tar -x -C "$source_dir"
-
-swift test --package-path "$source_dir/native"
-bash "$source_dir/scripts/build-macos.sh" "$release_version"
+swift test --package-path "$repo_root/native"
+bash "$repo_root/scripts/build-macos.sh" "$release_version"
 archive_name="Bigboard_${release_version}_darwin_universal.zip"
 output_dir="$repo_root/native/build"
 mkdir -p "$output_dir"
-bash "$source_dir/scripts/sign-macos.sh" "$source_dir/native/build/Bigboard.app" "$output_dir/$archive_name"
+bash "$repo_root/scripts/sign-macos.sh" "$repo_root/native/build/Bigboard.app" "$output_dir/$archive_name"
 (cd "$output_dir" && shasum -a 256 "$archive_name" > checksums.txt)
 
 release_flags=(--verify-tag --generate-notes --title "Bigboard $release_tag")
