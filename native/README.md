@@ -118,10 +118,10 @@ future features.
 Use **Workspace Settings → Repositories** to save what Bigboard collects. Named
 groups intersect that saved selection. These choices are separate from
 **Repository filter**, available as a persistent toolbar popover, in the Boards
-menu, or through `i`. The popover stays open across selections. The sidebar contains
+menu, or with Command-Shift-I. The popover stays open across selections. The sidebar contains
 only Activity, Contributors, and Pull requests. Workspace Settings lives in the
 app menu and Keyboard Guide under Help. Data Status opens from a single clickable
-control containing status and timestamp at the bottom right, or from the Boards menu or `e`.
+control containing status and timestamp at the bottom right, from the Boards menu, or with Command-Shift-D.
 The footer control spins during refresh; the main screen's top progress display
 remains visible. Date and repository filters and Refresh stay in the toolbar.
 

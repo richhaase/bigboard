@@ -11,7 +11,7 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum ToolbarPopover: Equatable { case date, repositories, groups }
-enum Panel: String, Identifiable { case settings, filters, status, help, identities, repositories; var id: String { rawValue } }
+enum Panel: String, Identifiable { case settings, filters, status, help, identities; var id: String { rawValue } }
 struct RelatedEvidence: Equatable { var mode: String; var values: Set<String> }
 struct BoardFilters: Equatable {
     var query = ""
@@ -56,14 +56,9 @@ struct RepositoryChecklist {
     var contributorSelection: String?
     var prSelection: String?
     var scopedPerson: String?
-    var commitLimit = 100
     var contextualRepository: String?
     var savedPRFilters: BoardFilters?
     var toolbarPopover: ToolbarPopover?
-    var repositoryPopoverPresented: Bool {
-        get { toolbarPopover == .repositories }
-        set { setToolbarPopover(.repositories, presented: newValue) }
-    }
     var panel: Panel? { didSet { if panel != nil { toolbarPopover = nil } } }
     var preferencesApplied = false
     var rangeLabel: String { sinceLastLook ? "Since last look" : days == 0 ? "All time" : "Last \(days) days" }
@@ -82,13 +77,6 @@ struct RepositoryChecklist {
         else if toolbarPopover == value { toolbarPopover = nil }
     }
     func dismissToolbarPopover() { toolbarPopover = nil }
-    func toggleRepositoryPopover() { toggleToolbarPopover(.repositories) }
-    func dismissRepositoryPopover() { setToolbarPopover(.repositories, presented: false) }
-    func handlePopoverShortcut(_ key: String) -> Bool {
-        guard toolbarPopover != nil else { return false }
-        if key == "\u{1b}" { dismissToolbarPopover() }
-        return true
-    }
     var repositoryFilterLabel: String { repositories.isEmpty ? "All" : "\(repositories.count) selected" }
     @discardableResult func setRepositoryFilter(_ ids: Set<String>, available: [Repository]) -> Bool {
         let selected = ids.intersection(available.map(\.id))
@@ -147,7 +135,8 @@ struct RepositoryChecklist {
         lens = mode == "people" ? .people : .commits
         relatedEvidence = RelatedEvidence(mode: mode, values: Set(row.evidence))
     }
-    func explore(_ scope: ActivityScope) { self.scope = scope; relatedEvidence = nil; activitySelection = nil; scopedPerson = nil; commitLimit = 100; heatExpanded = false; if scope.isFile { lens = .commits } }
+    func explore(_ scope: ActivityScope) { self.scope = scope; relatedEvidence = nil; activitySelection = nil; scopedPerson = nil; heatExpanded = false; if scope.isFile { lens = .commits } }
+    var canGoBackInActivity: Bool { !scope.repo.isEmpty || lens != .heat }
     func back() {
         if contextualRepository != nil { returnToActivity(); return }
         if scopedPerson != nil { scopedPerson = nil; return }

@@ -200,8 +200,41 @@ struct AnalysisTests {
         #expect(series.allSatisfy { cal.component(.hour, from: $0.date) == 0 })
         #expect(zip(series, series.dropFirst()).contains { $1.date.timeIntervalSince($0.date) == 25 * 3600 })
     }
+    @Test func dailyCalendarFollowsBookmarkAndAllTimeRanges() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let bookmark = now.addingTimeInterval(-3 * 86_400)
+        let records = [commit("old", days: 400), commit("boundary", days: 3), commit("recent", days: 1), commit("future", days: -7)]
+        let since = Analysis.daily(records, days: 14, since: bookmark, now: now, calendar: calendar)
+        #expect(since.first?.date == calendar.startOfDay(for: bookmark))
+        #expect(since.count == 4)
+        #expect(since.reduce(0) { $0 + $1.commits } == 1)
+        let all = Analysis.daily(records, days: 0, now: now, calendar: calendar)
+        #expect(all.count == 401)
+        #expect(all.last?.date == calendar.startOfDay(for: now))
+        #expect(all.reduce(0) { $0 + $1.commits } == 3)
+    }
+    @Test func weeklyTimelineAndHeatUseMondayStartAcrossDaylightSaving() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Denver"))
+        calendar.firstWeekday = 2
+        let tuesday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 12)))
+        let monday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2)))
+        var sundayCommit = commit("sunday")
+        sundayCommit.date = monday.addingTimeInterval(-3600)
+        var mondayCommit = commit("monday")
+        mondayCommit.date = monday
+        let records = [sundayCommit, mondayCommit]
+        let timeline = Analysis.timeline(records, days: 45, now: tuesday, calendar: calendar)
+        let heat = Analysis.heatSeries(records, metric: "commits", now: tuesday, calendar: calendar)
+        #expect(timeline.last?.date == monday)
+        #expect(timeline.suffix(2).map(\.commits) == [1, 1])
+        #expect(heat.series.last?.start == monday)
+        #expect(heat.series.suffix(2).map(\.value) == [1, 1])
+    }
     @Test func bookmarkTimelineUsesActualSpanAndExclusiveBoundary() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        cal.firstWeekday = 1
         let bookmark = now.addingTimeInterval(-45 * 86400)
         let records = [commit("before", days: 46), commit("boundary", days: 45), commit("after", days: 40), commit("recent", days: 1), commit("future", days: -8)]
         let points = Analysis.timeline(records, days: 14, since: bookmark, now: now, calendar: cal)

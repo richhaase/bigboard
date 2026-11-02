@@ -36,7 +36,13 @@ struct ContributorsBoard: View {
             HStack { Text("AI assisted \(Int(person.totals.aiPercent))%"); Text("Net \(person.totals.net)"); Text("Churn \(person.totals.added == 0 ? "0.00" : String(format: "%.2f", Double(person.totals.removed) / Double(person.totals.added)))") }.font(.caption).foregroundStyle(.secondary)
             SectionTitle(title: "Contribution rhythm", detail: navigation.rangeLabel)
             ActivityTimeline(points: navigation.timelinePoints(person.records, snapshot: workspace.snapshot))
-            ActivityCalendar(records: person.records, now: workspace.snapshot.generatedAt)
+            ActivityCalendar(
+                records: person.records,
+                days: navigation.days,
+                since: navigation.sinceLastLook ? workspace.snapshot.bookmark : nil,
+                now: workspace.snapshot.generatedAt,
+                rangeLabel: navigation.rangeLabel
+            )
             SectionTitle(title: "Where work happened")
             ForEach(Analysis.activityRows(person.records, repositories: navigation.visibleRepositories(workspace.snapshot)).filter { $0.totals.commits > 0 }) { row in
                 Button { navigation.explore(row.scope); navigation.board = .activity } label: { HStack { Text(row.label); Spacer(); DeltaView(added: row.totals.added, removed: row.totals.removed) }.padding(.vertical, 5) }.buttonStyle(.plain)

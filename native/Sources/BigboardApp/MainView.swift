@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct MainView: View {
     @Bindable var workspace: WorkspaceModel
@@ -20,9 +19,12 @@ struct MainView: View {
                 else {
                     HStack {
                         TextField("Search \(navigation.board.rawValue.lowercased())", text: Binding(get: { navigation.currentFilters.query }, set: { navigation.currentFilters.query = $0 })).textFieldStyle(.roundedBorder).focused($searchFocused).onSubmit { searchFocused = false }.onExitCommand { searchFocused = false }
+                            .focusedSceneValue(\.boardSearch, $searchFocused)
                         Button("Filters", systemImage: "line.3.horizontal.decrease") { navigation.panel = .filters }
                         if navigation.board != .pullRequests { Toggle("Hide bots", isOn: Binding(get: { navigation.currentFilters.hideBots }, set: { navigation.currentFilters.hideBots = $0 })).toggleStyle(.checkbox) }
-                        Button("Copy view", systemImage: "doc.on.doc") { copyView() }.labelStyle(.iconOnly).help("Copy this view as Markdown")
+                        Button("Copy view", systemImage: "doc.on.doc") {
+                            BoardMarkdown.copy(snapshot: workspace.snapshot, configuration: workspace.configuration, navigation: navigation)
+                        }.labelStyle(.iconOnly).help("Copy this view as Markdown")
                     }.padding(12)
                     Group {
                         switch navigation.board {
@@ -59,7 +61,6 @@ struct MainView: View {
         .onChange(of: workspace.snapshot.repositories.map(\.id)) { _, _ in navigation.reconcile(workspace.snapshot) }
         .onChange(of: workspace.configuration.sinceDays) { _, value in if !navigation.preferencesApplied { navigation.days = value; navigation.preferencesApplied = true } }
         .onChange(of: navigation.repositories) { navigation.reconcile() }
-        .background(KeyCommandMonitor { key in handleKey(key) })
     }
     private func toolbarPopover(_ value: ToolbarPopover) -> Binding<Bool> {
         Binding(get: { navigation.toolbarPopover == value }, set: { navigation.setToolbarPopover(value, presented: $0) })
@@ -91,7 +92,7 @@ struct MainView: View {
         }
     }
     private var repositoryFilter: some View {
-        Button { navigation.toggleRepositoryPopover() } label: {
+        Button { navigation.toggleToolbarPopover(.repositories) } label: {
             ToolbarControlLabel(title: "Repository filter: \(navigation.repositoryFilterLabel)", symbol: "line.3.horizontal.decrease.circle", disclosure: true)
         }
         .accessibilityLabel("Repository filter")
@@ -102,7 +103,10 @@ struct MainView: View {
                 HStack { Text("Repository filter").font(.headline); Spacer() }.padding(16)
                 Divider()
                 RepositoryFilterPanel(repositories: workspace.snapshot.repositories, navigation: navigation, repositoryListHeightLimit: 240)
-            }.frame(width: 420).fixedSize(horizontal: false, vertical: true).buttonStyle(.automatic)
+            }.frame(width: 420)
+                .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.automatic)
+                .onExitCommand { navigation.dismissToolbarPopover() }
         }
     }
     private var groupFilter: some View {
@@ -163,53 +167,6 @@ struct MainView: View {
     }
     private var emptyWorkspace: some View {
         VStack { EmptyBoard(title: workspace.busy ? "Loading repositories" : "Choose your repositories", message: workspace.snapshot.coverage.message.isEmpty ? "Discover repositories in Settings, choose what to track, and save your workspace." : workspace.snapshot.coverage.message, symbol: "shippingbox"); Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent).padding(.bottom, 50) }
-    }
-    private func handleKey(_ key: String) {
-        if navigation.handlePopoverShortcut(key) { return }
-        if navigation.panel != nil { if key == "\u{1b}" { navigation.panel = nil }; return }
-        switch key {
-        case "a": navigation.switchBoard(.activity)
-        case "c": navigation.switchBoard(.contributors)
-        case "p": navigation.switchBoard(.pullRequests)
-        case "r": if !workspace.busy { Task { await workspace.refresh() } }
-        case "/": searchFocused = true
-        case "f", "t": navigation.panel = .filters
-        case "e": navigation.panel = .status
-        case "i": navigation.panel = .repositories
-        case ",": navigation.panel = .settings
-        case "?", "F1": navigation.panel = .help
-        case "x": navigation.resetBoard()
-        case "y": copyView()
-        case "\u{1b}", "left": navigation.back()
-        case "1", "2", "3", "4", "5": if navigation.board == .activity { navigation.setLens(["1": .commits, "2": .people, "3": .related, "4": .directories, "5": .heat][key]!) }
-        case "b": navigation.currentFilters.hideBots.toggle()
-        case "m": if navigation.board == .contributors { navigation.panel = .identities } else if navigation.board == .activity { navigation.relatedMode = navigation.relatedMode == "commits" ? "people" : "commits" } else { navigation.togglePRMine("attention") }
-        case "M": navigation.togglePRMine("authored")
-        case "n": navigation.togglePRMine("requested")
-        case "v": if navigation.board == .activity && !navigation.scope.repo.isEmpty { navigation.showPRs(repo: navigation.scope.repo) } else if navigation.board == .pullRequests { navigation.panel = .filters }
-        case "u", "k", "d", "z": if navigation.board == .pullRequests { navigation.panel = .filters }
-        case "s":
-            let sorts = navigation.board == .pullRequests ? ["updated", "repository", "author", "title", "attention"] : navigation.board == .contributors ? ["change", "commits", "added", "removed", "net", "ai", "name", "recent"] : ["change", "commits", "recent", "name"]
-            navigation.currentFilters.sort = sorts[((sorts.firstIndex(of: navigation.currentFilters.sort) ?? -1) + 1) % sorts.count]
-        case "A": if navigation.board == .pullRequests { navigation.prs.sort = "author" }
-        case "o": openSelection()
-        case "S": navigation.currentFilters.reversed.toggle()
-        default: break
-        }
-    }
-    private func openSelection() {
-        if navigation.board == .pullRequests {
-            let rows = navigation.pullRequests(workspace.snapshot)
-            if let pr = rows.first(where: { $0.id == navigation.prSelection }) ?? rows.first { openGitHub(pr.url) }
-        } else if navigation.board == .activity {
-            let scope = navigation.activityRows(workspace.snapshot, configuration: workspace.configuration).first { $0.id == navigation.activitySelection }?.scope ?? navigation.scope
-            guard !scope.repo.isEmpty else { return }
-            Task { do { let url = try await workspace.openPath(scope); NSWorkspace.shared.open(url) } catch { workspace.error = error.localizedDescription } }
-        }
-    }
-    private func copyView() {
-        let text = BoardMarkdown.render(snapshot: workspace.snapshot, configuration: workspace.configuration, navigation: navigation)
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
     }
 }
 private struct ToolbarControlLabel: View {
@@ -277,31 +234,5 @@ struct DataStatusPresentation: Equatable {
         else if !signedIn { label = "Sign in to load repository evidence"; symbol = "info.circle" }
         else if snapshot.repositories.isEmpty { label = "No repository evidence loaded"; symbol = "info.circle" }
         else { label = "Repository evidence loaded"; symbol = "checkmark.circle" }
-    }
-}
-struct KeyCommandMonitor: NSViewRepresentable {
-    var action: @MainActor (String) -> Void
-    func makeNSView(context: Context) -> NSView { context.coordinator.start(action); return NSView() }
-    func updateNSView(_ view: NSView, context: Context) { context.coordinator.action = action }
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.stop() }
-    @MainActor final class Coordinator {
-        var monitor: Any?
-        var action: (@MainActor (String) -> Void)?
-        func start(_ action: @escaping @MainActor (String) -> Void) {
-            self.action = action
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                let handled = MainActor.assumeIsolated {
-                    guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
-                    if let text = event.window?.firstResponder as? NSTextView, text.isEditable { return false }
-                    let key = event.keyCode == 122 ? "F1" : event.keyCode == 123 ? "left" : event.characters ?? ""
-                    let keys: Set<String> = ["a","c","p","r","/","f","t","e","i",",","?","F1","x","y","\u{1b}","left","1","2","3","4","5","b","m","M","n","v","S","s","A","o","u","k","d","z"]
-                    guard keys.contains(key) else { return false }
-                    self?.action?(key); return true
-                }
-                return handled ? nil : event
-            }
-        }
-        func stop() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
     }
 }

@@ -214,14 +214,17 @@ enum Analysis {
         return grouped.map { RelatedRow(scope: $0.key, evidence: Array(Set($0.value.map(evidence))).sorted(by: literalLess), records: $0.value) }.sorted { a, b in a.count != b.count ? a.count > b.count : literalLess(a.id, b.id) }
     }
     static func relatedScopes(_ commits: [Commit], scope: ActivityScope, mode: String = "commits", workAreas: [String: [WorkArea]] = [:]) -> [RelatedRow] { related(commits, scope: scope, mode: mode, workAreas: workAreas) }
-    static func daily(_ commits: [Commit], days: Int = 30, now: Date = Date(), calendar: Calendar = .current) -> [TimelinePoint] {
-        let cutoff = now.addingTimeInterval(-Double(days > 0 ? days : 365) * 86_400)
-        var date = calendar.startOfDay(for: cutoff)
+    static func daily(_ commits: [Commit], days: Int = 30, since: Date? = nil, now: Date = Date(), calendar: Calendar = .current) -> [TimelinePoint] {
+        let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
+        let records = unique(commits).filter { commit in
+            commit.date <= now && cutoff.map { commit.date > $0 } != false
+        }
+        let start = cutoff ?? records.map(\.date).min() ?? now
+        var date = calendar.startOfDay(for: start)
         var rows: [Date: TimelinePoint] = [:]
         while date <= now { rows[date] = TimelinePoint(date: date); date = calendar.date(byAdding: .day, value: 1, to: date)! }
-        for c in unique(commits) where c.date >= cutoff {
+        for c in records {
             let key = calendar.startOfDay(for: c.date)
-            guard rows[key] != nil || c.date > now else { continue }
             var row = rows[key] ?? TimelinePoint(date: key); row.commits += 1; row.added += c.linesUnknown ? 0 : c.added; row.removed += c.linesUnknown ? 0 : c.removed; rows[key] = row
         }
         return rows.values.sorted { $0.date < $1.date }
@@ -232,7 +235,7 @@ enum Analysis {
         let daily = span.map { $0 <= 30 } ?? false, weekly = span.map { $0 > 30 && $0 <= 180 } ?? false
         func bucket(_ date: Date) -> Date {
             if daily { return calendar.startOfDay(for: date) }
-            if weekly { let d = calendar.startOfDay(for: date); return calendar.date(byAdding: .day, value: -(calendar.component(.weekday, from: d) - 1), to: d)! }
+            if weekly { return weekStart(date, calendar: calendar) }
             return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
         }
         let start = cutoff.map(bucket) ?? calendar.date(byAdding: .month, value: -11, to: bucket(now))!
@@ -248,12 +251,14 @@ enum Analysis {
         }
         return rows.values.sorted { $0.date < $1.date }
     }
+    private static func weekStart(_ date: Date, calendar: Calendar) -> Date {
+        calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
+    }
     static func heatSeries(_ commits: [Commit], metric: String = "lines", now: Date = Date(), calendar: Calendar = .current) -> HeatSeries {
-        func week(_ date: Date) -> Date { let start = calendar.startOfDay(for: date); return calendar.date(byAdding: .day, value: -(calendar.component(.weekday, from: start) - 1), to: start)! }
-        let end = week(now)
-        let starts = (0..<38).map { calendar.date(byAdding: .day, value: -7 * (37 - $0), to: end)! }
+        let end = weekStart(now, calendar: calendar)
+        let starts = (0..<38).map { calendar.date(byAdding: .weekOfYear, value: $0 - 37, to: end)! }
         var records: [Date: [Commit]] = [:]; var future = 0
-        for c in unique(commits) { if c.date > now { future += 1 } else { records[week(c.date), default: []].append(c) } }
+        for c in unique(commits) { if c.date > now { future += 1 } else { records[weekStart(c.date, calendar: calendar), default: []].append(c) } }
         let values: [Double] = starts.map { date in let t = totals(records[date] ?? []); return Double(metric == "people" ? t.people : metric == "commits" ? t.commits : t.change) }
         func mean(_ values: ArraySlice<Double>) -> Double { values.reduce(0, +) / Double(max(1, values.count)) }
         let series = (12..<38).map { i -> HeatPoint in

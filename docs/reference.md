@@ -21,8 +21,8 @@ the main window. Errors keep the draft open. Cancel discards the draft. Newly
 available repositories remain unchecked until you select and apply them.
 Repository exclusion patterns in Advanced can further narrow the saved selection.
 
-Open Settings from the app menu, with Command-comma, or with `,` outside a text
-field. Its sections are:
+Open Settings from the app menu or with Command-comma. Escape cancels the draft.
+Its sections are:
 
 | Section | Purpose |
 | --- | --- |
@@ -74,6 +74,8 @@ across all boards. Reopening it shows the current selection. Search narrows the
 list; **Select all loaded** checks every loaded repository. When only one
 repository remains checked, its checkbox is disabled until you check another.
 Closing the picker keeps the selection already applied.
+Press Return in the search field to move to the results, use the arrow keys to
+select a repository, and press Space to toggle it.
 
 This filter does not fetch history, make network requests, change saved
 collection choices, or unload caches. Use Settings to change what the app
@@ -128,8 +130,9 @@ commits, additions, removals, net lines, AI share, name, and recency. Bot and
 people filters are independent of Activity's filters.
 
 Contribution rhythm uses daily, weekly, or monthly buckets according to the
-range. The calendar displays a fixed past-year grid using the selected evidence;
-dates outside the selected range are empty. Calendar grouping uses local time.
+range. The calendar shows daily activity in the selected range through the
+snapshot date. All time starts with the earliest contribution in view. Weekly
+buckets and the calendar grid use local time and your first weekday.
 The charts and totals describe recorded changes, not productivity.
 
 **Identities** links email addresses belonging to the same person. Choose the
@@ -167,8 +170,7 @@ mode has no live PR context. Use Data Status to inspect coverage.
 
 Click the status and timestamp at the bottom right to open Data Status. This
 single footer control shows a spinner during refresh; the progress display at
-the top of the main screen remains visible. The Boards menu and `e` also open
-Data Status.
+the top of the main screen remains visible. The Boards menu and Command-Shift-D also open Data Status.
 
 The sheet shows refresh phase, snapshot time, last-look
 baseline, request counts, per-repository timestamps and coverage, errors, and
@@ -206,34 +208,29 @@ unknown counts. Generated, vendored, and bulk-data changes are excluded from
 line totals by default, but their commits remain visible. Advanced settings can
 include those lines. Missing line counts are shown as unknown, not measured zero.
 
-The copy button or `y` copies the current view as Markdown. **Export JSON** on
+The copy button or Command-Shift-C copies the current view as Markdown. **Export JSON** on
 Contributors opens a native Save dialog and exports all loaded tracked history,
 ignoring viewing filters. Neither export fetches data.
 
 ## Keyboard controls
 
-Letter shortcuts apply when you are not editing text. Standard macOS controls
-handle focus, selection, and window navigation. The Help menu opens Keyboard
-Guide; the Boards menu provides the main commands.
+The Boards menu lists available commands and their shortcuts. Open Keyboard
+Guide from the Help menu. Use Tab to move focus, arrows to move through lists,
+and Space to toggle a focused checkbox.
 
 | Control | Action |
 | --- | --- |
-| `a`, `c`, `p` | Activity, Contributors, Pull requests |
-| `/` | Focus the current board's search |
-| `f`, `t` or Command-Shift-F | Filters |
-| `s`, Shift-S | Cycle sorting, reverse sorting |
-| `x` | Reset current-board filters/search, retaining shared scope |
-| `r` or Command-R | Refresh repository evidence |
-| `e`, `i` | Data Status, Repository Filter |
-| `,` or Command-comma | Settings |
-| `y` | Copy current view as Markdown |
-| `?`, F1 | Keyboard Guide |
-| `b` | Toggle bot visibility |
-| `1`, `2`, `3`, `4`, `5` | Activity: Commits, People, Related, Directories, Heat |
-| Return / right arrow | Directories: explore the selected row |
-| Escape | Close the open panel or move back through Activity |
-| Left arrow | Move back through Activity when no panel is open |
-| `o` | Open the selected path or PR on GitHub |
-| `v` | Activity: open repository PRs |
-| `m` | Activity: switch related evidence; Contributors: identities; PRs: attention |
-| Shift-M, `n` | PRs: authored by me, review requested |
+| ⌘1, ⌘2, ⌘3 | Activity, Contributors, Pull requests |
+| ⌘F | Focus the current board's search |
+| ⌘⇧F | Open Filters |
+| ⌘⇧I | Open the Repository Filter popover |
+| ⌘⇧D | Open Data Status |
+| ⌘R | Refresh repository evidence |
+| ⌘, | Settings |
+| ⌘[ | Back in Activity |
+| ⌘⇧C | Copy current view as Markdown |
+| ⌘Return | Open selection on GitHub |
+| ⌘⌥1–5 | Activity: Heat, Directories, Commits, People, Related |
+| ⌘⌥M, ⌘⌥A, ⌘⌥R | PRs: needs my attention, authored by me, review requested |
+| Return or right arrow | Explore the selected directory row |
+| Escape | Dismiss the active popover or sheet |
