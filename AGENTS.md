@@ -31,7 +31,6 @@ Override `DEVELOPER_DIR` for Swift builds when needed.
 ```sh
 make test
 make check
-python3 -B -m unittest discover -s scripts -p '*_test.py'
 make build
 ```
 

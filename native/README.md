@@ -120,7 +120,6 @@ macOS 26; building with a newer SDK does not raise the runtime requirement.
 make build
 make test
 make check
-python3 -B -m unittest discover -s scripts -p '*_test.py'
 open -n native/build/Bigboard.app --args --ui-preview
 ```
 
