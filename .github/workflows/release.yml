@@ -84,7 +84,7 @@ jobs:
         if: ${{ !contains(env.RELEASE_TAG, '-') }}
         run: |
           mkdir -p homebrew-tap/Casks
-          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "native/build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
+          bash scripts/homebrew-cask.sh "${RELEASE_TAG#v}" "build/Bigboard_${RELEASE_TAG#v}_darwin_universal.zip" > homebrew-tap/Casks/bigboard.rb
           ruby -c homebrew-tap/Casks/bigboard.rb
           git -C homebrew-tap config user.name github-actions[bot]
           git -C homebrew-tap config user.email 41898282+github-actions[bot]@users.noreply.github.com

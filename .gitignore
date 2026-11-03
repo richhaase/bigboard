@@ -22,12 +22,12 @@ dist/
 # Editor
 .claude/settings.local.json
 
-# Native Swift build products
-native/.build/
-native/build/
-native/.swiftpm/
+# Swift and Xcode build products
+/.build/
+/build/
+/.swiftpm/
 
-native/publisher.local.json
+/publisher.local.json
 
 xcuserdata/
 *.xcuserstate

@@ -1,6 +1,6 @@
 # Publisher setup
 
-[README](../README.md) · [Development guide](../native/README.md)
+[README](../README.md) · [Development guide](development.md)
 
 This guide is for maintaining Bigboard's GitHub App and release credentials.
 App users sign in through GitHub; see the [user reference](reference.md#setup-and-settings).
@@ -46,7 +46,7 @@ The publisher supplies three build settings:
 | `BIGBOARD_GITHUB_APP_SLUG` | App slug from its public URL | Repository variable |
 | `BIGBOARD_GITHUB_CLIENT_SECRET` | GitHub App client secret | Repository secret |
 
-For local development, create the ignored `native/publisher.local.json` using
+For local development, create the ignored `publisher.local.json` using
 the publisher's values in place of these placeholders:
 
 ```json
@@ -57,7 +57,7 @@ the publisher's values in place of these placeholders:
 }
 ```
 
-Restrict the file to your account with `chmod 600 native/publisher.local.json`.
+Restrict the file to your account with `chmod 600 publisher.local.json`.
 Keep actual values out of source control, logs, and chat. GitHub Actions secrets
 cannot be read back for local use.
 
@@ -70,7 +70,7 @@ A local build may omit all three values and open with sign-in unavailable.
 Configured builds require all three. The release script sets
 `BIGBOARD_REQUIRE_AUTH=YES` so publication fails if any value is missing or invalid.
 Use `make dev` and the **Bigboard Dev** Xcode scheme for
-[local development](../native/README.md#local-development).
+[local development](development.md#local-development).
 
 ## Authentication and access
 
@@ -86,7 +86,7 @@ credentials are not written into Git config or passed to credential helpers.
 
 Signing out removes the current build's local credential. Revoking authorization
 or changing installation access on GitHub affects both production and development.
-The [development guide](../native/README.md#storage-and-access) describes account
+The [development guide](development.md#storage-and-access) describes account
 isolation and cached access.
 
 ## Release credentials
@@ -112,6 +112,6 @@ Team ID. It passes `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, `NOTARY_KEY_PATH`,
 `NOTARY_KEY_ID`, and `NOTARY_ISSUER` to the release script. The temporary
 notarization key and signing keychain are cleaned up after the job.
 
-Follow the [release procedure](../native/README.md#releases) and
-[installed-upgrade checks](../native/README.md#installed-upgrade-verification)
+Follow the [release procedure](development.md#releases) and
+[installed-upgrade checks](development.md#installed-upgrade-verification)
 when publishing or changing signing behavior.

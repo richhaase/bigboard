@@ -14,10 +14,10 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 
 xcodebuild -quiet \
-  -project "$repo_root/native/Bigboard.xcodeproj" \
+  -project "$repo_root/Bigboard.xcodeproj" \
   -scheme "Bigboard App" \
   -configuration "$configuration" \
-  -derivedDataPath "$repo_root/native/build/DerivedData" \
+  -derivedDataPath "$repo_root/build/DerivedData" \
   -destination 'generic/platform=macOS' \
-  CONFIGURATION_BUILD_DIR="$repo_root/native/build" \
+  CONFIGURATION_BUILD_DIR="$repo_root/build" \
   build

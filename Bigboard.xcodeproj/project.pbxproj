@@ -18,7 +18,7 @@
 			);
 			isa = PBXShellScriptBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
-			shellScript = "set -euo pipefail\nxcrun swift \"$SRCROOT/../scripts/configure-publisher.swift\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\ntouch \"$DERIVED_FILE_DIR/publisher-configured\"\n";
+			shellScript = "set -euo pipefail\nxcrun swift \"$SRCROOT/scripts/configure-publisher.swift\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\ntouch \"$DERIVED_FILE_DIR/publisher-configured\"\n";
 			files = (
 			);
 			alwaysOutOfDate = 1;
