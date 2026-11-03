@@ -9,7 +9,7 @@ dev:
 	bash scripts/build-macos.sh Development
 	open "native/build/Bigboard Dev.app"
 test:
-	swift test --package-path native
+	swift test --package-path native --no-parallel
 check: test
 	bash scripts/build-macos.sh Release
 	lipo native/build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch arm64

@@ -174,8 +174,9 @@ values override the file. The build validates values without printing them.
 `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; override
 it for another Xcode installation. `bash scripts/build-macos.sh Release` builds
 an optimized universal app for arm64 and x86_64. `make test` runs the library
-package tests without launching the app. `make check` runs those tests and the
-universal app build.
+package tests without launching the app. Tests run serially so subprocess-heavy
+fixtures do not interfere with timeout and cancellation checks. `make check`
+runs those tests and verifies the universal app build.
 
 Open `Bigboard.xcodeproj` and select **Bigboard Dev** for local development.
 The **Bigboard App** scheme uses the production identity. Run package tests with
