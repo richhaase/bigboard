@@ -7,13 +7,13 @@ build:
 	bash scripts/build-macos.sh
 dev:
 	bash scripts/build-macos.sh Development
-	open "native/build/Bigboard Dev.app"
+	open "build/Bigboard Dev.app"
 test:
-	swift test --package-path native --no-parallel
+	swift test --no-parallel
 check: test
 	bash scripts/build-macos.sh Release
-	lipo native/build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch arm64
-	lipo native/build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch x86_64
+	lipo build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch arm64
+	lipo build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch x86_64
 clean:
-	swift package --package-path native clean
-	rm -rf native/build
+	swift package clean
+	rm -rf build

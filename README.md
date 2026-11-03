@@ -55,7 +55,7 @@ data interpretation, and troubleshooting.
 ## Develop
 
 Bigboard uses Swift 6, SwiftUI, AppKit, and Charts. Development requires Xcode 26
-or later. Start with the [development guide](native/README.md) to configure
+or later. Start with the [development guide](docs/development.md) to configure
 GitHub sign-in and run `make dev`. Bigboard Dev has separate credentials and
 data, so the installed release can remain open.
 

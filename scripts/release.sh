@@ -17,15 +17,15 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 release_version=${release_tag#v}
 bundle_version=${release_version%%-*}
-output_dir="$repo_root/native/build"
+output_dir="$repo_root/build"
 archive_path="$output_dir/Bigboard.xcarchive"
 export_path="$output_dir/export"
 zip_path="$output_dir/Bigboard_${release_version}_darwin_universal.zip"
 
-swift test --package-path "$repo_root/native" --no-parallel
+swift test --package-path "$repo_root" --no-parallel
 
 xcodebuild -quiet \
-  -project "$repo_root/native/Bigboard.xcodeproj" \
+  -project "$repo_root/Bigboard.xcodeproj" \
   -scheme "Bigboard App" \
   -configuration Release \
   -destination 'generic/platform=macOS' \
@@ -39,7 +39,7 @@ xcodebuild -quiet \
   archive
 
 export_options="$output_dir/ExportOptions.plist"
-cp "$repo_root/native/Config/ExportOptions.plist" "$export_options"
+cp "$repo_root/Config/ExportOptions.plist" "$export_options"
 plutil -insert teamID -string "$DEVELOPMENT_TEAM" "$export_options"
 plutil -insert signingCertificate -string "$SIGNING_IDENTITY" "$export_options"
 

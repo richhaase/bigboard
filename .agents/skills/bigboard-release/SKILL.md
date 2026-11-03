@@ -25,4 +25,4 @@ Do not build recovery infrastructure for a one-off release failure.
 
 Publisher settings and signing credentials stay in GitHub Actions secrets/variables.
 For packaging, signing, authentication, or storage changes, follow the
-[installed-upgrade checks](../../../native/README.md#installed-upgrade-verification).
+[installed-upgrade checks](../../../docs/development.md#installed-upgrade-verification).

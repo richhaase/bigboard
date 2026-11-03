@@ -1,6 +1,6 @@
 # Bigboard development
 
-[README](../README.md) · [User reference](../docs/reference.md) · [Publisher setup](../docs/github-app.md)
+[README](../README.md) · [User reference](reference.md) · [Publisher setup](github-app.md)
 
 ## Local development
 
@@ -9,25 +9,25 @@ Commands below run from the repository root. `DEVELOPER_DIR` defaults to
 `/Applications/Xcode.app/Contents/Developer`; override it for another Xcode installation.
 
 For GitHub sign-in, use the publisher configuration described in
-[publisher setup](../docs/github-app.md#build-configuration). The GitHub App must
+[publisher setup](github-app.md#build-configuration). The GitHub App must
 have both the production and development callback URLs registered.
 
 ```sh
 make dev
 ```
 
-This builds and opens `native/build/Bigboard Dev.app`. Sign in with your normal
+This builds and opens `build/Bigboard Dev.app`. Sign in with your normal
 GitHub account and select repositories in Settings. Quit Bigboard Dev before
 rebuilding. Its sign-in, settings, and caches persist across builds.
 
-To debug in Xcode, open `native/Bigboard.xcodeproj` and select the **Bigboard Dev**
+To debug in Xcode, open `Bigboard.xcodeproj` and select the **Bigboard Dev**
 scheme. The **Bigboard App** scheme uses the production identity. Package tests
-run through `make test`, or by opening `native/Package.swift` separately in Xcode.
+run through `make test`, or by opening `Package.swift` separately in Xcode.
 
 | Command | Result |
 | --- | --- |
 | `make dev` | Build and launch Bigboard Dev. |
-| `make build` | Build `native/build/Bigboard.app` with the production identity. |
+| `make build` | Build `build/Bigboard.app` with the production identity. |
 | `make test` | Run the Swift package tests serially. |
 | `make check` | Run tests, build the optimized app, and verify arm64 and x86_64 support. |
 | `make clean` | Remove package and app build output. |
@@ -58,7 +58,7 @@ implementation and tests. SwiftUI provides the interface; AppKit handles lifecyc
 and desktop integration. Foundation provides HTTP and filesystem operations, and
 Security provides Keychain access. There are no third-party Swift dependencies.
 
-Paths in this table are relative to `native/`.
+Paths in this table are relative to the repository root.
 
 | Location | Responsibility |
 | --- | --- |
@@ -104,7 +104,7 @@ Account-scoped grants control cached access. A pending check preserves the last
 verified grant; confirmed denials remove the affected access. A failed save after
 grant invalidation requires live verification again. Cancellation cannot restore
 access after sign-out or an account change. See the
-[user reference](../docs/reference.md#data-status-offline-work-and-storage) for
+[user reference](reference.md#data-status-offline-work-and-storage) for
 offline behavior, cache removal, and bookmark eligibility.
 
 ## Testing
@@ -126,7 +126,7 @@ live behaviors or large-workspace performance.
 ## Releases
 
 Publishing requires repository write access and the configured
-[publisher inputs](../docs/github-app.md#release-credentials).
+[publisher inputs](github-app.md#release-credentials).
 
 1. Use current main and confirm CI passed for the commit being released.
 2. Choose an unused version, create an annotated `vX.Y.Z` tag on that commit,

@@ -4,11 +4,11 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
 
 ## Layout
 
-- `native/Bigboard.xcodeproj`: app target and development/release schemes.
-- `native/Package.swift`: application library and test targets.
-- `native/Sources/BigboardApp`: interface, navigation, and workspace orchestration.
-- `native/Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
-- `native/Tests`: native tests; `scripts`: app packaging and release checks.
+- `Bigboard.xcodeproj`: app target and development/release schemes.
+- `Package.swift`: application library and test targets.
+- `Sources/BigboardApp`: interface, navigation, and workspace orchestration.
+- `Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
+- `Tests`: native tests; `scripts`: app packaging and release checks.
 
 ## Working rules
 
@@ -36,9 +36,9 @@ make check
 make build
 ```
 
-`make dev` builds and launches `native/build/Bigboard Dev.app` with separate
-credentials and data. `make build` produces `native/build/Bigboard.app`.
-See the [development guide](native/README.md) for setup and verification, the
+`make dev` builds and launches `build/Bigboard Dev.app` with separate
+credentials and data. `make build` produces `build/Bigboard.app`.
+See the [development guide](docs/development.md) for setup and verification, the
 [user reference](docs/reference.md) for behavior, and
 [publisher setup](docs/github-app.md) for authentication and signing inputs.
 Publish only when requested, using the tag-triggered release workflow.

@@ -75,7 +75,7 @@ struct PublisherConfigurationTests {
 
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["swift", repository.appendingPathComponent("scripts/configure-publisher.swift").path, plistURL.path]
