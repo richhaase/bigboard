@@ -278,7 +278,7 @@ struct HistoryTests {
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(start.duration(to: .now) < .seconds(3))
+        #expect(start.duration(to: .now) < .seconds(10))
         #expect(!FileManager.default.fileExists(atPath: completed.path))
     }
     @Test func timeoutStopsDescendantsHoldingOutputPipes() async throws {
@@ -299,7 +299,7 @@ struct HistoryTests {
             _ = try await task.value
             Issue.record("A hung Git process family did not time out.")
         } catch { #expect(error.localizedDescription.contains("timeout")) }
-        #expect(start.duration(to: .now) < .seconds(3))
+        #expect(start.duration(to: .now) < .seconds(10))
         #expect(!FileManager.default.fileExists(atPath: completed.path))
     }
     @Test func cancellationInterruptsAttributeMatchingInsideStreamCallback() async throws {

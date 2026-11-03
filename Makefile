@@ -12,6 +12,8 @@ test:
 	swift test --package-path native
 check: test
 	bash scripts/build-macos.sh Release
+	lipo native/build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch arm64
+	lipo native/build/Bigboard.app/Contents/MacOS/Bigboard -verify_arch x86_64
 clean:
 	swift package --package-path native clean
 	rm -rf native/build

@@ -49,8 +49,8 @@ xcodebuild -quiet -exportArchive \
   -exportPath "$export_path"
 
 app_path="$export_path/Bigboard.app"
-lipo -verify_arch arm64 "$app_path/Contents/MacOS/Bigboard"
-lipo -verify_arch x86_64 "$app_path/Contents/MacOS/Bigboard"
+lipo "$app_path/Contents/MacOS/Bigboard" -verify_arch arm64
+lipo "$app_path/Contents/MacOS/Bigboard" -verify_arch x86_64
 codesign --verify --deep --strict "$app_path"
 
 bash "$repo_root/scripts/notarize-macos.sh" "$app_path" "$zip_path"
