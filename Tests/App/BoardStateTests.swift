@@ -154,71 +154,35 @@ import Testing
         let state = BoardState()
         let repos = [Repository(id: "acme/app"), Repository(id: "acme/library"), Repository(id: "acme/service")]
         let available = Set(repos.map(\.id))
-        state.toggleToolbarPopover(.repositories)
+        state.repositoryFilterPresented.toggle()
         let changed = try #require(RepositoryChecklist(selection: state.repositories, available: available).setting("acme/app", checked: false))
         #expect(state.setRepositoryFilter(changed, available: repos))
-        #expect(state.toolbarPopover == .repositories)
+        #expect(state.repositoryFilterPresented)
         #expect(state.repositories == ["acme/library", "acme/service"])
         #expect(state.visibleRepositories(Snapshot(repositories: repos)).map(\.id) == ["acme/library", "acme/service"])
-        state.dismissToolbarPopover()
+        state.repositoryFilterPresented = false
         #expect(state.repositories == ["acme/library", "acme/service"])
-        state.toggleToolbarPopover(.repositories)
+        state.repositoryFilterPresented.toggle()
         #expect(RepositoryChecklist(selection: state.repositories, available: available).checked == ["acme/library", "acme/service"])
-        state.dismissToolbarPopover()
-        #expect(state.toolbarPopover != .repositories)
+        state.repositoryFilterPresented = false
+        #expect(!state.repositoryFilterPresented)
         #expect(state.repositories == ["acme/library", "acme/service"])
         #expect(state.setRepositoryFilter([], available: repos))
         #expect(RepositoryChecklist(selection: state.repositories, available: available).checked == available)
     }
     @Test func repositoryPopoverYieldsToOtherNavigation() {
         let state = BoardState()
-        state.toggleToolbarPopover(.repositories)
+        state.repositoryFilterPresented.toggle()
         state.panel = .status
-        #expect(state.toolbarPopover != .repositories)
+        #expect(!state.repositoryFilterPresented)
         #expect(state.panel == .status)
-        state.toggleToolbarPopover(.repositories)
+        state.repositoryFilterPresented.toggle()
         #expect(state.panel == nil)
         state.switchBoard(.contributors)
-        #expect(state.toolbarPopover != .repositories)
-        state.toggleToolbarPopover(.repositories)
+        #expect(!state.repositoryFilterPresented)
+        state.repositoryFilterPresented.toggle()
         state.resetForAccount(WorkspaceConfiguration())
-        #expect(state.toolbarPopover != .repositories)
-    }
-    @Test func toolbarPopoversSwitchWithoutStaleDismissalsClosingTheNewPopover() {
-        let state = BoardState()
-        state.toggleToolbarPopover(.repositories)
-        state.toggleToolbarPopover(.date)
-        #expect(state.toolbarPopover == .date)
-        #expect(state.toolbarPopover != .repositories)
-        state.setToolbarPopover(.repositories, presented: false)
-        #expect(state.toolbarPopover == .date)
-        state.toggleToolbarPopover(.groups)
-        state.setToolbarPopover(.date, presented: false)
-        #expect(state.toolbarPopover == .groups)
-        state.toggleToolbarPopover(.groups)
-        #expect(state.toolbarPopover == nil)
-        state.panel = .status
-        state.toggleToolbarPopover(.date)
-        #expect(state.panel == nil)
-        #expect(state.toolbarPopover == .date)
-    }
-    @Test func allToolbarPopoversDismissAndYieldToNavigation() {
-        let state = BoardState()
-        for popover in [ToolbarPopover.date, .repositories, .groups] {
-            state.toggleToolbarPopover(popover)
-            #expect(state.toolbarPopover == popover)
-            state.dismissToolbarPopover()
-            #expect(state.toolbarPopover == nil)
-            state.toggleToolbarPopover(popover)
-            state.panel = .filters
-            #expect(state.toolbarPopover == nil)
-            state.toggleToolbarPopover(popover)
-            state.switchBoard(.contributors)
-            #expect(state.toolbarPopover == nil)
-            state.toggleToolbarPopover(popover)
-            state.resetForAccount(WorkspaceConfiguration())
-            #expect(state.toolbarPopover == nil)
-        }
+        #expect(!state.repositoryFilterPresented)
     }
     @Test func dataStatusIndicatorQualifiesIncompleteAndCachedEvidence() {
         let complete = Repository(id: "acme/app", prInventoryComplete: true, prFilesComplete: true, prReviewersComplete: true)

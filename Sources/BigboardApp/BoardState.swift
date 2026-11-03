@@ -17,7 +17,6 @@ enum ActivityLens: String, CaseIterable, Identifiable {
         "Related"
     var id: String { rawValue }
 }
-enum ToolbarPopover: Equatable { case date, repositories, groups }
 enum Panel: String, Identifiable {
     case settings, filters, status, help, identities
     var id: String { rawValue }
@@ -70,8 +69,10 @@ struct RepositoryChecklist {
     var scopedPerson: String?
     var contextualRepository: String?
     var savedPRFilters: BoardFilters?
-    var toolbarPopover: ToolbarPopover?
-    var panel: Panel? { didSet { if panel != nil { toolbarPopover = nil } } }
+    var repositoryFilterPresented = false {
+        didSet { if repositoryFilterPresented { panel = nil } }
+    }
+    var panel: Panel? { didSet { if panel != nil { repositoryFilterPresented = false } } }
     var preferencesApplied = false
     var rangeLabel: String {
         sinceLastLook ? "Since last look" : days == 0 ? "All time" : "Last \(days) days"
@@ -97,19 +98,6 @@ struct RepositoryChecklist {
         guard days > 0 else { return true }
         return date.map { $0 > snapshot.generatedAt.addingTimeInterval(-Double(days) * 86400) } ?? false
     }
-    func toggleToolbarPopover(_ value: ToolbarPopover) {
-        panel = nil
-        toolbarPopover = toolbarPopover == value ? nil : value
-    }
-    func setToolbarPopover(_ value: ToolbarPopover, presented: Bool) {
-        if presented {
-            panel = nil
-            toolbarPopover = value
-        } else if toolbarPopover == value {
-            toolbarPopover = nil
-        }
-    }
-    func dismissToolbarPopover() { toolbarPopover = nil }
     var repositoryFilterLabel: String { repositories.isEmpty ? "All" : "\(repositories.count) selected" }
     @discardableResult func setRepositoryFilter(_ ids: Set<String>, available: [Repository]) -> Bool {
         let selected = ids.intersection(available.map(\.id))
@@ -258,7 +246,7 @@ struct RepositoryChecklist {
         contextualRepository = nil
     }
     func switchBoard(_ value: Board) {
-        dismissToolbarPopover()
+        repositoryFilterPresented = false
         restorePRFilters()
         board = value
     }
@@ -271,7 +259,7 @@ struct RepositoryChecklist {
         currentFilters = BoardFilters(sort: old.sort, reversed: old.reversed)
     }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
-        dismissToolbarPopover()
+        repositoryFilterPresented = false
         days = configuration.sinceDays
         sinceLastLook = false
         repositories = []

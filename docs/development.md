@@ -21,8 +21,9 @@ GitHub account and select repositories in Settings. Quit Bigboard Dev before
 rebuilding. Its sign-in, settings, and caches persist across builds.
 
 To debug in Xcode, open `Bigboard.xcodeproj` and select the **Bigboard Dev**
-scheme. The **Bigboard App** scheme uses the production identity. Package tests
-run through `make test`, or by opening `Package.swift` separately in Xcode.
+scheme. The **Bigboard App** scheme uses the production identity. Both schemes
+run the existing package tests with **Product → Test** (⌘U), without launching
+the app or using your sign-in. `make test` runs the same tests from the terminal.
 
 | Command | Result |
 | --- | --- |
