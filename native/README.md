@@ -1,303 +1,163 @@
-# Native Bigboard
+# Bigboard development
 
-Bigboard uses an Xcode macOS app target and a local Swift 6 library package,
-targeting macOS 26 Tahoe or later. It has no third-party
-Swift packages or embedded browser runtime.
-SwiftUI supplies the interface; AppKit supplies lifecycle, clipboard, browser,
-and Save dialog integration; Security supplies Keychain; Foundation supplies
-HTTP and filesystem operations. Git runs as a cancellable child process against
-app-owned bare repositories. History collection discovers Git from PATH and standard Homebrew/system locations.
-Install Git through Homebrew or Xcode Command Line Tools if it is unavailable.
-
-## Source layout
-
-| Location | Responsibility |
-| --- | --- |
-| `Sources/BigboardApp/WorkspaceModel.swift` | Account-scoped snapshots, refresh orchestration, settings, grants, bookmarks, export and native actions. |
-| `Sources/BigboardApp/BoardState.swift` | Shared view scope and independent board state. |
-| `Sources/BigboardApp/Boards/` | Activity, Heat, Contributors, Pull Requests, and their shared charts and commit list. |
-| `Sources/BigboardApp/Panels/`, `Settings/` | Workspace sheets, repository filters, and settings editors. |
-| `Sources/BigboardCore/Authentication.swift` | PKCE, callback validation, serialized rotation, opaque Keychain persistence. |
-| `Sources/BigboardCore/GitHub.swift` | Paginated installation discovery, bounded PR evidence, request budgets and cooldowns. |
-| `Sources/BigboardCore/History/` | Git subprocesses, app-owned mirrors, commit parsing, history rules, and the parsed scan cache. |
-| `Sources/BigboardCore/Analysis.swift` | Canonical deduplication, scoped totals, Heat, people, calendars and PR attention. |
-| `Sources/BigboardCore/Storage.swift` | Versioned JSON, account isolation, atomic writes, conflicts, access and bookmarks. |
-| `Tests/App/`, `Tests/Core/`, `Tests/Workspace/` | Board and settings state, core logic, and workspace flows across Git, storage, and mocked GitHub. |
-| `Bigboard.xcodeproj`, `App/` | Application target and launcher, linking the local Bigboard package. |
-| `Config/` | Development and release build settings, bundle metadata, and archive export options. |
-| `Assets.xcassets/` | App icon sizes compiled by Xcode. |
-| `Assets/AppIcon.png` | Original artwork for updating the asset catalog. |
-
-## Storage choice
-
-Small durable state uses versioned JSON in Application Support. This is easy to
-inspect, supports atomic replacement and external-edit detection, and does not
-need a database migration layer for the current workspace shape. Git objects
-and parsed scans live in Caches because they can be rebuilt. No credentials are
-stored in either location. A future historical PR store may justify SQLite;
-that feature and its schema are outside this port.
-
-`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override native paths for isolated
-testing. They do not redirect Keychain. The packaged bundle identity selects
-the default data directories, Keychain service, and OAuth callback together.
-Use Bigboard Dev for authenticated local testing alongside the installed release.
+[README](../README.md) · [User reference](../docs/reference.md) · [Publisher setup](../docs/github-app.md)
 
 ## Local development
 
-Run `make dev` from the repository root to build and open
-`native/build/Bigboard Dev.app`. Quit Bigboard Dev before rebuilding and running
-the command again. Development sign-in, settings, and caches persist across builds.
+Use Xcode 26 or later with the macOS 26 SDK or newer and a usable Git installation.
+Commands below run from the repository root. `DEVELOPER_DIR` defaults to
+`/Applications/Xcode.app/Contents/Developer`; override it for another Xcode installation.
 
-For the one-time GitHub setup, add
-`com.richhaase.bigboard.dev://oauth/github` as a second callback URL on the
-existing Bigboard Desktop GitHub App. Keep the release callback
-`com.richhaase.bigboard://oauth/github` and leave wildcard matching disabled.
-Use the existing publisher settings described below; no separate GitHub App,
-account, or credential file is needed. Sign in once in Bigboard Dev, choose your
-actual repositories in Settings, and Apply.
+For GitHub sign-in, use the publisher configuration described in
+[publisher setup](../docs/github-app.md#build-configuration). The GitHub App must
+have both the production and development callback URLs registered.
 
-| Identity | Production | Development |
+```sh
+make dev
+```
+
+This builds and opens `native/build/Bigboard Dev.app`. Sign in with your normal
+GitHub account and select repositories in Settings. Quit Bigboard Dev before
+rebuilding. Its sign-in, settings, and caches persist across builds.
+
+To debug in Xcode, open `native/Bigboard.xcodeproj` and select the **Bigboard Dev**
+scheme. The **Bigboard App** scheme uses the production identity. Package tests
+run through `make test`, or by opening `native/Package.swift` separately in Xcode.
+
+| Command | Result |
+| --- | --- |
+| `make dev` | Build and launch Bigboard Dev. |
+| `make build` | Build `native/build/Bigboard.app` with the production identity. |
+| `make test` | Run the Swift package tests serially. |
+| `make check` | Run tests, build the optimized app, and verify arm64 and x86_64 support. |
+| `make clean` | Remove package and app build output. |
+
+### App identities
+
+| Setting | Production | Development |
 | --- | --- | --- |
 | Bundle identifier | `com.richhaase.bigboard` | `com.richhaase.bigboard.dev` |
 | Keychain service | `com.richhaase.bigboard.github` | `com.richhaase.bigboard.dev.github` |
-| Application Support and Caches directory | `com.richhaase.bigboard.native` | `com.richhaase.bigboard.dev.native` |
+| Support/cache directory | `com.richhaase.bigboard.native` | `com.richhaase.bigboard.dev.native` |
 
-Development starts with a fresh workspace and does not copy production tokens,
-settings, grants, bookmarks, or caches. Both apps access the same GitHub App
-installations and can collect the same repositories, but their local state is
-independent. The installed release can stay open during development. Sign-out
-removes only the current build's local credential; changing installation access
-or revoking GitHub authorization still affects the shared GitHub App.
+The bundle identity selects the OAuth callback, credential store, and data paths.
+Development starts with an independent workspace; it does not copy production
+credentials or data. The installed release can stay open while Bigboard Dev runs.
+Both use the same GitHub App registration, so changes to installation access or
+GitHub authorization affect both.
 
-`make build` retains its production identity and output at
-`native/build/Bigboard.app`; close the installed release before launching that
-bundle. The **Bigboard Dev** scheme selects the Development configuration and
-its separate identity. Debug and Release use the production identity.
-Use `make dev` or run the **Bigboard Dev** scheme for the authenticated app
-walkthrough.
+Debug and Release configurations use the production identity. Close the installed
+release before launching a local production build: those copies share credentials
+and data. Local builds are ad hoc signed, and macOS may request Keychain access
+after a rebuild.
 
-Local builds are ad hoc signed. macOS may ask for Keychain permission after a
-rebuild; this does not establish the signed-release upgrade behavior below.
+## Source organization
 
-## Preserved behavior
+The Xcode app target links the local Swift package, which contains the application
+implementation and tests. SwiftUI provides the interface; AppKit handles lifecycle
+and desktop integration. Foundation provides HTTP and filesystem operations, and
+Security provides Keychain access. There are no third-party Swift dependencies.
 
-- Cache-first history, explicit refresh, and cached-only mode. Stale and partial
-  evidence is qualified. Missing inventory is never a complete zero.
-- Git author dates and PR update dates; exclusive lower bounds; snapshot-relative
-  ranges; local calendar weeks/days; future-dated evidence retained where applicable.
-- Canonical shared-commit selection, repository associations, mailmap followed
-  by saved identities, excluded generated/vendored/bulk volume and unknown lines.
-- Only saved, selected repositories are collected. Exact exclusions, exclusion
-  patterns, and named groups can further narrow that selection. Newly discovered
-  repositories stay unchecked until explicitly saved. The shared Repository
-  filter only narrows loaded data; there is no session-tracking layer.
-- Heat uses its own 26-week context, with recent four-week and preceding
-  twelve-week averages, independent of the shared date range.
-- PR inventory, file and reviewer completeness remain independent. The request
-  budget and pagination bounds qualify unfinished work. Attention uses available
-  individual evidence and does not infer team membership.
-- Account-scoped offline grants remain available while live access checks are
-  pending, including when the app quits mid-refresh. Completed verification
-  replaces the grant; confirmed denials remove affected access. A failed save
-  after invalidation requires live verification again. Transient failure can
-  retain previously authorized stale evidence. Unlisted cache removal requires a
-  successful live refresh and verifies cache ownership; it is available in
-  Workspace Settings → Storage.
-- Session bookmark baselines remain fixed. Normal quit saves a live snapshot
-  time only when every repository in the collected global/group scope has current
-  Git history and complete, nonstale PR inventory, with some commit history loaded.
-  Failed or incomplete collection preserves the last eligible time. Bounded PR
-  file/reviewer details remain qualified without blocking the bookmark. Viewing
-  filters, offline scans, and exports do not advance it.
-- JSON export aggregates all loaded tracked history; Markdown copies current
-  view context. Neither initiates network access.
+Paths in this table are relative to `native/`.
 
-The [user reference](../docs/reference.md) and [workflow guide](../docs/visual-guide.md)
-describe the native interface. Time-range comparison, a new catch-up board,
-persistent acknowledge/snooze/pin, and historical PR statistics remain separate
-future features.
+| Location | Responsibility |
+| --- | --- |
+| `Bigboard.xcodeproj`, `App/` | App target, schemes, and launcher. |
+| `Config/` | Build settings, bundle metadata, and archive export options. |
+| `Assets.xcassets/` | App icon asset catalog; source artwork is in `Assets/AppIcon.png`. |
+| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, bookmarks, and native actions. |
+| `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
+| `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
+| `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
+| `Sources/BigboardCore/Authentication.swift`, `Sources/BigboardCore/ApplicationIdentity.swift` | OAuth, token rotation, Keychain, and build identities. |
+| `Sources/BigboardCore/GitHub.swift` | Repository discovery, PR evidence, pagination, and request budgets. |
+| `Sources/BigboardCore/History/` | Git processes, owned caches, history parsing, and counting rules. |
+| `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
+| `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
+| `Tests/App/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Build/` | UI state, core logic, workspace integration, and publisher configuration tests. |
 
-## Repository collection and viewing
+Xcode assembles the bundle, processes its Info.plist and icon catalog, and runs
+`scripts/configure-publisher.swift` before signing.
+`scripts/build-macos.sh` invokes Xcode for local builds;
+`scripts/release.sh` archives, exports, and publishes releases.
 
-Use **Workspace Settings → Repositories** to save what Bigboard collects. Named
-groups intersect that saved selection. These choices are separate from
-**Repository filter**, available as a persistent toolbar popover, in the Boards
-menu, or with Command-Shift-I. The popover stays open across selections. The sidebar contains
-only Activity, Contributors, and Pull requests. Workspace Settings lives in the
-app menu and Keyboard Guide under Help. Data Status opens from a single clickable
-control containing status and timestamp at the bottom right, from the Boards menu, or with Command-Shift-D.
-The footer control spins during refresh; the main screen's top progress display
-remains visible. Date and repository filters and Refresh stay in the toolbar.
+## Storage and access
 
-The filter is one checklist, initially showing every loaded repository checked.
-It stays open while changes apply immediately across Activity, Contributors,
-and Pull requests. Reopening it reflects the current selection. Search narrows
-the displayed rows, and **Select all loaded** checks every loaded repository.
-When only one repository remains checked, its checkbox is disabled until another
-repository is checked.
+Durable settings, access grants, and bookmarks use versioned JSON under
+`~/Library/Application Support/<identity>/accounts/<account-id>/`.
+Git mirrors and parsed scans live under
+`~/Library/Caches/<identity>/accounts/<account-id>/repos/`.
+The identity directory names are listed above. Credentials live only in Keychain.
 
-Filtering preserves each board's other filters. It makes no refresh or network
-request, writes no settings, and does not unload history. Closing the picker
-keeps the selection already applied.
+`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override the support and cache
+roots for isolated testing. They do not redirect Keychain. Use Bigboard Dev for
+authenticated testing alongside the installed release.
 
-Settings reuses the current verified repository inventory, supports Select All,
-shows last-push dates, and defaults to most recently pushed with alternate sorts.
-**Apply** validates and saves the local draft, then closes Settings while refresh
-continues in the main screen. A save failure keeps the draft open. **General**
-contains common preferences; advanced collection/counting options are grouped
-separately. There is no intermediate review screen.
+Git runs as a cancellable child process against app-owned bare repositories.
+The app discovers Git through PATH and standard Homebrew/system locations.
+It isolates Git configuration and credentials from developer checkouts.
+History is streamed; parsed JSON caches are optional and can be rebuilt.
+Resource limits and interrupted collection retain honest stale or partial
+coverage instead of silently truncating results.
 
-**Workspace Settings → Storage** contains local cache removal. Removal remains
-limited to app-owned caches whose repositories were unlisted after a successful
-live GitHub refresh. Settings discovery alone or changing a viewing filter does not authorize
-removal. Cached history mode cannot remove caches.
-Removal requires its own confirmation and does not change the GitHub repository.
+Account-scoped grants control cached access. A pending check preserves the last
+verified grant; confirmed denials remove the affected access. A failed save after
+grant invalidation requires live verification again. Cancellation cannot restore
+access after sign-out or an account change. See the
+[user reference](../docs/reference.md#data-status-offline-work-and-storage) for
+offline behavior, cache removal, and bookmark eligibility.
 
-## Build and verification
+## Testing
 
-Use Xcode 26 or later with the macOS 26 SDK or newer. The deployment target is
-macOS 26; building with a newer SDK does not raise the runtime requirement.
+Run `make check` before submitting code changes. Tests use temporary directories,
+local Git fixture repositories, mock HTTP transports, and isolated credential
+stores. They do not read real credentials or require a signed-in app.
 
-```sh
-make build
-make test
-make check
-open native/build/Bigboard.app
-```
+Tests run serially so subprocess-heavy fixtures do not interfere with timeout
+and cancellation checks. Individual tests still exercise concurrent operations.
+Add focused unit or integration coverage for changed behavior.
 
-Publisher settings may be placed in the ignored `native/publisher.local.json`
-(string fields named `BIGBOARD_GITHUB_CLIENT_ID`, `BIGBOARD_GITHUB_CLIENT_SECRET`,
-and `BIGBOARD_GITHUB_APP_SLUG`). Restrict it to your account with `chmod 600`.
-`BIGBOARD_PUBLISHER_CONFIG` selects another JSON path; explicit environment
-values override the file. The build validates values without printing them.
+For UI changes, verify the affected workflow in Bigboard Dev with real
+repositories. Include saving/canceling edits, keyboard interaction, and
+quit/reopen behavior when relevant. Authentication changes also need the real
+browser callback and Keychain flow. Automated fixtures do not establish those
+live behaviors or large-workspace performance.
 
-`DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; override
-it for another Xcode installation. `bash scripts/build-macos.sh Release` builds
-an optimized universal app for arm64 and x86_64. `make test` runs the library
-package tests without launching the app. Tests run serially so subprocess-heavy
-fixtures do not interfere with timeout and cancellation checks. `make check`
-runs those tests and verifies the universal app build.
+## Releases
 
-Open `Bigboard.xcodeproj` and select **Bigboard Dev** for local development.
-The **Bigboard App** scheme uses the production identity. Run package tests with
-`make test`, or open `Package.swift` separately in Xcode. Both schemes link the same
-local library package, which owns the implementation and tests. Xcode processes
-`Config/Info.plist` and the icon asset catalog, then runs
-`scripts/configure-publisher.swift` to validate and embed publisher settings
-before code signing. The same configuration loader runs for Xcode and Make builds.
+Publishing requires repository write access and the configured
+[publisher inputs](../docs/github-app.md#release-credentials).
 
-The Release workflow imports the Developer ID certificate with
-`apple-actions/import-codesign-certs`. It runs `scripts/release.sh` to test the
-tagged source, archive and export with `xcodebuild`, notarize and staple with
-Apple's command-line tools, and publish `native/build/Bigboard_<version>_darwin_universal.zip` plus
-`checksums.txt` using `gh release create`. Stable releases update the Homebrew cask;
-the cask requires macOS Tahoe and explains the app's Git
-requirement, with no Homebrew Git dependency. No publication is part of local
-validation.
+1. Use current main and confirm CI passed for the commit being released.
+2. Choose an unused version, create an annotated `vX.Y.Z` tag on that commit,
+   and push only that tag.
+3. Watch the [Release workflow](../.github/workflows/release.yml). It runs tests,
+   archives and exports a universal app, signs with Developer ID, notarizes,
+   staples, and verifies Gatekeeper acceptance.
+4. Verify the published ZIP and `checksums.txt`. Stable releases also update
+   the [Homebrew cask](https://github.com/richhaase/homebrew-tap/blob/trunk/Casks/bigboard.rb);
+   its version and checksum must match the release.
 
-New version tag pushes trigger that workflow. It builds the checked-out commit;
-there is no manual old-tag publishing option.
+Release assets are named `Bigboard_<version>_darwin_universal.zip`.
+Prerelease tags publish GitHub prereleases without updating Homebrew.
+New tag pushes trigger publication; local builds do not publish.
 
-Automated fixtures do not establish live GitHub, real Keychain access, release
-signing, notarization, or large-account performance. For ordinary local
-verification, use `make dev` and its independent workspace. For production-identity
-upgrade verification, test with the installed app closed:
+If a release fails, inspect the failing command and fix its cause. Leave the
+tag in place and use a new version for the corrected release. If GitHub cannot
+assign a runner, rerun the CI job when capacity returns; a queue failure alone
+does not require a code change.
 
-1. Build with the existing publisher configuration and launch the native bundle.
-2. Allow Keychain access if macOS asks; confirm the expected account is reused.
-3. Select a small public/private set in Settings and Apply. Verify that Settings
-   closes after saving while the main screen shows refresh progress.
-4. Refresh; inspect Activity → Heat → directory/file → commits → people → PRs.
-5. Exercise Contributor selection, PR filters, groups, identities and both exports.
-   Change Repository filter and verify immediate results across boards. Leave
-   one repository checked and verify that it cannot be unchecked until another
-   is checked. Close and reopen the picker; verify the selection is retained,
-   saved collection choices remain intact, and no refresh starts.
-6. Quit and reopen; confirm native preferences/bookmarks and cached startup.
-7. Test offline refresh, interrupted refresh, changed repository access, and
-   verified cache removal in Workspace Settings → Storage.
+### Installed-upgrade verification
 
-Sign-out and account-switch tests change the shared credential, so schedule them
-after the initial reuse test. The development app is locally signed; a signed
-release still needs an end-to-end OAuth callback check and distribution checks.
+For changes to packaging, signing, authentication, or storage:
 
-### Installed-upgrade Keychain validation
+1. Start with a signed-in installed release, then quit it.
+2. Upgrade through Homebrew or replace it with the published app at the same location.
+3. Launch and confirm the account, repository selections, and cached data persist.
+4. Quit and reopen. With the login Keychain unlocked, neither launch should
+   require renewed Keychain permission or another OAuth sign-in.
 
-Normal published upgrades must reuse the existing sign-in without another
-Keychain permission prompt. Initial permission is acceptable. For the first
-native release, Rich will validate by upgrading to the published version and
-report any regression for a follow-up patch. This is not a pre-release gate:
-
-1. Install the prior Developer ID-signed Bigboard release at its normal location.
-   With the login Keychain unlocked, establish the existing credential and
-   approve persistent access once if needed.
-2. Quit it and replace it through the normal upgrade path with the signed
-   candidate. Both apps must use the same publisher Team ID, bundle identifier,
-   compatible designated requirement, and existing Keychain entry. Do not delete
-   or recreate the entry to make the test pass.
-3. Launch the candidate, verify the same signed-in account is reused, then quit
-   and restart. Neither launch may request Keychain access again while the login
-   Keychain remains unlocked.
-
-Local builds use ad-hoc signing: their designated requirement is tied to the
-binary's code hash and can change after a rebuild. Published Developer ID builds
-need a stable code identity across versions. Ad-hoc rebuilds do not prove this
-upgrade behavior. See [Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
-
-This validation is pending the first published native upgrade; the local test
-environment has no publisher Developer ID signing identity available.
-
-## Verification recorded for this branch
-
-On 2026-10-31, the replacement was built locally with Xcode 27.2 for arm64 and
-x86_64, and the bundle signature was verified. Activity/Heat, Contributors,
-Pull requests, and Settings were inspected in the isolated preview. A configured
-build reused the existing `richhaase` Keychain sign-in, discovered installation
-repositories, and saved a fresh single-repository workspace for
-`richhaase/bigboard`. The live refresh loaded 187 commits and reported complete
-PR inventory, files, and reviewers, with no data errors.
-
-PR collection makes per-repository inventory requests with explicit request
-bounds and coverage qualifications. Large workspaces may exhaust the request
-budget before every repository is complete. Remote Git branch probes use
-authenticated `ls-remote`.
-
-Real private-repository failures, large-account performance, release signing,
-notarization, and a new browser OAuth exchange still require joint testing.
-
-Git operations isolate global/system Git configuration and inherited `GIT_*`
-settings. Repository mailmap and native identity rules apply. Each command has
-a 120-second deadline. Buffered command output has a 256 MiB bound; streamed
-history has no total-output ceiling. Repository `.gitattributes`
-input is limited to 4 MiB and 20,000 generated/vendored rules, with a shared
-matching-work budget for each history scan. Cancellation and timeouts interrupt
-parsing as well as Git. Exceeding a limit reports a scan error and retains stale
-evidence when available; rules are never silently truncated or skipped.
-History has no fixed commit-count, file-change-count, or retained-text ceiling.
-Parsed JSON caches are optional and limited to 16 MiB on read; oversized older
-caches are ignored and complete history is parsed again. A conservative size
-estimate bounds JSON encoding before it starts. When the estimate exceeds the
-cache limit, the complete scan is displayed without replacing the parsed cache.
-The app supports its own complete bare caches, not arbitrary shallow/partial
-caches or developer checkouts. The initial port verification covered 73 native tests and 12 packaging tests;
-subsequent walkthrough fixes add focused repository-filter and settings tests.
-
-The first usability pass adds a persistent multi-select repository popover,
-a board-only sidebar, toolbar scope controls, footer data status, recent-push repository
-sorting, and direct Apply with background refresh. The combined native suite
-passes 86 tests after these changes; the optimized universal bundle builds and
-passes local signature verification. Contributor rhythm and calendar behavior
-were intentionally retained for further evaluation.
-
-## Cleanup verification
-
-The cleanup-only branch passed 185 native tests, an optimized Swift build, and
-local app packaging on 2026-11-02. A parser regression retains 50,001 commits
-and 150,003 file changes with more than 16 MiB of metadata, while skipping the
-optional oversized parsed cache. Streaming tests verify that buffered-output
-bounds do not cap history streams. Existing cancellation, timeout, cache-boundary,
-and credential-isolation coverage remains.
-
-The normal build was launched without publisher configuration. Startup was
-visually inspected and Settings was opened without loading real credentials.
-Authenticated refresh and a large live repository scan were not performed.
+Keep the publisher Team ID, bundle identifier, and compatible signing requirements.
+Do not delete or recreate credentials to make the check pass. Local ad hoc builds
+do not establish Developer ID upgrade continuity. See
+[Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).

@@ -1,168 +1,117 @@
-# GitHub sign-in and publisher setup
+# Publisher setup
 
-Bigboard signs in through a public GitHub App. Users choose **Sign in with
-GitHub**, authorize in their browser, and use **Manage access…** to
-choose installation repositories on GitHub. Back in Bigboard, they refresh the
-repository list and select what to collect in Settings. They do not register an
-app, supply client IDs, create personal access tokens, or install `gh`.
+[README](../README.md) · [Development guide](../native/README.md)
 
-## One-time publisher registration
+This guide is for maintaining Bigboard's GitHub App and release credentials.
+App users sign in through GitHub; see the [user reference](reference.md#setup-and-settings).
 
-Register a **public GitHub App** owned by the Bigboard publisher. The following
-settings are required before a release can support sign-in:
+## GitHub App registration
+
+The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
+Use a public GitHub App with these settings:
 
 | Setting | Value |
 | --- | --- |
 | Homepage | `https://github.com/richhaase/bigboard` |
-| Callback URL | `com.richhaase.bigboard://oauth/github` |
-| Callback wildcard | Disabled |
+| Production callback | `com.richhaase.bigboard://oauth/github` |
+| Development callback | `com.richhaase.bigboard.dev://oauth/github` |
+| Callback wildcard matching | Disabled |
 | Expire user authorization tokens | Enabled |
 | Request user authorization during installation | Disabled |
 | Device flow | Disabled |
 | Webhooks | Disabled |
 | Setup URL | Empty |
 | Installation availability | Any account |
-| Repository permissions | Contents, Pull requests, Checks, Commit statuses: **read-only** |
+| Repository permissions | Contents, Pull requests, Checks, Commit statuses: read-only |
 | Metadata | Read-only, implicitly required |
 | Organization/account permissions | None |
 
-Bigboard initiates authorization itself so every attempt includes a fresh state
-value and an S256 PKCE challenge. Its registered macOS URL scheme receives the
-callback; the backend verifies the exact route, matching state, expiration,
-and single use before exchanging the code. It requests no OAuth `repo` scope
-and needs no GitHub App private key, installation-token signing key, webhook
-receiver, or hosted authentication service.
+Keep both callbacks registered on the same app. Each Bigboard build accepts only
+its own exact callback route. Authorization uses state, S256 PKCE, expiration,
+and single-use validation before exchanging a code.
 
-GitHub requires a client secret for this native authorization-code flow. Its
-[current native-app guidance](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app#client-secrets)
-explicitly treats a client secret shipped in a public native client as public;
-PKCE protects intercepted authorization codes. The build parameter must never
-be mistaken for an app private key or used to authorize privileged app operations.
+GitHub requires a client secret for the authorization-code flow. A native app
+cannot keep an embedded client secret confidential; PKCE protects intercepted
+codes. Bigboard uses user access tokens and does not need a GitHub App private
+key or hosted authentication service. See
+[GitHub's public-client guidance](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app#client-secrets).
 
-In GitHub App settings, open **Credentials → Client secrets** to create the
-client secret; the control is no longer on the general settings page. The
-separate **Key pairs** tab is for app private keys, which Bigboard does not use.
-GitHub moved these controls in its [October 2026 app-management update](https://github.blog/changelog/2026-10-13-github-app-improvements-for-least-privilege-and-management/).
-Store the generated value directly in the build environment or repository secret;
-do not paste it into chat or commit it. GitHub Actions secrets cannot be read back
-for a local build.
+## Build configuration
 
-Configure the publishing repository after registration:
+The publisher supplies three build settings:
 
-| Build setting | GitHub Actions storage |
+| Setting | Value | GitHub Actions storage |
+| --- | --- | --- |
+| `BIGBOARD_GITHUB_CLIENT_ID` | GitHub App client ID | Repository variable |
+| `BIGBOARD_GITHUB_APP_SLUG` | App slug from its public URL | Repository variable |
+| `BIGBOARD_GITHUB_CLIENT_SECRET` | GitHub App client secret | Repository secret |
+
+For local development, create the ignored `native/publisher.local.json` using
+the publisher's values in place of these placeholders:
+
+```json
+{
+  "BIGBOARD_GITHUB_CLIENT_ID": "your-client-id",
+  "BIGBOARD_GITHUB_CLIENT_SECRET": "your-client-secret",
+  "BIGBOARD_GITHUB_APP_SLUG": "bigboard-desktop"
+}
+```
+
+Restrict the file to your account with `chmod 600 native/publisher.local.json`.
+Keep actual values out of source control, logs, and chat. GitHub Actions secrets
+cannot be read back for local use.
+
+`BIGBOARD_PUBLISHER_CONFIG` selects another JSON file. Environment variables
+override individual file values, including explicit empty strings.
+`scripts/configure-publisher.swift` validates the configuration and embeds it
+in the built Info.plist before signing.
+
+A local build may omit all three values and open with sign-in unavailable.
+Configured builds require all three. The release script sets
+`BIGBOARD_REQUIRE_AUTH=YES` so publication fails if any value is missing or invalid.
+Use `make dev` and the **Bigboard Dev** Xcode scheme for
+[local development](../native/README.md#local-development).
+
+## Authentication and access
+
+Access is the intersection of the signed-in user's permissions and the GitHub
+App's installation access. Discovery pages through user installations and their
+repositories. Organization approval and SSO policies still apply.
+
+Access and refresh tokens stay in the authentication service and macOS Keychain.
+Token rotation is serialized and persisted before a new token is used. Tokens
+are excluded from settings, logs, repository URLs, and command arguments.
+Authenticated Git fetches use a temporary, GitHub-scoped environment header;
+credentials are not written into Git config or passed to credential helpers.
+
+Signing out removes the current build's local credential. Revoking authorization
+or changing installation access on GitHub affects both production and development.
+The [development guide](../native/README.md#storage-and-access) describes account
+isolation and cached access.
+
+## Release credentials
+
+Configure these repository secrets for the
+[Release workflow](../.github/workflows/release.yml):
+
+| Secret | Purpose |
 | --- | --- |
-| `BIGBOARD_GITHUB_CLIENT_ID` | Repository variable |
-| `BIGBOARD_GITHUB_APP_SLUG` | Repository variable, from the app's public URL |
-| `BIGBOARD_GITHUB_CLIENT_SECRET` | Repository secret |
+| `QUILL_SIGN_P12` | Base64-encoded Developer ID Application certificate and private key. |
+| `QUILL_SIGN_PASSWORD` | Password for the certificate file. |
+| `QUILL_NOTARY_KEY` | Apple notarization API key, as PEM text or base64. |
+| `QUILL_NOTARY_KEY_ID` | Notarization API key ID. |
+| `QUILL_NOTARY_ISSUER` | Notarization API issuer ID. |
+| `HOMEBREW_TAP_GITHUB_TOKEN` | Token with write access to `richhaase/homebrew-tap`. |
 
-The release workflow injects these publisher values into the native bundle metadata.
-`scripts/configure-publisher.swift` validates publisher settings during the Xcode
-build. Release archives require all three settings. End users
-have no configuration fields for these values. A local development build may
-omit all three, in which case sign-in is unavailable; supplying all three as
-environment variables enables the same flow through `make build` or `make dev`.
-For everyday local development, add
-`com.richhaase.bigboard.dev://oauth/github` as a second callback URL on this same
-GitHub App, with wildcard matching disabled and the release callback retained.
-Run `make dev` to launch Bigboard Dev and sign in separately using your normal
-GitHub account and repositories. The ignored `native/publisher.local.json` can
-hold the same publisher settings instead of supplying environment variables;
-see the [local development guide](../native/README.md#local-development).
-Development has its own Keychain credential and local data. `make build` keeps
-the production identity. The app bundle must be launched on macOS for native
-callback registration.
+The workflow also uses the GitHub App variables and secret listed above.
+GitHub supplies `GITHUB_TOKEN` for publishing the release in this repository.
 
-The publisher app is [Bigboard Desktop](https://github.com/apps/bigboard-desktop).
-Registration and publishing-repository settings are configured separately from
-the source code. A successful native exchange must still verify the client
-secret and callback before release readiness is established.
+The certificate action imports the signing identity into a temporary keychain.
+The workflow requires one Developer ID Application identity and derives its
+Team ID. It passes `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, `NOTARY_KEY_PATH`,
+`NOTARY_KEY_ID`, and `NOTARY_ISSUER` to the release script. The temporary
+notarization key and signing keychain are cleaned up after the job.
 
-## Access and credential boundaries
-
-User access is the intersection of the signed-in user's GitHub permissions and
-repositories selected for the app's installations. Discovery pages through
-`/user/installations` and each installation's repositories. **Manage access…**
-opens GitHub's app installation page; return to Bigboard and refresh the
-repository list after selecting repositories or receiving an organization's approval.
-Organization policy, SSO, and administrator approval still apply. Bigboard does
-not bypass them or request write permissions to work around a denial.
-
-Access and refresh tokens stay in the authentication service and macOS Keychain. They
-are absent from settings JSON, interface state, diagnostic messages, repository
-URLs, and command arguments. Expiring user tokens refresh under a serialized
-lock; refresh-token rotation is persisted before the new token is used. API
-requests are serialized, bounded, and respect GitHub retry/reset headers and
-conditional GET caching. Private Git fetches use a temporary, GitHub-scoped
-process environment header, without credential helpers or persistent Git config.
-
-Sign out removes Bigboard's local credentials. To revoke the authorization or
-change installation permissions on GitHub, use GitHub's application settings.
-Cached repository evidence is separated by the stable GitHub account ID. A new
-sign-in verifies access before opening history; a restart with the same stored
-account can use its local cache offline, visibly cached/stale. Live work checks
-access again, and authoritative access denials do not become offline fallbacks.
-The last verified grant remains available while a live access check is pending,
-so quitting during a refresh does not discard offline access. A completed check
-replaces that grant; a confirmed denial removes the affected access. The old
-grant is invalidated immediately before saving an authoritative replacement.
-If saving fails after invalidation, restart requires successful live verification
-before cached evidence is available. Cancellation never restores a grant after
-sign-out or an account change, and confirmed denials remain authoritative.
-
-## Native verification boundary
-
-Swift authentication and GitHub tests use an isolated credential store and mock
-HTTP transports. Native storage tests use temporary directories, and Git tests
-use owned local fixture repositories. No real credentials are read by tests.
-Native dependencies are Apple frameworks and a usable Git installation, with no third-party
-Swift package dependencies. Automated tests and local signature verification do
-not establish release signing, notarization, or the live OAuth exchange.
-
-## Signed-release validation
-
-Normal installed upgrades must not repeat the Keychain permission prompt.
-The first native release will be validated by Rich upgrading from the installed
-Developer ID-signed prior release to the published native version. Follow up with
-a patch if a regression appears; this check does not block that initial release.
-Compare the installed prior release with the signed native version
-from the same publisher Team ID and bundle identifier, with compatible designated
-requirements and the existing Keychain entry intact. Approve persistent access
-once on the initial installation if needed, perform the normal replacement
-upgrade, and verify that both launch and restart reuse the signed-in account
-without another prompt while the login Keychain is unlocked.
-
-Ad-hoc local builds have code-hash-based identity that can change on rebuild;
-they are not proof of continuity for published releases. Developer ID upgrades
-must retain a stable designated requirement. See [Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
-and the [installed-upgrade acceptance steps](../native/README.md#installed-upgrade-keychain-validation).
-This validation remains pending for the native replacement: the publisher signing
-identity is not available in the local test environment.
-
-Offline tests cover the authorization protocol, callback validation, token
-rotation, storage failures, HTTP boundaries, and account switching. During
-signed-release validation, verify the configured public registration with the signed app:
-sign in through the browser, select public and private repositories, confirm an
-organization restriction is explained, restart to verify Keychain persistence,
-then sign out and sign in with another account. Confirm repository evidence does
-not cross accounts. Never put real authorization codes or tokens in test fixtures,
-logs, screenshots, or the PR.
-
-References: [user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app),
-[token refresh](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens),
-[Git permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app#choosing-permissions-for-git-access),
-[REST API practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).
-
-## Release signing inputs
-
-The release workflow maps the existing GitHub secrets to the signing action and
-Apple's notarization tools. `QUILL_SIGN_P12` holds the base64-encoded Developer ID
-certificate and private key, and `QUILL_SIGN_PASSWORD` unlocks that file.
-`QUILL_NOTARY_KEY` holds the notarization API key as PEM text or base64,
-with `QUILL_NOTARY_KEY_ID` and `QUILL_NOTARY_ISSUER` identifying it.
-These existing secret names are retained in GitHub Actions.
-
-The certificate action creates and cleans up a temporary keychain. The workflow
-selects the single Developer ID Application identity and derives its Team ID.
-`release.sh` receives `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and
-`NOTARY_KEY_PATH`, `NOTARY_KEY_ID`, and `NOTARY_ISSUER`.
-The temporary notarization key is removed even if the release fails.
+Follow the [release procedure](../native/README.md#releases) and
+[installed-upgrade checks](../native/README.md#installed-upgrade-verification)
+when publishing or changing signing behavior.

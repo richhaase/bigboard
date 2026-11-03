@@ -1,6 +1,6 @@
 # Bigboard user reference
 
-[README](../README.md) · [Workflow guide](visual-guide.md)
+[Installation and overview](../README.md)
 
 ## Setup and settings
 
@@ -33,15 +33,12 @@ Its sections are:
 | Storage | Inspect owned caches and remove eligible unavailable repositories. |
 
 Repository IDs entered in groups and work areas are saved in lowercase, matching
-GitHub discovery. Existing mixed-case settings remain openable for repair; edit
-and update those entries before applying settings. Repository names beginning
-with a hyphen, such as `owner/-repo`, are supported.
+GitHub discovery.
 
 Area paths are repository-relative prefixes, such as `src/ui` or `docs`. One
 trailing slash is optional, so `src` and `src/` cannot be assigned separately.
-Paths containing `.` components or repeated slashes are rejected when saving.
-Previously saved dot components, repeated slashes, or conflicting prefixes remain
-openable for repair.
+Paths containing `.` components, repeated slashes, or conflicting prefixes are
+rejected when saving.
 
 To rename a repository group, choose **Edit**, change its name, then **Update
 group**. This replaces the original group in the draft. An existing group name
@@ -56,9 +53,6 @@ the draft unchanged. **Apply** saves the complete settings draft.
 Credentials are stored in macOS Keychain. Sign out removes the local credential;
 if removal fails, the account remains signed in and Settings stays open so you
 can retry. GitHub authorization is revoked separately in GitHub's application settings.
-There is no import of settings or history from previous Bigboard versions. A
-compatible existing Keychain sign-in can be reused, but keep the old app closed
-because both versions share rotating credentials.
 
 ## Navigation and scope
 
@@ -95,12 +89,20 @@ network request. Heat has a separate historical window, described below.
 
 ## Activity
 
-Activity opens on **Heat**. Its lenses are Heat, Directories, Commits, People,
-and Related. Explore a repository, directory, or file to narrow the evidence.
-Selecting a file opens its commits. Breadcrumbs and Back move to broader scopes;
-board filters remain applied. Directory totals include only files in that
-directory. Additions and removals stay separate even when rows are sorted by
-commits, recency, or name.
+To follow a change through the code:
+
+1. Start in **Activity → Heat** and find an area whose activity differs from its
+   usual pattern. Choose Lines, Commits, or People for the measure.
+2. Explore a repository, then a directory. Switch to **Directories** for
+   additions and removals within the selected date range.
+3. Select a file to see its **Commits**, or use **People** to inspect contributors
+   to the current scope.
+4. Use **Related** to find shared commits or contributor overlap with other areas.
+5. Open repository PRs to inspect current review and check evidence.
+
+Breadcrumbs and Back move to broader scopes while keeping board filters applied.
+Directory totals include only files in that directory. Additions and removals
+stay separate even when rows are sorted by commits, recency, or name.
 
 **Heat** shows 26 weekly buckets. Each week is compared with that row's preceding
 12 weeks; the Change badge compares its latest four weeks with the 12 before
@@ -128,11 +130,13 @@ Select a contributor to inspect totals, contribution rhythm, the daily calendar,
 repository distribution, and recent commits. Sorting includes line changes,
 commits, additions, removals, net lines, AI share, name, and recency. Bot and
 people filters are independent of Activity's filters.
+Select a repository under **Where work happened** to continue exploring in Activity.
 
 Contribution rhythm uses daily, weekly, or monthly buckets according to the
 range. The calendar shows daily activity in the selected range through the
 snapshot date. All time starts with the earliest contribution in view. Weekly
 buckets and the calendar grid use local time and your first weekday.
+Hover over a calendar day to see its date and commit count.
 The charts and totals describe recorded changes, not productivity.
 
 **Identities** links email addresses belonging to the same person. Choose the
@@ -183,7 +187,7 @@ without GitHub refreshes. After verified access, a restart with the same account
 can use its saved offline grant. Quitting while an access check is pending keeps
 that previously verified offline access. New sign-in and account changes require
 live verification. Confirmed access denials hide affected evidence; a failed save
-of the replacement access list may require live verification again.
+of access settings may require live verification again.
 
 Durable account-scoped JSON lives in Application Support; rebuildable Git
 mirrors and parsed scans live in Caches. The app never scans developer checkouts.
@@ -199,6 +203,17 @@ keeps the previous eligible time so recovered activity stays in the catch-up ran
 PR file and reviewer details can remain partial; those limits stay visible in Data
 Status and do not block the bookmark. Viewing filters do not narrow this requirement.
 Offline scans, identity rescans, and export do not advance it.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| A repository is missing from Settings | Use **Manage access…** to check the GitHub App installation, including organization approval and SSO. Return and refresh the repository list. |
+| A selected repository is missing from a board | Check the toolbar repository filter, selected group, and Advanced exclusion patterns. Settings controls collection; viewing filters narrow the results. |
+| A view is empty or a count includes `+ ?` | Check the date range and board filters, then open Data Status. Incomplete coverage does not establish that no activity exists. |
+| Data stays stale | Check **Use cached history only** in Settings → General. Data Status identifies access errors, request limits, and unfinished collection. |
+| Git is unavailable | Install Git through Homebrew or Xcode Command Line Tools, then reopen Bigboard. |
+| Settings will not save | Resolve the validation error shown in the sheet. If settings changed externally, cancel and reopen before editing again. |
 
 ## Counting and export
 
