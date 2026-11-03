@@ -1,10 +1,11 @@
 # Bigboard
 
 Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Charts.
-There is no Go/web runtime or legacy data import.
 
 ## Layout
 
+- `native/Bigboard.xcodeproj`: app target and development/release schemes.
+- `native/Package.swift`: application library and test targets.
 - `native/Sources/BigboardApp`: interface, navigation, and workspace orchestration.
 - `native/Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
 - `native/Tests`: native tests; `scripts`: app packaging and release checks.
@@ -13,7 +14,7 @@ There is no Go/web runtime or legacy data import.
 
 - Follow native macOS conventions and preserve independent board state. Repository
   filters only affect viewing; Settings controls saved collection choices.
-- Use existing atomic, account-scoped storage. Keep durable data in Application
+- Use atomic, account-scoped storage. Keep durable data in Application
   Support, rebuildable history in Caches, and credentials in Keychain. Operate only
   on app-owned Git caches, never developer checkouts.
 - Preserve cancellation, access checks, identity rules, and honest stale/partial
@@ -21,7 +22,8 @@ There is no Go/web runtime or legacy data import.
 - Do not add source comments unless requested. Keep publisher settings and
   credentials out of source control and tool output.
 - Verify UI changes in the actual running build before reporting them complete.
-  Do not run old and new apps concurrently with their shared rotating credential.
+  Use Bigboard Dev for local testing. Do not run multiple production-identity
+  builds concurrently; they share rotating credentials and data.
 
 ## Checks
 
@@ -34,6 +36,9 @@ make check
 make build
 ```
 
-The app is built at `native/build/Bigboard.app`. See the [native guide](native/README.md) for behavior and live checks,
-and [publisher setup](docs/github-app.md) for authentication and signing.
-Publish only when requested, using the existing tag-triggered release workflow.
+`make dev` builds and launches `native/build/Bigboard Dev.app` with separate
+credentials and data. `make build` produces `native/build/Bigboard.app`.
+See the [development guide](native/README.md) for setup and verification, the
+[user reference](docs/reference.md) for behavior, and
+[publisher setup](docs/github-app.md) for authentication and signing inputs.
+Publish only when requested, using the tag-triggered release workflow.

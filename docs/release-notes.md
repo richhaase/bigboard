@@ -1,16 +1,16 @@
 Bigboard for macOS: explore work areas, contributors, and commit evidence across GitHub repositories.
 
-### GitHub sign-in
-Sign in with GitHub from Bigboard and select repository access in your browser.
-GitHub CLI is no longer required. Organization access policies still apply.
+Requires macOS 26 Tahoe or later and Git.
 
-## Installation
+## Install
 
-### Homebrew
-```bash
+```sh
 brew install --cask richhaase/tap/bigboard
 ```
 
-### Direct Download
-Download the universal macOS archive, extract it, and move Bigboard.app to Applications.
-Git is required for repository history. Open Bigboard and choose Sign in with GitHub.
+Or download the universal macOS ZIP below, extract it, and move Bigboard.app
+to Applications. Open Bigboard, sign in with GitHub, and select repositories
+in Settings.
+
+See the [user reference](https://github.com/richhaase/bigboard/blob/main/docs/reference.md)
+for controls, data interpretation, and troubleshooting.
