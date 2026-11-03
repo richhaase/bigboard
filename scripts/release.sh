@@ -22,7 +22,7 @@ archive_path="$output_dir/Bigboard.xcarchive"
 export_path="$output_dir/export"
 zip_path="$output_dir/Bigboard_${release_version}_darwin_universal.zip"
 
-swift test --package-path "$repo_root/native"
+swift test --package-path "$repo_root/native" --no-parallel
 
 xcodebuild -quiet \
   -project "$repo_root/native/Bigboard.xcodeproj" \
