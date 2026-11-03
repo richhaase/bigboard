@@ -28,6 +28,7 @@ dist/
 /.swiftpm/
 
 /publisher.local.json
+/Config/Development.local.xcconfig
 
 xcuserdata/
 *.xcuserstate
