@@ -25,27 +25,29 @@ struct FiltersPanel: View {
                 }
                 Section(navigation.board.rawValue) {
                     TextField("Search", text: $filters.query)
-                    Picker("Sort", selection: $filters.sort) {
-                        if navigation.board == .pullRequests {
-                            Text("Updated").tag("updated")
-                            Text("Repository").tag("repository")
-                            Text("Author").tag("author")
-                            Text("Title").tag("title")
-                            Text("Attention").tag("attention")
-                        } else {
-                            Text("Lines changed").tag("change")
-                            Text("Commits").tag("commits")
-                            Text("Name").tag("name")
-                            Text("Recent").tag("recent")
-                            if navigation.board == .contributors {
-                                Text("Additions").tag("added")
-                                Text("Removals").tag("removed")
-                                Text("Net lines").tag("net")
-                                Text("AI share").tag("ai")
+                    if navigation.board != .heat {
+                        Picker("Sort", selection: $filters.sort) {
+                            if navigation.board == .pullRequests {
+                                Text("Updated").tag("updated")
+                                Text("Repository").tag("repository")
+                                Text("Author").tag("author")
+                                Text("Title").tag("title")
+                                Text("Attention").tag("attention")
+                            } else {
+                                Text("Lines changed").tag("change")
+                                Text("Commits").tag("commits")
+                                Text("Name").tag("name")
+                                Text("Recent").tag("recent")
+                                if navigation.board == .contributors {
+                                    Text("Additions").tag("added")
+                                    Text("Removals").tag("removed")
+                                    Text("Net lines").tag("net")
+                                    Text("AI share").tag("ai")
+                                }
                             }
                         }
+                        Toggle("Reverse sort", isOn: $filters.reversed)
                     }
-                    Toggle("Reverse sort", isOn: $filters.reversed)
                     if navigation.board != .pullRequests {
                         Toggle("Hide bots", isOn: $filters.hideBots)
                         DisclosureGroup(

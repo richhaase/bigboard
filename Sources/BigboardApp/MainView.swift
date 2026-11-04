@@ -80,6 +80,7 @@ struct MainView: View {
                     .padding(12)
                     Group {
                         switch navigation.board {
+                        case .heat: HeatBoard(workspace: workspace, navigation: navigation)
                         case .activity: ActivityBoard(workspace: workspace, navigation: navigation)
                         case .contributors: ContributorsBoard(workspace: workspace, navigation: navigation)
                         case .pullRequests: PullRequestsBoard(workspace: workspace, navigation: navigation)
@@ -142,7 +143,7 @@ struct MainView: View {
     private var dateFilter: some View {
         Menu {
             ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
-                Toggle(days == 0 ? "All time" : "Last \(days) days", isOn: Binding(
+                Toggle(days == 0 ? "All time" : days == 1 ? "Last day" : "Last \(days) days", isOn: Binding(
                     get: { !navigation.sinceLastLook && navigation.days == days },
                     set: { selected in
                         if selected {

@@ -2,17 +2,17 @@ import SwiftUI
 
 struct KeyboardGuide: View {
     let commands: [(String, String)] = [
-        ("⌘1 / ⌘2 / ⌘3", "Activity / Contributors / Pull requests"),
+        ("⌘1 / ⌘2 / ⌘3 / ⌘4", "Heat Maps / Activity / Contributors / Pull requests"),
         ("⌘F", "Find on the current board"),
         ("⌘⇧F", "Open Filters"),
         ("⌘⇧I", "Repository Filter"),
         ("⌘⇧D", "Data Status"),
         ("⌘R", "Refresh repository evidence"),
         ("⌘,", "Workspace Settings"),
-        ("⌘[", "Back in Activity"),
+        ("⌘[", "Back in Heat Maps or Activity"),
         ("⌘⇧C", "Copy view as Markdown"),
         ("⌘Return", "Open selection on GitHub"),
-        ("⌘⌥1–5", "Activity: Heat, Directories, Commits, People, Related"),
+        ("⌘⌥1–4", "Activity: Directories, Commits, People, Related"),
         ("⌘⌥M / ⌘⌥A / ⌘⌥R", "PRs: needs my attention / authored by me / review requested"),
         ("Return / →", "Explore the selected directory row"),
         ("Esc", "Dismiss the active popover or sheet"),
@@ -33,7 +33,7 @@ struct KeyboardGuide: View {
                     Divider()
                 }
                 Text(
-                    "Heat compares each area with its own recent history. Contribution totals describe changes; they do not measure productivity. Pull-request evidence may be partial; Data status explains coverage."
+                    "Heat Maps shows where and when activity occurred in the selected range. Contribution totals describe changes; they do not measure productivity. Pull-request evidence may be partial; Data status explains coverage."
                 )
                 .foregroundStyle(.secondary)
             }

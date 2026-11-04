@@ -84,10 +84,14 @@ private struct BoardCommands: Commands {
             Button("Contributor Identities…") { navigation.panel = .identities }
                 .disabled(modalOpen)
             Divider()
-            Button("Back in Activity") { navigation.back() }
+            Button(navigation.board == .heat ? "Back in Heat Maps" : "Back in Activity") {
+                if navigation.board == .heat { navigation.backInHeat() } else { navigation.back() }
+            }
                 .keyboardShortcut("[")
                 .disabled(
-                    modalOpen || !hasData || navigation.board != .activity || !navigation.canGoBackInActivity)
+                    modalOpen || !hasData
+                        || (navigation.board == .heat ? navigation.heatScope.repo.isEmpty
+                            : navigation.board != .activity || !navigation.canGoBackInActivity))
             Button("Copy View as Markdown") {
                 BoardMarkdown.copy(
                     snapshot: workspace.snapshot, configuration: workspace.configuration,

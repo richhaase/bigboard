@@ -2,18 +2,22 @@ import Foundation
 import AppKit
 
 @MainActor enum BoardMarkdown {
-    static func copy(snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState) {
+    static func copy(
+        snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState
+    ) {
         let text = render(snapshot: snapshot, configuration: configuration, navigation: navigation)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
-    static func render(snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState)
+    static func render(
+        snapshot: Snapshot, configuration: WorkspaceConfiguration, navigation: BoardState
+    )
         -> String
     {
         var lines = [
             "# Bigboard · \(navigation.board.rawValue)", "",
             "Snapshot: \(snapshot.generatedAt.formatted(.iso8601))",
-            "Range: \(navigation.lens == .heat && navigation.board == .activity ? "Heat historical window" : navigation.rangeLabel)",
+            "Range: \(navigation.board == .activity ? navigation.activityRangeLabel : navigation.rangeLabel)",
             "Repositories: \(navigation.repositories.isEmpty ? "All tracked" : navigation.repositories.sorted().joined(separator: ", "))",
         ]
         if !navigation.currentFilters.query.isEmpty {
@@ -28,8 +32,29 @@ import AppKit
         }
         lines.append("")
         switch navigation.board {
+        case .heat:
+            let range = navigation.heatRange(snapshot)
+            lines += [
+                "## Activity over time", "Measure: \(navigation.heatMetric)",
+                "Scope: \(scopeName(navigation.heatScope))",
+                "Selected: \(HeatRange.label(range.current))",
+                "\(range.unitLabel) activity. Totals cover the selected range.",
+            ]
+            let rows = Analysis.heatRows(
+                navigation.heatRecords(snapshot), repositories: navigation.visibleRepositories(snapshot),
+                scope: navigation.heatScope, workAreas: configuration.workAreas,
+                metric: navigation.heatMetric, range: range
+            ).filter { matches($0.label, navigation.heat.query) }
+            lines += table(
+                ["Area", "Total", "Coverage"],
+                rows.map {
+                    [
+                        escaped($0.label), $0.heat.total.formatted(),
+                        $0.heat.incomplete ? "Incomplete or stale; known activity only" : "Loaded history",
+                    ]
+                })
         case .activity:
-            let records = navigation.filteredCommits(snapshot, heat: navigation.lens == .heat)
+            let records = navigation.filteredCommits(snapshot, for: .activity)
             let scoped = navigation.evidenceRecords(
                 Analysis.scoped(records, scope: navigation.scope, workAreas: configuration.workAreas),
                 canonical: records)
@@ -40,27 +65,6 @@ import AppKit
                 )
             }
             switch navigation.lens {
-            case .heat:
-                lines.append(
-                    "Measure: \(navigation.heatMetric). Weekly activity is relative to the area's preceding 12 weeks; change compares recent 4 weeks with the preceding 12."
-                )
-                let rows =
-                    Analysis.heatRows(
-                        records, repositories: navigation.visibleRepositories(snapshot),
-                        scope: navigation.scope, workAreas: configuration.workAreas,
-                        metric: navigation.heatMetric, now: snapshot.generatedAt
-                    )
-                    .filter { matches($0.label, navigation.activity.query) }
-                lines += table(
-                    ["Area", "Recent / week", "Prior / week", "Change", "Total"],
-                    rows.map {
-                        [
-                            escaped($0.label), number($0.heat.recent), number($0.heat.prior),
-                            $0.heat.status == "new"
-                                ? "New" : $0.heat.ratio.map { String(format: "%.2f×", $0) } ?? "—",
-                            number($0.heat.total),
-                        ]
-                    })
             case .directories:
                 if navigation.scope.isFile {
                     lines += commits(navigation.searchCommits(scoped))
@@ -140,9 +144,6 @@ import AppKit
     }
     private static func matches(_ value: String, _ query: String) -> Bool {
         query.isEmpty || value.localizedCaseInsensitiveContains(query)
-    }
-    private static func number(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...1)))
     }
     private static func scopeName(_ scope: ActivityScope) -> String {
         scope.repo.isEmpty

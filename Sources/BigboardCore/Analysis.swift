@@ -37,29 +37,6 @@ struct TimelinePoint: Identifiable, Sendable {
     var removed = 0
     var id: Date { date }
 }
-struct HeatPoint: Identifiable, Sendable {
-    var start: Date
-    var value: Double
-    var usual: Double
-    var level: String
-    var id: Date { start }
-}
-struct HeatSeries: Sendable {
-    var series: [HeatPoint]
-    var recent: Double
-    var prior: Double
-    var ratio: Double?
-    var status: String
-    var total: Double
-    var future: Int
-}
-struct HeatRow: Identifiable, Sendable {
-    var id: String
-    var label: String
-    var kind: String
-    var scope: ActivityScope
-    var heat: HeatSeries
-}
 struct RelatedRow: Identifiable, Sendable {
     var scope: ActivityScope
     var evidence: [String]
@@ -363,7 +340,7 @@ enum Analysis {
     }
     static func timeline(
         _ commits: [Commit], days: Int = 30, since: Date? = nil, now: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current, includesStart: Bool = false
     ) -> [TimelinePoint] {
         let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
         let span = cutoff.map { max(0, now.timeIntervalSince($0) / 86_400) }
@@ -382,7 +359,7 @@ enum Analysis {
             date = calendar.date(byAdding: component, value: 1, to: date)!
         }
         for c in unique(commits) {
-            if let cutoff, c.date <= cutoff { continue }
+            if let cutoff, c.date < cutoff || (!includesStart && c.date == cutoff) { continue }
             let key = bucket(c.date)
             guard rows[key] != nil || c.date > now else { continue }
             var row = rows[key] ?? TimelinePoint(date: key)
@@ -395,69 +372,6 @@ enum Analysis {
     }
     private static func weekStart(_ date: Date, calendar: Calendar) -> Date {
         calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
-    }
-    static func heatSeries(
-        _ commits: [Commit], metric: String = "lines", now: Date = Date(), calendar: Calendar = .current
-    ) -> HeatSeries {
-        let end = weekStart(now, calendar: calendar)
-        let starts = (0..<38).map { calendar.date(byAdding: .weekOfYear, value: $0 - 37, to: end)! }
-        var records: [Date: [Commit]] = [:]
-        var future = 0
-        for c in unique(commits) {
-            if c.date > now {
-                future += 1
-            } else {
-                records[weekStart(c.date, calendar: calendar), default: []].append(c)
-            }
-        }
-        let values: [Double] = starts.map { date in
-            let t = totals(records[date] ?? [])
-            return Double(metric == "people" ? t.people : metric == "commits" ? t.commits : t.change)
-        }
-        func mean(_ values: ArraySlice<Double>) -> Double {
-            values.reduce(0, +) / Double(max(1, values.count))
-        }
-        let series = (12..<38)
-            .map { i -> HeatPoint in
-                let value = values[i], usual = mean(values[(i - 12)..<i])
-                let ratio = usual > 0 && value > 0 ? log2(value / usual) : 0
-                let level =
-                    value <= 0
-                    ? "none"
-                    : usual <= 0
-                        ? "first"
-                        : ratio >= 1.5
-                            ? "hot"
-                            : ratio >= 0.75
-                                ? "warm" : ratio <= -1.5 ? "cold" : ratio <= -0.75 ? "cool" : "steady"
-                return HeatPoint(start: starts[i], value: value, usual: usual, level: level)
-            }
-        let recent = mean(values[34..<38]), prior = mean(values[22..<34])
-        let ratio: Double? = prior > 0 ? recent / prior : nil
-        let status =
-            prior <= 0
-            ? (recent > 0 ? "new" : "")
-            : recent <= 0 ? "quiet" : ratio! >= 2 ? "up" : ratio! <= 0.5 ? "down" : ""
-        return HeatSeries(
-            series: series, recent: recent, prior: prior, ratio: ratio, status: status,
-            total: values[12..<38].reduce(0, +), future: future)
-    }
-    static func heatRows(
-        _ commits: [Commit], repositories: [Repository], scope: ActivityScope = ActivityScope(),
-        workAreas: [String: [WorkArea]] = [:], metric: String = "lines", now: Date = Date()
-    ) -> [HeatRow] {
-        activityRows(commits, repositories: repositories, scope: scope, workAreas: workAreas)
-            .filter { scope.repo.isEmpty || $0.kind == "directory" }
-            .map {
-                HeatRow(
-                    id: $0.id, label: $0.label, kind: $0.kind, scope: $0.scope,
-                    heat: heatSeries($0.records, metric: metric, now: now))
-            }
-            .filter { $0.kind == "repository" || $0.heat.total > 0 || $0.heat.prior > 0 }
-            .sorted {
-                $0.heat.total != $1.heat.total
-                    ? $0.heat.total > $1.heat.total : literalLess($0.label, $1.label)
-            }
     }
     static func updatedSinceReview(_ pr: PullRequest, viewer: String) -> Bool {
         guard !viewer.isEmpty, let updated = pr.updatedAt,

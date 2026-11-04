@@ -56,7 +56,7 @@ struct AnalysisTests {
         let files = Analysis.scoped(commits, scope: ActivityScope(repo: "o/a", path: "src/core/a.swift", isFile: true, areaName: "Engine"), workAreas: areas)
         #expect(files.count == 1 && files[0].files.map(\.path) == ["src/core/a.swift"])
         #expect(files[0].added == 3)
-        let heat = Analysis.heatRows(commits, repositories: [], scope: source.scope, workAreas: areas, now: now)
+        let heat = Analysis.heatRows(commits, repositories: [], scope: source.scope, workAreas: areas, range: HeatRange(now: now))
         #expect(heat.count == 1 && heat[0].heat.total == 3)
     }
     @Test func historicalFileAndDirectoryScopesKeepDistinctEvidence() throws {
@@ -79,9 +79,9 @@ struct AnalysisTests {
                 #expect(rows.reduce(0) { $0 + $1.totals.change } == Analysis.totals(records).change)
                 #expect(Analysis.activityRows(records, repositories: [], scope: file.scope).isEmpty)
                 #expect(Analysis.activityRows(records, repositories: [], scope: directory.scope).map(\.id) == ["file:" + path + "/new.swift"])
-                let heat = Analysis.heatRows(records, repositories: [], scope: parent, now: now)
-                #expect(heat.map(\.id) == [directory.id])
-                #expect(heat.first?.heat.total == 100)
+                let heat = Analysis.heatRows(records, repositories: [], scope: parent, range: HeatRange(now: now))
+                #expect(heat.contains { $0.id == directory.id })
+                #expect(heat.first { $0.id == directory.id }?.heat.total == 100)
             }
         }
     }
@@ -149,10 +149,10 @@ struct AnalysisTests {
         #expect(updated.records.map(\.id) == ["initial", "update"])
         #expect(updated.records.map { $0.files.count } == [2, 1])
         #expect(updated.latest == records[1].date)
-        let heat = Analysis.heatRows(records, repositories: [], scope: scope, now: now)
+        let heat = Analysis.heatRows(records, repositories: [], scope: scope, range: HeatRange(now: now))
         #expect(heat.count == count)
         #expect(Set(heat.map(\.id)) == Set(rows.map(\.id)))
-        #expect(heat.reduce(0) { $0 + $1.heat.total } == Double(count * 3 + count / 2))
+        #expect(heat.reduce(0) { $0 + $1.heat.total } == count * 3 + count / 2)
         let files = Analysis.activityRows(records, repositories: [], scope: ActivityScope(repo: "o/a", path: "src/unit0"))
         #expect(Set(files.map(\.id)) == ["file:src/unit0/a.swift", "file:src/unit0/b.swift"])
         #expect(files.reduce(0) { $0 + $1.totals.change } == 4)
@@ -182,16 +182,6 @@ struct AnalysisTests {
         #expect(!Analysis.inRange(nil, days: 14, now: now))
         #expect(Analysis.inRange(nil, now: now))
     }
-    @Test func heatUsesPreviousWeeksBaselineAndExcludesFuture() {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
-        let rows = [commit("now", added: 100, removed: 0), commit("older", days: 70, added: 120, removed: 0), commit("future", days: -8, added: 1000)]
-        let heat = Analysis.heatSeries(rows, now: now, calendar: cal)
-        #expect(heat.series.count == 26)
-        #expect(heat.recent == 25 && heat.prior == 10)
-        #expect(heat.ratio == 2.5 && heat.status == "up")
-        #expect(heat.total == 220 && heat.future == 1)
-        #expect(heat.series.last?.usual == 10)
-    }
     @Test func localDailyBucketsSpanDaylightSavingTransitions() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/Denver")!
         let end = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 12))!
@@ -214,7 +204,7 @@ struct AnalysisTests {
         #expect(all.last?.date == calendar.startOfDay(for: now))
         #expect(all.reduce(0) { $0 + $1.commits } == 3)
     }
-    @Test func weeklyTimelineAndHeatUseMondayStartAcrossDaylightSaving() throws {
+    @Test func weeklyTimelineUsesMondayStartAcrossDaylightSaving() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "America/Denver"))
         calendar.firstWeekday = 2
@@ -226,11 +216,8 @@ struct AnalysisTests {
         mondayCommit.date = monday
         let records = [sundayCommit, mondayCommit]
         let timeline = Analysis.timeline(records, days: 45, now: tuesday, calendar: calendar)
-        let heat = Analysis.heatSeries(records, metric: "commits", now: tuesday, calendar: calendar)
         #expect(timeline.last?.date == monday)
         #expect(timeline.suffix(2).map(\.commits) == [1, 1])
-        #expect(heat.series.last?.start == monday)
-        #expect(heat.series.suffix(2).map(\.value) == [1, 1])
     }
     @Test func bookmarkTimelineUsesActualSpanAndExclusiveBoundary() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
