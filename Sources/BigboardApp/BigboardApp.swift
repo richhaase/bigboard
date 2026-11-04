@@ -73,7 +73,7 @@ private struct BoardCommands: Commands {
             Button("Filters…") { navigation.panel = .filters }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(modalOpen)
-            Button("Repository Filter…") { navigation.toggleToolbarPopover(.repositories) }
+            Button("Repository Filter…") { navigation.repositoryFilterPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(modalOpen)
             Button("Data Status…") { navigation.panel = .status }

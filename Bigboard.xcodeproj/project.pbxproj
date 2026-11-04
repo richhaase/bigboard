@@ -5,6 +5,13 @@
 	objectVersion = 77;
 	archiveVersion = 1;
 	objects = {
+		A00000000000000000000060 = {
+			isa = PBXFileReference;
+			lastKnownFileType = wrapper;
+			name = Bigboard;
+			path = .;
+			sourceTree = "<group>";
+		};
 		A00000000000000000000043 = {
 			name = "Configure publisher";
 			inputPaths = (
@@ -190,6 +197,7 @@
 			isa = PBXGroup;
 			sourceTree = "<group>";
 			children = (
+				A00000000000000000000060,
 				A00000000000000000000006,
 				A00000000000000000000007,
 				A00000000000000000000008,

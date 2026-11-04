@@ -105,25 +105,25 @@ struct MainView: View {
             .navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
-            ToolbarItem(id: "workspace-controls", placement: .primaryAction) {
-                HStack(spacing: 8) {
-                    dateFilter
-                    repositoryFilter
-                    if !workspace.configuration.groups.isEmpty { groupFilter }
-                    Button {
-                        Task { await workspace.refresh() }
-                    } label: {
-                        ToolbarControlLabel(symbol: "arrow.clockwise")
-                    }
-                    .accessibilityLabel("Refresh")
-                    .disabled(workspace.busy || !workspace.authStatus.signedIn)
-                    .help("Refresh repository evidence")
-                }
-                .buttonStyle(ToolbarControlStyle())
-                .padding(.trailing, 12)
-                .fixedSize(horizontal: true, vertical: false)
+            ToolbarItem(id: "date-filter", placement: .primaryAction) {
+                dateFilter
             }
-            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(id: "repository-filter", placement: .primaryAction) {
+                repositoryFilter
+            }
+            if !workspace.configuration.groups.isEmpty {
+                ToolbarItem(id: "workspace-group", placement: .primaryAction) {
+                    groupFilter
+                }
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(id: "refresh", placement: .primaryAction) {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task { await workspace.refresh() }
+                }
+                .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                .help("Refresh repository evidence")
+            }
         }
         .sheet(item: $navigation.panel) { panel in
             WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation)
@@ -142,57 +142,44 @@ struct MainView: View {
         }
         .onChange(of: navigation.repositories) { navigation.reconcile() }
     }
-    private func toolbarPopover(_ value: ToolbarPopover) -> Binding<Bool> {
-        Binding(
-            get: { navigation.toolbarPopover == value },
-            set: { navigation.setToolbarPopover(value, presented: $0) })
-    }
     private var dateFilter: some View {
-        Button {
-            navigation.toggleToolbarPopover(.date)
+        Menu {
+            ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
+                Toggle(days == 0 ? "All time" : "Last \(days) days", isOn: Binding(
+                    get: { !navigation.sinceLastLook && navigation.days == days },
+                    set: { selected in
+                        if selected {
+                            navigation.days = days
+                            navigation.sinceLastLook = false
+                        }
+                    })
+                )
+            }
+            Divider()
+            Toggle("Since last look", isOn: $navigation.sinceLastLook)
+                .disabled(workspace.snapshot.bookmark == nil)
+            Divider()
+            Button("Custom range…") { navigation.panel = .filters }
         } label: {
-            ToolbarControlLabel(title: navigation.rangeLabel, symbol: "calendar", disclosure: true)
+            Label(navigation.rangeLabel, systemImage: "calendar")
         }
+        .labelStyle(.titleAndIcon)
         .accessibilityLabel("Date filter")
         .accessibilityValue(navigation.rangeLabel)
         .help("Date filter for all boards")
-        .popover(isPresented: toolbarPopover(.date), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Date filter").font(.headline).padding(8)
-                ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
-                    ToolbarChoiceRow(
-                        title: days == 0 ? "All time" : "Last \(days) days",
-                        selected: !navigation.sinceLastLook && navigation.days == days
-                    ) {
-                        navigation.days = days
-                        navigation.sinceLastLook = false
-                        navigation.dismissToolbarPopover()
-                    }
-                }
-                Divider().padding(.vertical, 4)
-                ToolbarChoiceRow(title: "Since last look", selected: navigation.sinceLastLook) {
-                    navigation.sinceLastLook = true
-                    navigation.dismissToolbarPopover()
-                }
-                .disabled(workspace.snapshot.bookmark == nil)
-                ToolbarChoiceRow(title: "Custom range…") { navigation.panel = .filters }
-            }
-            .padding(8).frame(width: 220).buttonStyle(.automatic)
-        }
     }
     private var repositoryFilter: some View {
         Button {
-            navigation.toggleToolbarPopover(.repositories)
+            navigation.repositoryFilterPresented.toggle()
         } label: {
-            ToolbarControlLabel(
-                title: "Repository filter: \(navigation.repositoryFilterLabel)",
-                symbol: "line.3.horizontal.decrease.circle", disclosure: true)
+            Label("Repositories: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
         }
+        .labelStyle(.titleAndIcon)
         .accessibilityLabel("Repository filter")
         .accessibilityValue(navigation.repositoryFilterLabel)
         .help("Filter loaded repositories across all boards")
         .popover(
-            isPresented: toolbarPopover(.repositories), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom
+            isPresented: $navigation.repositoryFilterPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom
         ) {
             VStack(spacing: 0) {
                 HStack {
@@ -208,42 +195,29 @@ struct MainView: View {
             .frame(width: 420)
             .fixedSize(horizontal: false, vertical: true)
             .buttonStyle(.automatic)
-            .onExitCommand { navigation.dismissToolbarPopover() }
+            .onExitCommand { navigation.repositoryFilterPresented = false }
         }
     }
     private var groupFilter: some View {
-        Button {
-            navigation.toggleToolbarPopover(.groups)
+        Menu {
+            Picker("Workspace group", selection: Binding(
+                get: { workspace.activeGroup },
+                set: { name in Task { await workspace.selectGroup(name) } })
+            ) {
+                Text("All groups").tag("")
+                ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            .pickerStyle(.inline)
         } label: {
-            ToolbarControlLabel(
-                title: workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup,
-                symbol: "square.stack", disclosure: true)
+            Label(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup, systemImage: "square.stack")
         }
+        .labelStyle(.titleAndIcon)
         .accessibilityLabel("Workspace group")
         .accessibilityValue(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup)
         .disabled(workspace.busy)
         .help("Choose workspace group")
-        .popover(isPresented: toolbarPopover(.groups), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Workspace group").font(.headline).padding(8)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach([""] + workspace.configuration.groups.keys.sorted(), id: \.self) { name in
-                            ToolbarChoiceRow(
-                                title: name.isEmpty ? "All groups" : name,
-                                selected: workspace.activeGroup == name
-                            ) {
-                                navigation.dismissToolbarPopover()
-                                Task { await workspace.selectGroup(name) }
-                            }
-                            .disabled(workspace.busy)
-                        }
-                    }
-                }
-                .frame(height: min(CGFloat(workspace.configuration.groups.count + 1) * 32 - 2, 320))
-            }
-            .padding(8).frame(minWidth: 220).buttonStyle(.automatic)
-        }
     }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(
@@ -314,63 +288,6 @@ struct MainView: View {
             Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent)
                 .padding(.bottom, 50)
         }
-    }
-}
-private struct ToolbarControlLabel: View {
-    var title: String? = nil
-    var symbol: String
-    var disclosure = false
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol).frame(width: 14).accessibilityHidden(true)
-            if let title { Text(title).lineLimit(1) }
-            if disclosure {
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                    .accessibilityHidden(true)
-            }
-        }
-    }
-}
-private struct ToolbarControlStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        ToolbarControlBody(configuration: configuration, enabled: isEnabled)
-    }
-}
-private struct ToolbarControlBody: View {
-    var configuration: ButtonStyleConfiguration
-    var enabled: Bool
-    @State private var hovered = false
-    private var backgroundOpacity: Double {
-        guard enabled else { return 0 }
-        return configuration.isPressed ? 0.10 : hovered ? 0.05 : 0
-    }
-    var body: some View {
-        configuration.label
-            .font(.system(size: 13))
-            .foregroundStyle(enabled ? Color.primary : Color.secondary)
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .contentShape(Rectangle())
-            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(backgroundOpacity)))
-            .onHover { hovered = $0 }
-    }
-}
-private struct ToolbarChoiceRow: View {
-    var title: String
-    var selected = false
-    var action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark").frame(width: 12).opacity(selected ? 1 : 0)
-                    .accessibilityHidden(true)
-                Text(title)
-                Spacer(minLength: 0)
-            }
-        }
-        .buttonStyle(ToolbarControlStyle())
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 struct DataStatusPresentation: Equatable {

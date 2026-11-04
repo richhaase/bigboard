@@ -12,6 +12,8 @@ For GitHub sign-in, use the publisher configuration described in
 [publisher setup](github-app.md#build-configuration). The GitHub App must
 have both the production and development callback URLs registered.
 
+Set up [development signing](#development-signing) once on each Mac, then run:
+
 ```sh
 make dev
 ```
@@ -21,8 +23,9 @@ GitHub account and select repositories in Settings. Quit Bigboard Dev before
 rebuilding. Its sign-in, settings, and caches persist across builds.
 
 To debug in Xcode, open `Bigboard.xcodeproj` and select the **Bigboard Dev**
-scheme. The **Bigboard App** scheme uses the production identity. Package tests
-run through `make test`, or by opening `Package.swift` separately in Xcode.
+scheme. The **Bigboard App** scheme uses the production identity. Both schemes
+run the existing package tests with **Product → Test** (⌘U), without launching
+the app or using your sign-in. `make test` runs the same tests from the terminal.
 
 | Command | Result |
 | --- | --- |
@@ -31,6 +34,35 @@ run through `make test`, or by opening `Package.swift` separately in Xcode.
 | `make test` | Run the Swift package tests serially. |
 | `make check` | Run tests, build the optimized app, and verify arm64 and x86_64 support. |
 | `make clean` | Remove package and app build output. |
+
+### Development signing
+
+Bigboard Dev uses an Apple Development certificate so Keychain can recognize it
+across rebuilds. To create the certificate:
+
+1. Open **Xcode → Settings → Apple Accounts** (called **Accounts** in some versions).
+2. Add or select your Apple Account and select your developer team.
+3. Open **Manage Certificates**, click **+**, and choose **Apple Development**.
+4. Create the ignored `Config/Development.local.xcconfig` with your Team ID:
+
+   ```xcconfig
+   DEVELOPMENT_TEAM = YOUR_TEAM_ID
+   ```
+
+Your Team ID is listed in your Apple Developer account's membership details.
+The certificate and its private key stay in your login Keychain. Both `make dev`
+and the **Bigboard Dev** Xcode scheme use these signing settings. A missing
+certificate or team must be configured before building; development builds do
+not fall back to ad hoc signing.
+
+On the first build, macOS may ask to let `codesign` use the certificate's private
+key. Choose **Always Allow** to authorize signing subsequent builds.
+
+When switching from an ad hoc build, macOS may ask once to authorize the signed
+app to access its existing credential. Choose **Always Allow** to remember that
+authorization. Rebuilds using the same development signing identity should then
+retain access. A locked Keychain or a change of signing identity can still
+require authorization. Do not delete the saved credential to resolve a prompt.
 
 ### App identities
 
@@ -48,8 +80,9 @@ GitHub authorization affect both.
 
 Debug and Release configurations use the production identity. Close the installed
 release before launching a local production build: those copies share credentials
-and data. Local builds are ad hoc signed, and macOS may request Keychain access
-after a rebuild.
+and data. Local Debug and Release builds are ad hoc signed, and macOS may request
+Keychain access after a rebuild. Bigboard Dev uses the development certificate
+described above; published releases use Developer ID signing.
 
 ## Source organization
 
