@@ -29,7 +29,6 @@ public struct BigboardApplication: App {
                     delegate.workspace = workspace
                     await workspace.start()
                 }
-                .onOpenURL { url in Task { await workspace.handleCallback(url) } }
         }
         .defaultSize(width: 1360, height: 900)
         .commands {

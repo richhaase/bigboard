@@ -30,6 +30,10 @@ Keep both callbacks registered on the same app. Each Bigboard build accepts only
 its own exact callback route. Authorization uses state, S256 PKCE, expiration,
 and single-use validation before exchanging a code.
 
+The app uses `ASWebAuthenticationSession` to open GitHub and receive the callback.
+macOS manages the browser session; Bigboard validates the returned URL before
+exchanging the authorization code. Canceling sign-in also cancels that session.
+
 GitHub requires a client secret for the authorization-code flow. A native app
 cannot keep an embedded client secret confidential; PKCE protects intercepted
 codes. Bigboard uses user access tokens and does not need a GitHub App private
