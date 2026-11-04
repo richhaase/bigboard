@@ -26,6 +26,33 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var contributorSort = "change"
     var requestBudget = 128
     var cachedOnly = false
+    var refreshIntervalMinutes = 15
+}
+extension WorkspaceConfiguration {
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, repositories, excludedRepositories, groups, identities, workAreas, exclude
+        case allFiles, aiIdentities, botIdentities, sinceDays, contributorSort, requestBudget, cachedOnly
+        case refreshIntervalMinutes
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        repositories = try values.decode([String].self, forKey: .repositories)
+        excludedRepositories = try values.decode([String].self, forKey: .excludedRepositories)
+        groups = try values.decode([String: [String]].self, forKey: .groups)
+        identities = try values.decode([String: IdentityRule].self, forKey: .identities)
+        workAreas = try values.decode([String: [WorkArea]].self, forKey: .workAreas)
+        exclude = try values.decode([String].self, forKey: .exclude)
+        allFiles = try values.decode(Bool.self, forKey: .allFiles)
+        aiIdentities = try values.decode([String].self, forKey: .aiIdentities)
+        botIdentities = try values.decode([String].self, forKey: .botIdentities)
+        sinceDays = try values.decode(Int.self, forKey: .sinceDays)
+        contributorSort = try values.decode(String.self, forKey: .contributorSort)
+        requestBudget = try values.decode(Int.self, forKey: .requestBudget)
+        cachedOnly = try values.decode(Bool.self, forKey: .cachedOnly)
+        refreshIntervalMinutes = try values.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 15
+    }
 }
 struct FileChange: Codable, Sendable, Equatable {
     var path: String

@@ -195,7 +195,11 @@ import Testing
         let cached = DataStatusPresentation(snapshot: snapshot, busy: false, checkingSignIn: false, signedIn: true, error: "")
         #expect(cached.label == "Cached history")
         #expect(!cached.warning)
-        #expect(DataStatusPresentation(snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "").loading)
+        snapshot.coverage.message = "Loading pull-request evidence…"
+        let refreshing = DataStatusPresentation(snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "")
+        #expect(refreshing.loading && refreshing.label == snapshot.coverage.message)
+        snapshot.coverage.message = ""
+        #expect(DataStatusPresentation(snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "").label == "Refreshing repository evidence")
     }
     @Test func reverseSortIsStableForEqualMetrics() {
         let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [commit("a", email: "a@example.test"), commit("b", email: "b@example.test"), commit("c", email: "c@example.test")])

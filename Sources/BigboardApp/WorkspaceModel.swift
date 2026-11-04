@@ -26,6 +26,9 @@ final class WorkspaceModel {
     private let webAuthentication: any WebAuthenticating
     private var signInAttempt: UUID?
     private let transport: any GitHubTransport
+    private let now: @Sendable () -> Date
+    private var lastRefreshFinished: Date?
+    private var shuttingDown = false
     private let refreshHistory: @Sendable (GitHistory, Repository, String) async throws -> Repository
     private var github: GitHubService?
     private var history: GitHistory?
@@ -47,6 +50,7 @@ final class WorkspaceModel {
         storage: WorkspaceStorage = .system(), authentication: AuthManager? = nil,
         webAuthentication: any WebAuthenticating = WebAuthentication(),
         transport: any GitHubTransport = URLSessionGitHubTransport(),
+        now: @escaping @Sendable () -> Date = Date.init,
         refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = {
             try await $0.refresh($1, token: $2)
         }
@@ -54,6 +58,7 @@ final class WorkspaceModel {
         self.storage = storage
         self.webAuthentication = webAuthentication
         self.transport = transport
+        self.now = now
         self.refreshHistory = refreshHistory
         self.auth =
             authentication
@@ -84,6 +89,7 @@ final class WorkspaceModel {
         if account == authStatus.accountID, history != nil { return }
         generation += 1
         account = authStatus.accountID
+        lastRefreshFinished = nil
         configuration = try storage.loadConfiguration(account)
         authorized = try storage.loadGrant(account)
         baseline = try storage.bookmarks(account)
@@ -104,6 +110,18 @@ final class WorkspaceModel {
     func refresh() async {
         await beginRefresh()?.value
     }
+    func nextAutomaticRefresh(visible: Bool, modalOpen: Bool) -> Date? {
+        guard visible, !modalOpen, !shuttingDown, !checkingSignIn, !busy, !signingOut,
+            authStatus.signedIn, !configuration.cachedOnly, !configuration.repositories.isEmpty,
+            configuration.refreshIntervalMinutes > 0, let lastRefreshFinished
+        else { return nil }
+        return lastRefreshFinished.addingTimeInterval(Double(configuration.refreshIntervalMinutes) * 60)
+    }
+    func refreshAutomatically(visible: Bool, modalOpen: Bool) async {
+        guard let deadline = nextAutomaticRefresh(visible: visible, modalOpen: modalOpen), deadline <= now()
+        else { return }
+        await refresh()
+    }
     private func beginRefresh() -> Task<Void, Never>? {
         guard !busy, history != nil, github != nil, !account.isEmpty else { return nil }
         busy = true
@@ -113,6 +131,7 @@ final class WorkspaceModel {
         let task = Task {
             await self.performRefresh(operation: operation)
             if operation == self.generation {
+                self.lastRefreshFinished = self.now()
                 self.refreshTask = nil
                 self.busy = false
             }
@@ -702,6 +721,7 @@ final class WorkspaceModel {
     }
     func shutdown() async {
         guard shutdownOperation == nil else { return }
+        shuttingDown = true
         shutdownOperation = generation
         generation += 1
         let refresh = refreshTask, discovery = discoveryTask

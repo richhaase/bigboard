@@ -3,6 +3,39 @@ import Testing
 @testable import Bigboard
 
 struct StorageTests {
+    @Test func existingWorkspaceDefaultsToFifteenMinuteRefreshWithoutRewriting() throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        var config = WorkspaceConfiguration(repositories: ["owner/repo"])
+        config.sinceDays = 90
+        try storage.saveConfiguration(config, account: "42")
+        let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+        var document = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        document.removeValue(forKey: "refreshIntervalMinutes")
+        let original = try JSONSerialization.data(withJSONObject: document)
+        try original.write(to: file)
+        #expect(try storage.loadConfiguration("42") == config)
+        #expect(try Data(contentsOf: file) == original)
+        config.refreshIntervalMinutes = 30
+        try storage.saveConfiguration(config, account: "42")
+        #expect(try storage.loadConfiguration("42").refreshIntervalMinutes == 30)
+        #expect(try storage.loadConfiguration("43").refreshIntervalMinutes == 15)
+    }
+
+    @Test(arguments: [0, 5, 15, 30, 60, -1, 1, 1440])
+    func refreshIntervalsAreValidatedAndPersisted(minutes: Int) throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
+        var config = WorkspaceConfiguration()
+        config.refreshIntervalMinutes = minutes
+        if [0, 5, 15, 30, 60].contains(minutes) {
+            try storage.saveConfiguration(config, account: "42")
+            #expect(try storage.loadConfiguration("42").refreshIntervalMinutes == minutes)
+        } else {
+            #expect(throws: (any Error).self) { try storage.saveConfiguration(config, account: "42") }
+        }
+    }
+
     func temporary() throws -> WorkspaceStorage {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

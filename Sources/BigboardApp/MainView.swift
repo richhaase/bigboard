@@ -1,9 +1,14 @@
 import SwiftUI
+import AppKit
 
 struct MainView: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     @FocusState private var searchFocused: Bool
+    @State private var appVisible = false
+    private var automaticRefreshDate: Date? {
+        workspace.nextAutomaticRefresh(visible: appVisible, modalOpen: navigation.panel != nil)
+    }
     var body: some View {
         NavigationSplitView {
             List(selection: Binding(get: { navigation.board }, set: { navigation.switchBoard($0) })) {
@@ -21,18 +26,6 @@ struct MainView: View {
                         Button("Dismiss") { workspace.error = "" }
                     }
                     .padding(10).background(.orange.opacity(0.12))
-                }
-                if workspace.busy {
-                    HStack {
-                        ProgressView().controlSize(.small)
-                        Text(
-                            workspace.snapshot.coverage.message.isEmpty
-                                ? "Loading repository evidence…" : workspace.snapshot.coverage.message
-                        )
-                        .font(.callout)
-                        Spacer()
-                    }
-                    .padding(10)
                 }
                 if !workspace.snapshot.coverage.errors.isEmpty {
                     Button {
@@ -116,14 +109,18 @@ struct MainView: View {
                     groupFilter
                 }
             }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(id: "refresh", placement: .primaryAction) {
-                Button("Refresh", systemImage: "arrow.clockwise") {
-                    Task { await workspace.refresh() }
-                }
-                .disabled(workspace.busy || !workspace.authStatus.signedIn)
-                .help("Refresh repository evidence")
-            }
+        }
+        .onAppear { appVisible = NSApp.occlusionState.contains(.visible) }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeOcclusionStateNotification)) { _ in
+            appVisible = NSApp.occlusionState.contains(.visible)
+        }
+        .task(id: automaticRefreshDate) {
+            guard let deadline = automaticRefreshDate else { return }
+            do {
+                try await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)), tolerance: .seconds(1))
+                try Task.checkCancellation()
+                await workspace.refreshAutomatically(visible: appVisible, modalOpen: navigation.panel != nil)
+            } catch {}
         }
         .sheet(item: $navigation.panel) { panel in
             WorkspacePanel(panel: panel, workspace: workspace, navigation: navigation)
@@ -231,7 +228,8 @@ struct MainView: View {
             navigation.panel = .status
         } label: {
             HStack(spacing: 6) {
-                Text(updated)
+                Text(status.loading ? status.label : updated)
+                    .lineLimit(1)
                 Group {
                     if status.loading {
                         ProgressView().controlSize(.mini)
@@ -246,7 +244,7 @@ struct MainView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Data status")
-        .accessibilityValue("\(updated). \(status.label)")
+        .accessibilityValue(status.loading ? status.label : "\(updated). \(status.label)")
         .help("\(status.label). Click for collection and coverage details.")
     }
     private var signedOut: some View {
@@ -301,7 +299,7 @@ struct DataStatusPresentation: Equatable {
             symbol = "arrow.triangle.2.circlepath"
             loading = true
         } else if busy {
-            label = "Refreshing repository evidence"
+            label = snapshot.coverage.message.isEmpty ? "Refreshing repository evidence" : snapshot.coverage.message
             symbol = "arrow.triangle.2.circlepath"
             loading = true
         } else if !error.isEmpty || !snapshot.coverage.errors.isEmpty || snapshot.coverage.phase == "partial"

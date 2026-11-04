@@ -75,6 +75,9 @@ final class WorkspaceStorage: @unchecked Sendable {
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else {
             throw BigboardError.message("Invalid request budget or startup range.")
         }
+        guard [0, 5, 15, 30, 60].contains(config.refreshIntervalMinutes) else {
+            throw BigboardError.message("Choose a supported automatic refresh interval.")
+        }
         for id in config.repositories + config.excludedRepositories + config.groups.values.flatMap({ $0 }) {
             guard Self.validRepository(id) else {
                 throw BigboardError.message("Repository must be owner/name: \(id)")

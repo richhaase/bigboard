@@ -57,7 +57,7 @@ can retry. GitHub authorization is revoked separately in GitHub's application se
 ## Navigation and scope
 
 The sidebar contains **Activity**, **Contributors**, and **Pull requests**.
-The toolbar contains date scope, repository viewing scope, and Refresh.
+The toolbar contains date scope and repository viewing scope.
 Data Status opens from the combined status and timestamp at the bottom right.
 A configured repository group adds a group picker. Each board retains
 its own search, sorting, filters, and selection while you move between boards.
@@ -172,9 +172,16 @@ mode has no live PR context. Use Data Status to inspect coverage.
 
 ## Data status, offline work, and storage
 
-Click the status and timestamp at the bottom right to open Data Status. This
-single footer control shows a spinner during refresh; the progress display at
-the top of the main screen remains visible. The Boards menu and Command-Shift-D also open Data Status.
+Bigboard refreshes automatically every 15 minutes while visible. Choose Manual,
+5, 15, 30, or 60 minutes under **Settings → General → Automatically refresh**.
+The interval starts when the previous refresh finishes, including a manual
+refresh. Automatic refresh pauses while Bigboard is out of view or a sheet is
+open, then refreshes if overdue when you return. Cached-history mode disables
+automatic refresh. Command-R and **Boards → Refresh** still refresh immediately.
+
+Click the status and timestamp at the bottom right to open Data Status. During
+refresh, this control shows the spinner and the current collection step. The
+Boards menu and Command-Shift-D also open Data Status.
 
 The sheet shows refresh phase, snapshot time, last-look
 baseline, request counts, per-repository timestamps and coverage, errors, and
