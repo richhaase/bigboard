@@ -3,10 +3,11 @@ import SwiftUI
 struct ActivityBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
-    var records: [Commit] { navigation.filteredCommits(workspace.snapshot, heat: navigation.lens == .heat) }
+    var records: [Commit] { navigation.filteredCommits(workspace.snapshot, for: .activity) }
     var scoped: [Commit] {
         navigation.evidenceRecords(
-            Analysis.scoped(records, scope: navigation.scope, workAreas: workspace.configuration.workAreas),
+            Analysis.scoped(
+                records, scope: navigation.scope, workAreas: workspace.configuration.workAreas),
             canonical: records)
     }
     var rows: [ActivityRow] {
@@ -29,9 +30,19 @@ struct ActivityBoard: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if navigation.activityInterval != nil {
+                HStack {
+                    Text("From Heat Maps: \(navigation.activityRangeLabel)")
+                    Spacer()
+                    Button("Back to Heat Maps") { navigation.switchBoard(.heat) }
+                    Button("Use shared date range") { navigation.activityInterval = nil }
+                }
+                .font(.callout).padding(.horizontal, 12).padding(.bottom, 10)
+            }
             scopeBar
             Picker(
-                "Activity lens", selection: Binding(get: { navigation.lens }, set: { navigation.setLens($0) })
+                "Activity lens",
+                selection: Binding(get: { navigation.lens }, set: { navigation.setLens($0) })
             ) { ForEach(ActivityLens.allCases) { Text($0.rawValue).tag($0) } }
             .pickerStyle(.segmented).padding(.horizontal, 12).padding(.bottom, 12)
             HSplitView {
@@ -99,22 +110,14 @@ struct ActivityBoard: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        if navigation.lens == .heat {
-                            HeatBoard(
-                                records: records,
-                                repositories: navigation.visibleRepositories(workspace.snapshot),
-                                workAreas: workspace.configuration.workAreas, navigation: navigation,
-                                now: workspace.snapshot.generatedAt)
-                        } else {
-                            activitySummary
-                            switch navigation.lens {
-                            case .commits:
-                                CommitList(
-                                    records: navigation.searchCommits(scoped), showFiles: navigation.scope.isFile)
-                            case .people: scopedPeople
-                            case .related: relatedList
-                            case .directories, .heat: EmptyView()
-                            }
+                        activitySummary
+                        switch navigation.lens {
+                        case .commits:
+                            CommitList(
+                                records: navigation.searchCommits(scoped), showFiles: navigation.scope.isFile)
+                        case .people: scopedPeople
+                        case .related: relatedList
+                        case .directories: EmptyView()
                         }
                     }
                     .padding(16)
@@ -286,7 +289,7 @@ struct ActivityBoard: View {
                             ? inspectScope.repo.isEmpty ? "Selection" : inspectScope.repo : inspectScope.path
                 )
                 .font(.title3.bold()).textSelection(.enabled)
-                Text(navigation.lens == .heat ? "All available history" : navigation.rangeLabel)
+                Text(navigation.activityRangeLabel)
                     .font(.caption).foregroundStyle(.secondary)
                 let total = Analysis.totals(inspectRecords)
                 DeltaView(added: total.added, removed: total.removed, unknown: total.unknown)
@@ -309,7 +312,7 @@ struct ActivityBoard: View {
                 SectionTitle(title: "Recent activity")
                 ActivityTimeline(
                     points: navigation.timelinePoints(
-                        inspectRecords, snapshot: workspace.snapshot, heat: navigation.lens == .heat))
+                        inspectRecords, snapshot: workspace.snapshot))
                 SectionTitle(title: "Open pull requests")
                 let related = relatedPRs
                 if workspace.snapshot.cachedOnly {

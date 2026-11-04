@@ -1,121 +1,218 @@
 import SwiftUI
 
 struct HeatBoard: View {
-    var records: [Commit]
-    var repositories: [Repository]
-    var workAreas: [String: [WorkArea]]
+    @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
-    var now: Date
+    @Environment(\.calendar) private var calendar
+
     var body: some View {
-        let query = navigation.activity.query
-        let rows =
-            Analysis.heatRows(
-                records,
-                repositories: repositories,
-                scope: navigation.scope,
-                workAreas: workAreas,
-                metric: navigation.heatMetric,
-                now: now
-            )
-            .filter { query.isEmpty || $0.label.localizedCaseInsensitiveContains(query) }
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Change relative to usual").font(.title2.bold())
-                Spacer()
-                Picker("Measure", selection: $navigation.heatMetric) {
-                    Text("Lines").tag("lines")
-                    Text("Commits").tag("commits")
-                    Text("People").tag("people")
-                }
-                .frame(width: 160)
-            }
-            Text(
-                "Each week compares with that area's previous 12 weeks. The change badge compares the latest 4 weeks with the 12 before them. Heat keeps its own historical window."
-            )
-            .font(.callout).foregroundStyle(.secondary)
-            let current = Analysis.heatSeries(
-                Analysis.scoped(records, scope: navigation.scope, workAreas: workAreas),
-                metric: navigation.heatMetric, now: now)
-            HeatStrip(series: current)
-            if current.future > 0 {
-                Text("\(current.future) future-dated commits are outside the Heat window.").font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("Area")
-                Spacer()
-                Text("Last 26 weeks")
-                Spacer()
-                Text("Change")
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            ForEach(navigation.heatExpanded ? rows : Array(rows.prefix(25))) { row in
-                Button {
-                    navigation.explore(row.scope)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Label(row.label, systemImage: row.kind == "repository" ? "shippingbox" : "folder")
-                                .lineLimit(1)
-                            Spacer()
-                            Text(changeLabel(row.heat)).font(.caption.bold())
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        HeatStrip(series: row.heat)
+        let snapshot = workspace.snapshot
+        let range = navigation.heatRange(snapshot, calendar: calendar)
+        let records = navigation.heatRecords(snapshot)
+        let repositories = navigation.visibleRepositories(snapshot)
+        let scope = navigation.heatScope
+        let scoped = Analysis.scoped(
+            records, scope: scope, workAreas: workspace.configuration.workAreas)
+        let scopeRepositories = repositories.filter { scope.repo.isEmpty || $0.id == scope.repo }
+        let evidence = records.filter { commit in
+            (scope.repo.isEmpty || commit.repo == scope.repo)
+                && range.contains(commit.date, in: range.current)
+        }
+        let current = Analysis.heatSeries(
+            scoped, metric: navigation.heatMetric, range: range,
+            complete: Analysis.heatHistoryComplete(scopeRepositories, records: evidence))
+        let rows = Analysis.heatRows(
+            records, repositories: repositories, scope: scope,
+            workAreas: workspace.configuration.workAreas, metric: navigation.heatMetric, range: range
+        )
+        .filter {
+            navigation.heat.query.isEmpty
+                || $0.label.localizedCaseInsensitiveContains(navigation.heat.query)
+        }
+        let maximum = ([current] + rows.map(\.heat)).flatMap(\.series).map(\.value).max() ?? 0
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                scopeBar
+                HStack {
+                    Text("Activity over time").font(.title2.bold())
+                    Spacer()
+                    Picker("Measure", selection: $navigation.heatMetric) {
+                        Text("Lines").tag("lines")
+                        Text("Commits").tag("commits")
+                        Text("People").tag("people")
                     }
-                    .padding(.vertical, 6).contentShape(Rectangle())
+                    .frame(width: 160)
                 }
-                .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Selected: \(HeatRange.label(range.current))")
+                    Text("\(range.unitLabel) activity. Edge cells may cover part of an interval.")
+                }
+                .font(.callout).foregroundStyle(.secondary)
+                Text("\(current.total.formatted()) \(navigation.heatMetric) in this range")
+                    .font(.title3.monospacedDigit())
+                if current.incomplete || rows.contains(where: { $0.heat.incomplete }) {
+                    Text(
+                        "Some history is unavailable, incomplete, or stale. Affected cells and totals show known activity only."
+                    )
+                    .font(.callout).foregroundStyle(.secondary)
+                }
+                if current.future > 0 {
+                    Text("\(current.future) future-dated commits are outside the selected range.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HeatStrip(series: current, metric: navigation.heatMetric, maximum: maximum) {
+                    interval, includesStart in
+                    navigation.showHeatActivity(
+                        scope, interval: interval, lens: .commits, includesStart: includesStart)
+                }
+                HStack {
+                    Text(axisLabel(range.current.start, range: range))
+                    Spacer()
+                    Text(range.unitLabel)
+                    Spacer()
+                    Text(axisLabel(range.current.end, range: range))
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("0")
+                    ForEach(0..<5) { step in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(
+                                step == 0
+                                    ? Color.secondary.opacity(0.1)
+                                    : Color.blue.opacity(0.2 + Double(step) * 0.2)
+                            )
+                            .frame(width: 18, height: 12)
+                    }
+                    Text("\(maximum.formatted()) \(navigation.heatMetric) per cell")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                Text(
+                    "Darker cells mean more activity. All rows use the same scale. Hover for counts; select a cell to inspect its commits in Activity."
+                )
+                .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                ForEach(navigation.heatExpanded ? rows : Array(rows.prefix(25))) { row in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Button {
+                                if row.scope.isFile {
+                                    navigation.showHeatActivity(
+                                        row.scope, interval: range.current, includesStart: range.includesStart
+                                    )
+                                } else {
+                                    navigation.exploreHeat(row.scope)
+                                }
+                            } label: {
+                                Label(
+                                    row.label,
+                                    systemImage: row.kind == "repository"
+                                        ? "shippingbox" : row.scope.isFile ? "doc.text" : "folder"
+                                )
+                                .lineLimit(1)
+                            }
+                            .buttonStyle(.link)
+                            Spacer()
+                            Text(
+                                "\(row.heat.total.formatted()) \(navigation.heatMetric)\(row.heat.incomplete ? " (known)" : "")"
+                            )
+                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                            Button("View in Activity", systemImage: "arrow.right") {
+                                navigation.showHeatActivity(
+                                    row.scope, interval: range.current, includesStart: range.includesStart)
+                            }
+                            .labelStyle(.iconOnly).buttonStyle(.borderless)
+                            .help("View \(row.label) in Activity")
+                        }
+                        HeatStrip(series: row.heat, metric: navigation.heatMetric, maximum: maximum) {
+                            interval, includesStart in
+                            navigation.showHeatActivity(
+                                row.scope, interval: interval, lens: .commits, includesStart: includesStart)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                if rows.isEmpty {
+                    Text("No areas match this range and search.").foregroundStyle(.secondary)
+                }
+                if !navigation.heatExpanded && rows.count > 25 {
+                    Button("Show \(rows.count - 25) more areas") { navigation.heatExpanded = true }
+                }
             }
-            if rows.isEmpty && !navigation.scope.repo.isEmpty {
-                Button("Browse files in this area") { navigation.lens = .directories }.buttonStyle(.bordered)
-            }
-            if !navigation.heatExpanded && rows.count > 25 {
-                Button(
-                    "Show \(rows.count - 25) more areas (\(rows.dropFirst(25).filter { ["up", "new"].contains($0.heat.status) }.count) rising or new)"
-                ) { navigation.heatExpanded = true }
-            }
-            HStack {
-                Label("Quieter", systemImage: "square.fill").foregroundStyle(.blue)
-                Text("Usual")
-                Label("Busier", systemImage: "square.fill").foregroundStyle(.orange)
-                Label("After quiet weeks", systemImage: "square.fill").foregroundStyle(.yellow)
-            }
-            .font(.caption)
+            .padding(16)
         }
     }
-    private func changeLabel(_ value: HeatSeries) -> String {
-        if value.status == "new" { return "New" }
-        if value.status == "quiet" { return "Quiet" }
-        guard let ratio = value.ratio else { return "—" }
-        return ratio < 0.1 ? "<0.1×" : String(format: "%.1f×", ratio)
+    private func axisLabel(_ date: Date, range: HeatRange) -> String {
+        date.formatted(date: .abbreviated, time: range.unit == .hour ? .shortened : .omitted)
+    }
+    private var scopeBar: some View {
+        HStack {
+            Button {
+                navigation.backInHeat()
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .disabled(navigation.heatScope.repo.isEmpty)
+            .help("Back in Heat Maps")
+            Button("All repositories") { navigation.exploreHeat(ActivityScope()) }
+                .buttonStyle(.link)
+            if !navigation.heatScope.repo.isEmpty {
+                Text("/").foregroundStyle(.tertiary)
+                Button(navigation.heatScope.repo) {
+                    navigation.exploreHeat(ActivityScope(repo: navigation.heatScope.repo))
+                }
+                .buttonStyle(.link)
+            }
+            if !navigation.heatScope.path.isEmpty || !navigation.heatScope.areaName.isEmpty {
+                Text("/").foregroundStyle(.tertiary)
+                Text(
+                    navigation.heatScope.areaName.isEmpty
+                        ? navigation.heatScope.path : navigation.heatScope.areaName
+                )
+                .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+        }
     }
 }
+
 private struct HeatStrip: View {
     var series: HeatSeries
+    var metric: String
+    var maximum: Int
+    var explore: (DateInterval, Bool) -> Void
+
     var body: some View {
         HStack(spacing: 3) {
             ForEach(series.series) { point in
-                RoundedRectangle(cornerRadius: 3).fill(color(point.level)).frame(maxWidth: .infinity)
-                    .frame(height: 22)
-                    .help(
-                        "Week of \(point.start.formatted(date: .abbreviated, time: .omitted)): \(point.value.formatted()) · usual \(point.usual.formatted(.number.precision(.fractionLength(1))))"
-                    )
-                    .accessibilityLabel(
-                        "\(point.start.formatted(date: .abbreviated, time: .omitted)): \(point.value.formatted()), baseline \(point.usual.formatted())"
-                    )
+                Button {
+                    explore(point.interval, point.includesStart)
+                } label: {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(color(point))
+                        .overlay {
+                            if series.incomplete {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .strokeBorder(
+                                        .secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [2]))
+                            }
+                        }
+                        .frame(maxWidth: .infinity).frame(height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(description(point))
+                .accessibilityLabel(description(point))
+
             }
         }
     }
-    private func color(_ level: String) -> Color {
-        switch level {
-        case "hot": .orange
-        case "warm": .orange.opacity(0.55)
-        case "cold": .blue
-        case "cool": .blue.opacity(0.5)
-        case "first": .yellow.opacity(0.5)
-        case "steady": .secondary.opacity(0.28)
-        default: .secondary.opacity(0.08)
-        }
+    private func description(_ point: HeatPoint) -> String {
+        "\(HeatRange.label(point.interval)): \(point.value.formatted()) \(metric)"
+            + (series.incomplete ? "\nKnown activity only; history is incomplete or stale." : "")
+    }
+    private func color(_ point: HeatPoint) -> Color {
+        guard point.value > 0, maximum > 0 else { return .secondary.opacity(0.1) }
+        return .blue.opacity(0.2 + 0.8 * Double(point.value) / Double(maximum))
     }
 }

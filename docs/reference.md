@@ -56,7 +56,7 @@ can retry. GitHub authorization is revoked separately in GitHub's application se
 
 ## Navigation and scope
 
-The sidebar contains **Activity**, **Contributors**, and **Pull requests**.
+The sidebar contains **Heat Maps**, **Activity**, **Contributors**, and **Pull requests**, in that order.
 The toolbar contains date scope and repository viewing scope.
 Data Status opens from the combined status and timestamp at the bottom right.
 A configured repository group adds a group picker. Each board retains
@@ -85,32 +85,42 @@ search, sorting, and applicable people/bot filters until Apply.
 Activity and Contributors use Git author dates; PRs use update times. Date
 filtering is relative to the retained snapshot and uses an exclusive lower
 boundary. Unknown dates match only All time. Changing viewing scope makes no
-network request. Heat has a separate historical window, described below.
+network request.
+
+## Heat Maps
+
+Heat Maps shows actual activity in the selected date range. Choose Lines,
+Commits, or People. Totals cover the whole range; People counts distinct
+contributors rather than adding the cell counts.
+
+Cells adapt to the selected duration: hourly through one day, daily through 31
+days, weekly through 180 days, and monthly for longer ranges. Calendar boundaries
+use your local time zone and first weekday. Edge cells may be partial. All time
+includes all loaded history; Since last look starts at the saved bookmark.
+
+Darker blue means more activity. The overview and area rows use the same linear
+scale, from zero to the largest cell count in the current view. Hover to see the
+interval and actual count. Missing, incomplete, or stale history is marked with
+dashed outlines and known-activity labels; a zero in those cells does not establish
+that no activity occurred.
+
+Select a repository or directory name to explore it within Heat Maps. Select a
+cell to inspect that interval's commits in Activity. The arrow beside an area
+opens Activity for the whole selected range. Activity labels the interval carried from Heat Maps and offers
+**Back to Heat Maps** and **Use shared date range**. Changing the shared date range
+also clears that interval. Switching boards preserves each board's state.
 
 ## Activity
 
-To follow a change through the code:
-
-1. Start in **Activity → Heat** and find an area whose activity differs from its
-   usual pattern. Choose Lines, Commits, or People for the measure.
-2. Explore a repository, then a directory. Switch to **Directories** for
-   additions and removals within the selected date range.
-3. Select a file to see its **Commits**, or use **People** to inspect contributors
-   to the current scope.
-4. Use **Related** to find shared commits or contributor overlap with other areas.
-5. Open repository PRs to inspect current review and check evidence.
+Activity opens with **Directories** for additions and removals in the selected
+range. You can start here directly or arrive from Heat Maps. Select a file to see
+its **Commits**, use **People** to inspect contributors to the current scope, or
+use **Related** to find shared commits or contributor overlap with other areas.
+Open repository PRs to inspect current review and check evidence.
 
 Breadcrumbs and Back move to broader scopes while keeping board filters applied.
 Directory totals include only files in that directory. Additions and removals
 stay separate even when rows are sorted by commits, recency, or name.
-
-**Heat** shows 26 weekly buckets. Each week is compared with that row's preceding
-12 weeks; the Change badge compares its latest four weeks with the 12 before
-them. Amber means busier than usual, blue means quieter, and cream marks
-activity after a quiet baseline. Choose Lines, Commits, or People. Heat keeps
-its historical window regardless of the shared date range, while repository,
-contributor, and bot scope still apply. It measures change relative to the
-area's own history, not productivity or importance.
 
 **Commits** shows commit subjects, authors, dates, and measured line changes.
 Commit links open GitHub. Lists show an initial batch and offer more as needed.
@@ -242,17 +252,17 @@ and Space to toggle a focused checkbox.
 
 | Control | Action |
 | --- | --- |
-| ⌘1, ⌘2, ⌘3 | Activity, Contributors, Pull requests |
+| ⌘1, ⌘2, ⌘3, ⌘4 | Heat Maps, Activity, Contributors, Pull requests |
 | ⌘F | Focus the current board's search |
 | ⌘⇧F | Open Filters |
 | ⌘⇧I | Open the Repository Filter popover |
 | ⌘⇧D | Open Data Status |
 | ⌘R | Refresh repository evidence |
 | ⌘, | Settings |
-| ⌘[ | Back in Activity |
+| ⌘[ | Back in Heat Maps or Activity |
 | ⌘⇧C | Copy current view as Markdown |
 | ⌘Return | Open selection on GitHub |
-| ⌘⌥1–5 | Activity: Heat, Directories, Commits, People, Related |
+| ⌘⌥1–4 | Activity: Directories, Commits, People, Related |
 | ⌘⌥M, ⌘⌥A, ⌘⌥R | PRs: needs my attention, authored by me, review requested |
 | Return or right arrow | Explore the selected directory row |
 | Escape | Dismiss the active popover or sheet |

@@ -2,10 +2,14 @@ import SwiftUI
 import Observation
 
 enum Board: String, CaseIterable, Identifiable {
-    case activity = "Activity", contributors = "Contributors", pullRequests = "Pull requests"
+    case heat = "Heat Maps"
+    case activity = "Activity"
+    case contributors = "Contributors"
+    case pullRequests = "Pull requests"
     var id: String { rawValue }
     var symbol: String {
         switch self {
+        case .heat: "square.grid.3x3.fill"
         case .activity: "chart.bar.xaxis"
         case .contributors: "person.2"
         case .pullRequests: "arrow.triangle.pull"
@@ -13,8 +17,10 @@ enum Board: String, CaseIterable, Identifiable {
     }
 }
 enum ActivityLens: String, CaseIterable, Identifiable {
-    case heat = "Heat", directories = "Directories", commits = "Commits", people = "People", related =
-        "Related"
+    case directories = "Directories"
+    case commits = "Commits"
+    case people = "People"
+    case related = "Related"
     var id: String { rawValue }
 }
 enum Panel: String, Identifiable {
@@ -50,15 +56,19 @@ struct RepositoryChecklist {
     }
 }
 @MainActor @Observable final class BoardState {
-    var board: Board = .activity
-    var days = 14
-    var sinceLastLook = false
+    var board: Board = .heat
+    var days = 14 { didSet { if days != oldValue { activityInterval = nil } } }
+    var sinceLastLook = false { didSet { if sinceLastLook != oldValue { activityInterval = nil } } }
     var repositories: Set<String> = []
+    var heat = BoardFilters()
+    var heatScope = ActivityScope()
+    var activityInterval: DateInterval?
+    var activityIncludesStart = false
     var activity = BoardFilters()
     var contributors = BoardFilters()
     var prs = BoardFilters(sort: "updated")
     var scope = ActivityScope()
-    var lens: ActivityLens = .heat
+    var lens: ActivityLens = .directories
     var heatMetric = "lines"
     var heatExpanded = false
     var relatedMode = "commits"
@@ -75,11 +85,12 @@ struct RepositoryChecklist {
     var panel: Panel? { didSet { if panel != nil { repositoryFilterPresented = false } } }
     var preferencesApplied = false
     var rangeLabel: String {
-        sinceLastLook ? "Since last look" : days == 0 ? "All time" : "Last \(days) days"
+        sinceLastLook ? "Since last look" : days == 0 ? "All time" : days == 1 ? "Last day" : "Last \(days) days"
     }
     var currentFilters: BoardFilters {
         get {
             switch board {
+            case .heat: heat
             case .activity: activity
             case .contributors: contributors
             case .pullRequests: prs
@@ -87,6 +98,7 @@ struct RepositoryChecklist {
         }
         set {
             switch board {
+            case .heat: heat = newValue
             case .activity: activity = newValue
             case .contributors: contributors = newValue
             case .pullRequests: prs = newValue
@@ -94,11 +106,21 @@ struct RepositoryChecklist {
         }
     }
     func dateMatches(_ date: Date?, snapshot: Snapshot) -> Bool {
-        if sinceLastLook, let bookmark = snapshot.bookmark { return date.map { $0 > bookmark } ?? false }
+        if board == .activity, let interval = activityInterval {
+            return date.map {
+                ($0 > interval.start || (activityIncludesStart && $0 == interval.start))
+                    && $0 <= interval.end
+            } ?? false
+        }
+        if sinceLastLook, let bookmark = snapshot.bookmark {
+            return date.map { $0 > bookmark } ?? false
+        }
         guard days > 0 else { return true }
         return date.map { $0 > snapshot.generatedAt.addingTimeInterval(-Double(days) * 86400) } ?? false
     }
-    var repositoryFilterLabel: String { repositories.isEmpty ? "All" : "\(repositories.count) selected" }
+    var repositoryFilterLabel: String {
+        repositories.isEmpty ? "All" : "\(repositories.count) selected"
+    }
     @discardableResult func setRepositoryFilter(_ ids: Set<String>, available: [Repository]) -> Bool {
         let selected = ids.intersection(available.map(\.id))
         guard ids.isEmpty || !selected.isEmpty else { return false }
@@ -109,17 +131,71 @@ struct RepositoryChecklist {
     func visibleRepositories(_ snapshot: Snapshot) -> [Repository] {
         snapshot.repositories.filter { repositories.isEmpty || repositories.contains($0.id) }
     }
-    func filteredCommits(_ snapshot: Snapshot, heat: Bool = false, for board: Board? = nil) -> [Commit] {
-        let filters = (board ?? self.board) == .contributors ? contributors : activity
-        return Analysis.select(
-            snapshot.commits, days: heat ? 0 : days, since: !heat && sinceLastLook ? snapshot.bookmark : nil,
-            repos: repositories, hideBots: filters.hideBots, people: filters.people, now: snapshot.generatedAt
-        )
+    var activityRangeLabel: String {
+        activityInterval.map { HeatRange.label($0) } ?? rangeLabel
     }
-    func timelinePoints(_ records: [Commit], snapshot: Snapshot, heat: Bool = false) -> [TimelinePoint] {
-        Analysis.timeline(
-            records, days: heat ? 0 : days, since: !heat && sinceLastLook ? snapshot.bookmark : nil,
-            now: snapshot.generatedAt)
+    func heatRange(_ snapshot: Snapshot, calendar: Calendar = .current) -> HeatRange {
+        HeatRange(
+            days: days, since: sinceLastLook ? snapshot.bookmark : nil,
+            now: snapshot.generatedAt,
+            records: snapshot.commits.filter {
+                repositories.isEmpty || repositories.contains($0.repo)
+            }, calendar: calendar)
+    }
+    func heatRecords(_ snapshot: Snapshot) -> [Commit] {
+        Analysis.select(
+            snapshot.commits, repos: repositories, hideBots: heat.hideBots,
+            people: heat.people, now: snapshot.generatedAt)
+    }
+    func filteredCommits(_ snapshot: Snapshot, for board: Board? = nil) -> [Commit] {
+        let selectedBoard = board ?? self.board
+        let filters = selectedBoard == .heat ? heat : selectedBoard == .contributors ? contributors : activity
+        let interval = selectedBoard == .activity ? activityInterval : nil
+        return Analysis.select(
+            snapshot.commits, days: interval == nil ? days : 0,
+            since: interval == nil && sinceLastLook ? snapshot.bookmark : nil,
+            repos: repositories, hideBots: filters.hideBots, people: filters.people,
+            now: interval?.end ?? snapshot.generatedAt
+        ).filter { commit in
+            guard let interval else { return true }
+            return
+                (commit.date > interval.start || (activityIncludesStart && commit.date == interval.start))
+                && commit.date <= interval.end
+        }
+    }
+    func timelinePoints(_ records: [Commit], snapshot: Snapshot) -> [TimelinePoint] {
+        let interval = board == .activity ? activityInterval : nil
+        return Analysis.timeline(
+            records, days: days, since: interval?.start ?? (sinceLastLook ? snapshot.bookmark : nil),
+            now: interval?.end ?? snapshot.generatedAt,
+            includesStart: interval != nil && activityIncludesStart)
+    }
+    func exploreHeat(_ scope: ActivityScope) {
+        heatScope = scope
+        heatExpanded = false
+    }
+    func backInHeat() {
+        if !heatScope.path.isEmpty {
+            heatScope.path = heatScope.path.split(separator: "/").dropLast().joined(separator: "/")
+        } else if !heatScope.areaName.isEmpty {
+            heatScope.areaName = ""
+        } else {
+            heatScope = ActivityScope()
+        }
+        heatExpanded = false
+    }
+    func showHeatActivity(
+        _ scope: ActivityScope, interval: DateInterval?, lens: ActivityLens = .directories,
+        includesStart: Bool = false
+    ) {
+        explore(scope)
+        self.lens = scope.isFile ? .commits : lens
+        activity.query = ""
+        activity.hideBots = heat.hideBots
+        activity.people = heat.people
+        activityInterval = interval
+        activityIncludesStart = includesStart
+        switchBoard(.activity)
     }
     func searchCommits(_ records: [Commit]) -> [Commit] {
         records.filter {
@@ -130,7 +206,7 @@ struct RepositoryChecklist {
     func activityRows(_ snapshot: Snapshot, configuration: WorkspaceConfiguration) -> [ActivityRow] {
         let rows =
             Analysis.activityRows(
-                filteredCommits(snapshot), repositories: visibleRepositories(snapshot), scope: scope,
+                filteredCommits(snapshot, for: .activity), repositories: visibleRepositories(snapshot), scope: scope,
                 workAreas: configuration.workAreas
             )
             .filter { activity.query.isEmpty || $0.label.localizedCaseInsensitiveContains(activity.query) }
@@ -197,10 +273,9 @@ struct RepositoryChecklist {
         relatedEvidence = nil
         activitySelection = nil
         scopedPerson = nil
-        heatExpanded = false
         if scope.isFile { lens = .commits }
     }
-    var canGoBackInActivity: Bool { !scope.repo.isEmpty || lens != .heat }
+    var canGoBackInActivity: Bool { !scope.repo.isEmpty || lens != .directories }
     func back() {
         if contextualRepository != nil {
             returnToActivity()
@@ -215,7 +290,7 @@ struct RepositoryChecklist {
             scope.path = scope.path.split(separator: "/").dropLast().joined(separator: "/")
             scope.isFile = false
             lens = .directories
-        } else if lens != .heat && lens != .directories {
+        } else if lens != .directories {
             lens = .directories
             return
         } else if !scope.path.isEmpty {
@@ -227,7 +302,6 @@ struct RepositoryChecklist {
             scope = ActivityScope()
         }
         activitySelection = nil
-        heatExpanded = false
     }
     func showPRs(repo: String, selected: String? = nil) {
         if contextualRepository == nil { savedPRFilters = prs }
@@ -263,11 +337,17 @@ struct RepositoryChecklist {
         days = configuration.sinceDays
         sinceLastLook = false
         repositories = []
+        heat = BoardFilters()
+        heatScope = ActivityScope()
+        heatMetric = "lines"
+        heatExpanded = false
+        activityInterval = nil
+        activityIncludesStart = false
         activity = BoardFilters()
         contributors = BoardFilters(sort: configuration.contributorSort)
         prs = BoardFilters(sort: "updated")
         scope = ActivityScope()
-        lens = .heat
+        lens = .directories
         activitySelection = nil
         contributorSelection = nil
         prSelection = nil
@@ -280,32 +360,43 @@ struct RepositoryChecklist {
     func reconcile(_ snapshot: Snapshot) {
         let available = Set(snapshot.repositories.map(\.id))
         repositories.formIntersection(available)
+        if !heatScope.repo.isEmpty && !available.contains(heatScope.repo) {
+            exploreHeat(ActivityScope())
+        }
         if !scope.repo.isEmpty && !available.contains(scope.repo) {
             scope = ActivityScope()
+            activityInterval = nil
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil
-            lens = .heat
+            lens = .directories
         }
         if let contextualRepository, !available.contains(contextualRepository) { restorePRFilters() }
         reconcile()
     }
     func reconcile() {
+        if !heatScope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(heatScope.repo) {
+            exploreHeat(ActivityScope())
+        }
         if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) {
             scope = ActivityScope()
+            activityInterval = nil
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil
-            lens = .heat
+            lens = .directories
         }
-        if let contextualRepository, !repositories.isEmpty && !repositories.contains(contextualRepository) {
+        if let contextualRepository,
+            !repositories.isEmpty && !repositories.contains(contextualRepository)
+        {
             restorePRFilters()
         }
     }
 
     func pullRequests(_ snapshot: Snapshot) -> [PullRequest] {
         let filters = PRFilters(
-            query: prs.query, repos: repositories, days: days, since: sinceLastLook ? snapshot.bookmark : nil,
+            query: prs.query, repos: repositories, days: days,
+            since: sinceLastLook ? snapshot.bookmark : nil,
             authors: prs.authors, reviews: prs.reviews, checks: prs.checks, states: prs.states,
             mine: prs.mine, sort: prs.sort, reverse: prs.reversed)
         return

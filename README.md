@@ -40,13 +40,15 @@ Git history uses app-owned caches; developer checkouts are untouched.
 
 | Board | Use it to |
 | --- | --- |
+| Heat Maps | See where and when activity occurred across the selected range. |
 | Activity | Follow changes through repositories, directories, files, commits, people, and related PRs. |
 | Contributors | Explore each person's repository distribution, timelines, calendar, and recent commits. |
 | Pull requests | Find open PRs, review requests, failing checks, and work needing your attention. |
 
 Each board keeps its own search, sorting, and selection. The toolbar's repository
 filter changes what you see; Settings controls what the app collects.
-Heat uses a fixed historical window; other views follow the selected date range.
+Heat Maps shows activity across the selected range.
+Activity, Contributors, and Pull requests provide the supporting detail.
 Activity describes recorded changes, not productivity.
 
 See the [user reference](docs/reference.md) for workflows, keyboard shortcuts,

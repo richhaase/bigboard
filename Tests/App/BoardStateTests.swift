@@ -71,9 +71,9 @@ import Testing
     }
     @Test func heatKeepsHistoryWhileHonoringSharedRepositoriesAndPeople() {
         let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100), commit("other", repo: "acme/other"), commit("otherperson", email: "sam@example.test")], bookmark: now.addingTimeInterval(-2 * 86400))
-        let state = BoardState(); state.repositories = ["acme/app"]; state.activity.people = ["alex@example.test"]; state.sinceLastLook = true
+        let state = BoardState(); state.repositories = ["acme/app"]; state.activity.people = ["alex@example.test"]; state.heat.people = ["alex@example.test"]; state.sinceLastLook = true
         #expect(state.filteredCommits(snapshot).map(\.id) == ["recent"])
-        #expect(state.filteredCommits(snapshot, heat: true).map(\.id) == ["recent", "old"])
+        #expect(state.heatRecords(snapshot).map(\.id) == ["recent", "old"])
     }
     @Test func boardTimelinesFollowBookmarkInsteadOfPreviousDaySelection() {
         let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("older", days: 40), commit("oldest", days: 700), commit("before", days: 850)], bookmark: now.addingTimeInterval(-800 * 86400))
@@ -89,13 +89,12 @@ import Testing
         state.sinceLastLook = false
         #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
     }
-    @Test func bookmarkTimelineFallsBackWithoutBookmarkAndHeatIgnoresActiveRange() {
+    @Test func bookmarkTimelineFallsBackWithoutBookmark() {
         var snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100)])
         let state = BoardState(); state.days = 14; state.sinceLastLook = true
         #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
         snapshot.bookmark = now.addingTimeInterval(-2 * 86400)
         #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
-        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot, heat: true).reduce(0) { $0 + $1.commits } == 2)
     }
     @Test func fileDrillReturnsToParentAndAreaBoundaryRemains() {
         let state = BoardState()
@@ -211,7 +210,7 @@ import Testing
     @Test func markdownExportsAllMatchingRowsBeyondVisualLimit() {
         let commits = (0..<150).map { commit(String($0)) }
         let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: commits)
-        let state = BoardState(); state.lens = .commits
+        let state = BoardState(); state.board = .activity; state.lens = .commits
         let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(markdown.components(separatedBy: "https://github.com/acme/app/commit/").count == 151)
         state.activity.query = "Change 149"
@@ -224,7 +223,7 @@ import Testing
         newer.files = [FileChange(path: "component", removed: 1), FileChange(path: "component/new.swift", added: 100)]
         older.files = [FileChange(path: "component", added: 1)]
         let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [newer, older])
-        let state = BoardState(); state.lens = .directories; state.scope = ActivityScope(repo: "acme/app")
+        let state = BoardState(); state.board = .activity; state.lens = .directories; state.scope = ActivityScope(repo: "acme/app")
         let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(markdown.contains("| component | 2 | 1 | 1 | 1 |"))
         #expect(markdown.contains("| component/ | 1 | 1 | 100 | 0 |"))
