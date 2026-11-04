@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import Bigboard
 
@@ -31,6 +32,12 @@ private actor ScriptedGitHub: GitHubTransport {
     var first: URLRequest? { requests.first }
 }
 private let testNow = Date(timeIntervalSince1970: 1_800_000_000)
+private final class GitHubTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date = testNow
+    func now() -> Date { lock.withLock { date } }
+    func advance(by seconds: TimeInterval) { lock.withLock { date.addTimeInterval(seconds) } }
+}
 private let testConfiguration = AuthConfiguration(clientID: "client", clientSecret: "secret", appSlug: "bigboard-desktop")
 private func reply(_ json: String, status: Int = 200, headers: [String: String] = [:]) -> GitHubHTTPResponse { GitHubHTTPResponse(status: status, headers: headers, data: Data(json.utf8)) }
 private func storedCredentials(expired: Bool = false) throws -> Data {
@@ -66,7 +73,13 @@ private func callback(for url: URL) throws -> URL {
     let body = try #require(exchange.httpBody.flatMap { String(data: $0, encoding: .utf8) })
     let fields = try #require(URLComponents(string: "?" + body)?.queryItems)
     #expect(fields.first(where: { $0.name == "redirect_uri" })?.value == identity.callbackURI)
-    #expect(fields.first(where: { $0.name == "code_verifier" })?.value?.count == 43)
+    let verifier = try #require(fields.first(where: { $0.name == "code_verifier" })?.value)
+    #expect(verifier.count == 43)
+    let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+    #expect(query.first(where: { $0.name == "code_challenge" })?.value == challenge)
     let state = await auth.status()
     #expect(state.signedIn && state.accountID == "123")
     #expect(try await auth.token() == "new-access")
@@ -140,6 +153,40 @@ func authRejectsOtherBuildAndMalformedCallback(identity: ApplicationIdentity, al
     let saved = String(data: try #require(try store.load()), encoding: .utf8) ?? ""
     #expect(saved.contains("new-refresh"))
     #expect(!saved.contains("old-refresh"))
+}
+@Test(arguments: [599.0, 600.0])
+func signInCallbackExpiresAtTenMinutes(elapsed: TimeInterval) async throws {
+    let clock = GitHubTestClock()
+    let store = MemoryCredentials()
+    let network = ScriptedGitHub([reply(tokenResponse), reply(#"{"login":"rich","id":123}"#)])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: clock.now)
+    let redirect = try callback(for: await auth.start())
+    clock.advance(by: elapsed)
+    if elapsed < 600 {
+        try await auth.complete(redirect)
+        #expect(await auth.status().signedIn)
+        #expect(await network.count == 2)
+    } else {
+        await #expect(throws: AuthFailure.callback) { try await auth.complete(redirect) }
+        #expect(await network.count == 0)
+        #expect(try store.load() == nil)
+        let status = await auth.status()
+        #expect(!status.pending && !status.signedIn)
+    }
+}
+
+@Test func expiredRefreshCredentialCannotStartAnExchange() async throws {
+    let clock = GitHubTestClock()
+    let saved = try storedCredentials()
+    let store = MemoryCredentials(saved)
+    let network = ScriptedGitHub([])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: clock.now)
+    #expect(await auth.status().signedIn)
+    clock.advance(by: 86400)
+    #expect(!(await auth.status()).signedIn)
+    await #expect(throws: GitHubFailure.auth) { try await auth.token() }
+    #expect(await network.count == 0)
+    #expect(try store.load() == saved)
 }
 @Test func rotationStorageFailureRetainsReplacementForRetry() async throws {
     let store = MemoryCredentials(try storedCredentials(expired: true)); store.failingWrites(true)
@@ -217,12 +264,19 @@ private let onePR = #"{"data":{"repository":{"nameWithOwner":"owner/repo","defau
     #expect(denial.pullRequests.isEmpty)
     #expect(denial.deniedRepositories == ["owner/repo"])
 }
-@Test func rateLimitPausesFurtherRequests() async throws {
-    let network = ScriptedGitHub([reply("{}", status: 429, headers: ["retry-after": "60"])])
-    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+@Test func rateLimitPausesRequestsUntilCooldownEnds() async throws {
+    let clock = GitHubTestClock()
+    let network = ScriptedGitHub([reply("{}", status: 429, headers: ["retry-after": "60"]), reply(onePR)])
+    let service = GitHubService(token: { "token" }, transport: network, now: clock.now)
     _ = await service.fetch([Repository(id: "owner/one"), Repository(id: "owner/two")], budget: 128, previous: [])
+    clock.advance(by: 59)
     _ = await service.fetch([Repository(id: "owner/one")], budget: 128, previous: [])
     #expect(await network.count == 1)
+    clock.advance(by: 1)
+    let recovered = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
+    #expect(await network.count == 2)
+    #expect(recovered.coverage.phase == "ready")
+    #expect(recovered.pullRequests.map(\.number) == [1])
 }
 @Test func repositoryIdentifiersRejectPathEscape() {
     #expect(canonicalGitHubRepository("Owner/Repo") == "owner/repo")
@@ -241,6 +295,120 @@ private func alteredPR(_ patch: (inout [String: Any]) -> Void, errors: [[String:
     if !errors.isEmpty { document["errors"] = errors }
     return GitHubHTTPResponse(status: 200, headers: [:], data: try JSONSerialization.data(withJSONObject: document))
 }
+
+private func inventoryPage(_ numbers: [Int], total: Int, next: String? = nil) throws -> GitHubHTTPResponse {
+    var document = try #require(JSONSerialization.jsonObject(with: Data(onePR.utf8)) as? [String: Any])
+    var data = try #require(document["data"] as? [String: Any])
+    var repository = try #require(data["repository"] as? [String: Any])
+    var connection = try #require(repository["pullRequests"] as? [String: Any])
+    let template = try #require((connection["nodes"] as? [[String: Any]])?.first)
+    connection["nodes"] = numbers.map { number in
+        var node = template
+        node["number"] = number
+        node["title"] = "Current PR \(number)"
+        return node
+    }
+    connection["totalCount"] = total
+    connection["pageInfo"] = ["hasNextPage": next != nil, "endCursor": next as Any? ?? NSNull()]
+    repository["pullRequests"] = connection
+    data["repository"] = repository
+    document["data"] = data
+    return GitHubHTTPResponse(status: 200, headers: [:], data: try JSONSerialization.data(withJSONObject: document))
+}
+
+private func graphCursor(in request: URLRequest) throws -> String? {
+    let body = try #require(request.httpBody)
+    let document = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let variables = try #require(document["variables"] as? [String: Any])
+    return variables["cursor"] as? String
+}
+
+@Test func pullRequestInventoryFollowsCursorAndCombinesPages() async throws {
+    let network = ScriptedGitHub([
+        try inventoryPage([1], total: 2, next: "second-page"),
+        try inventoryPage([2], total: 2)
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 2, previous: [])
+    #expect(result.pullRequests.map(\.number) == [1, 2])
+    #expect(result.pullRequests.allSatisfy { $0.inventoryComplete })
+    #expect(result.repositories.first?.prInventoryComplete == true)
+    #expect(result.coverage.phase == "ready")
+    #expect(result.coverage.inventoryRequests == 2)
+    let requests = await network.requests
+    try #require(requests.count == 2)
+    #expect(try graphCursor(in: requests[0]) == nil)
+    #expect(try graphCursor(in: requests[1]) == "second-page")
+}
+
+@Test(arguments: [false, true])
+func interruptedInventoryRetainsOldEvidenceUntilCompleteRefresh(exhaustBudget: Bool) async throws {
+    var replies = [try inventoryPage([1], total: 2, next: "second-page")]
+    if !exhaustBudget { replies.append(reply("{}", status: 503)) }
+    replies.append(try inventoryPage([1, 2], total: 2))
+    let network = ScriptedGitHub(replies)
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let previous = [1, 99].map {
+        PullRequest(repo: "owner/repo", number: $0, title: "Previously saved", author: "author",
+                    url: "https://github.com/owner/repo/pull/\($0)", updatedAt: testNow)
+    }
+    let partial = await service.fetch(
+        [Repository(id: "owner/repo")], budget: exhaustBudget ? 1 : 10, previous: previous)
+    #expect(partial.pullRequests.map(\.number) == [1, 99])
+    #expect(partial.pullRequests.first?.title == "Current PR 1")
+    #expect(partial.pullRequests.allSatisfy { !$0.inventoryComplete })
+    #expect(partial.repositories.first?.prInventoryComplete == false)
+    #expect(partial.repositories.first?.prStale == true)
+    #expect(partial.coverage.phase == "partial")
+    #expect(partial.deniedRepositories.isEmpty)
+    #expect(await network.count == (exhaustBudget ? 1 : 2))
+
+    let recovered = await service.fetch(partial.repositories, budget: 10, previous: partial.pullRequests)
+    #expect(recovered.pullRequests.map(\.number) == [1, 2])
+    #expect(recovered.pullRequests.allSatisfy { $0.inventoryComplete })
+    #expect(recovered.repositories.first?.prInventoryComplete == true)
+    #expect(recovered.repositories.first?.prStale == false)
+    #expect(recovered.coverage.phase == "ready")
+    #expect(await network.count == (exhaustBudget ? 2 : 3))
+}
+
+@Test(arguments: ["headRefOid", "baseRefOid"])
+func changingPullRequestRevisionCannotCombineFilePages(changedField: String) async throws {
+    let inventory = try alteredPR {
+        $0["files"] = ["totalCount": 2, "nodes": [], "pageInfo": ["hasNextPage": true]]
+    }
+    func filePage(path: String, next: String?, changed: Bool) throws -> GitHubHTTPResponse {
+        var node: [String: Any] = [
+            "number": 1, "headRefOid": "head", "baseRefOid": "base", "updatedAt": "2026-10-31T12:00:00Z",
+            "files": ["totalCount": 2, "nodes": [["path": path]],
+                      "pageInfo": ["hasNextPage": next != nil, "endCursor": next as Any? ?? NSNull()]]
+        ]
+        if changed { node[changedField] = "changed-revision" }
+        let data = try JSONSerialization.data(withJSONObject: [
+            "data": ["repository": ["nameWithOwner": "owner/repo", "pullRequest": node]]
+        ])
+        return GitHubHTTPResponse(status: 200, headers: [:], data: data)
+    }
+    let network = ScriptedGitHub([
+        inventory,
+        try filePage(path: "src/original.swift", next: "more-files", changed: false),
+        try filePage(path: "src/changed.swift", next: nil, changed: true)
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 10, previous: [])
+    let pr = try #require(result.pullRequests.first)
+    #expect(pr.files == ["src/original.swift"])
+    #expect(!pr.filesComplete && pr.inventoryComplete)
+    #expect(result.repositories.first?.prFilesComplete == false)
+    #expect(result.repositories.first?.prInventoryComplete == true)
+    #expect(result.coverage.phase == "partial")
+    #expect(result.deniedRepositories.isEmpty)
+    #expect(result.coverage.fileRequests == 2)
+    let requests = await network.requests
+    try #require(requests.count == 3)
+    #expect(try graphCursor(in: requests[2]) == "more-files")
+}
+
 @Test func supportingFieldDenialDoesNotRevokeRepositoryOrInventory() async throws {
     let partial = try alteredPR({ $0["reviewRequests"] = NSNull() }, errors: [["type": "FORBIDDEN", "path": ["repository", "pullRequests", "nodes", 0, "reviewRequests"]]])
     let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([partial]), now: { testNow })
