@@ -221,6 +221,15 @@ struct SettingsPanel: View {
                 Text("Recent").tag("recent")
             }
             Divider()
+            Picker("Automatically refresh", selection: $draft.refreshIntervalMinutes) {
+                Text("Manually").tag(0)
+                ForEach([5, 15, 30, 60], id: \.self) { minutes in
+                    Text("Every \(minutes) minutes").tag(minutes)
+                }
+            }
+            .disabled(draft.cachedOnly)
+            Text("Refresh while Bigboard is visible. If overdue, refresh when you return. Command-R refreshes immediately.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Use cached history only", isOn: $draft.cachedOnly)
             Text(
                 "Read local history without refreshing GitHub. Live pull-request information is unavailable in this mode."
