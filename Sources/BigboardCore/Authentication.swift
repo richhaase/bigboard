@@ -100,6 +100,7 @@ private func validAuthValue(_ value: String) -> Bool {
 }
 actor AuthManager {
     private let configuration: AuthConfiguration
+    nonisolated var callbackScheme: String { configuration.identity.rawValue }
     private let store: any CredentialStore
     private let transport: any GitHubTransport
     private let now: @Sendable () -> Date

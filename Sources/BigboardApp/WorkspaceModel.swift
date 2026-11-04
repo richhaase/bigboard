@@ -23,6 +23,8 @@ final class WorkspaceModel {
     }
     private let storage: WorkspaceStorage
     private let auth: AuthManager
+    private let webAuthentication: any WebAuthenticating
+    private var signInAttempt: UUID?
     private let transport: any GitHubTransport
     private let refreshHistory: @Sendable (GitHistory, Repository, String) async throws -> Repository
     private var github: GitHubService?
@@ -43,12 +45,14 @@ final class WorkspaceModel {
     private var bookmarkKey: String { activeGroup.isEmpty ? "all" : "group:\(activeGroup)" }
     init(
         storage: WorkspaceStorage = .system(), authentication: AuthManager? = nil,
+        webAuthentication: any WebAuthenticating = WebAuthentication(),
         transport: any GitHubTransport = URLSessionGitHubTransport(),
         refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = {
             try await $0.refresh($1, token: $2)
         }
     ) {
         self.storage = storage
+        self.webAuthentication = webAuthentication
         self.transport = transport
         self.refreshHistory = refreshHistory
         self.auth =
@@ -559,31 +563,45 @@ final class WorkspaceModel {
         return operation == generation ? rows : []
     }
     func signIn() async {
-        guard !checkingSignIn else { return }
+        guard !checkingSignIn, !signingOut, !authStatus.pending, signInAttempt == nil else { return }
+        let attempt = UUID()
+        signInAttempt = attempt
+        authStatus.pending = true
+        defer { if signInAttempt == attempt { signInAttempt = nil } }
         let operation = generation
+        error = ""
         do {
             let url = try await auth.start()
             let state = await auth.status()
-            guard operation == generation else { return }
+            guard operation == generation, signInAttempt == attempt else { return }
             authStatus = state
-            NSWorkspace.shared.open(url)
+            let callback = try await webAuthentication.authenticate(url: url, callbackScheme: auth.callbackScheme)
+            guard operation == generation, signInAttempt == attempt else { return }
+            try await auth.complete(callback)
+            guard operation == generation, signInAttempt == attempt else { return }
+            await finishSignIn()
         } catch {
+            guard operation == generation, signInAttempt == attempt else { return }
+            await auth.cancel()
             let state = await auth.status()
-            guard operation == generation else { return }
-            self.error = error.localizedDescription
+            guard operation == generation, signInAttempt == attempt else { return }
+            if !(error is CancellationError) { self.error = error.localizedDescription }
             authStatus = state
         }
     }
     func cancelSignIn() async {
         let operation = generation
+        signInAttempt = nil
+        webAuthentication.cancel()
         await auth.cancel()
         let state = await auth.status()
-        if operation == generation { authStatus = state }
+        if operation == generation, signInAttempt == nil { authStatus = state }
     }
     @discardableResult
     func signOut() async -> Bool {
         guard !signingOut else { return false }
         signingOut = true
+        if signInAttempt != nil { await cancelSignIn() }
         let interruptedRefresh = refreshTask != nil || snapshot.coverage.phase == "refreshing"
         generation += 1
         refreshTask?.cancel()
@@ -639,11 +657,9 @@ final class WorkspaceModel {
         authStatus.error = ""
         return true
     }
-    func handleCallback(_ url: URL) async {
+    func finishSignIn() async {
         var operation = generation
         do {
-            try await auth.complete(url)
-            guard operation == generation else { return }
             generation += 1
             operation = generation
             refreshTask?.cancel()
@@ -689,6 +705,7 @@ final class WorkspaceModel {
         shutdownOperation = generation
         generation += 1
         let refresh = refreshTask, discovery = discoveryTask
+        if signInAttempt != nil { await cancelSignIn() }
         refresh?.cancel()
         discovery?.cancel()
         await refresh?.value
