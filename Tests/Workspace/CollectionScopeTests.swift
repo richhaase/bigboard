@@ -9,7 +9,7 @@ import Testing
         var config = SettingsRepositories.applying([ids[0]], available: Set(ids.prefix(2)), to: WorkspaceConfiguration())
         config.cachedOnly = true
         config.groups = ["Mixed": [ids[0], ids[2]], "Unchecked": [ids[2]]]
-        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
+        let fixture = try CollectionFixture(config: config, inventory: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
@@ -29,7 +29,7 @@ import Testing
     @Test func liveDiscoveryKeepsNewRepositoriesVisibleWithoutCollectingThem() async throws {
         let chosen = "owner/chosen", new = "owner/new-private"
         let config = SettingsRepositories.applying([chosen], available: [chosen], to: WorkspaceConfiguration())
-        let fixture = try CollectionFixture(config: config, granted: [chosen], cloned: [chosen, new])
+        let fixture = try CollectionFixture(config: config, inventory: [chosen], cloned: [chosen, new])
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(Set(fixture.workspace.discovered.map(\.id)) == [chosen, new])
@@ -49,7 +49,7 @@ import Testing
         let denied = "owner/denied", transient = "owner/transient"
         let ids = [denied, transient]
         let config = WorkspaceConfiguration(repositories: ids)
-        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids, refreshHistory: { _, repo, _ in
+        let fixture = try CollectionFixture(config: config, inventory: ids, cloned: ids, refreshHistory: { _, repo, _ in
             if repo.id == denied { throw failure }
             throw BigboardError.message("Access denied: local Git process could not start.")
         })
@@ -63,23 +63,23 @@ import Testing
         #expect(deniedRow?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
         let transientRow = fixture.workspace.snapshot.repositories.first { $0.id == transient }
         #expect(transientRow?.error == "Access denied: local Git process could not start.")
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == ids)
+        #expect(try fixture.storage.loadClones("123").map(\.id) == ids)
     }
 
     @Test func gitFetchAuthenticationFailureSignsOut() async throws {
         let ids = ["owner/chosen"]
-        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), granted: ids, cloned: ids, refreshHistory: { _, _, _ in throw GitHubFailure.auth })
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), inventory: ids, cloned: ids, refreshHistory: { _, _, _ in throw GitHubFailure.auth })
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(!fixture.workspace.authStatus.signedIn)
         #expect(fixture.workspace.snapshot.coverage.phase == "signin")
-        #expect(try fixture.storage.loadGrant("123").isEmpty)
+        #expect(try fixture.storage.loadClones("123").map(\.id) == ids)
     }
 
     @Test func discoveryFollowsClonesOnDisk() async throws {
         let ids = ["owner/chosen", "owner/removed"]
         let config = SettingsRepositories.applying(Set(ids), available: Set(ids), to: WorkspaceConfiguration())
-        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
+        let fixture = try CollectionFixture(config: config, inventory: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         try #require(fixture.workspace.snapshot.coverage.phase == "ready")
@@ -94,7 +94,7 @@ import Testing
         await fixture.workspace.refresh()
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
         #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == [ids[0]])
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == [ids[0]])
+        #expect(try fixture.storage.loadClones("123").map(\.id) == [ids[0]])
     }
 
     @Test func changingSourceFoldersRediscoversAndRequiresLocalClones() async throws {
@@ -103,7 +103,7 @@ import Testing
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: empty) }
         var config = WorkspaceConfiguration(); config.sourceRoots = [empty.path]
-        let fixture = try CollectionFixture(config: config, granted: [], cloned: [chosen])
+        let fixture = try CollectionFixture(config: config, inventory: [], cloned: [chosen])
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.discovered.isEmpty)
@@ -122,16 +122,16 @@ import Testing
         #expect(fixture.workspace.configuration.repositories == [chosen])
     }
 
-    @Test func noSourceFoldersAsksForThemAndKeepsTheGrant() async throws {
+    @Test func noSourceFoldersAsksForThemAndKeepsTheCloneList() async throws {
         let id = "owner/chosen"
         let fixture = try CollectionFixture(
-            config: WorkspaceConfiguration(repositories: [id]), granted: [id], cloned: [id], chooseSources: false)
+            config: WorkspaceConfiguration(repositories: [id]), inventory: [id], cloned: [id], chooseSources: false)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.configuration.sourceRoots.isEmpty)
         #expect(fixture.workspace.snapshot.coverage.phase == "setup")
         #expect(fixture.workspace.discovered.isEmpty)
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == [id])
+        #expect(try fixture.storage.loadClones("123").map(\.id) == [id])
         #expect(await fixture.workspace.addSourceFolders([fixture.clones.path, fixture.clones.path]))
         #expect(fixture.workspace.configuration.sourceRoots == [fixture.clones.path])
         #expect(try fixture.storage.loadConfiguration("123").sourceRoots == [fixture.clones.path])
@@ -143,9 +143,9 @@ import Testing
         #expect(fixture.workspace.configuration.sourceRoots == [fixture.clones.path])
     }
 
-    @Test func freshSetupDiscoversChoicesWithoutScanningGrantedCaches() async throws {
+    @Test func freshSetupDiscoversChoicesWithoutScanningSavedClones() async throws {
         let ids = ["owner/chosen", "owner/new-private"]
-        let fixture = try CollectionFixture(config: WorkspaceConfiguration(), granted: [ids[0]], cloned: ids)
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(), inventory: [ids[0]], cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.coverage.phase == "setup")
@@ -163,7 +163,7 @@ import Testing
         var config = WorkspaceConfiguration()
         config.repositories = Array(ids.prefix(3)); config.excludedRepositories = [ids[2]]
         config.exclude = [pattern]; config.cachedOnly = true; config.groups = ["Mixed": ids]
-        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
+        let fixture = try CollectionFixture(config: config, inventory: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
@@ -177,7 +177,7 @@ import Testing
     @Test func savingNarrowerCollectionRemovesRetainedEvidenceBeforeDiscoveryFailure() async throws {
         let ids = ["owner/chosen", "owner/removed"]
         var config = WorkspaceConfiguration(); config.repositories = ids; config.cachedOnly = true
-        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
+        let fixture = try CollectionFixture(config: config, inventory: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(Set(fixture.workspace.snapshot.repositories.map(\.id)) == Set(ids))
@@ -208,7 +208,7 @@ import Testing
     let repositoryRoot: URL
     let network: CollectionTransport
     let workspace: WorkspaceModel
-    init(config original: WorkspaceConfiguration, granted: [String], cloned: [String], chooseSources: Bool = true, refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { _, repo, _ in repo }) throws {
+    init(config original: WorkspaceConfiguration, inventory: [String], cloned: [String], chooseSources: Bool = true, refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { _, repo, _ in repo }) throws {
         let history = try HistoryFixture()
         base = history.base
         clones = base.appendingPathComponent("collection-src")
@@ -223,7 +223,7 @@ import Testing
         var config = original
         if chooseSources, config.sourceRoots.isEmpty { config.sourceRoots = [clones.path] }
         try storage.saveConfiguration(config, account: "123")
-        try storage.saveGrant(granted.map { id in
+        try storage.saveClones(inventory.map { id in
             var repo = Repository(id: id, branch: "main")
             repo.path = paths[id] ?? ""
             return repo

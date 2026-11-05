@@ -109,7 +109,7 @@ import Testing
             let row = workspace.snapshot.repositories.first { $0.id == RefreshRecoveryFixture.second }
             #expect(row?.stale == true && row?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
         }
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == both)
+        #expect(try fixture.storage.loadClones("123").map(\.id) == both)
         await workspace.shutdown()
     }
 }
@@ -134,14 +134,14 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
         var configuration = original
         configuration.sourceRoots = [sources.path]
         try storage.saveConfiguration(configuration, account: "123")
-        var grant: [Repository] = []
+        var clones: [Repository] = []
         for id in [Self.first, Self.second] {
             let clone = try history.addClone(id, at: sources.appendingPathComponent(id))
             var repo = Repository(id: id, branch: "main")
             repo.path = try history.gitDirectory(clone)
-            grant.append(repo)
+            clones.append(repo)
         }
-        try storage.saveGrant(grant, account: "123")
+        try storage.saveClones(clones, account: "123")
     }
     func workspace() -> WorkspaceModel {
         let auth = cliAuth(storage: storage)
@@ -173,8 +173,6 @@ private actor RefreshRecoveryTransport: GitHubTransport {
         let object: Any
         switch request.url?.path {
         case "/user": object = ["login": "fixture", "id": 123]
-        case "/user/repos":
-            object = repositories.map { ["full_name": $0, "default_branch": "main", "archived": false] as [String: Any] }
         case "/graphql":
             guard let body = request.httpBody, let document = try JSONSerialization.jsonObject(with: body) as? [String: Any], let variables = document["variables"] as? [String: Any], let owner = variables["owner"] as? String, let name = variables["name"] as? String else { throw GitHubFailure.response }
             let id = owner + "/" + name

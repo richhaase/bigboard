@@ -76,7 +76,7 @@ struct StartupTests {
         #expect(try fixture.savedFiles() == before)
     }
 
-    @Test(arguments: ["workspace.json", "access.json"])
+    @Test(arguments: ["workspace.json", "clones.json"])
     func damagedSavedFileStopsStartupWithoutReplacingData(filename: String) async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
@@ -100,8 +100,8 @@ struct StartupTests {
         defer { fixture.remove() }
         try fixture.saveWorkspace()
         try fixture.saveWorkspace(account: "456")
-        let file = try fixture.storage.accountRoot("123").appendingPathComponent("access.json")
-        let other = try fixture.storage.accountRoot("456").appendingPathComponent("access.json")
+        let file = try fixture.storage.accountRoot("123").appendingPathComponent("clones.json")
+        let other = try fixture.storage.accountRoot("456").appendingPathComponent("clones.json")
         try Data(contentsOf: other).write(to: file)
         let before = try fixture.savedFiles()
         let workspace = fixture.workspace()
@@ -109,24 +109,22 @@ struct StartupTests {
 
         #expect(workspace.authStatus.signedIn && workspace.authStatus.accountID == "123")
         #expect(!workspace.checkingSignIn && !workspace.busy)
-        #expect(workspace.error == "Stored access does not match this GitHub account.")
+        #expect(workspace.error == "The saved clone list does not match this GitHub account.")
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
         #expect(await fixture.network.requests == 0)
         #expect(try fixture.savedFiles() == before)
         #expect(try Data(contentsOf: file) == Data(contentsOf: other))
     }
 
-    @Test(arguments: [false, true])
-    func localCloneDoesNotReplaceMissingOrRevokedDiscovery(revoked: Bool) async throws {
+    @Test func localCloneDoesNotReplaceMissingDiscovery() async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
         let history = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: history.base) }
         try fixture.saveWorkspace()
         try fixture.installClone(history)
-        let file = try fixture.storage.accountRoot("123").appendingPathComponent("access.json")
-        if revoked { try fixture.storage.invalidateGrant("123") }
-        else { try FileManager.default.removeItem(at: file) }
+        let file = try fixture.storage.accountRoot("123").appendingPathComponent("clones.json")
+        try FileManager.default.removeItem(at: file)
         let workspace = fixture.workspace()
         await workspace.start()
 
@@ -134,10 +132,9 @@ struct StartupTests {
         #expect(workspace.configuration == fixture.configuration())
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
         #expect(workspace.error.isEmpty)
-        #expect(try fixture.storage.loadGrant("123").isEmpty)
+        #expect(try fixture.storage.loadClones("123").isEmpty)
         #expect(await fixture.network.requests == 0)
-        if revoked { #expect(try Data(contentsOf: file).isEmpty) }
-        else { #expect(!FileManager.default.fileExists(atPath: file.path)) }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 }
 
@@ -162,10 +159,10 @@ struct StartupTests {
     func saveWorkspace(account: String = "123") throws {
         let storage = storage
         try storage.saveConfiguration(configuration(account: account), account: account)
-        try storage.saveGrant([Repository(id: repository(account: account))], account: account)
+        try storage.saveClones([Repository(id: repository(account: account))], account: account)
     }
     func savedFiles() throws -> [Data] {
-        try ["workspace.json", "access.json"].map {
+        try ["workspace.json", "clones.json"].map {
             try Data(contentsOf: storage.accountRoot("123").appendingPathComponent($0))
         }
     }
@@ -178,7 +175,7 @@ struct StartupTests {
     func installClone(_ history: HistoryFixture, account: String = "123") throws {
         let id = repository(account: account)
         try history.addClone(id)
-        try storage.saveGrant([try history.repository(id)], account: account)
+        try storage.saveClones([try history.repository(id)], account: account)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
 }

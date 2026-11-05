@@ -27,16 +27,16 @@ func bundleIdentitySelectsStorage(identity: ApplicationIdentity) throws {
     var original = try production.loadConfiguration("123")
     original.repositories = ["owner/production"]
     try production.saveConfiguration(original, account: "123")
-    try production.saveGrant([Repository(id: "owner/production")], account: "123")
+    try production.saveClones([Repository(id: "owner/production")], account: "123")
     let development = storage(.development)
     var config = try development.loadConfiguration("123")
     #expect(config.repositories.isEmpty)
-    #expect(try development.loadGrant("123").isEmpty)
+    #expect(try development.loadClones("123").isEmpty)
     config.repositories = ["owner/development"]
     try development.saveConfiguration(config, account: "123")
     #expect(try storage(.development).loadConfiguration("123") == config)
     #expect(try storage(.production).loadConfiguration("123") == original)
-    #expect(try production.loadGrant("123").map(\.id) == ["owner/production"])
+    #expect(try production.loadClones("123").map(\.id) == ["owner/production"])
     #expect(try development.repositoryRoot("123") != production.repositoryRoot("123"))
 }
 

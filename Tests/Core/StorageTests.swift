@@ -62,29 +62,32 @@ struct StorageTests {
         #expect(throws: (any Error).self) { try storage.saveConfiguration(config, account: "42") }
         #expect(try Data(contentsOf: path) == Data("{}".utf8))
     }
-    @Test func revokedAccessCannotReappear() throws {
+    @Test func cloneInventoryIsAccountScopedAndReplacesLegacyAccessFile() throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
-        try storage.saveGrant([Repository(id: "owner/private")], account: "42")
-        #expect(try storage.loadGrant("42").count == 1)
-        try storage.invalidateGrant("42")
-        #expect(try storage.loadGrant("42").isEmpty)
-        #expect(try storage.loadGrant("43").isEmpty)
+        let legacy = try storage.accountRoot("42").appendingPathComponent("access.json")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"accountID":"42","repositories":[{"id":"owner/old"}]}"#.utf8).write(to: legacy)
+        #expect(try storage.loadClones("42").isEmpty)
+        try storage.saveClones([Repository(id: "owner/private")], account: "42")
+        #expect(try storage.loadClones("42").map(\.id) == ["owner/private"])
+        #expect(try storage.loadClones("43").isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
     }
     @Test func symbolicLinksAreRejectedAndStateIsPrivate() throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
-        try storage.saveGrant([], account: "42")
+        try storage.saveClones([], account: "42")
         let account = try storage.accountRoot("42")
-        let file = account.appendingPathComponent("access.json")
+        let file = account.appendingPathComponent("clones.json")
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         let target = storage.supportRoot.appendingPathComponent("outside.json")
         try Data("private".utf8).write(to: target)
         try FileManager.default.removeItem(at: file)
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
-        #expect(throws: (any Error).self) { try storage.loadGrant("42") }
-        #expect(throws: (any Error).self) { try storage.invalidateGrant("42") }
+        #expect(throws: (any Error).self) { try storage.loadClones("42") }
+        #expect(throws: (any Error).self) { try storage.saveClones([], account: "42") }
         #expect(try Data(contentsOf: target) == Data("private".utf8))
         let other = try storage.accountRoot("43")
         try FileManager.default.createSymbolicLink(at: other, withDestinationURL: account)

@@ -52,7 +52,7 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
     #expect(workspace.discovered.isEmpty && workspace.activeGroup.isEmpty)
     #expect(workspace.busy == false)
-    #expect(try storage.loadGrant("123").isEmpty)
+    #expect(try storage.loadClones("123").isEmpty)
 }
 private actor SequenceWorkspaceTransport: GitHubTransport {
     private var statuses: [Int]
@@ -69,13 +69,13 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     try isolateSources(storage, sources: root.appendingPathComponent("src"))
-    try storage.saveGrant([Repository(id: "private/repo")], account: "123")
+    try storage.saveClones([Repository(id: "private/repo")], account: "123")
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: SequenceWorkspaceTransport([status]))
     await workspace.start()
     #expect(workspace.authStatus.signedIn == (status == 403))
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
     #expect(workspace.busy == false)
-    #expect(try storage.loadGrant("123").isEmpty)
+    #expect(try storage.loadClones("123").map(\.id) == ["private/repo"])
     if status == 401 {
         #expect(workspace.snapshot.coverage.phase == "signin")
         #expect(workspace.snapshot.accountID.isEmpty)
@@ -95,7 +95,7 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     #expect(workspace.authStatus.signedIn == false)
     #expect(workspace.snapshot.coverage.phase == "signin")
     #expect(workspace.discovered.isEmpty)
-    #expect(try storage.loadGrant("123").isEmpty)
+    #expect(try storage.loadClones("123").isEmpty)
     await workspace.checkConnection()
     #expect(workspace.authStatus.signedIn && workspace.snapshot.accountID == "123")
 }
@@ -216,9 +216,6 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
         if request.url?.path == "/user", !users.isEmpty {
             return GitHubHTTPResponse(status: 200, headers: [:], data: Data(users.removeFirst().utf8))
         }
-        if request.url?.path == "/user/repos" {
-            return GitHubHTTPResponse(status: 200, headers: [:], data: Data("[]".utf8))
-        }
         throw GitHubFailure.unavailable
     }
 }
@@ -251,14 +248,15 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     try isolateSources(storage, sources: root.appendingPathComponent("src"))
-    try storage.saveGrant([Repository(id: "private/repo")], account: "123")
+    try storage.saveClones([Repository(id: "private/repo")], account: "123")
     let network = ViewerWorkspaceTransport([#"{"login":"other","id":456}"#])
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()
     #expect(!workspace.authStatus.signedIn)
     #expect(workspace.snapshot.accountID.isEmpty && workspace.snapshot.viewer.isEmpty)
     #expect(workspace.snapshot.repositories.isEmpty && workspace.discovered.isEmpty)
-    #expect(try storage.loadGrant("123").isEmpty)
+    #expect(try storage.loadClones("123").map(\.id) == ["private/repo"])
+    #expect(try storage.loadClones("456").isEmpty)
     #expect(await network.count == 1)
 }
 @Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositories(rename: Bool) async throws {
@@ -270,7 +268,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     config.groups = ["Focus": ["fixture/one"]]
     config.cachedOnly = true
     try storage.saveConfiguration(config, account: "123")
-    try storage.saveGrant(config.repositories.map { Repository(id: $0) }, account: "123")
+    try storage.saveClones(config.repositories.map { Repository(id: $0) }, account: "123")
     let network = ViewerWorkspaceTransport([])
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()

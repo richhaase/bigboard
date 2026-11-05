@@ -141,7 +141,7 @@ struct SettingsGroupEditorTests {
         original.cachedOnly = true
         try storage.saveConfiguration(original, account: "123")
         try storage.saveConfiguration(original, account: "456")
-        try storage.saveGrant(original.repositories.map { Repository(id: $0) }, account: "123")
+        try storage.saveClones(original.repositories.map { Repository(id: $0) }, account: "123")
         let transport = GroupEditorTransport()
         let auth = cliAuth(storage: storage)
         let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: transport)

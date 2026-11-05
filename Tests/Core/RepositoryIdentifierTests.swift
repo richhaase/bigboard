@@ -18,10 +18,8 @@ struct RepositoryIdentifierTests {
     @Test func discoveredLeadingHyphenRepositoryCanBeSavedAndScanned() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
-        let github = GitHubService(token: { "fixture-token" }, transport: IdentifierTransport())
-        let repositories = try await github.discover()
-        let repo = try #require(repositories.first)
-        #expect(repositories.count == 1 && repo.id == "owner/-repo")
+        #expect(CloneDiscovery.githubRepository("git@github.com:Owner/-Repo.git") == "owner/-repo")
+        let repo = Repository(id: "owner/-repo")
         let storage = WorkspaceStorage(supportRoot: fixture.base.appendingPathComponent("support"), cacheRoot: fixture.root)
         var configuration = try storage.loadConfiguration("123")
         configuration.repositories = [repo.id]
@@ -35,17 +33,5 @@ struct RepositoryIdentifierTests {
         let scanned = try await history.scan(discovered, configuration: configuration)
         #expect(scanned.0.id == repo.id && !scanned.0.revision.isEmpty)
         #expect(!scanned.1.isEmpty && scanned.1.allSatisfy { $0.repo == repo.id })
-    }
-}
-
-private struct IdentifierTransport: GitHubTransport {
-    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
-        let body: String
-        switch request.url?.path {
-        case "/user/repos":
-            body = #"[{"full_name":"Owner/-Repo","default_branch":"main","archived":false}]"#
-        default: throw GitHubFailure.unavailable
-        }
-        return GitHubHTTPResponse(status: 200, headers: [:], data: Data(body.utf8))
     }
 }

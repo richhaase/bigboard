@@ -97,12 +97,12 @@ Paths in this table are relative to the repository root.
 | `Config/` | Build settings, bundle metadata, and archive export options. |
 | `Assets.xcassets/` | App icon asset catalog; source artwork is in `Assets/AppIcon.png`. |
 | `Sources/BigboardCLI/` | The `bigboard` command: dispatch, options, and text and JSON reports. |
-| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, and native actions. |
+| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, clone discovery, and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
 | `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
 | `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
 | `Sources/BigboardCore/GitHubCLI.swift`, `Sources/BigboardCore/ApplicationIdentity.swift` | GitHub CLI token and identity, and build identities. |
-| `Sources/BigboardCore/GitHub.swift` | Repository discovery, PR evidence, pagination, and request budgets. |
+| `Sources/BigboardCore/GitHub.swift` | GitHub viewer check, PR evidence, pagination, and request budgets. |
 | `Sources/BigboardCore/History/` | Git processes, clone discovery, fetch-only refresh, history parsing, and counting rules. |
 | `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
@@ -114,7 +114,7 @@ Xcode assembles the bundle and processes its Info.plist and icon catalog.
 
 ## Storage and access
 
-Durable settings and access grants use versioned JSON under
+Durable settings and the discovered clone list use versioned JSON under
 `~/Library/Application Support/<identity>/accounts/<account-id>/`.
 Parsed scans and repository locks live under
 `~/Library/Caches/<identity>/accounts/<account-id>/repos/`. Git history stays in
@@ -144,10 +144,10 @@ are optional and can be rebuilt.
 Resource limits and interrupted collection retain honest stale or partial
 coverage instead of silently truncating results.
 
-The account-scoped grant records the last discovered clones so cached history
-opens offline. Fetch denials mark a repository stale without hiding its local
-history; a rejected GitHub CLI token invalidates the session. Cancellation cannot
-restore access after the GitHub CLI account changes. See the
+`clones.json` records the clones found by the last discovery so cached history
+opens offline; each discovery replaces it, and nothing else removes it. Fetch
+denials mark a repository stale without hiding its local history; a rejected
+GitHub CLI token disconnects the session but keeps the clone list. See the
 [user reference](reference.md#data-status-offline-work-and-storage) for offline
 behavior.
 

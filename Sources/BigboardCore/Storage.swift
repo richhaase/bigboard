@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-struct AccessGrant: Codable, Sendable {
+struct CloneInventory: Codable, Sendable {
     var accountID: String
     var repositories: [Repository]
 }
@@ -154,25 +154,27 @@ final class WorkspaceStorage: @unchecked Sendable {
         guard value.valid else { throw BigboardError.message("GitHub identity is invalid.") }
         try write(JSONEncoder().encode(value), to: supportRoot.appendingPathComponent("github-identity.json"))
     }
-    func loadGrant(_ id: String) throws -> [Repository] {
-        guard let data = try read(accountRoot(id).appendingPathComponent("access.json")), !data.isEmpty else {
+    func loadClones(_ id: String) throws -> [Repository] {
+        guard let data = try read(accountRoot(id).appendingPathComponent("clones.json")), !data.isEmpty else {
             return []
         }
-        let grant = try decoder().decode(AccessGrant.self, from: data)
-        guard grant.accountID == id, grant.repositories.allSatisfy({ Self.validRepository($0.id) }) else {
-            throw BigboardError.message("Stored access does not match this GitHub account.")
+        let inventory = try decoder().decode(CloneInventory.self, from: data)
+        guard inventory.accountID == id, inventory.repositories.allSatisfy({ Self.validRepository($0.id) }) else {
+            throw BigboardError.message("The saved clone list does not match this GitHub account.")
         }
-        return grant.repositories
+        return inventory.repositories
     }
-    func saveGrant(_ repos: [Repository], account id: String) throws {
+    func saveClones(_ repos: [Repository], account id: String) throws {
+        let root = try accountRoot(id)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try write(
-            encoder.encode(AccessGrant(accountID: id, repositories: repos)),
-            to: accountRoot(id).appendingPathComponent("access.json"))
-    }
-    func invalidateGrant(_ id: String) throws {
-        try write(Data(), to: accountRoot(id).appendingPathComponent("access.json"))
+            encoder.encode(CloneInventory(accountID: id, repositories: repos)),
+            to: root.appendingPathComponent("clones.json"))
+        let legacy = root.appendingPathComponent("access.json")
+        if (try? legacy.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            try? FileManager.default.removeItem(at: legacy)
+        }
     }
     private func decoder() -> JSONDecoder {
         let d = JSONDecoder()

@@ -132,8 +132,6 @@ actor GitHubService {
     private let now: @Sendable () -> Date
     private var busy = false
     private var requests = 0
-    private var discoveryRequests = 0
-    private var viewerRequests = 0
     private var maximumRequests = 128
     private var repositoryLimit = Int.max
     private var deadline = Date.distantFuture
@@ -211,38 +209,10 @@ actor GitHubService {
     }
     func viewer() async throws -> GitHubUser {
         try await begin(budget: 1)
-        defer {
-            viewerRequests = requests
-            busy = false
-        }
+        defer { busy = false }
         let user = try decode(GitHubUser.self, try await request("user"))
         guard user.valid else { throw GitHubFailure.response }
         return user
-    }
-    func discover() async throws -> [Repository] {
-        try await begin(budget: 128)
-        defer {
-            discoveryRequests = requests + viewerRequests
-            viewerRequests = 0
-            busy = false
-        }
-        var repositories: [String: Repository] = [:]
-        for page in 1...128 {
-            let data = try await request(
-                "user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100&page=\(page)")
-            let rows = try decode([RepositoryRow].self, data)
-            guard rows.count <= 100 else { throw GitHubFailure.response }
-            for item in rows {
-                guard let id = canonicalGitHubRepository(item.full_name) else { throw GitHubFailure.response }
-                if !item.archived {
-                    repositories[id] = Repository(
-                        id: id, branch: item.default_branch, pushedAt: githubDate(item.pushed_at))
-                }
-            }
-            if rows.count < 100 { break }
-            if page == 128 { throw GitHubFailure.incomplete }
-        }
-        return repositories.values.sorted { $0.pushedAt ?? .distantPast > $1.pushedAt ?? .distantPast }
     }
     func fetch(_ repos: [Repository], budget: Int, previous: [PullRequest]) async -> GitHubResult {
         do { try await begin(budget: budget) } catch {
@@ -255,7 +225,7 @@ actor GitHubService {
         defer { busy = false }
         var result = GitHubResult(
             repositories: [], pullRequests: [],
-            coverage: Coverage(phase: "ready", accountRequests: discoveryRequests))
+            coverage: Coverage(phase: "ready"))
         let previousByID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for original in repos {
             var repo = original
@@ -563,12 +533,6 @@ func canonicalGitHubRepository(_ value: String) -> String? {
 }
 private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
     do { return try JSONDecoder().decode(type, from: data) } catch { throw GitHubFailure.response }
-}
-private struct RepositoryRow: Decodable {
-    var full_name: String
-    var default_branch: String
-    var archived: Bool
-    var pushed_at: String?
 }
 private struct PageInfo: Decodable {
     var hasNextPage: Bool
