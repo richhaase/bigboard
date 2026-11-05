@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct IdentityRule: Codable, Sendable, Equatable {
     var aliases: [String] = []
@@ -29,6 +30,19 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var refreshIntervalMinutes = 15
 }
 extension WorkspaceConfiguration {
+    func collected(_ repositories: [Repository], group: String = "") -> [Repository] {
+        let configured = Set(self.repositories)
+        let excluded = Set(excludedRepositories)
+        let members = group.isEmpty ? nil : Set(groups[group] ?? [])
+        return repositories.filter { repo in
+            if !configured.contains(repo.id) || excluded.contains(repo.id) { return false }
+            if let members, !members.contains(repo.id) { return false }
+            let name = String(repo.id.split(separator: "/").last ?? "")
+            return !exclude.contains { pattern in
+                fnmatch(pattern, repo.id, 0) == 0 || fnmatch(pattern, name, 0) == 0
+            }
+        }
+    }
     enum CodingKeys: String, CodingKey {
         case schemaVersion, repositories, excludedRepositories, groups, identities, workAreas, exclude
         case allFiles, aiIdentities, botIdentities, sinceDays, contributorSort, requestBudget, cachedOnly

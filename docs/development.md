@@ -19,6 +19,15 @@ This builds and opens `build/Bigboard Dev.app`, which uses your active GitHub CL
 account. Select repositories in Settings. Quit Bigboard Dev before rebuilding.
 Its settings and caches persist across builds.
 
+The app executable is also the `bigboard` command. Invoked through a link whose
+name is not `Bigboard`, it runs as a command line tool and uses the data of the
+app bundle it belongs to. For Bigboard Dev:
+
+```sh
+ln -sf "$PWD/build/Bigboard Dev.app/Contents/MacOS/Bigboard" /opt/homebrew/bin/bigboard-dev
+bigboard-dev status
+```
+
 To debug in Xcode, open `Bigboard.xcodeproj` and select the **Bigboard Dev**
 scheme. The **Bigboard App** scheme uses the production identity. Both schemes
 run the existing package tests with **Product → Test** (⌘U), without launching
@@ -87,6 +96,7 @@ Paths in this table are relative to the repository root.
 | `Bigboard.xcodeproj`, `App/` | App target, schemes, and launcher. |
 | `Config/` | Build settings, bundle metadata, and archive export options. |
 | `Assets.xcassets/` | App icon asset catalog; source artwork is in `Assets/AppIcon.png`. |
+| `Sources/BigboardCLI/` | The `bigboard` command: dispatch, options, and text and JSON reports. |
 | `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
 | `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
@@ -96,7 +106,7 @@ Paths in this table are relative to the repository root.
 | `Sources/BigboardCore/History/` | Git processes, owned caches, history parsing, and counting rules. |
 | `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
-| `Tests/App/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, core logic, workspace integration, and shared fixtures. |
+| `Tests/App/`, `Tests/CLI/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, command line, core logic, workspace integration, and shared fixtures. |
 
 Xcode assembles the bundle and processes its Info.plist and icon catalog.
 `scripts/build-macos.sh` invokes Xcode for local builds;
