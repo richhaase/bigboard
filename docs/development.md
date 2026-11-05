@@ -215,16 +215,3 @@ The workflow requires one Developer ID Application identity and derives its
 Team ID. It passes `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, `NOTARY_KEY_PATH`,
 `NOTARY_KEY_ID`, and `NOTARY_ISSUER` to the release script. The temporary
 notarization key and signing keychain are cleaned up after the job.
-
-### Installed-upgrade verification
-
-For changes to packaging, signing, or storage:
-
-1. Start with an installed release that has repositories selected, then quit it.
-2. Upgrade through Homebrew or replace it with the published app at the same location.
-3. Launch and confirm the account, repository selections, and cached data persist.
-4. Quit and reopen, and confirm the workspace opens without reconnecting.
-
-Keep the Team ID, bundle identifier, and compatible signing requirements. Local
-ad hoc builds do not establish Developer ID upgrade continuity. See
-[Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).

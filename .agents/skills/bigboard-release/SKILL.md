@@ -27,5 +27,3 @@ command, make the smallest fix, and use a new version for the next release.
 Do not build recovery infrastructure for a one-off release failure.
 
 Signing credentials stay in GitHub Actions secrets.
-For packaging, signing, authentication, or storage changes, follow the
-[installed-upgrade checks](../../../docs/development.md#installed-upgrade-verification).
