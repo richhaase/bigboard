@@ -98,7 +98,7 @@ Paths in this table are relative to the repository root.
 | `Bigboard.xcodeproj`, `App/` | App target, schemes, and launcher. |
 | `Config/` | Build settings, bundle metadata, and archive export options. |
 | `Assets.xcassets/` | App icon asset catalog; source artwork is in `Assets/AppIcon.png`. |
-| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, bookmarks, and native actions. |
+| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
 | `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
 | `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
@@ -116,7 +116,7 @@ Xcode assembles the bundle, processes its Info.plist and icon catalog, and runs
 
 ## Storage and access
 
-Durable settings, access grants, and bookmarks use versioned JSON under
+Durable settings and access grants use versioned JSON under
 `~/Library/Application Support/<identity>/accounts/<account-id>/`.
 Git mirrors and parsed scans live under
 `~/Library/Caches/<identity>/accounts/<account-id>/repos/`.
@@ -138,7 +138,7 @@ verified grant; confirmed denials remove the affected access. A failed save afte
 grant invalidation requires live verification again. Cancellation cannot restore
 access after sign-out or an account change. See the
 [user reference](reference.md#data-status-offline-work-and-storage) for
-offline behavior, cache removal, and bookmark eligibility.
+offline behavior and cache removal.
 
 ## Testing
 

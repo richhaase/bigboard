@@ -2,69 +2,61 @@ import Foundation
 import Testing
 @testable import Bigboard
 
-@Suite @MainActor struct BookmarkRecoveryTests {
-    @Test(arguments: BookmarkInterruption.allCases)
-    func partialRefreshPreservesRecoveryAfterRestart(_ interruption: BookmarkInterruption) async throws {
-        let fixture = try BookmarkFixture(missing: interruption == .history ? [BookmarkFixture.second] : [])
+@Suite @MainActor struct RefreshRecoveryTests {
+    @Test(arguments: RefreshRecoveryInterruption.allCases)
+    func partialRefreshPreservesRecoveryAfterRestart(_ interruption: RefreshRecoveryInterruption) async throws {
+        let fixture = try RefreshRecoveryFixture(missing: interruption == .history ? [RefreshRecoveryFixture.second] : [])
         defer { fixture.remove() }
-        if interruption == .history { await fixture.historyRefresh.fail(BookmarkFixture.second) }
-        else { await fixture.network.setMode(.incomplete, for: BookmarkFixture.second) }
+        if interruption == .history { await fixture.historyRefresh.fail(RefreshRecoveryFixture.second) }
+        else { await fixture.network.setMode(.incomplete, for: RefreshRecoveryFixture.second) }
         let workspace = fixture.workspace()
         await workspace.start()
         #expect(workspace.snapshot.coverage.phase == "partial")
-        #expect(workspace.snapshot.repositories.contains { $0.id == BookmarkFixture.first && !$0.stale && $0.prInventoryComplete })
+        #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.first && !$0.stale && $0.prInventoryComplete })
         if interruption == .history {
-            #expect(workspace.snapshot.repositories.contains { $0.id == BookmarkFixture.second && $0.stale })
-            #expect(!workspace.snapshot.commits.contains { $0.repo == BookmarkFixture.second })
+            #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && $0.stale })
+            #expect(!workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
         } else {
-            #expect(workspace.snapshot.repositories.contains { $0.id == BookmarkFixture.second && !$0.prInventoryComplete && $0.prStale })
-            #expect(!workspace.snapshot.pullRequests.contains { $0.repo == BookmarkFixture.second })
+            #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && !$0.prInventoryComplete && $0.prStale })
+            #expect(!workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second })
         }
         await workspace.shutdown()
-        #expect(try fixture.storage.bookmarks("123")["all"] == BookmarkFixture.oldBookmark)
-        if interruption == .history { try fixture.install(BookmarkFixture.second) }
+        if interruption == .history { try fixture.install(RefreshRecoveryFixture.second) }
         await fixture.historyRefresh.recover()
-        await fixture.network.setMode(.complete, for: BookmarkFixture.second)
+        await fixture.network.setMode(.complete, for: RefreshRecoveryFixture.second)
         let restarted = fixture.workspace()
         await restarted.start()
-        #expect(restarted.snapshot.bookmark == BookmarkFixture.oldBookmark)
         #expect(restarted.snapshot.repositories.allSatisfy { !$0.stale && $0.prInventoryComplete && !$0.prStale })
-        let board = BoardState(); board.sinceLastLook = true
-        #expect(board.filteredCommits(restarted.snapshot).contains { $0.repo == BookmarkFixture.second })
-        #expect(board.pullRequests(restarted.snapshot).contains { $0.repo == BookmarkFixture.second })
-        let recoveredAt = BookmarkFixture.persistedDate(restarted.snapshot.generatedAt)
+        let board = BoardState(); board.dateRange = .days(0)
+        #expect(board.filteredCommits(restarted.snapshot).contains { $0.repo == RefreshRecoveryFixture.second })
+        #expect(board.pullRequests(restarted.snapshot).contains { $0.repo == RefreshRecoveryFixture.second })
         await restarted.shutdown()
-        #expect(try fixture.storage.bookmarks("123")["all"] == recoveredAt)
     }
 
-    @Test func laterPartialRefreshKeepsEarlierEligibleBookmark() async throws {
-        let fixture = try BookmarkFixture()
+    @Test func laterPartialRefreshRetainsCachedHistory() async throws {
+        let fixture = try RefreshRecoveryFixture()
         defer { fixture.remove() }
         let workspace = fixture.workspace()
         await workspace.start()
         #expect(workspace.snapshot.coverage.phase == "ready")
-        let eligibleAt = BookmarkFixture.persistedDate(workspace.snapshot.generatedAt)
-        try await Task.sleep(for: .milliseconds(1100))
-        await fixture.historyRefresh.fail(BookmarkFixture.second)
+        await fixture.historyRefresh.fail(RefreshRecoveryFixture.second)
         await workspace.refresh()
-        #expect(BookmarkFixture.persistedDate(workspace.snapshot.generatedAt) > eligibleAt)
-        #expect(workspace.snapshot.repositories.contains { $0.id == BookmarkFixture.second && $0.stale })
+        #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && $0.stale })
         await workspace.shutdown()
-        #expect(try fixture.storage.bookmarks("123")["all"] == eligibleAt)
         var config = try fixture.storage.loadConfiguration("123"); config.cachedOnly = true
         try fixture.storage.saveConfiguration(config, account: "123")
         let restarted = fixture.workspace()
         await restarted.start()
-        #expect(restarted.snapshot.bookmark == eligibleAt)
+        #expect(restarted.snapshot.cachedOnly && !restarted.snapshot.commits.isEmpty)
         await restarted.shutdown()
     }
 
-    @Test func boundedSupportingDetailsDoNotPreventEligibleInventory() async throws {
-        var config = BookmarkFixture.configuration
-        config.repositories = [BookmarkFixture.first]; config.requestBudget = 1
-        let fixture = try BookmarkFixture(configuration: config)
+    @Test func boundedSupportingDetailsKeepInventoryAvailable() async throws {
+        var config = RefreshRecoveryFixture.configuration
+        config.repositories = [RefreshRecoveryFixture.first]; config.requestBudget = 1
+        let fixture = try RefreshRecoveryFixture(configuration: config)
         defer { fixture.remove() }
-        await fixture.network.setMode(.supportingDetails, for: BookmarkFixture.first)
+        await fixture.network.setMode(.supportingDetails, for: RefreshRecoveryFixture.first)
         let workspace = fixture.workspace()
         await workspace.start()
         let repo = try #require(workspace.snapshot.repositories.first)
@@ -72,82 +64,71 @@ import Testing
         #expect(!repo.prFilesComplete && !repo.prReviewersComplete)
         #expect(workspace.snapshot.coverage.phase == "partial")
         #expect(workspace.snapshot.coverage.inventoryRequests == 1)
-        let eligibleAt = BookmarkFixture.persistedDate(workspace.snapshot.generatedAt)
         await workspace.shutdown()
-        #expect(try fixture.storage.bookmarks("123")["all"] == eligibleAt)
     }
 
-    @Test func groupsEmptyScopesAndOfflineRefreshKeepIndependentBookmarks() async throws {
-        var config = BookmarkFixture.configuration
-        config.groups = ["Focus": [BookmarkFixture.first], "Empty": []]
-        let fixture = try BookmarkFixture(configuration: config)
+    @Test func groupsAndEmptyScopesWorkOffline() async throws {
+        var config = RefreshRecoveryFixture.configuration
+        config.groups = ["Focus": [RefreshRecoveryFixture.first], "Empty": []]
+        let fixture = try RefreshRecoveryFixture(configuration: config)
         defer { fixture.remove() }
-        try fixture.storage.saveBookmarks(["group:Focus": BookmarkFixture.oldBookmark, "group:Empty": BookmarkFixture.oldBookmark], account: "123")
-        await fixture.historyRefresh.fail(BookmarkFixture.second)
+        await fixture.historyRefresh.fail(RefreshRecoveryFixture.second)
         let workspace = fixture.workspace()
         await workspace.start()
         await workspace.selectGroup("Focus")
-        #expect(workspace.snapshot.repositories.map(\.id) == [BookmarkFixture.first])
+        #expect(workspace.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
         #expect(workspace.snapshot.coverage.phase == "ready")
-        let focusedAt = BookmarkFixture.persistedDate(workspace.snapshot.generatedAt)
         await workspace.selectGroup("Empty")
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
         await workspace.shutdown()
-        let expected = ["all": BookmarkFixture.oldBookmark, "group:Focus": focusedAt, "group:Empty": BookmarkFixture.oldBookmark]
-        #expect(try fixture.storage.bookmarks("123") == expected)
         config = try fixture.storage.loadConfiguration("123"); config.cachedOnly = true
         try fixture.storage.saveConfiguration(config, account: "123")
         let requests = await fixture.network.requests
         let offline = fixture.workspace()
         await offline.start()
         #expect(offline.snapshot.cachedOnly && !offline.snapshot.commits.isEmpty)
-        #expect(offline.snapshot.bookmark == BookmarkFixture.oldBookmark)
         await offline.selectGroup("Focus")
-        #expect(offline.snapshot.bookmark == focusedAt)
+        #expect(offline.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
         await offline.shutdown()
         #expect(await fixture.network.requests == requests)
-        #expect(try fixture.storage.bookmarks("123") == expected)
     }
 
-    @Test(arguments: BookmarkInterruption.allCases)
-    func accessDenialCannotTurnPartialScopeIntoEligibleRefresh(_ interruption: BookmarkInterruption) async throws {
-        let fixture = try BookmarkFixture()
+    @Test(arguments: RefreshRecoveryInterruption.allCases)
+    func accessDenialRemovesRepositoryEvidence(_ interruption: RefreshRecoveryInterruption) async throws {
+        let fixture = try RefreshRecoveryFixture()
         defer { fixture.remove() }
-        if interruption == .history { await fixture.historyRefresh.fail(BookmarkFixture.second, failure: .permission) }
-        else { await fixture.network.setMode(.denied, for: BookmarkFixture.second) }
+        if interruption == .history { await fixture.historyRefresh.fail(RefreshRecoveryFixture.second, failure: .permission) }
+        else { await fixture.network.setMode(.denied, for: RefreshRecoveryFixture.second) }
         let workspace = fixture.workspace()
         await workspace.start()
-        #expect(workspace.snapshot.repositories.map(\.id) == [BookmarkFixture.first])
-        #expect(!workspace.snapshot.commits.contains { $0.repo == BookmarkFixture.second })
-        #expect(!workspace.snapshot.pullRequests.contains { $0.repo == BookmarkFixture.second })
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == [BookmarkFixture.first])
+        #expect(workspace.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
+        #expect(!workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
+        #expect(!workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second })
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == [RefreshRecoveryFixture.first])
         await workspace.shutdown()
-        #expect(try fixture.storage.bookmarks("123")["all"] == BookmarkFixture.oldBookmark)
     }
 }
 
-enum BookmarkInterruption: CaseIterable, Sendable { case history, inventory }
+enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, inventory }
 
-@MainActor private struct BookmarkFixture {
+@MainActor private struct RefreshRecoveryFixture {
     static let first = "owner/one"
     static let second = "owner/two"
-    static let oldBookmark = Date(timeIntervalSince1970: 1_780_000_000)
     static var configuration: WorkspaceConfiguration {
         var value = WorkspaceConfiguration(); value.repositories = [first, second]; return value
     }
     let history: HistoryFixture
     let storage: WorkspaceStorage
-    let network: BookmarkTransport
-    let historyRefresh = BookmarkHistoryRefresh()
-    let credentials: BookmarkCredentials
-    init(missing: Set<String> = [], configuration: WorkspaceConfiguration = BookmarkFixture.configuration) throws {
+    let network: RefreshRecoveryTransport
+    let historyRefresh = RefreshRecoveryHistoryRefresh()
+    let credentials: RefreshRecoveryCredentials
+    init(missing: Set<String> = [], configuration: WorkspaceConfiguration = RefreshRecoveryFixture.configuration) throws {
         history = try HistoryFixture()
         storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
-        network = BookmarkTransport(repositories: [Self.first, Self.second])
-        credentials = try BookmarkCredentials()
+        network = RefreshRecoveryTransport(repositories: [Self.first, Self.second])
+        credentials = try RefreshRecoveryCredentials()
         try storage.saveConfiguration(configuration, account: "123")
         try storage.saveGrant([Repository(id: Self.first), Repository(id: Self.second)], account: "123")
-        try storage.saveBookmarks(["all": Self.oldBookmark], account: "123")
         for id in [Self.first, Self.second] where !missing.contains(id) { try install(id) }
     }
     func install(_ id: String) throws {
@@ -163,10 +144,9 @@ enum BookmarkInterruption: CaseIterable, Sendable { case history, inventory }
         return WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: { _, repo, _ in try await refresh.refresh(repo) })
     }
     func remove() { try? FileManager.default.removeItem(at: history.base) }
-    static func persistedDate(_ value: Date) -> Date { Date(timeIntervalSince1970: floor(value.timeIntervalSince1970)) }
 }
 
-private actor BookmarkHistoryRefresh {
+private actor RefreshRecoveryHistoryRefresh {
     private var failures: [String: GitHubFailure] = [:]
     func fail(_ id: String, failure: GitHubFailure = .unavailable) { failures[id] = failure }
     func recover() { failures = [:] }
@@ -176,7 +156,7 @@ private actor BookmarkHistoryRefresh {
     }
 }
 
-private actor BookmarkTransport: GitHubTransport {
+private actor RefreshRecoveryTransport: GitHubTransport {
     enum Mode: Sendable { case complete, incomplete, supportingDetails, denied }
     private let repositories: [String]
     private var modes: [String: Mode] = [:]
@@ -212,7 +192,7 @@ private actor BookmarkTransport: GitHubTransport {
     }
 }
 
-private final class BookmarkCredentials: CredentialStore, @unchecked Sendable {
+private final class RefreshRecoveryCredentials: CredentialStore, @unchecked Sendable {
     private let lock = NSLock()
     private var data: Data?
     init() throws {

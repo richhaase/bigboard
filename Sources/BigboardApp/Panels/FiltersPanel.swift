@@ -5,16 +5,27 @@ struct FiltersPanel: View {
     @Bindable var navigation: BoardState
     @Environment(\.dismiss) private var dismiss
     @State private var filters = BoardFilters()
-    @State private var days = 14
-    @State private var since = false
+    @State private var dateRange = DateRange.days(14)
     @State private var repositories: Set<String> = []
     var body: some View {
         VStack {
             Form {
                 Section("Shared scope") {
-                    Toggle("Since last look", isOn: $since).disabled(workspace.snapshot.bookmark == nil)
-                    LabeledContent("Last days (0 for all time)") {
-                        TextField("Days", value: $days, format: .number).frame(width: 100).disabled(since)
+                    Picker("Date range", selection: $dateRange) {
+                        ForEach(DateRange.presets, id: \.self) { range in
+                            Text(range.label).tag(range)
+                        }
+                        if !DateRange.presets.contains(dateRange) {
+                            Text(dateRange.label).tag(dateRange)
+                        }
+                    }
+                    if case .days(let days) = dateRange {
+                        LabeledContent("Custom days (0 for all time)") {
+                            TextField("Days", value: Binding(
+                                get: { days },
+                                set: { dateRange = .days(max(0, min(3650, $0))) }
+                            ), format: .number).frame(width: 100)
+                        }
                     }
                     DisclosureGroup(
                         "Repository filter (\(repositories.isEmpty ? "all" : "\(repositories.count) selected"))"
@@ -74,16 +85,14 @@ struct FiltersPanel: View {
                     filters = BoardFilters(sort: filters.sort, reversed: filters.reversed)
                 }
                 Button("Reset shared scope") {
-                    days = workspace.configuration.sinceDays
-                    since = false
+                    dateRange = .days(workspace.configuration.sinceDays)
                     repositories = []
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Apply") {
                     navigation.currentFilters = filters
-                    navigation.days = max(0, min(3650, days))
-                    navigation.sinceLastLook = since
+                    navigation.dateRange = dateRange
                     navigation.setRepositoryFilter(repositories, available: workspace.snapshot.repositories)
                     dismiss()
                 }
@@ -93,8 +102,7 @@ struct FiltersPanel: View {
         }
         .onAppear {
             filters = navigation.currentFilters
-            days = navigation.days
-            since = navigation.sinceLastLook
+            dateRange = navigation.dateRange
             repositories = navigation.repositories
         }
     }

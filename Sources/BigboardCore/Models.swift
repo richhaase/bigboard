@@ -145,7 +145,6 @@ struct Snapshot: Sendable {
     var pullRequests: [PullRequest] = []
     var coverage = Coverage()
     var cachedOnly = false
-    var bookmark: Date? = nil
 }
 struct ActivityScope: Hashable, Sendable {
     var repo = ""

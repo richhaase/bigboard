@@ -76,11 +76,14 @@ collection choices, or unload caches. Use Settings to change what the app
 collects. Changing a named group narrows collection to its saved, selected
 repositories and refreshes; it never adds unchecked repositories.
 
-The date menu offers 1, 7, 14, 30, 90, and 365 days, All time, Since last look,
-and a custom range through Filters. The default is 14 days unless changed in
-Settings. Custom days accepts 0 for all time, up to 3650 days. Since last look
-requires a saved bookmark. Filters stages shared scope and the current board's
-search, sorting, and applicable people/bot filters until Apply.
+The date menu offers the last 1, 4, 12, or 24 hours, 7, 14, 30, 90, and 365 days,
+All time, and a custom range through Filters. The default is 14 days unless
+changed in Settings. Custom days accepts 0 for all time, up to 3650 days.
+Filters stages shared scope and the current board's search, sorting, and
+applicable people/bot filters until Apply.
+
+Ranges roll forward with the displayed snapshot when data refreshes. Refreshing
+keeps the selected duration. Each session starts with the configured default range.
 
 Activity and Contributors use Git author dates; PRs use update times. Date
 filtering is relative to the retained snapshot and uses an exclusive lower
@@ -96,7 +99,7 @@ contributors rather than adding the cell counts.
 Cells adapt to the selected duration: hourly through one day, daily through 31
 days, weekly through 180 days, and monthly for longer ranges. Calendar boundaries
 use your local time zone and first weekday. Edge cells may be partial. All time
-includes all loaded history; Since last look starts at the saved bookmark.
+includes all loaded history.
 
 Darker blue means more activity. The overview and area rows use the same linear
 scale, from zero to the largest cell count in the current view. Hover to see the
@@ -193,8 +196,8 @@ Click the status and timestamp at the bottom right to open Data Status. During
 refresh, this control shows the spinner and the current collection step. The
 Boards menu and Command-Shift-D also open Data Status.
 
-The sheet shows refresh phase, snapshot time, last-look
-baseline, request counts, per-repository timestamps and coverage, errors, and
+The sheet shows refresh phase, snapshot time, request counts,
+per-repository timestamps and coverage, errors, and
 storage locations. History, PR inventory, changed files, and reviewer evidence
 have separate completeness signals. Explicit refresh preserves usable data on
 transient failure and labels stale or incomplete evidence.
@@ -211,15 +214,6 @@ mirrors and parsed scans live in Caches. The app never scans developer checkouts
 **Settings → Storage** offers cache removal only after a live refresh verifies
 that a repository is unavailable. Removal affects the owned local mirror, not
 GitHub. Settings discovery and cached-history mode alone do not authorize it.
-
-Since last look uses a fixed baseline for the session. A normal quit saves
-the latest eligible live snapshot time for the workspace/group as the next baseline.
-Every repository in that collected scope must have current Git history and a
-complete, nonstale PR list, with some commit history loaded. An incomplete refresh
-keeps the previous eligible time so recovered activity stays in the catch-up range.
-PR file and reviewer details can remain partial; those limits stay visible in Data
-Status and do not block the bookmark. Viewing filters do not narrow this requirement.
-Offline scans, identity rescans, and export do not advance it.
 
 ## Troubleshooting
 

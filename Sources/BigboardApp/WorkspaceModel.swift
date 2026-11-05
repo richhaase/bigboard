@@ -34,8 +34,6 @@ final class WorkspaceModel {
     private var history: GitHistory?
     private var account = ""
     private var authorized: [Repository] = []
-    private var baseline: [String: Date] = [:]
-    private var eligible: [String: Date] = [:]
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
@@ -45,7 +43,6 @@ final class WorkspaceModel {
     private var discoveryVerified = false
     private var pendingGitDenials: Set<String> = []
     private var pendingGitAuthentication = false
-    private var bookmarkKey: String { activeGroup.isEmpty ? "all" : "group:\(activeGroup)" }
     init(
         storage: WorkspaceStorage = .system(), authentication: AuthManager? = nil,
         webAuthentication: any WebAuthenticating = WebAuthentication(),
@@ -92,8 +89,6 @@ final class WorkspaceModel {
         lastRefreshFinished = nil
         configuration = try storage.loadConfiguration(account)
         authorized = try storage.loadGrant(account)
-        baseline = try storage.bookmarks(account)
-        eligible = [:]
         discovered = []
         cachedRepositoryRows = []
         inventoryVerified = false
@@ -105,7 +100,6 @@ final class WorkspaceModel {
         let manager = auth
         github = GitHubService(token: { try await manager.token() }, transport: transport)
         snapshot = Snapshot(accountID: account, viewer: authStatus.login)
-        snapshot.bookmark = baseline[bookmarkKey]
     }
     func refresh() async {
         await beginRefresh()?.value
@@ -180,7 +174,6 @@ final class WorkspaceModel {
             current.cachedOnly = true
             current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
             current.coverage.message = "Cached history. Pull-request evidence is unavailable offline."
-            current.bookmark = baseline[bookmarkKey]
             snapshot = current
             return
         }
@@ -241,16 +234,8 @@ final class WorkspaceModel {
                 current.coverage.errors.isEmpty
                 ? "Repository evidence is current." : "Some evidence is incomplete. See Data Status."
             current.cachedOnly = false
-            current.bookmark = baseline[bookmarkKey]
             snapshot = current
             restrictSnapshot()
-            let expected = Set(repos.map(\.id))
-            if !expected.isEmpty, !snapshot.commits.isEmpty,
-                Set(snapshot.repositories.map(\.id)) == expected,
-                snapshot.repositories.allSatisfy({ !$0.stale && $0.prInventoryComplete && !$0.prStale })
-            {
-                eligible[bookmarkKey] = snapshot.generatedAt
-            }
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
             if error as? GitHubFailure == .auth {
@@ -369,8 +354,6 @@ final class WorkspaceModel {
         account = ""
         history = nil
         github = nil
-        baseline = [:]
-        eligible = [:]
         activeGroup = ""
         pendingGitDenials = []
         pendingGitAuthentication = false
@@ -520,7 +503,6 @@ final class WorkspaceModel {
             }
             try storage.saveConfiguration(config, account: account)
             configuration = config
-            eligible = [:]
             error = ""
             reconcileActiveGroup()
             restrictSnapshot()
@@ -554,12 +536,10 @@ final class WorkspaceModel {
     }
     private func reconcileActiveGroup() {
         if !activeGroup.isEmpty, configuration.groups[activeGroup] == nil { activeGroup = "" }
-        snapshot.bookmark = baseline[bookmarkKey]
     }
     func selectGroup(_ name: String) async {
         guard !busy, name.isEmpty || configuration.groups[name] != nil else { return }
         activeGroup = name
-        snapshot.bookmark = baseline[bookmarkKey]
         restrictSnapshot()
         await refresh()
     }
@@ -660,8 +640,6 @@ final class WorkspaceModel {
         account = ""
         history = nil
         github = nil
-        baseline = [:]
-        eligible = [:]
         activeGroup = ""
         pendingGitDenials = []
         pendingGitAuthentication = false
@@ -731,11 +709,6 @@ final class WorkspaceModel {
         await refresh?.value
         await discovery?.value
         shutdownOperation = nil
-        if !account.isEmpty {
-            do { try storage.saveBookmarks(eligible, account: account) } catch {
-                self.error = error.localizedDescription
-            }
-        }
     }
     func exportJSON() throws -> Data {
         guard !snapshot.repositories.isEmpty else {

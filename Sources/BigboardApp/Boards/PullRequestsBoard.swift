@@ -134,9 +134,8 @@ struct PullRequestsBoard: View {
     private func age(_ pr: PullRequest) -> String {
         guard let date = pr.updatedAt else { return "Unknown" }
         let stale = workspace.snapshot.generatedAt.timeIntervalSince(date) >= 14 * 86400
-        let changed = workspace.snapshot.bookmark.map { date > $0 } ?? false
         return
-            "\(date.formatted(date: .abbreviated, time: .omitted))\(stale ? " !" : "")\(changed ? " +" : "")"
+            "\(date.formatted(date: .abbreviated, time: .omitted))\(stale ? " !" : "")"
     }
     private func detail(_ pr: PullRequest) -> some View {
         VStack(alignment: .leading, spacing: 12) {

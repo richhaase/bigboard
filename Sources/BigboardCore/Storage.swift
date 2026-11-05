@@ -161,19 +161,6 @@ final class WorkspaceStorage: @unchecked Sendable {
     func invalidateGrant(_ id: String) throws {
         try write(Data(), to: accountRoot(id).appendingPathComponent("access.json"))
     }
-    func bookmarks(_ id: String) throws -> [String: Date] {
-        guard let data = try read(accountRoot(id).appendingPathComponent("bookmarks.json")) else {
-            return [:]
-        }
-        return try decoder().decode([String: Date].self, from: data)
-    }
-    func saveBookmarks(_ values: [String: Date], account id: String) throws {
-        var merged = try bookmarks(id)
-        for (key, value) in values { merged[key] = max(merged[key] ?? .distantPast, value) }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        try write(encoder.encode(merged), to: accountRoot(id).appendingPathComponent("bookmarks.json"))
-    }
     private func decoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601

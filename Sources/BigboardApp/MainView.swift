@@ -134,7 +134,7 @@ struct MainView: View {
         }
         .onChange(of: workspace.configuration.sinceDays) { _, value in
             if !navigation.preferencesApplied {
-                navigation.days = value
+                navigation.dateRange = .days(value)
                 navigation.preferencesApplied = true
             }
         }
@@ -142,20 +142,16 @@ struct MainView: View {
     }
     private var dateFilter: some View {
         Menu {
-            ForEach([1, 7, 14, 30, 90, 365, 0], id: \.self) { days in
-                Toggle(days == 0 ? "All time" : days == 1 ? "Last day" : "Last \(days) days", isOn: Binding(
-                    get: { !navigation.sinceLastLook && navigation.days == days },
+            ForEach(DateRange.presets, id: \.self) { range in
+                Toggle(range.label, isOn: Binding(
+                    get: { navigation.dateRange == range },
                     set: { selected in
                         if selected {
-                            navigation.days = days
-                            navigation.sinceLastLook = false
+                            navigation.dateRange = range
                         }
                     })
                 )
             }
-            Divider()
-            Toggle("Since last look", isOn: $navigation.sinceLastLook)
-                .disabled(workspace.snapshot.bookmark == nil)
             Divider()
             Button("Custom range…") { navigation.panel = .filters }
         } label: {

@@ -94,8 +94,8 @@ struct ContributorsBoard: View {
             ActivityTimeline(points: navigation.timelinePoints(person.records, snapshot: workspace.snapshot))
             ActivityCalendar(
                 records: person.records,
-                days: navigation.days,
-                since: navigation.sinceLastLook ? workspace.snapshot.bookmark : nil,
+                days: 0,
+                since: navigation.dateRange.start(relativeTo: workspace.snapshot.generatedAt),
                 now: workspace.snapshot.generatedAt,
                 rangeLabel: navigation.rangeLabel
             )

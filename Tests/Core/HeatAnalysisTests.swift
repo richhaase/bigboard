@@ -51,10 +51,10 @@ struct HeatAnalysisTests {
         #expect(
             monthly.intervals.dropFirst().allSatisfy { calendar.component(.day, from: $0.start) == 1 })
     }
-    @Test func bookmarkAndAllTimeDefineTheDisplayedRange() {
-        let bookmark = now.addingTimeInterval(-6 * 3600)
-        let range = HeatRange(days: 90, since: bookmark, now: now, calendar: calendar)
-        #expect(range.current.start == bookmark && range.unit == .hour)
+    @Test func cutoffAndAllTimeDefineTheDisplayedRange() {
+        let cutoff = now.addingTimeInterval(-6 * 3600)
+        let range = HeatRange(days: 90, since: cutoff, now: now, calendar: calendar)
+        #expect(range.current.start == cutoff && range.unit == .hour)
         #expect(range.current.duration == 21_600.0)
         let midnight = calendar.startOfDay(for: now)
         let record = commit("first", at: midnight)
@@ -63,8 +63,8 @@ struct HeatAnalysisTests {
         #expect(all.includesStart)
         #expect(series.total == 10)
         #expect(series.series.reduce(0) { $0 + $1.value } == 10)
-        let futureBookmark = HeatRange(since: now.addingTimeInterval(60), now: now)
-        #expect(futureBookmark.current.duration == 0 && futureBookmark.intervals.isEmpty)
+        let futureCutoff = HeatRange(since: now.addingTimeInterval(60), now: now)
+        #expect(futureCutoff.current.duration == 0 && futureCutoff.intervals.isEmpty)
     }
     @Test func wholeRangePeopleAreDistinctRatherThanSummedCells() {
         let range = HeatRange(days: 14, now: now, calendar: calendar)
