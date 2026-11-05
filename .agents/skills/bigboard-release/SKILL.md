@@ -11,8 +11,11 @@ Verify the checkout's origin is `richhaase/bigboard`. Read `AGENTS.md`,
 1. Inspect current main, releases, and remote tags. Preserve unrelated local work.
 2. Confirm CI passed for the commit to release. Use the user's requested version;
    otherwise choose the smallest appropriate version bump and announce it.
-3. When the user requests a release, create an annotated tag on the verified main
-   commit and push only that tag. Do not move existing tags or change credentials.
+3. Draft release notes from the changes since the previous release: what changed
+   for users and anything they must do after upgrading. Show them to the user.
+   When the user requests a release, create an annotated tag on the verified main
+   commit with those notes as its message, and push only that tag. Do not move
+   existing tags or change credentials.
 4. Watch the Release workflow. It tests the tagged Swift source, archives and
    exports with Xcode, signs with Developer ID, notarizes and staples, and
    publishes the ZIP and checksum. Stable releases update the Homebrew cask.

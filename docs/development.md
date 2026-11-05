@@ -175,7 +175,10 @@ Publishing requires repository write access and the
 
 1. Use current main and confirm CI passed for the commit being released.
 2. Choose an unused version, create an annotated `vX.Y.Z` tag on that commit,
-   and push only that tag.
+   and push only that tag. The tag message is the release notes: write what
+   changed for users and anything they must do after upgrading. GitHub's
+   generated list of merged pull requests follows it. Lightweight tags and
+   empty messages are rejected before the build starts.
 3. Watch the [Release workflow](../.github/workflows/release.yml). It runs tests,
    archives and exports a universal app, signs with Developer ID, notarizes,
    staples, and verifies Gatekeeper acceptance.
