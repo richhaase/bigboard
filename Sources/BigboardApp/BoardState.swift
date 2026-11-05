@@ -185,11 +185,11 @@ struct RepositoryChecklist {
         heatExpanded = false
     }
     func showHeatActivity(
-        _ scope: ActivityScope, interval: DateInterval?, lens: ActivityLens = .directories,
+        _ scope: ActivityScope, interval: DateInterval?,
         includesStart: Bool = false
     ) {
         explore(scope)
-        self.lens = scope.isFile ? .commits : lens
+        lens = scope.isFile ? .commits : .directories
         activity.query = ""
         activity.hideBots = heat.hideBots
         activity.people = heat.people
