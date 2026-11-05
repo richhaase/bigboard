@@ -99,6 +99,29 @@ import Testing
         #expect(heat.current.start == start && heat.current.end == now)
         #expect(Analysis.heatSeries(records, metric: "commits", range: heat).total == 2)
     }
+    @Test func allTimeContributorTimelineRetainsSelectedRepositoriesAndPeopleHistory() throws {
+        let old = commit("old", days: 800)
+        let snapshot = Snapshot(generatedAt: now, commits: [
+            old, commit("recent"),
+            commit("other-repository", repo: "acme/other", days: 1400),
+            commit("other-person", email: "sam@example.test", days: 1200)
+        ])
+        let state = BoardState()
+        state.switchBoard(.contributors)
+        state.dateRange = .days(0)
+        state.repositories = ["acme/app"]
+        state.contributors.people = ["alex@example.test"]
+        let people = state.peopleRows(snapshot)
+        #expect(people.count == 1)
+        let person = try #require(people.first)
+        let points = state.timelinePoints(person.records, snapshot: snapshot)
+        let calendar = Calendar.current
+        #expect(state.rangeLabel == "All time")
+        #expect(Set(person.records.map(\.id)) == ["old", "recent"])
+        #expect(points.first?.date == calendar.date(from: calendar.dateComponents([.year, .month], from: old.date)))
+        #expect(points.reduce(0) { $0 + $1.commits } == person.totals.commits)
+        #expect(points.reduce(0) { $0 + $1.commits } == 2)
+    }
     @Test func refreshMovesTheWindowWithoutChangingItsDuration() {
         var recent = commit("recent"); recent.date = now.addingTimeInterval(-1800)
         var snapshot = Snapshot(generatedAt: now, commits: [recent])
