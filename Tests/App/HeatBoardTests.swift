@@ -24,14 +24,16 @@ import Testing
         #expect(state.heat.query == "Sources" && state.heatMetric == "people")
         #expect(state.scope.repo == "acme/other")
         let interval = DateInterval(start: Date(timeIntervalSince1970: 100), duration: 3600)
-        state.showHeatActivity(state.heatScope, interval: interval, lens: .commits)
-        #expect(state.board == .activity && state.lens == .commits)
+        state.showHeatActivity(state.heatScope, interval: interval)
+        #expect(state.board == .activity && state.lens == .directories)
         #expect(state.scope == state.heatScope && state.activityInterval == interval)
         #expect(state.activity.people == state.heat.people && state.activity.hideBots)
         #expect(state.activity.query.isEmpty && state.activitySelection == nil)
         state.switchBoard(.heat)
         #expect(state.heat.query == "Sources" && state.heatScope.path == "Sources")
         #expect(state.contributors.query == "Sam")
+        state.switchBoard(.activity)
+        #expect(state.lens == .directories && state.scope == state.heatScope)
         state.days = 90
         #expect(state.activityInterval == nil)
     }
@@ -67,8 +69,8 @@ import Testing
             ])
         let state = BoardState()
         state.days = 14
-        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: interval, lens: .commits)
-        #expect(state.days == 14)
+        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: interval)
+        #expect(state.days == 14 && state.lens == .directories)
         #expect(state.filteredCommits(snapshot).map(\.id) == ["inside", "end"])
         #expect(
             state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot).reduce(0) {
@@ -97,7 +99,7 @@ import Testing
         #expect(series.series.reduce(0) { $0 + $1.value } == 1)
         let cell = try #require(series.series.first)
         state.showHeatActivity(
-            ActivityScope(repo: "acme/app"), interval: cell.interval, lens: .commits,
+            ActivityScope(repo: "acme/app"), interval: cell.interval,
             includesStart: cell.includesStart)
         let records = state.filteredCommits(snapshot)
         #expect(records.map(\.id) == ["first"])

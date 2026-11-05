@@ -63,7 +63,7 @@ struct HeatBoard: View {
                 HeatStrip(series: current, metric: navigation.heatMetric, maximum: maximum) {
                     interval, includesStart in
                     navigation.showHeatActivity(
-                        scope, interval: interval, lens: .commits, includesStart: includesStart)
+                        scope, interval: interval, includesStart: includesStart)
                 }
                 HStack {
                     Text(axisLabel(range.current.start, range: range))
@@ -88,7 +88,7 @@ struct HeatBoard: View {
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 Text(
-                    "Darker cells mean more activity. All rows use the same scale. Hover for counts; select a cell to inspect its commits in Activity."
+                    "Darker cells mean more activity. All rows use the same scale. Hover for counts; select a cell to explore its activity by directory."
                 )
                 .font(.caption).foregroundStyle(.secondary)
                 Divider()
@@ -127,7 +127,7 @@ struct HeatBoard: View {
                         HeatStrip(series: row.heat, metric: navigation.heatMetric, maximum: maximum) {
                             interval, includesStart in
                             navigation.showHeatActivity(
-                                row.scope, interval: interval, lens: .commits, includesStart: includesStart)
+                                row.scope, interval: interval, includesStart: includesStart)
                         }
                     }
                     .padding(.vertical, 4)

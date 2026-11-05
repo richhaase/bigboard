@@ -105,7 +105,7 @@ dashed outlines and known-activity labels; a zero in those cells does not establ
 that no activity occurred.
 
 Select a repository or directory name to explore it within Heat Maps. Select a
-cell to inspect that interval's commits in Activity. The arrow beside an area
+cell to explore that interval in Activity's **Directories** view. The arrow beside an area
 opens Activity for the whole selected range. Activity labels the interval carried from Heat Maps and offers
 **Back to Heat Maps** and **Use shared date range**. Changing the shared date range
 also clears that interval. Switching boards preserves each board's state.
