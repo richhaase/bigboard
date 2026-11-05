@@ -131,17 +131,19 @@ struct SettingsGroupEditorTests {
         #expect(editor.original == "Focus" && editor.name == "Product")
         #expect(editor.error.contains("removed"))
     }
-    @Test @MainActor func editedGroupAppliesAndReopensWithoutOriginalOrChangingOtherAccount() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    @Test @MainActor func editedGroupAppliesAndReopensWithoutOriginal() async throws {
+        let history = try HistoryFixture(id: "owner/app")
+        try history.addClone("owner/library")
+        try history.addClone("other/repo")
+        let root = history.base
         defer { try? FileManager.default.removeItem(at: root) }
-        let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         var original = WorkspaceConfiguration()
         original.repositories = ["owner/app", "owner/library", "other/repo"]
         original.groups = ["Focus": ["owner/app"], "Other": ["owner/library"]]
         original.cachedOnly = true
-        try storage.saveConfiguration(original, account: "123")
-        try storage.saveConfiguration(original, account: "456")
-        try storage.saveClones(original.repositories.map { Repository(id: $0) }, account: "123")
+        original.sourceRoots = [history.sources.path]
+        try storage.saveConfiguration(original)
         let transport = GroupEditorTransport()
         let auth = cliAuth(storage: storage)
         let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: transport)
@@ -156,7 +158,7 @@ struct SettingsGroupEditorTests {
         #expect(didSave)
         draft = SettingsRepositories.applying(Set(original.repositories), available: [], to: draft)
         #expect(workspace.configuration == original)
-        #expect(try storage.loadConfiguration("123") == original)
+        #expect(try storage.loadConfiguration() == original)
 
         let applied = await workspace.saveConfiguration(draft)
         for _ in 0..<100 {
@@ -171,9 +173,8 @@ struct SettingsGroupEditorTests {
 
         #expect(applied)
         #expect(workspace.configuration.groups == ["Product": ["owner/app", "owner/library"], "Other": ["owner/library"]])
-        let reopened = WorkspaceStorage(supportRoot: storage.supportRoot, cacheRoot: storage.cacheRoot)
-        #expect(try reopened.loadConfiguration("123") == draft)
-        #expect(try reopened.loadConfiguration("456") == original)
+        let reopened = WorkspaceStorage(configRoot: storage.configRoot, cacheRoot: storage.cacheRoot)
+        #expect(try reopened.loadConfiguration() == draft)
         #expect(await transport.count == 0)
     }
 }

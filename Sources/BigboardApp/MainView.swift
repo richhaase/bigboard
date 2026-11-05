@@ -45,9 +45,7 @@ struct MainView: View {
                 }
                 if !workspace.authStatus.signedIn {
                     signedOut
-                } else if !workspace.checkingSignIn, workspace.configuration.sourceRoots.isEmpty,
-                    !workspace.configuration.cachedOnly
-                {
+                } else if !workspace.checkingSignIn, workspace.configuration.sourceRoots.isEmpty {
                     chooseSources
                 } else if workspace.snapshot.repositories.isEmpty {
                     emptyWorkspace

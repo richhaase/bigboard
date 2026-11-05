@@ -7,7 +7,7 @@ struct GitHubCLIAuthTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return (
             WorkspaceStorage(
-                supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache")),
+                configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache")),
             root
         )
     }

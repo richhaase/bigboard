@@ -1,76 +1,65 @@
 import Foundation
 import Darwin
 
-struct CloneInventory: Codable, Sendable {
-    var accountID: String
-    var repositories: [Repository]
-}
 final class WorkspaceStorage: @unchecked Sendable {
-    let supportRoot: URL
+    let configRoot: URL
     let cacheRoot: URL
-    private var expected: [String: Data] = [:]
+    private var expected: Data?
     private let lock = NSLock()
     static func system(
         identity: ApplicationIdentity = .fromBundle(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> WorkspaceStorage {
-        let support =
-            environment["BIGBOARD_DATA_ROOT"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(identity.storageDirectory)
+        func base(_ variable: String, _ fallback: String) -> URL {
+            if let value = environment[variable], value.hasPrefix("/") { return URL(fileURLWithPath: value) }
+            return home.appendingPathComponent(fallback)
+        }
+        let config =
+            environment["BIGBOARD_CONFIG_ROOT"].map { URL(fileURLWithPath: $0) }
+            ?? base("XDG_CONFIG_HOME", ".config").appendingPathComponent(identity.directoryName)
         let cache =
             environment["BIGBOARD_CACHE_ROOT"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(identity.storageDirectory)
-        return WorkspaceStorage(supportRoot: support, cacheRoot: cache)
+            ?? base("XDG_CACHE_HOME", ".cache").appendingPathComponent(identity.directoryName)
+        return WorkspaceStorage(configRoot: config, cacheRoot: cache)
     }
-    init(supportRoot: URL, cacheRoot: URL) {
-        self.supportRoot = supportRoot.resolvingSymlinksInPath()
+    init(configRoot: URL, cacheRoot: URL) {
+        self.configRoot = configRoot.resolvingSymlinksInPath()
         self.cacheRoot = cacheRoot.resolvingSymlinksInPath()
     }
-    func accountRoot(_ id: String) throws -> URL {
-        guard !id.isEmpty, id.allSatisfy(\.isNumber), UInt64(id) != nil else {
-            throw BigboardError.message("Invalid GitHub account identifier")
-        }
-        return supportRoot.appendingPathComponent("accounts/\(id)")
-    }
-    func repositoryRoot(_ id: String) throws -> URL {
-        _ = try accountRoot(id)
-        return cacheRoot.appendingPathComponent("accounts/\(id)/repos")
-    }
-    func loadConfiguration(_ id: String) throws -> WorkspaceConfiguration {
+    var configurationFile: URL { configRoot.appendingPathComponent("config.json") }
+    var historyRoot: URL { cacheRoot.appendingPathComponent("history") }
+    func loadConfiguration() throws -> WorkspaceConfiguration {
         lock.lock()
         defer { lock.unlock() }
-        let url = try accountRoot(id).appendingPathComponent("workspace.json")
-        guard let data = try read(url) else {
-            expected.removeValue(forKey: id)
+        guard let data = try read(configurationFile) else {
+            expected = nil
             return WorkspaceConfiguration()
         }
         let value = try JSONDecoder().decode(WorkspaceConfiguration.self, from: data)
         try validate(value, forSaving: false)
-        expected[id] = data
+        expected = data
         return value
     }
-    func saveConfiguration(_ value: WorkspaceConfiguration, account id: String) throws {
+    func saveConfiguration(_ value: WorkspaceConfiguration) throws {
         lock.lock()
         defer { lock.unlock() }
         try validate(value)
-        let url = try accountRoot(id).appendingPathComponent("workspace.json")
-        guard try read(url) == expected[id] else {
-            throw BigboardError.message("Workspace settings changed outside BigBoard. Restart before saving.")
+        guard try read(configurationFile) == expected else {
+            throw BigboardError.message("Bigboard settings changed outside Bigboard. Restart before saving.")
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(value)
-        try write(data, to: url)
-        expected[id] = data
+        try write(data, to: configurationFile)
+        expected = data
     }
     func validate(_ config: WorkspaceConfiguration) throws {
         try validate(config, forSaving: true)
     }
     private func validate(_ config: WorkspaceConfiguration, forSaving: Bool) throws {
         guard config.schemaVersion == 1 else {
-            throw BigboardError.message("This workspace was created by an unsupported BigBoard version.")
+            throw BigboardError.message("This workspace was created by an unsupported Bigboard version.")
         }
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else {
             throw BigboardError.message("Invalid request budget or startup range.")
@@ -145,41 +134,14 @@ final class WorkspaceStorage: @unchecked Sendable {
         canonicalGitHubRepository(id) != nil
     }
     func loadIdentity() throws -> GitHubIdentity? {
-        guard let data = try read(supportRoot.appendingPathComponent("github-identity.json")) else { return nil }
+        guard let data = try read(cacheRoot.appendingPathComponent("gh-identity.json")) else { return nil }
         let value = try JSONDecoder().decode(GitHubIdentity.self, from: data)
         guard value.valid else { throw BigboardError.message("Saved GitHub identity is invalid.") }
         return value
     }
     func saveIdentity(_ value: GitHubIdentity) throws {
         guard value.valid else { throw BigboardError.message("GitHub identity is invalid.") }
-        try write(JSONEncoder().encode(value), to: supportRoot.appendingPathComponent("github-identity.json"))
-    }
-    func loadClones(_ id: String) throws -> [Repository] {
-        guard let data = try read(accountRoot(id).appendingPathComponent("clones.json")), !data.isEmpty else {
-            return []
-        }
-        let inventory = try decoder().decode(CloneInventory.self, from: data)
-        guard inventory.accountID == id, inventory.repositories.allSatisfy({ Self.validRepository($0.id) }) else {
-            throw BigboardError.message("The saved clone list does not match this GitHub account.")
-        }
-        return inventory.repositories
-    }
-    func saveClones(_ repos: [Repository], account id: String) throws {
-        let root = try accountRoot(id)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        try write(
-            encoder.encode(CloneInventory(accountID: id, repositories: repos)),
-            to: root.appendingPathComponent("clones.json"))
-        let legacy = root.appendingPathComponent("access.json")
-        if (try? legacy.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
-            try? FileManager.default.removeItem(at: legacy)
-        }
-    }
-    private func decoder() -> JSONDecoder {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
+        try write(JSONEncoder().encode(value), to: cacheRoot.appendingPathComponent("gh-identity.json"))
     }
     private func checkedParent(_ url: URL, create: Bool) throws -> URL {
         let parent = url.deletingLastPathComponent().standardizedFileURL

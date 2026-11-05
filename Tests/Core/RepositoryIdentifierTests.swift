@@ -20,11 +20,11 @@ struct RepositoryIdentifierTests {
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         #expect(CloneDiscovery.githubRepository("git@github.com:Owner/-Repo.git") == "owner/-repo")
         let repo = Repository(id: "owner/-repo")
-        let storage = WorkspaceStorage(supportRoot: fixture.base.appendingPathComponent("support"), cacheRoot: fixture.root)
-        var configuration = try storage.loadConfiguration("123")
+        let storage = WorkspaceStorage(configRoot: fixture.base.appendingPathComponent("support"), cacheRoot: fixture.root)
+        var configuration = try storage.loadConfiguration()
         configuration.repositories = [repo.id]
-        try storage.saveConfiguration(configuration, account: "123")
-        #expect(try storage.loadConfiguration("123").repositories == [repo.id])
+        try storage.saveConfiguration(configuration)
+        #expect(try storage.loadConfiguration().repositories == [repo.id])
 
         let clone = try fixture.addClone(repo.id)
         let discovered = try #require(await CloneDiscovery.find(in: [fixture.sources]).first { $0.id == repo.id })

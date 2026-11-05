@@ -37,5 +37,10 @@ cask "bigboard" do
     their remote-tracking default branch.
     Run `bigboard` to open the app, or `bigboard help` for terminal commands.
   EOS
+
+  zap trash: [
+    "~/.cache/bigboard",
+    "~/.config/bigboard",
+  ]
 end
 CASK

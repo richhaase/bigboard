@@ -12,7 +12,7 @@ final class WorkspaceModel {
     var discovered: [Repository] = []
     var activeGroup = ""
     var storageDescription: String {
-        "Settings: \(storage.supportRoot.path)\nHistory: \(storage.cacheRoot.path)"
+        "Settings: \(storage.configurationFile.path)\nHistory: \(storage.cacheRoot.path)"
     }
     private let storage: WorkspaceStorage
     private let auth: GitHubCLIAuth
@@ -71,13 +71,13 @@ final class WorkspaceModel {
         generation += 1
         account = authStatus.accountID
         lastRefreshFinished = nil
-        configuration = try storage.loadConfiguration(account)
-        clones = try storage.loadClones(account)
+        configuration = try storage.loadConfiguration()
+        clones = []
         discovered = []
         discoveryVerified = false
         pendingGitAuthentication = false
         activeGroup = ""
-        history = GitHistory(root: try storage.repositoryRoot(account))
+        history = GitHistory(root: storage.historyRoot)
         let manager = auth
         github = GitHubService(token: { try await manager.token() }, transport: transport)
         snapshot = Snapshot(accountID: account, viewer: authStatus.login)
@@ -121,40 +121,34 @@ final class WorkspaceModel {
         guard operation == generation, let history, let github, !account.isEmpty else { return }
         let id = account, config = configuration
         error = ""
-        var current = snapshot
-        current.cachedOnly = config.cachedOnly
-        current.coverage = Coverage(phase: "refreshing", message: "Loading cached history…")
-        snapshot.coverage = current.coverage
-        if snapshot.commits.isEmpty, !clones.isEmpty {
-            current = await scan(
-                selected(clones), previous: current, history: history, configuration: config, live: false)
-            guard operation == generation, !Task.isCancelled else { return }
-            current.cachedOnly = config.cachedOnly
-            current.coverage.phase = "refreshing"
-            current.coverage.message = "Cached history loaded; checking GitHub access…"
-            snapshot = current
-        }
-        if config.cachedOnly {
-            current = await scan(
-                selected(clones), previous: current, history: history, configuration: config, live: false)
-            guard operation == generation, !Task.isCancelled else { return }
-            current.pullRequests = []
-            current.cachedOnly = true
-            current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
-            current.coverage.message = "Cached history. Pull-request evidence is unavailable offline."
-            snapshot = current
-            return
-        }
         guard !config.sourceRoots.isEmpty else {
             snapshot.coverage = Coverage(phase: "setup", message: "Choose the folders that hold your Git clones.")
             return
         }
+        snapshot.coverage = Coverage(phase: "refreshing", message: "Finding clones…")
+        guard await findClones(operation: operation, roots: config.sourceRoots) else { return }
+        var current = snapshot
+        current.cachedOnly = config.cachedOnly
+        current.coverage = Coverage(phase: "refreshing", message: "Loading cached history…")
+        snapshot.coverage = current.coverage
+        if config.cachedOnly || snapshot.commits.isEmpty {
+            current = await scan(
+                selected(clones), previous: current, history: history, configuration: config, live: false)
+            guard operation == generation, !Task.isCancelled else { return }
+            current.cachedOnly = config.cachedOnly
+            if config.cachedOnly {
+                current.pullRequests = []
+                current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
+                current.coverage.message = "Cached history. Pull-request evidence is unavailable offline."
+                snapshot = current
+                return
+            }
+            current.coverage.phase = "refreshing"
+            current.coverage.message = "Cached history loaded; checking GitHub access…"
+            snapshot = current
+        }
         do {
-            discoveryVerified = false
-            guard let rows = try await discoverClones(github, account: id, operation: operation) else { return }
-            discovered = rows
-            discoveryVerified = true
-            restrictSnapshot()
+            guard try await verifyViewer(github, account: id, operation: operation) else { return }
             current = snapshot
             let repos = selected(clones)
             guard !configuration.repositories.isEmpty else {
@@ -322,28 +316,31 @@ final class WorkspaceModel {
         snapshot.pullRequests.removeAll { !collected.contains($0.repo) }
         discovered.removeAll { !allowed.contains($0.id) }
     }
-    private func discoverClones(
-        _ github: GitHubService, account id: String, operation: Int, roots folders: [String]? = nil
-    ) async throws -> [Repository]? {
-        guard operation == generation, account == id, !Task.isCancelled else { return nil }
+    private func findClones(operation: Int, roots: [String]) async -> Bool {
+        let rows = await CloneDiscovery.find(in: CloneDiscovery.roots(roots))
+        guard operation == generation, !Task.isCancelled else { return false }
+        clones = rows
+        discovered = rows
+        discoveryVerified = true
+        restrictSnapshot()
+        return true
+    }
+    private func verifyViewer(_ github: GitHubService, account id: String, operation: Int) async throws -> Bool {
+        guard operation == generation, account == id, !Task.isCancelled else { return false }
         let state = try await auth.verify(using: github, account: id)
-        guard operation == generation, !Task.isCancelled else { return nil }
+        guard operation == generation, !Task.isCancelled else { return false }
         authStatus = state
         snapshot.viewer = state.login
-        let rows = await CloneDiscovery.find(in: CloneDiscovery.roots(folders ?? configuration.sourceRoots))
-        guard operation == generation, !Task.isCancelled else { return nil }
-        clones = rows
-        restrictSnapshot()
-        try storage.saveClones(rows, account: id)
-        return rows
+        return true
     }
     func discover(roots: [String]? = nil) async {
-        guard !busy, let github, !account.isEmpty else { return }
+        guard !busy, !account.isEmpty else { return }
         busy = true
         error = ""
         discoveryVerified = false
-        let operation = generation, id = account
-        let task = Task { await self.performDiscovery(github, account: id, operation: operation, roots: roots) }
+        let operation = generation
+        let folders = roots ?? configuration.sourceRoots
+        let task = Task { _ = await self.findClones(operation: operation, roots: folders) }
         discoveryTask = task
         await withTaskCancellationHandler {
             await task.value
@@ -355,23 +352,6 @@ final class WorkspaceModel {
             busy = false
         }
     }
-    private func performDiscovery(
-        _ github: GitHubService, account id: String, operation: Int, roots: [String]?
-    ) async {
-        do {
-            guard let rows = try await discoverClones(github, account: id, operation: operation, roots: roots)
-            else { return }
-            discovered = rows
-            discoveryVerified = true
-        } catch {
-            guard operation == generation, !Task.isCancelled else { return }
-            if error as? GitHubFailure == .auth {
-                await invalidateAuthentication(operation: operation)
-                return
-            }
-            self.error = error.localizedDescription
-        }
-    }
     @discardableResult
     func addSourceFolders(_ folders: [String]) async -> Bool {
         guard !busy, !account.isEmpty, authStatus.signedIn else { return false }
@@ -381,7 +361,7 @@ final class WorkspaceModel {
         let operation = generation
         do {
             try storage.validate(config)
-            try storage.saveConfiguration(config, account: account)
+            try storage.saveConfiguration(config)
             configuration = config
             error = ""
         } catch {
@@ -427,7 +407,7 @@ final class WorkspaceModel {
                     )
                 }
             }
-            try storage.saveConfiguration(config, account: account)
+            try storage.saveConfiguration(config)
             configuration = config
             error = ""
             reconcileActiveGroup()
@@ -444,7 +424,7 @@ final class WorkspaceModel {
         do {
             var next = configuration
             next.identities = rules
-            try storage.saveConfiguration(next, account: account)
+            try storage.saveConfiguration(next)
             configuration = next
             busy = true
             let operation = generation

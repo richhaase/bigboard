@@ -69,7 +69,7 @@ key. Choose **Always Allow** to authorize signing subsequent builds.
 | Setting | Production | Development |
 | --- | --- | --- |
 | Bundle identifier | `com.richhaase.bigboard` | `com.richhaase.bigboard.dev` |
-| Support/cache directory | `com.richhaase.bigboard.native` | `com.richhaase.bigboard.dev.native` |
+| Config and cache directory | `bigboard` | `bigboard-dev` |
 
 The bundle identity selects the data paths. Development starts with an
 independent workspace; it does not copy production data. The installed release
@@ -105,7 +105,7 @@ Paths in this table are relative to the repository root.
 | `Sources/BigboardCore/GitHub.swift` | GitHub viewer check, PR evidence, pagination, and request budgets. |
 | `Sources/BigboardCore/History/` | Git processes, clone discovery, fetch-only refresh, history parsing, and counting rules. |
 | `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
-| `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
+| `Sources/BigboardCore/Storage.swift` | XDG config and cache paths, atomic writes, and conflict detection. |
 | `Tests/App/`, `Tests/CLI/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, command line, core logic, workspace integration, and shared fixtures. |
 
 Xcode assembles the bundle and processes its Info.plist and icon catalog.
@@ -114,19 +114,20 @@ Xcode assembles the bundle and processes its Info.plist and icon catalog.
 
 ## Storage and access
 
-Durable settings and the discovered clone list use versioned JSON under
-`~/Library/Application Support/<identity>/accounts/<account-id>/`.
-Parsed scans and repository locks live under
-`~/Library/Caches/<identity>/accounts/<account-id>/repos/`. Git history stays in
-the user's clones.
-The identity directory names are listed above. The last verified GitHub identity
-(login and numeric ID) is kept in the support root so cached history opens
-offline. Bigboard stores no tokens; it runs `gh auth token` when it needs one and
-keeps the result in memory for at most five minutes.
+Bigboard follows the XDG base directories, like `gh` and Git. Settings are one
+versioned JSON file, `$XDG_CONFIG_HOME/<name>/config.json` (default
+`~/.config/<name>/config.json`), shared by every GitHub CLI account. Parsed
+scans and repository locks live under `$XDG_CACHE_HOME/<name>/history/`
+(default `~/.cache/<name>/history/`), next to `gh-identity.json`, the last
+verified GitHub login and numeric ID that lets cached history open offline.
+Relative XDG values are ignored. The directory names are listed above. Git
+history stays in the user's clones, and clones are found again on every refresh
+rather than saved. Bigboard stores no tokens; it runs `gh auth token` when it
+needs one and keeps the result in memory for at most five minutes.
 
-`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override the support and cache
-roots for isolated testing. Use Bigboard Dev for authenticated testing alongside
-the installed release.
+`BIGBOARD_CONFIG_ROOT` and `BIGBOARD_CACHE_ROOT` override the config and cache
+roots for isolated testing. Use Bigboard Dev for
+authenticated testing alongside the installed release.
 
 Git runs as a cancellable child process against the user's clones. The app
 discovers Git through PATH and standard Homebrew/system locations, ignores
@@ -144,10 +145,8 @@ are optional and can be rebuilt.
 Resource limits and interrupted collection retain honest stale or partial
 coverage instead of silently truncating results.
 
-`clones.json` records the clones found by the last discovery so cached history
-opens offline; each discovery replaces it, and nothing else removes it. Fetch
-denials mark a repository stale without hiding its local history; a rejected
-GitHub CLI token disconnects the session but keeps the clone list. See the
+Fetch denials mark a repository stale without hiding its local history; a
+rejected GitHub CLI token disconnects the session. See the
 [user reference](reference.md#data-status-offline-work-and-storage) for offline
 behavior.
 

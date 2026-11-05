@@ -107,11 +107,11 @@ struct AutomaticRefreshTests {
     init() throws {
         network = AutomaticRefreshTransport(clock: clock)
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         let sources = root.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
         var config = WorkspaceConfiguration(repositories: ["owner/repo"]); config.sourceRoots = [sources.path]
-        try storage.saveConfiguration(config, account: "123")
+        try storage.saveConfiguration(config)
         let auth = cliAuth(storage: storage, now: clock.now)
         workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network, now: clock.now)
     }

@@ -158,7 +158,7 @@ struct CommandLineTool: Sendable {
             throw BigboardError.message(state.error.isEmpty ? GitHubCLIFailure.signedOut.localizedDescription : state.error)
         }
         let account = GitHubIdentity(login: state.login, accountID: state.accountID)
-        let configuration = try environment.storage.loadConfiguration(account.accountID)
+        let configuration = try environment.storage.loadConfiguration()
         let group = options.value("--group") ?? ""
         guard group.isEmpty || configuration.groups[group] != nil else {
             throw UsageError("Unknown group: \(group)")
@@ -167,7 +167,7 @@ struct CommandLineTool: Sendable {
             throw BigboardError.message(
                 "No source folders are set. Run bigboard and choose the folders that hold your clones in Settings.")
         }
-        let history = GitHistory(root: try environment.storage.repositoryRoot(account.accountID))
+        let history = GitHistory(root: environment.storage.historyRoot)
         let clones = await CloneDiscovery.find(in: CloneDiscovery.roots(configuration.sourceRoots))
         let known = Dictionary(clones.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var repositories = configuration.collected(
@@ -188,7 +188,7 @@ struct CommandLineTool: Sendable {
         let workspace = try await workspace(options, requireSources: false)
         let report = StatusReport(
             login: workspace.account.login, accountID: workspace.account.accountID,
-            settings: environment.storage.supportRoot.path, history: environment.storage.cacheRoot.path,
+            settings: environment.storage.configurationFile.path, history: environment.storage.cacheRoot.path,
             sourceFolders: CloneDiscovery.roots(workspace.configuration.sourceRoots).map(\.path),
             repositories: workspace.repositories.map {
                 StatusReport.Row(

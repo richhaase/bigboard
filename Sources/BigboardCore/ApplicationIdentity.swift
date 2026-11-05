@@ -8,5 +8,5 @@ enum ApplicationIdentity: String, CaseIterable, Sendable {
         ApplicationIdentity(rawValue: bundle.bundleIdentifier ?? "") ?? .production
     }
 
-    var storageDirectory: String { "\(rawValue).native" }
+    var directoryName: String { self == .production ? "bigboard" : "bigboard-dev" }
 }

@@ -68,7 +68,7 @@ the draft unchanged. **Apply** saves the complete settings draft.
 
 Bigboard stores no credentials. It reads the GitHub CLI token when it needs one
 and keeps it only in memory. To switch accounts, run `gh auth switch` and choose
-**Check again**; each account keeps its own settings and caches. To disconnect,
+**Check again**; settings and caches are shared across accounts. To disconnect,
 run `gh auth logout`.
 
 ## Navigation and scope
@@ -232,13 +232,15 @@ have separate completeness signals. Explicit refresh preserves usable data on
 transient failure and labels stale or incomplete evidence.
 
 **Settings → General → Use cached history only** reads your clones without
-fetching or contacting GitHub. A restart with the same account opens the last
-discovered clones offline. Connecting a new GitHub CLI account requires live
-verification. If GitHub denies a fetch, the repository is marked stale and its
-local history is still shown.
+fetching or contacting GitHub. Clones are found again on every refresh, so
+cached history opens offline after a restart. Connecting a new GitHub CLI
+account requires live verification. If GitHub denies a fetch, the repository is
+marked stale and its local history is still shown.
 
-Durable account-scoped JSON lives in Application Support; rebuildable parsed
-history lives in Caches. Git history itself stays in your clones.
+Settings live in `~/.config/bigboard/config.json` (or under `$XDG_CONFIG_HOME`)
+and can be edited by hand while Bigboard is closed. Rebuildable parsed history
+lives in `~/.cache/bigboard/` (or under `$XDG_CACHE_HOME`). Bigboard Dev uses
+`bigboard-dev` for both. Git history itself stays in your clones.
 
 ## Command line
 

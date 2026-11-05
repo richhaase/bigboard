@@ -31,14 +31,14 @@ private struct CLIFixture {
         history = try HistoryFixture()
         root = history.base.appendingPathComponent("workspace")
         storage = WorkspaceStorage(
-            supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+            configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         let empty = history.base.appendingPathComponent("empty-src")
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         var configuration = WorkspaceConfiguration()
         configuration.repositories = ["owner/repo"]
         configuration.groups = ["Core": ["owner/repo"]]
         configuration.sourceRoots = [cache ? history.sources.path : empty.path]
-        try storage.saveConfiguration(configuration, account: "123")
+        try storage.saveConfiguration(configuration)
     }
     func tool(token: CLITokenSource = CLITokenSource(), openFails: Bool = false) -> CommandLineTool {
         let captured = captured
@@ -145,9 +145,9 @@ struct CommandLineTests {
     @Test func missingSourceFoldersAreExplained() async throws {
         let fixture = try CLIFixture()
         defer { fixture.remove() }
-        var configuration = try fixture.storage.loadConfiguration("123")
+        var configuration = try fixture.storage.loadConfiguration()
         configuration.sourceRoots = []
-        try fixture.storage.saveConfiguration(configuration, account: "123")
+        try fixture.storage.saveConfiguration(configuration)
         #expect(await fixture.tool().run(["activity"]) == 1)
         #expect(fixture.captured.error.contains("No source folders are set"))
         #expect(await fixture.tool().run(["refresh"]) == 1)
