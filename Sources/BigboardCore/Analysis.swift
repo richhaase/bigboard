@@ -342,6 +342,7 @@ enum Analysis {
         _ commits: [Commit], days: Int = 30, since: Date? = nil, now: Date = Date(),
         calendar: Calendar = .current, includesStart: Bool = false
     ) -> [TimelinePoint] {
+        let records = unique(commits)
         let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
         let span = cutoff.map { max(0, now.timeIntervalSince($0) / 86_400) }
         let daily = span.map { $0 <= 30 } ?? false, weekly = span.map { $0 > 30 && $0 <= 180 } ?? false
@@ -350,7 +351,7 @@ enum Analysis {
             if weekly { return weekStart(date, calendar: calendar) }
             return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
         }
-        let start = cutoff.map(bucket) ?? calendar.date(byAdding: .month, value: -11, to: bucket(now))!
+        let start = cutoff.map(bucket) ?? bucket(records.reduce(now) { min($0, $1.date) })
         let component: Calendar.Component = daily ? .day : weekly ? .weekOfYear : .month
         var rows: [Date: TimelinePoint] = [:]
         var date = start
@@ -358,7 +359,7 @@ enum Analysis {
             rows[date] = TimelinePoint(date: date)
             date = calendar.date(byAdding: component, value: 1, to: date)!
         }
-        for c in unique(commits) {
+        for c in records {
             if let cutoff, c.date < cutoff || (!includesStart && c.date == cutoff) { continue }
             let key = bucket(c.date)
             guard rows[key] != nil || c.date > now else { continue }

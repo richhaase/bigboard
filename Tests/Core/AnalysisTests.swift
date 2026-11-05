@@ -244,6 +244,53 @@ struct AnalysisTests {
         #expect(explicitDays.map(\.date) == points.map(\.date))
         #expect(explicitDays.map(\.commits) == points.map(\.commits))
     }
+    @Test func allTimeTimelineMatchesTotalsAndCalendarAcrossFullHistory() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let old = commit("old", days: 800)
+        var duplicate = old
+        duplicate.repo = "o/z"
+        let records = [duplicate, commit("recent", days: 1), old]
+        let points = Analysis.timeline(records, days: 0, now: now, calendar: calendar)
+        let daily = Analysis.daily(records, days: 0, now: now, calendar: calendar)
+        let totals = Analysis.totals(records)
+        let firstMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: old.date))
+        let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))
+        #expect(points.first?.date == firstMonth)
+        #expect(points.last?.date == currentMonth)
+        #expect(points.count > 24)
+        #expect(points.filter { $0.commits == 0 }.count == points.count - 2)
+        #expect(totals.commits == 2)
+        #expect(points.reduce(0) { $0 + $1.commits } == totals.commits)
+        #expect(points.reduce(0) { $0 + $1.added } == totals.added)
+        #expect(points.reduce(0) { $0 + $1.removed } == totals.removed)
+        #expect(points.reduce(0) { $0 + $1.commits } == daily.reduce(0) { $0 + $1.commits })
+    }
+    @Test func allTimeTimelineRetainsInactiveContributorsHistory() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let old = commit("old", days: 800)
+        let points = Analysis.timeline([old], days: 0, now: now, calendar: calendar)
+        #expect(points.first?.date == calendar.date(from: calendar.dateComponents([.year, .month], from: old.date)))
+        #expect(points.last?.date == calendar.date(from: calendar.dateComponents([.year, .month], from: now)))
+        #expect(points.first?.commits == 1)
+        #expect(points.dropFirst().allSatisfy { $0.commits == 0 })
+    }
+    @Test func allTimeTimelineWithoutPastHistoryStartsInCurrentMonth() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))
+        let empty = Analysis.timeline([], days: 0, now: now, calendar: calendar)
+        #expect(empty.count == 1)
+        #expect(empty.first?.date == currentMonth)
+        #expect(empty.first?.commits == 0)
+        let future = commit("future", days: -45)
+        let points = Analysis.timeline([future], days: 0, now: now, calendar: calendar)
+        #expect(points.first?.date == currentMonth)
+        #expect(points.first?.commits == 0)
+        #expect(points.last?.date == calendar.date(from: calendar.dateComponents([.year, .month], from: future.date)))
+        #expect(points.reduce(0) { $0 + $1.commits } == 1)
+    }
     @Test func relatedSharedEvidenceAndPeopleDiffer() {
         let records = [commit("same", repo: "o/a"), commit("same", repo: "o/b"), commit("different", repo: "o/c")]
         let shared = Analysis.related(records, scope: ActivityScope(repo: "o/a"))
