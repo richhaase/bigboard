@@ -16,11 +16,9 @@ private final class Captured: @unchecked Sendable {
 }
 
 private struct RoutedTransport: GitHubTransport {
-    var repositories: String
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
-        let path = request.url?.path ?? ""
-        let body = path == "/user" ? #"{"login":"fixture","id":123}"# : repositories
-        return GitHubHTTPResponse(status: 200, headers: [:], data: Data(body.utf8))
+        guard request.url?.path == "/user" else { throw GitHubFailure.unavailable }
+        return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8))
     }
 }
 
@@ -33,21 +31,18 @@ private struct CLIFixture {
         history = try HistoryFixture()
         root = history.base.appendingPathComponent("workspace")
         storage = WorkspaceStorage(
-            supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+            configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         let empty = history.base.appendingPathComponent("empty-src")
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         var configuration = WorkspaceConfiguration()
         configuration.repositories = ["owner/repo"]
         configuration.groups = ["Core": ["owner/repo"]]
         configuration.sourceRoots = [cache ? history.sources.path : empty.path]
-        try storage.saveConfiguration(configuration, account: "123")
+        try storage.saveConfiguration(configuration)
     }
-    func tool(
-        token: CLITokenSource = CLITokenSource(), openFails: Bool = false,
-        repositories: String = #"[{"full_name":"owner/repo","default_branch":"main","archived":false}]"#
-    ) -> CommandLineTool {
+    func tool(token: CLITokenSource = CLITokenSource(), openFails: Bool = false) -> CommandLineTool {
         let captured = captured
-        let transport = RoutedTransport(repositories: repositories)
+        let transport = RoutedTransport()
         let environment = CommandLineEnvironment(
             storage: storage, auth: cliAuth(storage: storage, token: token, user: CLIUserTransport()),
             transport: transport, now: { Date(timeIntervalSince1970: 1791201600) },
@@ -150,9 +145,9 @@ struct CommandLineTests {
     @Test func missingSourceFoldersAreExplained() async throws {
         let fixture = try CLIFixture()
         defer { fixture.remove() }
-        var configuration = try fixture.storage.loadConfiguration("123")
+        var configuration = try fixture.storage.loadConfiguration()
         configuration.sourceRoots = []
-        try fixture.storage.saveConfiguration(configuration, account: "123")
+        try fixture.storage.saveConfiguration(configuration)
         #expect(await fixture.tool().run(["activity"]) == 1)
         #expect(fixture.captured.error.contains("No source folders are set"))
         #expect(await fixture.tool().run(["refresh"]) == 1)

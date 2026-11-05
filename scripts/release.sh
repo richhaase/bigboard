@@ -14,6 +14,15 @@ fi
 : "${NOTARY_ISSUER:?A notarization API issuer is required}"
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
+if [[ "$(git -C "$repo_root" cat-file -t "refs/tags/$release_tag" 2>/dev/null)" != tag ]]; then
+  printf '%s must be an annotated tag; its message becomes the release notes\n' "$release_tag" >&2
+  exit 1
+fi
+release_notes=$(git -C "$repo_root" for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/$release_tag")
+if [[ -z "${release_notes//[[:space:]]/}" ]]; then
+  printf 'The %s tag message is empty; write release notes in it\n' "$release_tag" >&2
+  exit 1
+fi
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 release_version=${release_tag#v}
 bundle_version=${release_version%%-*}
@@ -54,11 +63,12 @@ codesign --verify --deep --strict "$app_path"
 
 bash "$repo_root/scripts/notarize-macos.sh" "$app_path" "$zip_path"
 (cd "$output_dir" && shasum -a 256 "$(basename "$zip_path")" > checksums.txt)
+printf '%s\n' "$release_notes" > "$output_dir/release-notes.md"
 
 release_flags=(
   --verify-tag
   --generate-notes
-  --notes-file "$repo_root/docs/release-notes.md"
+  --notes-file "$output_dir/release-notes.md"
   --title "Bigboard $release_tag"
 )
 if [[ "$release_tag" == *-* ]]; then

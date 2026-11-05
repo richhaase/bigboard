@@ -216,7 +216,7 @@ struct SettingsWorkAreaEditorTests {
     @Test(arguments: [false, true]) func canonicalRepositoryRoundTripsIntoActivityProjection(repairStoredRepository: Bool) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         let original = WorkArea(name: "Sources", paths: ["src/"])
         let sibling = WorkArea(name: "Tests", paths: ["tests/"])
         var configuration = WorkspaceConfiguration()
@@ -225,10 +225,10 @@ struct SettingsWorkAreaEditorTests {
         var editor = SettingsWorkAreaEditor()
         if repairStoredRepository {
             configuration.workAreas["Owner/Repo"] = [original, sibling]
-            let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+            let file = storage.configurationFile
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(configuration).write(to: file)
-            configuration = try storage.loadConfiguration("42")
+            configuration = try storage.loadConfiguration()
             editor.edit(repository: "Owner/Repo", area: original)
             #expect(editor.original?.repository == "Owner/Repo")
         } else {
@@ -242,14 +242,14 @@ struct SettingsWorkAreaEditorTests {
         #expect(didSave)
         if repairStoredRepository {
             #expect(configuration.workAreas["Owner/Repo"] == [sibling])
-            #expect(throws: (any Error).self) { try storage.saveConfiguration(configuration, account: "42") }
+            #expect(throws: (any Error).self) { try storage.saveConfiguration(configuration) }
             editor.edit(repository: "Owner/Repo", area: sibling)
             let savedSibling = editor.save(to: &configuration.workAreas)
             #expect(savedSibling)
         }
-        try storage.saveConfiguration(configuration, account: "42")
-        let reopened = WorkspaceStorage(supportRoot: storage.supportRoot, cacheRoot: storage.cacheRoot)
-        let loaded = try reopened.loadConfiguration("42")
+        try storage.saveConfiguration(configuration)
+        let reopened = WorkspaceStorage(configRoot: storage.configRoot, cacheRoot: storage.cacheRoot)
+        let loaded = try reopened.loadConfiguration()
         #expect(loaded == configuration)
         #expect(loaded.workAreas["Owner/Repo"] == nil)
         #expect(Set(loaded.workAreas.keys) == ["owner/repo", "other/repo"])

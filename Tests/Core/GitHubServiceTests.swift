@@ -26,38 +26,6 @@ private final class GitHubTestClock: @unchecked Sendable {
     func advance(by seconds: TimeInterval) { lock.withLock { date.addTimeInterval(seconds) } }
 }
 private func reply(_ json: String, status: Int = 200, headers: [String: String] = [:]) -> GitHubHTTPResponse { GitHubHTTPResponse(status: status, headers: headers, data: Data(json.utf8)) }
-private func repoRow(_ name: String, archived: Bool = false) -> String {
-    #"{"full_name":"\#(name)","default_branch":"trunk","archived":\#(archived),"pushed_at":"2026-10-31T12:00:00Z"}"#
-}
-@Test func discoveryListsUserRepositoriesAcrossPagesWithoutArchives() async throws {
-    let first = "[" + (0..<100).map { repoRow("Owner/Repo\($0)", archived: $0 == 7) }.joined(separator: ",") + "]"
-    let second = "[" + repoRow("Other/Last") + "]"
-    let network = ScriptedGitHub([reply(first), reply(second)])
-    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
-    let repositories = try await service.discover()
-    #expect(repositories.count == 100)
-    #expect(Set(repositories.map(\.id)).contains("owner/repo0"))
-    #expect(!repositories.contains { $0.id == "owner/repo7" })
-    #expect(repositories.contains { $0.id == "other/last" && $0.branch == "trunk" })
-    #expect(await network.count == 2)
-    let url = try #require(await network.first?.url?.absoluteString)
-    #expect(url.contains("user/repos?affiliation=owner,collaborator,organization_member"))
-    #expect(url.contains("per_page=100") && url.contains("page=1"))
-}
-@Test func discoveryStopsOnShortPageAndRejectsInvalidNames() async throws {
-    let network = ScriptedGitHub([reply("[" + repoRow("owner/only") + "]")])
-    let single = try await GitHubService(token: { "token" }, transport: network, now: { testNow }).discover()
-    #expect(single.map(\.id) == ["owner/only"])
-    #expect(await network.count == 1)
-    let invalid = ScriptedGitHub([reply("[" + repoRow("owner/../escape") + "]")])
-    await #expect(throws: GitHubFailure.response) {
-        try await GitHubService(token: { "token" }, transport: invalid, now: { testNow }).discover()
-    }
-    let denied = ScriptedGitHub([reply("{}", status: 401)])
-    await #expect(throws: GitHubFailure.auth) {
-        try await GitHubService(token: { "token" }, transport: denied, now: { testNow }).discover()
-    }
-}
 private let onePR = #"{"data":{"repository":{"nameWithOwner":"owner/repo","defaultBranchRef":{"name":"main","target":{"oid":"new-head"}},"pullRequests":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"number":1,"title":"Fix","author":{"login":"rich"},"isDraft":false,"reviewDecision":"APPROVED","mergeable":"MERGEABLE","updatedAt":"2026-10-31T12:00:00Z","headRefOid":"head","baseRefOid":"base","files":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"path":"src/a.swift"}]},"reviewRequests":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"requestedReviewer":{"login":"reviewer"}}]},"latestReviews":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"login":"reviewer"},"state":"APPROVED","submittedAt":"2026-10-30T12:00:00Z"}]},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}]}}}}"#
 @Test func pullRequestCollectionPreservesScopedCoverageAndScanRevision() async throws {
     let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([reply(onePR)]), now: { testNow })

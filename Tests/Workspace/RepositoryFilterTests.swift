@@ -23,11 +23,11 @@ private actor FilterTestTransport: GitHubTransport {
     @Test func repositoryFilterOnlyChangesViewingScope() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-        var configuration = try storage.loadConfiguration("123")
+        let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        var configuration = try storage.loadConfiguration()
         configuration.repositories = ["acme/app", "acme/library"]
-        try storage.saveConfiguration(configuration, account: "123")
-        let settingsURL = try storage.accountRoot("123").appendingPathComponent("workspace.json")
+        try storage.saveConfiguration(configuration)
+        let settingsURL = storage.configurationFile
         let settingsBefore = try Data(contentsOf: settingsURL)
         let token = CLITokenSource()
         let network = FilterTestTransport()

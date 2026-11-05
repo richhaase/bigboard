@@ -64,15 +64,13 @@ func cliAuth(
         storage: storage, run: { try token.read($0) }, transport: transport, now: now)
 }
 @discardableResult func isolateSources(
-    _ storage: WorkspaceStorage, sources: URL, accounts: [String] = ["123"],
+    _ storage: WorkspaceStorage, sources: URL,
     configure: (inout WorkspaceConfiguration) -> Void = { _ in }
 ) throws -> URL {
     try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
-    for account in accounts {
-        var config = try storage.loadConfiguration(account)
-        config.sourceRoots = [sources.path]
-        configure(&config)
-        try storage.saveConfiguration(config, account: account)
-    }
+    var config = try storage.loadConfiguration()
+    config.sourceRoots = [sources.path]
+    configure(&config)
+    try storage.saveConfiguration(config)
     return sources
 }

@@ -180,7 +180,6 @@ struct Coverage: Codable, Sendable, Equatable {
     var probeRequests = 0
     var inventoryRequests = 0
     var fileRequests = 0
-    var accountRequests = 0
 }
 struct Snapshot: Sendable {
     var generatedAt = Date()

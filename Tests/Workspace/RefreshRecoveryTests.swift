@@ -42,8 +42,8 @@ import Testing
         await workspace.refresh()
         #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && $0.stale })
         await workspace.shutdown()
-        var config = try fixture.storage.loadConfiguration("123"); config.cachedOnly = true
-        try fixture.storage.saveConfiguration(config, account: "123")
+        var config = try fixture.storage.loadConfiguration(); config.cachedOnly = true
+        try fixture.storage.saveConfiguration(config)
         let restarted = fixture.workspace()
         await restarted.start()
         #expect(restarted.snapshot.cachedOnly && !restarted.snapshot.commits.isEmpty)
@@ -80,8 +80,8 @@ import Testing
         await workspace.selectGroup("Empty")
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
         await workspace.shutdown()
-        config = try fixture.storage.loadConfiguration("123"); config.cachedOnly = true
-        try fixture.storage.saveConfiguration(config, account: "123")
+        config = try fixture.storage.loadConfiguration(); config.cachedOnly = true
+        try fixture.storage.saveConfiguration(config)
         let requests = await fixture.network.requests
         let offline = fixture.workspace()
         await offline.start()
@@ -109,7 +109,7 @@ import Testing
             let row = workspace.snapshot.repositories.first { $0.id == RefreshRecoveryFixture.second }
             #expect(row?.stale == true && row?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
         }
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == both)
+        #expect(workspace.discovered.map(\.id) == both)
         await workspace.shutdown()
     }
 }
@@ -128,20 +128,13 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
     let historyRefresh = RefreshRecoveryHistoryRefresh()
     init(configuration original: WorkspaceConfiguration = RefreshRecoveryFixture.configuration) throws {
         history = try HistoryFixture()
-        storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
+        storage = WorkspaceStorage(configRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
         network = RefreshRecoveryTransport(repositories: [Self.first, Self.second])
         let sources = history.base.appendingPathComponent("recovery-src")
         var configuration = original
         configuration.sourceRoots = [sources.path]
-        try storage.saveConfiguration(configuration, account: "123")
-        var grant: [Repository] = []
-        for id in [Self.first, Self.second] {
-            let clone = try history.addClone(id, at: sources.appendingPathComponent(id))
-            var repo = Repository(id: id, branch: "main")
-            repo.path = try history.gitDirectory(clone)
-            grant.append(repo)
-        }
-        try storage.saveGrant(grant, account: "123")
+        try storage.saveConfiguration(configuration)
+        for id in [Self.first, Self.second] { try history.addClone(id, at: sources.appendingPathComponent(id)) }
     }
     func workspace() -> WorkspaceModel {
         let auth = cliAuth(storage: storage)
@@ -173,8 +166,6 @@ private actor RefreshRecoveryTransport: GitHubTransport {
         let object: Any
         switch request.url?.path {
         case "/user": object = ["login": "fixture", "id": 123]
-        case "/user/repos":
-            object = repositories.map { ["full_name": $0, "default_branch": "main", "archived": false] as [String: Any] }
         case "/graphql":
             guard let body = request.httpBody, let document = try JSONSerialization.jsonObject(with: body) as? [String: Any], let variables = document["variables"] as? [String: Any], let owner = variables["owner"] as? String, let name = variables["name"] as? String else { throw GitHubFailure.response }
             let id = owner + "/" + name

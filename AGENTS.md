@@ -15,8 +15,9 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
 
 - Follow native macOS conventions and preserve independent board state. Repository
   filters only affect viewing; Settings controls saved collection choices.
-- Use atomic, account-scoped storage. Keep durable data in Application
-  Support and rebuildable history in Caches. GitHub access comes only from the
+- Use atomic storage under the XDG base directories: one settings file in
+  `$XDG_CONFIG_HOME/bigboard` and rebuildable history in `$XDG_CACHE_HOME/bigboard`
+  (`bigboard-dev` for Bigboard Dev). GitHub access comes only from the
   GitHub CLI (`gh auth token`); Bigboard stores no credentials. History comes from
   the user's own clones: only fetch into `refs/remotes/<remote>/<default branch>`,
   and never write branches, the index, the working tree, or config, or run gc or

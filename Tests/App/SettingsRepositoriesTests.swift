@@ -22,17 +22,17 @@ import Testing
 @Test func settingsSelectionRepairsStoredCaseWithoutDroppingHiddenExclusions() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
-    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     var original = WorkspaceConfiguration()
     original.repositories = ["Owner/Selected", "owner/selected"]
     original.excludedRepositories = ["Other/Hidden", "other/hidden", "OWNER/Selected"]
     original.groups = ["Focus": ["owner/selected"]]
     original.workAreas = ["owner/selected": [WorkArea(name: "Sources", paths: ["src/"])]]
     original.sinceDays = 90
-    let file = try storage.accountRoot("42").appendingPathComponent("workspace.json")
+    let file = storage.configurationFile
     try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
     try JSONEncoder().encode(original).write(to: file)
-    let loaded = try storage.loadConfiguration("42")
+    let loaded = try storage.loadConfiguration()
     #expect(loaded == original)
 
     let next = SettingsRepositories.applying(Set(loaded.repositories), available: ["OWNER/Selected", "Owner/Unselected", "owner/unselected"], to: loaded)
@@ -40,7 +40,7 @@ import Testing
     expected.repositories = ["owner/selected"]
     expected.excludedRepositories = ["other/hidden", "owner/unselected"]
     #expect(next == expected)
-    try storage.saveConfiguration(next, account: "42")
-    let reopened = WorkspaceStorage(supportRoot: storage.supportRoot, cacheRoot: storage.cacheRoot)
-    #expect(try reopened.loadConfiguration("42") == expected)
+    try storage.saveConfiguration(next)
+    let reopened = WorkspaceStorage(configRoot: storage.configRoot, cacheRoot: storage.cacheRoot)
+    #expect(try reopened.loadConfiguration() == expected)
 }

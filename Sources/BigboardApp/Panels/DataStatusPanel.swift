@@ -15,7 +15,7 @@ struct DataStatusPanel: View {
                 LabeledContent(
                     "Requests",
                     value:
-                        "\(workspace.snapshot.coverage.probeRequests) probes · \(workspace.snapshot.coverage.inventoryRequests) inventory · \(workspace.snapshot.coverage.fileRequests) files · \(workspace.snapshot.coverage.accountRequests) account"
+                        "\(workspace.snapshot.coverage.probeRequests) probes · \(workspace.snapshot.coverage.inventoryRequests) inventory · \(workspace.snapshot.coverage.fileRequests) files"
                 )
                 SectionTitle(title: "Repository evidence")
                 ForEach(workspace.snapshot.repositories) { repo in

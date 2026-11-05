@@ -16,12 +16,14 @@ make dev
 ```
 
 This builds and opens `build/Bigboard Dev.app`, which uses your active GitHub CLI
-account. Select repositories in Settings. Quit Bigboard Dev before rebuilding.
-Its settings and caches persist across builds.
+account. Choose the folders that hold your clones, then select repositories in
+Settings. Quit Bigboard Dev before rebuilding. Its settings and caches persist
+across builds.
 
-The app executable is also the `bigboard` command. Invoked through a link whose
-name is not `Bigboard`, it runs as a command line tool and uses the data of the
-app bundle it belongs to. For Bigboard Dev:
+The app executable is also the `bigboard` command. It runs as a command line
+tool when invoked through a link whose name is not `Bigboard`, or when its first
+argument is a command such as `status`, and uses the data of the app bundle it
+belongs to. For Bigboard Dev:
 
 ```sh
 ln -sf "$PWD/build/Bigboard Dev.app/Contents/MacOS/Bigboard" /opt/homebrew/bin/bigboard-dev
@@ -69,7 +71,7 @@ key. Choose **Always Allow** to authorize signing subsequent builds.
 | Setting | Production | Development |
 | --- | --- | --- |
 | Bundle identifier | `com.richhaase.bigboard` | `com.richhaase.bigboard.dev` |
-| Support/cache directory | `com.richhaase.bigboard.native` | `com.richhaase.bigboard.dev.native` |
+| Config and cache directory | `bigboard` | `bigboard-dev` |
 
 The bundle identity selects the data paths. Development starts with an
 independent workspace; it does not copy production data. The installed release
@@ -97,15 +99,15 @@ Paths in this table are relative to the repository root.
 | `Config/` | Build settings, bundle metadata, and archive export options. |
 | `Assets.xcassets/` | App icon asset catalog; source artwork is in `Assets/AppIcon.png`. |
 | `Sources/BigboardCLI/` | The `bigboard` command: dispatch, options, and text and JSON reports. |
-| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, grants, and native actions. |
+| `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, clone discovery, and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
 | `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
 | `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
 | `Sources/BigboardCore/GitHubCLI.swift`, `Sources/BigboardCore/ApplicationIdentity.swift` | GitHub CLI token and identity, and build identities. |
-| `Sources/BigboardCore/GitHub.swift` | Repository discovery, PR evidence, pagination, and request budgets. |
+| `Sources/BigboardCore/GitHub.swift` | GitHub viewer check, PR evidence, pagination, and request budgets. |
 | `Sources/BigboardCore/History/` | Git processes, clone discovery, fetch-only refresh, history parsing, and counting rules. |
 | `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
-| `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
+| `Sources/BigboardCore/Storage.swift` | XDG config and cache paths, atomic writes, and conflict detection. |
 | `Tests/App/`, `Tests/CLI/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, command line, core logic, workspace integration, and shared fixtures. |
 
 Xcode assembles the bundle and processes its Info.plist and icon catalog.
@@ -114,19 +116,20 @@ Xcode assembles the bundle and processes its Info.plist and icon catalog.
 
 ## Storage and access
 
-Durable settings and access grants use versioned JSON under
-`~/Library/Application Support/<identity>/accounts/<account-id>/`.
-Parsed scans and repository locks live under
-`~/Library/Caches/<identity>/accounts/<account-id>/repos/`. Git history stays in
-the user's clones.
-The identity directory names are listed above. The last verified GitHub identity
-(login and numeric ID) is kept in the support root so cached history opens
-offline. Bigboard stores no tokens; it runs `gh auth token` when it needs one and
-keeps the result in memory for at most five minutes.
+Bigboard follows the XDG base directories, like `gh` and Git. Settings are one
+versioned JSON file, `$XDG_CONFIG_HOME/<name>/config.json` (default
+`~/.config/<name>/config.json`), shared by every GitHub CLI account. Parsed
+scans and repository locks live under `$XDG_CACHE_HOME/<name>/history/`
+(default `~/.cache/<name>/history/`), next to `gh-identity.json`, the last
+verified GitHub login and numeric ID that lets cached history open offline.
+Relative XDG values are ignored. The directory names are listed above. Git
+history stays in the user's clones, and clones are found again on every refresh
+rather than saved. Bigboard stores no tokens; it runs `gh auth token` when it
+needs one and keeps the result in memory for at most five minutes.
 
-`BIGBOARD_DATA_ROOT` and `BIGBOARD_CACHE_ROOT` override the support and cache
-roots for isolated testing. Use Bigboard Dev for authenticated testing alongside
-the installed release.
+`BIGBOARD_CONFIG_ROOT` and `BIGBOARD_CACHE_ROOT` override the config and cache
+roots for isolated testing. Use Bigboard Dev for
+authenticated testing alongside the installed release.
 
 Git runs as a cancellable child process against the user's clones. The app
 discovers Git through PATH and standard Homebrew/system locations, ignores
@@ -144,10 +147,8 @@ are optional and can be rebuilt.
 Resource limits and interrupted collection retain honest stale or partial
 coverage instead of silently truncating results.
 
-The account-scoped grant records the last discovered clones so cached history
-opens offline. Fetch denials mark a repository stale without hiding its local
-history; a rejected GitHub CLI token invalidates the session. Cancellation cannot
-restore access after the GitHub CLI account changes. See the
+Fetch denials mark a repository stale without hiding its local history; a
+rejected GitHub CLI token disconnects the session. See the
 [user reference](reference.md#data-status-offline-work-and-storage) for offline
 behavior.
 
@@ -174,7 +175,10 @@ Publishing requires repository write access and the
 
 1. Use current main and confirm CI passed for the commit being released.
 2. Choose an unused version, create an annotated `vX.Y.Z` tag on that commit,
-   and push only that tag.
+   and push only that tag. The tag message is the release notes: write what
+   changed for users and anything they must do after upgrading. GitHub's
+   generated list of merged pull requests follows it. Lightweight tags and
+   empty messages are rejected before the build starts.
 3. Watch the [Release workflow](../.github/workflows/release.yml). It runs tests,
    archives and exports a universal app, signs with Developer ID, notarizes,
    staples, and verifies Gatekeeper acceptance.
@@ -211,16 +215,3 @@ The workflow requires one Developer ID Application identity and derives its
 Team ID. It passes `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, `NOTARY_KEY_PATH`,
 `NOTARY_KEY_ID`, and `NOTARY_ISSUER` to the release script. The temporary
 notarization key and signing keychain are cleaned up after the job.
-
-### Installed-upgrade verification
-
-For changes to packaging, signing, or storage:
-
-1. Start with an installed release that has repositories selected, then quit it.
-2. Upgrade through Homebrew or replace it with the published app at the same location.
-3. Launch and confirm the account, repository selections, and cached data persist.
-4. Quit and reopen, and confirm the workspace opens without reconnecting.
-
-Keep the Team ID, bundle identifier, and compatible signing requirements. Local
-ad hoc builds do not establish Developer ID upgrade continuity. See
-[Apple's code identity guidance](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
