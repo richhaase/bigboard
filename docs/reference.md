@@ -7,9 +7,24 @@
 Bigboard uses the active [GitHub CLI](https://cli.github.com) account on
 github.com. Run `gh auth login` before opening Bigboard; if the CLI is missing or
 signed out, Bigboard explains what to run and offers **Check again**.
-**Settings → Repositories** lists repositories you own, collaborate on, or can
-see as an organization member. Choose **Refresh repository list** after access
-changes. Organizations that require SSO must authorize the GitHub CLI token
+Bigboard has no default source folders. On first launch it asks you to choose
+the folders that hold your Git clones; change them at any time with **Add
+folder…** and the remove buttons in **Settings → Repositories**, which lists the
+GitHub clones found up to four levels deep in those folders. A clone maps to `owner/name` through its
+`upstream` remote, otherwise `origin`, otherwise its first GitHub remote.
+Worktrees of one repository count once; if you have several clones of the same
+repository, the first by path is used. Choose **Refresh repository list** after
+cloning. Repositories without a local clone cannot be collected.
+
+History comes from each clone's remote-tracking default branch, such as
+`origin/main`. Refresh fetches only that ref from GitHub with the GitHub CLI
+token; it never changes your local branches, the index, working files, or Git
+config, and it never runs maintenance in your repository. Local commits and
+uncommitted work are not counted until they reach the default branch on GitHub.
+Clones whose own Git config sets network, credential, or include options are not
+fetched; their local history is still shown. Shallow clones show only the history
+they contain, and partial (blobless) clones show commits with unknown line counts
+and paths. Organizations that require SSO must authorize the GitHub CLI token
 (`gh auth refresh` or GitHub's SSO prompt). History collection requires Git,
 available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
@@ -31,7 +46,7 @@ Its sections are:
 | Groups & areas | Named repository groups and named sets of paths within a repository. |
 | General | Startup date range, contributor sorting, and cached-history mode. |
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
-| Storage | Inspect owned caches and remove eligible unavailable repositories. |
+| Storage | Show where settings and parsed history are stored. |
 
 Repository IDs entered in groups and work areas are saved in lowercase, matching
 GitHub discovery.
@@ -144,8 +159,8 @@ Commit links open GitHub. Lists show an initial batch and offer more as needed.
 other areas. Open a related result to inspect the evidence; overlap is not
 ownership or current presence.
 
-**Open path on GitHub** checks the selected path against the retained revision
-in the local cache before opening it. Missing paths report an error. Repository
+**Open path on GitHub** checks the selected path against the scanned revision
+in your clone before opening it. Missing paths report an error. Repository
 PR context opens Pull requests for the selected repository; **Back to Activity**
 restores the previous PR filters and Activity location.
 
@@ -216,18 +231,14 @@ storage locations. History, PR inventory, changed files, and reviewer evidence
 have separate completeness signals. Explicit refresh preserves usable data on
 transient failure and labels stale or incomplete evidence.
 
-**Settings → General → Use cached history only** reads eligible owned history
-without GitHub refreshes. After verified access, a restart with the same account
-can use its saved offline grant. Quitting while an access check is pending keeps
-that previously verified offline access. Connecting a new GitHub CLI account
-requires live verification. Confirmed access denials hide affected evidence; a failed save
-of access settings may require live verification again.
+**Settings → General → Use cached history only** reads your clones without
+fetching or contacting GitHub. A restart with the same account opens the last
+discovered clones offline. Connecting a new GitHub CLI account requires live
+verification. If GitHub denies a fetch, the repository is marked stale and its
+local history is still shown.
 
-Durable account-scoped JSON lives in Application Support; rebuildable Git
-mirrors and parsed scans live in Caches. The app never scans developer checkouts.
-**Settings → Storage** offers cache removal only after a live refresh verifies
-that a repository is unavailable. Removal affects the owned local mirror, not
-GitHub. Settings discovery and cached-history mode alone do not authorize it.
+Durable account-scoped JSON lives in Application Support; rebuildable parsed
+history lives in Caches. Git history itself stays in your clones.
 
 ## Command line
 
@@ -240,8 +251,8 @@ app is open.
 | --- | --- |
 | `bigboard` or `bigboard open` | Open the app. |
 | `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
-| `bigboard activity [options]` | Summarize recorded change from cached history: totals, repositories, top paths, and people. |
-| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch collected repositories with the GitHub CLI token. |
+| `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
+| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with the GitHub CLI token. |
 | `bigboard help`, `bigboard version` | Show usage or the version. |
 
 `activity` options:
@@ -254,9 +265,10 @@ app is open.
 - `--json`: print JSON with snake_case keys. People are identified by name only;
   email addresses are omitted.
 
-`activity` reads cached history and makes no network requests. Run `refresh`
-first, or let the app refresh, for current evidence. Repositories without cached
-history are listed under incomplete evidence and the command exits with status 2.
+`activity` reads your clones and makes no network requests. Run `refresh` first,
+or let the app refresh, for current evidence. Repositories without a local clone,
+or with shallow or partial history, are listed under incomplete evidence and the
+command exits with status 2. `status` lists each collected repository's clone.
 Usage errors exit with status 64.
 
 ## Troubleshooting

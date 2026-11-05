@@ -28,16 +28,13 @@ struct RepositoryIdentifierTests {
         try storage.saveConfiguration(configuration, account: "123")
         #expect(try storage.loadConfiguration("123").repositories == [repo.id])
 
-        let destination = fixture.root.appendingPathComponent("github.com/" + repo.id + ".git")
-        try FileManager.default.copyItem(at: fixture.bare, to: destination)
-        try Data((repo.id + "\n").utf8).write(to: destination.appendingPathComponent("bigboard-cache"))
-        _ = try fixture.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/" + repo.id + ".git"])
+        let clone = try fixture.addClone(repo.id)
+        let discovered = try #require(await CloneDiscovery.find(in: [fixture.sources]).first { $0.id == repo.id })
+        #expect(discovered.path == (try fixture.gitDirectory(clone)) && discovered.branch == "main")
         let history = GitHistory(root: fixture.root)
-        let scanned = try await history.scan(repo, configuration: configuration)
+        let scanned = try await history.scan(discovered, configuration: configuration)
         #expect(scanned.0.id == repo.id && !scanned.0.revision.isEmpty)
         #expect(!scanned.1.isEmpty && scanned.1.allSatisfy { $0.repo == repo.id })
-        let cached = try await history.cachedRepositories()
-        #expect(cached.contains { $0.id == repo.id })
     }
 }
 

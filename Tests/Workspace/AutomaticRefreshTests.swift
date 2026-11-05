@@ -9,26 +9,26 @@ struct AutomaticRefreshTests {
         defer { fixture.remove() }
         let workspace = fixture.workspace
         await workspace.start()
-        #expect(await fixture.network.requests == 2)
+        #expect(await fixture.network.requests == 1)
         #expect(workspace.nextAutomaticRefresh(visible: true, modalOpen: false) == fixture.clock.now().addingTimeInterval(900))
 
         fixture.clock.advance(by: 899)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 2)
+        #expect(await fixture.network.requests == 1)
         fixture.clock.advance(by: 1)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 4)
+        #expect(await fixture.network.requests == 2)
         #expect(workspace.nextAutomaticRefresh(visible: true, modalOpen: false) == fixture.clock.now().addingTimeInterval(900))
 
         fixture.clock.advance(by: 100)
         await workspace.refresh()
-        #expect(await fixture.network.requests == 6)
+        #expect(await fixture.network.requests == 3)
         fixture.clock.advance(by: 899)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 6)
+        #expect(await fixture.network.requests == 3)
         fixture.clock.advance(by: 1)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 8)
+        #expect(await fixture.network.requests == 4)
     }
 
     @Test(arguments: ["hidden", "sheet", "busy", "cached", "manual", "signed-out"])
@@ -48,14 +48,14 @@ struct AutomaticRefreshTests {
         let visible = condition != "hidden", modalOpen = condition == "sheet"
         #expect(workspace.nextAutomaticRefresh(visible: visible, modalOpen: modalOpen) == nil)
         await workspace.refreshAutomatically(visible: visible, modalOpen: modalOpen)
-        #expect(await fixture.network.requests == 2)
+        #expect(await fixture.network.requests == 1)
 
         workspace.busy = false
         workspace.configuration.cachedOnly = false
         workspace.configuration.refreshIntervalMinutes = 15
         workspace.authStatus.signedIn = true
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 4)
+        #expect(await fixture.network.requests == 2)
     }
 
     @Test func failedRefreshWaitsForTheNextInterval() async throws {
@@ -68,14 +68,14 @@ struct AutomaticRefreshTests {
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
         #expect(workspace.snapshot.coverage.phase == "partial")
         #expect(!workspace.error.isEmpty)
-        #expect(await fixture.network.requests == 4)
+        #expect(await fixture.network.requests == 2)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 4)
+        #expect(await fixture.network.requests == 2)
 
         await fixture.network.setUnavailable(false)
         fixture.clock.advance(by: 900)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 6)
+        #expect(await fixture.network.requests == 3)
         #expect(workspace.snapshot.coverage.phase == "ready" && workspace.error.isEmpty)
     }
 
@@ -89,12 +89,12 @@ struct AutomaticRefreshTests {
         #expect(workspace.nextAutomaticRefresh(visible: true, modalOpen: false) == fixture.clock.now().addingTimeInterval(1800))
         fixture.clock.advance(by: 900)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 2)
+        #expect(await fixture.network.requests == 1)
         await workspace.shutdown()
         fixture.clock.advance(by: 900)
         #expect(workspace.nextAutomaticRefresh(visible: true, modalOpen: false) == nil)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
-        #expect(await fixture.network.requests == 2)
+        #expect(await fixture.network.requests == 1)
     }
 }
 
@@ -108,7 +108,10 @@ struct AutomaticRefreshTests {
         network = AutomaticRefreshTransport(clock: clock)
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-        try storage.saveConfiguration(WorkspaceConfiguration(repositories: ["owner/repo"]), account: "123")
+        let sources = root.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        var config = WorkspaceConfiguration(repositories: ["owner/repo"]); config.sourceRoots = [sources.path]
+        try storage.saveConfiguration(config, account: "123")
         let auth = cliAuth(storage: storage, now: clock.now)
         workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network, now: clock.now)
     }
@@ -133,9 +136,8 @@ private actor AutomaticRefreshTransport: GitHubTransport {
         clock.advance(by: 10)
         switch request.url?.path {
         case "/user":
+            if unavailable { return GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8)) }
             return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8))
-        case "/user/repos":
-            return GitHubHTTPResponse(status: unavailable ? 503 : 200, headers: [:], data: Data("[]".utf8))
         default:
             Issue.record("Unexpected request during automatic refresh: \(request.url?.path ?? "")")
             throw GitHubFailure.unavailable

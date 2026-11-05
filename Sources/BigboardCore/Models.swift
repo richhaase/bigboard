@@ -28,6 +28,7 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var requestBudget = 128
     var cachedOnly = false
     var refreshIntervalMinutes = 15
+    var sourceRoots: [String] = []
 }
 extension WorkspaceConfiguration {
     func collected(_ repositories: [Repository], group: String = "") -> [Repository] {
@@ -46,7 +47,7 @@ extension WorkspaceConfiguration {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, repositories, excludedRepositories, groups, identities, workAreas, exclude
         case allFiles, aiIdentities, botIdentities, sinceDays, contributorSort, requestBudget, cachedOnly
-        case refreshIntervalMinutes
+        case refreshIntervalMinutes, sourceRoots
     }
 
     init(from decoder: any Decoder) throws {
@@ -66,6 +67,7 @@ extension WorkspaceConfiguration {
         requestBudget = try values.decode(Int.self, forKey: .requestBudget)
         cachedOnly = try values.decode(Bool.self, forKey: .cachedOnly)
         refreshIntervalMinutes = try values.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 15
+        sourceRoots = try values.decodeIfPresent([String].self, forKey: .sourceRoots) ?? []
     }
 }
 struct FileChange: Codable, Sendable, Equatable {
@@ -110,7 +112,37 @@ struct Repository: Codable, Sendable, Identifiable, Equatable {
     var prFilesComplete = false
     var prReviewersComplete = false
     var prStale = false
+    var path = ""
+    var remote = "origin"
+    var shallow = false
+    var partial = false
     var name: String { id }
+}
+extension Repository {
+    enum CodingKeys: String, CodingKey {
+        case id, branch, revision, pushedAt, scannedAt, stale, error, included, prCheckedAt
+        case prInventoryComplete, prFilesComplete, prReviewersComplete, prStale, path, remote, shallow, partial
+    }
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        branch = try values.decodeIfPresent(String.self, forKey: .branch) ?? "main"
+        revision = try values.decodeIfPresent(String.self, forKey: .revision) ?? ""
+        pushedAt = try values.decodeIfPresent(Date.self, forKey: .pushedAt)
+        scannedAt = try values.decodeIfPresent(Date.self, forKey: .scannedAt)
+        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+        error = try values.decodeIfPresent(String.self, forKey: .error) ?? ""
+        included = try values.decodeIfPresent(Bool.self, forKey: .included) ?? true
+        prCheckedAt = try values.decodeIfPresent(Date.self, forKey: .prCheckedAt)
+        prInventoryComplete = try values.decodeIfPresent(Bool.self, forKey: .prInventoryComplete) ?? false
+        prFilesComplete = try values.decodeIfPresent(Bool.self, forKey: .prFilesComplete) ?? false
+        prReviewersComplete = try values.decodeIfPresent(Bool.self, forKey: .prReviewersComplete) ?? false
+        prStale = try values.decodeIfPresent(Bool.self, forKey: .prStale) ?? false
+        path = try values.decodeIfPresent(String.self, forKey: .path) ?? ""
+        remote = try values.decodeIfPresent(String.self, forKey: .remote) ?? "origin"
+        shallow = try values.decodeIfPresent(Bool.self, forKey: .shallow) ?? false
+        partial = try values.decodeIfPresent(Bool.self, forKey: .partial) ?? false
+    }
 }
 struct Review: Codable, Sendable, Equatable {
     var author: String

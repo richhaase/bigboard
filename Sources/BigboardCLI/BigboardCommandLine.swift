@@ -128,7 +128,7 @@ struct CommandLineTool: Sendable {
               --top N              Rows per section (default 10).
               --include-bots       Include bot accounts.
               --json               Print JSON.
-          refresh [options]        Fetch selected repositories with the GitHub CLI token.
+          refresh [options]        Fetch the default branch of collected clones with the GitHub CLI token.
               --repo OWNER/NAME    Limit to a repository (repeatable).
               --group NAME         Limit to a saved repository group.
           help                     Show this help.
@@ -152,7 +152,7 @@ struct CommandLineTool: Sendable {
         var repositories: [Repository]
         var history: GitHistory
     }
-    private func workspace(_ options: Options) async throws -> Workspace {
+    private func workspace(_ options: Options, requireSources: Bool = true) async throws -> Workspace {
         let state = await environment.auth.status()
         guard state.signedIn else {
             throw BigboardError.message(state.error.isEmpty ? GitHubCLIFailure.signedOut.localizedDescription : state.error)
@@ -163,13 +163,15 @@ struct CommandLineTool: Sendable {
         guard group.isEmpty || configuration.groups[group] != nil else {
             throw UsageError("Unknown group: \(group)")
         }
+        guard !requireSources || !configuration.sourceRoots.isEmpty else {
+            throw BigboardError.message(
+                "No source folders are set. Run bigboard and choose the folders that hold your clones in Settings.")
+        }
         let history = GitHistory(root: try environment.storage.repositoryRoot(account.accountID))
-        let granted = try environment.storage.loadGrant(account.accountID)
-        let cached = (try? await history.cachedRepositories()) ?? []
-        var known = Dictionary(cached.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for repo in granted { known[repo.id] = repo }
+        let clones = await CloneDiscovery.find(in: CloneDiscovery.roots(configuration.sourceRoots))
+        let known = Dictionary(clones.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var repositories = configuration.collected(
-            configuration.repositories.compactMap { known[$0] ?? Repository(id: $0) }, group: group)
+            configuration.repositories.map { known[$0] ?? Repository(id: $0, branch: "") }, group: group)
         let requested = options.values("--repo").map { $0.lowercased() }
         if !requested.isEmpty {
             let unknown = Set(requested).subtracting(repositories.map(\.id))
@@ -183,13 +185,14 @@ struct CommandLineTool: Sendable {
     }
 
     private func status(_ options: Options) async throws -> Int32 {
-        let workspace = try await workspace(options)
-        let cached = Set(((try? await workspace.history.cachedRepositories()) ?? []).map(\.id))
+        let workspace = try await workspace(options, requireSources: false)
         let report = StatusReport(
             login: workspace.account.login, accountID: workspace.account.accountID,
             settings: environment.storage.supportRoot.path, history: environment.storage.cacheRoot.path,
+            sourceFolders: CloneDiscovery.roots(workspace.configuration.sourceRoots).map(\.path),
             repositories: workspace.repositories.map {
-                StatusReport.Row(id: $0.id, branch: $0.branch, cached: cached.contains($0.id))
+                StatusReport.Row(
+                    id: $0.id, branch: $0.branch, clone: $0.path, shallow: $0.shallow, partial: $0.partial)
             })
         if options.flag("--json") {
             environment.write(try Self.json(report))
@@ -198,7 +201,7 @@ struct CommandLineTool: Sendable {
         var lines = [
             "GitHub CLI: \(report.login) (\(report.accountID))",
             "Settings:   \(report.settings)",
-            "History:    \(report.history)",
+            "Caches:     \(report.history)",
             "",
             "Collected repositories: \(report.repositories.count)",
         ]
@@ -207,9 +210,15 @@ struct CommandLineTool: Sendable {
         for row in report.repositories {
             let id: String = row.id.padding(toLength: width, withPad: " ", startingAt: 0)
             let branch: String = row.branch.padding(toLength: branchWidth, withPad: " ", startingAt: 0)
-            lines.append("  \(id)  \(branch)  " + (row.cached ? "cached" : "not cached; run bigboard refresh"))
+            var detail = row.clone.isEmpty ? "no local clone found in source folders" : row.displayPath
+            if row.shallow { detail += " (shallow)" }
+            if row.partial { detail += " (partial: line counts unknown)" }
+            lines.append("  \(id)  \(branch)  " + detail)
         }
         if report.repositories.isEmpty { lines.append("  None. Choose repositories in Bigboard Settings.") }
+        lines.insert(
+            "Sources:    "
+                + (report.sourceFolders.isEmpty ? "none. Choose folders in Bigboard Settings." : report.sourceFolders.joined(separator: ", ")), at: 3)
         environment.write(lines.joined(separator: "\n") + "\n")
         return 0
     }
@@ -246,19 +255,16 @@ struct CommandLineTool: Sendable {
             environment.write("No collected repositories. Choose repositories in Bigboard Settings.\n")
             return 0
         }
-        let github = GitHubService(token: { try await environment.auth.token() }, transport: environment.transport)
-        let discovered = try await github.discover()
-        let current = Dictionary(discovered.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var failures = 0
         for repo in workspace.repositories {
-            guard let live = current[repo.id] else {
+            guard !repo.path.isEmpty else {
                 failures += 1
-                environment.writeError("\(repo.id): not available to the GitHub CLI account\n")
+                environment.writeError("\(repo.id): no local clone found in source folders\n")
                 continue
             }
             do {
                 let token = try await environment.auth.token()
-                let refreshed = try await environment.refreshHistory(workspace.history, live, token)
+                let refreshed = try await environment.refreshHistory(workspace.history, repo, token)
                 let scanned = try await workspace.history.scan(refreshed, configuration: workspace.configuration)
                 environment.write("\(repo.id): \(scanned.1.count) commits at \(refreshed.revision.prefix(12))\n")
             } catch {
@@ -325,12 +331,21 @@ struct StatusReport: Encodable {
     struct Row: Encodable {
         var id: String
         var branch: String
-        var cached: Bool
+        var clone: String
+        var shallow: Bool
+        var partial: Bool
+        var displayPath: String {
+            var value = clone
+            if value.hasSuffix("/.git") { value.removeLast(5) }
+            let home = NSHomeDirectory()
+            return value.hasPrefix(home + "/") ? "~" + value.dropFirst(home.count) : value
+        }
     }
     var login: String
     var accountID: String
     var settings: String
     var history: String
+    var sourceFolders: [String]
     var repositories: [Row]
 }
 

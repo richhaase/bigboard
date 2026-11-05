@@ -5,7 +5,7 @@ import Testing
 @Suite @MainActor struct RefreshRecoveryTests {
     @Test(arguments: RefreshRecoveryInterruption.allCases)
     func partialRefreshPreservesRecoveryAfterRestart(_ interruption: RefreshRecoveryInterruption) async throws {
-        let fixture = try RefreshRecoveryFixture(missing: interruption == .history ? [RefreshRecoveryFixture.second] : [])
+        let fixture = try RefreshRecoveryFixture()
         defer { fixture.remove() }
         if interruption == .history { await fixture.historyRefresh.fail(RefreshRecoveryFixture.second) }
         else { await fixture.network.setMode(.incomplete, for: RefreshRecoveryFixture.second) }
@@ -15,13 +15,12 @@ import Testing
         #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.first && !$0.stale && $0.prInventoryComplete })
         if interruption == .history {
             #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && $0.stale })
-            #expect(!workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
+            #expect(workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
         } else {
             #expect(workspace.snapshot.repositories.contains { $0.id == RefreshRecoveryFixture.second && !$0.prInventoryComplete && $0.prStale })
             #expect(!workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second })
         }
         await workspace.shutdown()
-        if interruption == .history { try fixture.install(RefreshRecoveryFixture.second) }
         await fixture.historyRefresh.recover()
         await fixture.network.setMode(.complete, for: RefreshRecoveryFixture.second)
         let restarted = fixture.workspace()
@@ -94,17 +93,23 @@ import Testing
     }
 
     @Test(arguments: RefreshRecoveryInterruption.allCases)
-    func accessDenialRemovesRepositoryEvidence(_ interruption: RefreshRecoveryInterruption) async throws {
+    func accessDenialKeepsLocalHistory(_ interruption: RefreshRecoveryInterruption) async throws {
         let fixture = try RefreshRecoveryFixture()
         defer { fixture.remove() }
         if interruption == .history { await fixture.historyRefresh.fail(RefreshRecoveryFixture.second, failure: .permission) }
         else { await fixture.network.setMode(.denied, for: RefreshRecoveryFixture.second) }
         let workspace = fixture.workspace()
         await workspace.start()
-        #expect(workspace.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
-        #expect(!workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
-        #expect(!workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second })
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == [RefreshRecoveryFixture.first])
+        let both = [RefreshRecoveryFixture.first, RefreshRecoveryFixture.second]
+        #expect(workspace.authStatus.signedIn)
+        #expect(workspace.snapshot.repositories.map(\.id) == both)
+        #expect(workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
+        #expect(workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second } == (interruption == .history))
+        if interruption == .history {
+            let row = workspace.snapshot.repositories.first { $0.id == RefreshRecoveryFixture.second }
+            #expect(row?.stale == true && row?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
+        }
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == both)
         await workspace.shutdown()
     }
 }
@@ -121,20 +126,22 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
     let storage: WorkspaceStorage
     let network: RefreshRecoveryTransport
     let historyRefresh = RefreshRecoveryHistoryRefresh()
-    init(missing: Set<String> = [], configuration: WorkspaceConfiguration = RefreshRecoveryFixture.configuration) throws {
+    init(configuration original: WorkspaceConfiguration = RefreshRecoveryFixture.configuration) throws {
         history = try HistoryFixture()
         storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
         network = RefreshRecoveryTransport(repositories: [Self.first, Self.second])
+        let sources = history.base.appendingPathComponent("recovery-src")
+        var configuration = original
+        configuration.sourceRoots = [sources.path]
         try storage.saveConfiguration(configuration, account: "123")
-        try storage.saveGrant([Repository(id: Self.first), Repository(id: Self.second)], account: "123")
-        for id in [Self.first, Self.second] where !missing.contains(id) { try install(id) }
-    }
-    func install(_ id: String) throws {
-        let destination = try storage.repositoryRoot("123").appendingPathComponent("github.com/" + id + ".git")
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: history.bare, to: destination)
-        try Data((id + "\n").utf8).write(to: destination.appendingPathComponent("bigboard-cache"))
-        _ = try history.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
+        var grant: [Repository] = []
+        for id in [Self.first, Self.second] {
+            let clone = try history.addClone(id, at: sources.appendingPathComponent(id))
+            var repo = Repository(id: id, branch: "main")
+            repo.path = try history.gitDirectory(clone)
+            grant.append(repo)
+        }
+        try storage.saveGrant(grant, account: "123")
     }
     func workspace() -> WorkspaceModel {
         let auth = cliAuth(storage: storage)

@@ -9,7 +9,7 @@ import Testing
         var config = SettingsRepositories.applying([ids[0]], available: Set(ids.prefix(2)), to: WorkspaceConfiguration())
         config.cachedOnly = true
         config.groups = ["Mixed": [ids[0], ids[2]], "Unchecked": [ids[2]]]
-        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids)
+        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
@@ -29,7 +29,7 @@ import Testing
     @Test func liveDiscoveryKeepsNewRepositoriesVisibleWithoutCollectingThem() async throws {
         let chosen = "owner/chosen", new = "owner/new-private"
         let config = SettingsRepositories.applying([chosen], available: [chosen], to: WorkspaceConfiguration())
-        let fixture = try CollectionFixture(config: config, granted: [chosen], cached: [chosen], discovered: [chosen, new])
+        let fixture = try CollectionFixture(config: config, granted: [chosen], cloned: [chosen, new])
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(Set(fixture.workspace.discovered.map(\.id)) == [chosen, new])
@@ -44,61 +44,108 @@ import Testing
         #expect(!Set(fixture.workspace.configuration.repositories).contains(new))
     }
 
-    @Test func onlyTypedGitDenialRemovesRepositoryAccess() async throws {
+    @Test(arguments: [GitHubFailure.permission, .notFound])
+    func gitFetchDenialKeepsLocalHistoryAndAccess(failure: GitHubFailure) async throws {
         let denied = "owner/denied", transient = "owner/transient"
         let ids = [denied, transient]
         let config = WorkspaceConfiguration(repositories: ids)
-        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids, refreshHistory: { _, repo, _ in
-            if repo.id == denied { throw GitHubFailure.permission }
+        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids, refreshHistory: { _, repo, _ in
+            if repo.id == denied { throw failure }
             throw BigboardError.message("Access denied: local Git process could not start.")
         })
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
-        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [transient])
-        #expect(fixture.workspace.snapshot.repositories.first?.stale == true)
-        #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == [transient])
-        let storage = WorkspaceStorage(supportRoot: fixture.base.appendingPathComponent("support"), cacheRoot: fixture.base.appendingPathComponent("workspace-cache"))
-        #expect(try storage.loadGrant("123").map(\.id) == [transient])
+        #expect(fixture.workspace.authStatus.signedIn)
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == ids)
+        #expect(fixture.workspace.snapshot.repositories.allSatisfy { $0.stale })
+        #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == Set(ids))
+        let deniedRow = fixture.workspace.snapshot.repositories.first { $0.id == denied }
+        #expect(deniedRow?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
+        let transientRow = fixture.workspace.snapshot.repositories.first { $0.id == transient }
+        #expect(transientRow?.error == "Access denied: local Git process could not start.")
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == ids)
     }
 
-    @Test func settingsDiscoveryRequiresFullRefreshBeforeRemovingNewlyUnlistedCache() async throws {
+    @Test func gitFetchAuthenticationFailureSignsOut() async throws {
+        let ids = ["owner/chosen"]
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), granted: ids, cloned: ids, refreshHistory: { _, _, _ in throw GitHubFailure.auth })
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        #expect(!fixture.workspace.authStatus.signedIn)
+        #expect(fixture.workspace.snapshot.coverage.phase == "signin")
+        #expect(try fixture.storage.loadGrant("123").isEmpty)
+    }
+
+    @Test func discoveryFollowsClonesOnDisk() async throws {
         let ids = ["owner/chosen", "owner/removed"]
         let config = SettingsRepositories.applying(Set(ids), available: Set(ids), to: WorkspaceConfiguration())
-        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids, refreshHistory: { _, repo, _ in repo })
+        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         try #require(fixture.workspace.snapshot.coverage.phase == "ready")
         #expect(Set(fixture.workspace.snapshot.repositories.map(\.id)) == Set(ids))
         #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == Set(ids))
-        #expect(Set(fixture.workspace.cachedRepositoryRows.map(\.id)) == Set(ids))
-        #expect(fixture.workspace.removableCacheIDs.isEmpty)
-        try #require(ids.allSatisfy { fixture.cacheExists($0) && fixture.scanExists($0) })
+        #expect(fixture.workspace.discovered.allSatisfy { !$0.path.isEmpty })
 
-        await fixture.network.setRepositories([ids[0]])
+        try FileManager.default.removeItem(at: fixture.clones.appendingPathComponent(ids[1]))
         await fixture.workspace.discover()
         try #require(fixture.workspace.error.isEmpty)
         #expect(fixture.workspace.discovered.map(\.id) == [ids[0]])
-        #expect(fixture.workspace.removableCacheIDs.isEmpty)
-        await fixture.workspace.removeCache(ids[1])
-        #expect(fixture.workspace.error == "Refresh live access before removing an unlisted cache.")
-        #expect(ids.allSatisfy { fixture.cacheExists($0) && fixture.scanExists($0) })
-        #expect(Set(fixture.workspace.cachedRepositoryRows.map(\.id)) == Set(ids))
-
         await fixture.workspace.refresh()
-        try #require(fixture.workspace.snapshot.coverage.phase == "ready")
-        try #require(fixture.workspace.error.isEmpty)
-        #expect(fixture.workspace.removableCacheIDs == [ids[1]])
-        await fixture.workspace.removeCache(ids[1])
-        #expect(fixture.workspace.error.isEmpty)
-        #expect(!fixture.cacheExists(ids[1]) && !fixture.scanExists(ids[1]))
-        #expect(fixture.cacheExists(ids[0]) && fixture.scanExists(ids[0]))
-        #expect(fixture.workspace.cachedRepositoryRows.map(\.id) == [ids[0]])
-        #expect(fixture.workspace.removableCacheIDs.isEmpty)
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
+        #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == [ids[0]])
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == [ids[0]])
+    }
+
+    @Test func changingSourceFoldersRediscoversAndRequiresLocalClones() async throws {
+        let chosen = "owner/chosen"
+        let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: empty) }
+        var config = WorkspaceConfiguration(); config.sourceRoots = [empty.path]
+        let fixture = try CollectionFixture(config: config, granted: [], cloned: [chosen])
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        #expect(fixture.workspace.discovered.isEmpty)
+        var draft = fixture.workspace.configuration
+        draft.sourceRoots = [fixture.clones.path]
+        draft.repositories = [chosen]
+        #expect(await fixture.workspace.saveConfiguration(draft))
+        #expect(fixture.workspace.discovered.map(\.id) == [chosen])
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while fixture.workspace.busy && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [chosen])
+        var missing = fixture.workspace.configuration
+        missing.repositories = [chosen, "owner/absent"]
+        #expect(await fixture.workspace.saveConfiguration(missing) == false)
+        #expect(fixture.workspace.error.contains("No local clone was found for: owner/absent"))
+        #expect(fixture.workspace.configuration.repositories == [chosen])
+    }
+
+    @Test func noSourceFoldersAsksForThemAndKeepsTheGrant() async throws {
+        let id = "owner/chosen"
+        let fixture = try CollectionFixture(
+            config: WorkspaceConfiguration(repositories: [id]), granted: [id], cloned: [id], chooseSources: false)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        #expect(fixture.workspace.configuration.sourceRoots.isEmpty)
+        #expect(fixture.workspace.snapshot.coverage.phase == "setup")
+        #expect(fixture.workspace.discovered.isEmpty)
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == [id])
+        #expect(await fixture.workspace.addSourceFolders([fixture.clones.path, fixture.clones.path]))
+        #expect(fixture.workspace.configuration.sourceRoots == [fixture.clones.path])
+        #expect(try fixture.storage.loadConfiguration("123").sourceRoots == [fixture.clones.path])
+        #expect(fixture.workspace.discovered.map(\.id) == [id])
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while fixture.workspace.busy && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [id])
+        #expect(await fixture.workspace.addSourceFolders(["relative/path"]) == false)
+        #expect(fixture.workspace.configuration.sourceRoots == [fixture.clones.path])
     }
 
     @Test func freshSetupDiscoversChoicesWithoutScanningGrantedCaches() async throws {
         let ids = ["owner/chosen", "owner/new-private"]
-        let fixture = try CollectionFixture(config: WorkspaceConfiguration(), granted: [ids[0]], cached: [ids[0]], discovered: ids)
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(), granted: [ids[0]], cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.coverage.phase == "setup")
@@ -116,7 +163,7 @@ import Testing
         var config = WorkspaceConfiguration()
         config.repositories = Array(ids.prefix(3)); config.excludedRepositories = [ids[2]]
         config.exclude = [pattern]; config.cachedOnly = true; config.groups = ["Mixed": ids]
-        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids)
+        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
@@ -130,7 +177,7 @@ import Testing
     @Test func savingNarrowerCollectionRemovesRetainedEvidenceBeforeDiscoveryFailure() async throws {
         let ids = ["owner/chosen", "owner/removed"]
         var config = WorkspaceConfiguration(); config.repositories = ids; config.cachedOnly = true
-        let fixture = try CollectionFixture(config: config, granted: ids, cached: ids)
+        let fixture = try CollectionFixture(config: config, granted: ids, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
         #expect(Set(fixture.workspace.snapshot.repositories.map(\.id)) == Set(ids))
@@ -156,49 +203,52 @@ import Testing
 
 @MainActor private struct CollectionFixture {
     let base: URL
+    let clones: URL
+    let storage: WorkspaceStorage
     let repositoryRoot: URL
     let network: CollectionTransport
     let workspace: WorkspaceModel
-    init(config: WorkspaceConfiguration, granted: [String], cached: [String], discovered: [String]? = nil, refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { try await $0.refresh($1, token: $2) }) throws {
+    init(config original: WorkspaceConfiguration, granted: [String], cloned: [String], chooseSources: Bool = true, refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = { _, repo, _ in repo }) throws {
         let history = try HistoryFixture()
         base = history.base
-        let storage = WorkspaceStorage(supportRoot: base.appendingPathComponent("support"), cacheRoot: base.appendingPathComponent("workspace-cache"))
+        clones = base.appendingPathComponent("collection-src")
+        try FileManager.default.createDirectory(at: clones, withIntermediateDirectories: true)
+        storage = WorkspaceStorage(supportRoot: base.appendingPathComponent("support"), cacheRoot: base.appendingPathComponent("workspace-cache"))
         repositoryRoot = try storage.repositoryRoot("123")
-        for id in cached {
-            let destination = repositoryRoot.appendingPathComponent("github.com/" + id + ".git")
-            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: history.bare, to: destination)
-            try Data((id + "\n").utf8).write(to: destination.appendingPathComponent("bigboard-cache"))
-            _ = try history.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
+        var paths: [String: String] = [:]
+        for id in cloned {
+            let clone = try history.addClone(id, at: clones.appendingPathComponent(id))
+            paths[id] = try history.gitDirectory(clone)
         }
+        var config = original
+        if chooseSources, config.sourceRoots.isEmpty { config.sourceRoots = [clones.path] }
         try storage.saveConfiguration(config, account: "123")
-        try storage.saveGrant(granted.map { Repository(id: $0) }, account: "123")
-        network = CollectionTransport(repositories: discovered ?? granted)
+        try storage.saveGrant(granted.map { id in
+            var repo = Repository(id: id, branch: "main")
+            repo.path = paths[id] ?? ""
+            return repo
+        }, account: "123")
+        network = CollectionTransport()
         let auth = cliAuth(storage: storage)
         workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: refreshHistory)
     }
-    func cacheExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("github.com/" + id + ".git/bigboard-cache").path) }
     func scanExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("scans/" + hash(id) + ".json").path) }
     func lockExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("locks/" + hash(id) + ".lock").path) }
     private func hash(_ id: String) -> String { SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
 
 private actor CollectionTransport: GitHubTransport {
-    private var repositories: [String]
     private var discoveryFails = false
     private(set) var calls = 0
     private(set) var graphRepositories: [String] = []
-    init(repositories: [String]) { self.repositories = repositories }
-    func setRepositories(_ repositories: [String]) { self.repositories = repositories }
     func failDiscovery() { discoveryFails = true }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         calls += 1
         let object: Any
         switch request.url?.path {
-        case "/user": object = ["login": "fixture", "id": 123]
-        case "/user/repos":
+        case "/user":
             if discoveryFails { throw GitHubFailure.unavailable }
-            object = repositories.map { ["full_name": $0, "default_branch": "", "archived": false] as [String: Any] }
+            object = ["login": "fixture", "id": 123]
         case "/graphql":
             guard let body = request.httpBody, let document = try JSONSerialization.jsonObject(with: body) as? [String: Any], let variables = document["variables"] as? [String: Any], let owner = variables["owner"] as? String, let name = variables["name"] as? String else { throw GitHubFailure.response }
             let id = owner + "/" + name

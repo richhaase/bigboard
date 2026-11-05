@@ -87,7 +87,7 @@ struct SettingsPanel: View {
                             ? "GitHub CLI: \(workspace.authStatus.login)" : "GitHub CLI not connected"
                     )
                     .font(.headline)
-                    Text("Repositories you own, collaborate on, or can see as an organization member are listed.")
+                    Text("GitHub clones in your source folders are listed. Bigboard only fetches their default branch.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -97,11 +97,12 @@ struct SettingsPanel: View {
                     Button("Check again") { Task { await workspace.checkConnection() } }
                 }
             }
+            sourceFolders
             HStack {
                 Button("Refresh repository list", systemImage: "arrow.clockwise") {
-                    Task { await workspace.discover() }
+                    Task { await workspace.discover(roots: draft.sourceRoots) }
                 }
-                .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                .disabled(workspace.busy || !workspace.authStatus.signedIn || draft.sourceRoots.isEmpty)
                 Text("\(selected.count) selected").foregroundStyle(.secondary)
                 Spacer()
                 Button(query.isEmpty ? "Select all" : "Select visible") {
@@ -113,13 +114,13 @@ struct SettingsPanel: View {
             HStack {
                 TextField("Search repositories", text: $query).textFieldStyle(.roundedBorder)
                 Picker("Sort", selection: $repositorySort) {
-                    Text("Recent push").tag(SettingsRepositorySort.recent)
+                    Text("Latest commit").tag(SettingsRepositorySort.recent)
                     Text("Name").tag(SettingsRepositorySort.name)
                 }
                 .frame(width: 180)
             }
             if repositoryRows.isEmpty {
-                Text("Refresh the repository list, choose what to track, then apply your settings.")
+                Text("No GitHub clones found yet. Check your source folders, refresh the list, then choose what to track.")
                     .foregroundStyle(.secondary).padding(.vertical, 30)
             }
             ForEach(repositoryRows) { repo in
@@ -128,18 +129,48 @@ struct SettingsPanel: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 3) {
                         if let pushed = repo.pushedAt {
-                            Text("Last push \(pushed.formatted(date: .abbreviated, time: .omitted))")
-                        } else {
-                            Text("Push date unavailable")
+                            Text("Latest commit \(pushed.formatted(date: .abbreviated, time: .omitted))")
                         }
+                        if !repo.path.isEmpty { Text(SettingsRepositories.displayPath(repo.path)) }
+                        if repo.shallow { Text("Shallow clone: partial history").foregroundStyle(.orange) }
+                        if repo.partial { Text("Partial clone: line counts unknown").foregroundStyle(.orange) }
                         if !availableIDs.contains(repo.id) {
-                            Text("Not in current access list").foregroundStyle(.orange)
+                            Text("No local clone found").foregroundStyle(.orange)
                         }
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
+    }
+    private var sourceFolders: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Source folders").font(.subheadline.bold())
+                Spacer()
+                Button("Add folder…", systemImage: "plus") {
+                    for folder in SettingsRepositories.chooseFolders() where !draft.sourceRoots.contains(folder) {
+                        draft.sourceRoots.append(folder)
+                    }
+                }
+            }
+            if draft.sourceRoots.isEmpty {
+                Text("No source folders. Add the folders that hold your Git clones.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            ForEach(draft.sourceRoots, id: \.self) { folder in
+                HStack {
+                    Text(SettingsRepositories.displayPath(folder)).font(.callout.monospaced())
+                    Spacer()
+                    Button("Remove", systemImage: "minus.circle") {
+                        draft.sourceRoots.removeAll { $0 == folder }
+                    }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).help("Remove \(folder)")
+                    .accessibilityLabel("Remove \(folder)")
+                }
+            }
+        }
+        .padding(10).background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 8))
     }
     private var organization: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -276,41 +307,14 @@ struct SettingsPanel: View {
 
 private struct StorageSettingsPanel: View {
     @Bindable var workspace: WorkspaceModel
-    @State private var removal: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle(title: "Local storage")
             Text(workspace.storageDescription).font(.callout.monospaced()).textSelection(.enabled)
-            SectionTitle(title: "Unlisted caches")
             Text(
-                "Caches can be removed after live access confirms that a repository is no longer available to the app. Removing a cache does not change the repository on GitHub."
+                "History is read from your own clones. Bigboard only updates their remote-tracking default branch; it never changes local branches, the index, or working files. Parsed history caches can be rebuilt."
             )
             .font(.caption).foregroundStyle(.secondary)
-            ForEach(workspace.cachedRepositoryRows.filter { workspace.removableCacheIDs.contains($0.id) }) {
-                repo in
-                HStack {
-                    Text(repo.id)
-                    Spacer()
-                    Button("Remove cache…", role: .destructive) { removal = repo.id }.disabled(workspace.busy)
-                }
-            }
-            if workspace.removableCacheIDs.isEmpty {
-                Text("No removable caches.").foregroundStyle(.secondary)
-            }
-        }
-        .confirmationDialog(
-            "Remove local cache?",
-            isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let id = removal {
-                Button("Remove \(id)", role: .destructive) {
-                    Task { await workspace.removeCache(id) }
-                    removal = nil
-                }
-            }
-        } message: {
-            Text("The local mirror will be deleted. It can be downloaded again if access is restored.")
         }
     }
 }
