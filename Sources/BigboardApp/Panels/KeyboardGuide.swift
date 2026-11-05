@@ -3,8 +3,9 @@ import SwiftUI
 struct KeyboardGuide: View {
     let commands: [(String, String)] = [
         ("⌘1 / ⌘2 / ⌘3 / ⌘4", "Heat Maps / Activity / Contributors / Pull requests"),
-        ("⌘F", "Find on the current board"),
-        ("⌘⇧F", "Open Filters"),
+        ("⌘F", "Find commits, contributors, or pull requests where search is available"),
+        ("⌘⇧F", "Open this board’s People or Mine filter"),
+        ("⌘⌥D", "Custom date range on historical boards"),
         ("⌘⇧I", "Repository Filter"),
         ("⌘⇧D", "Data Status"),
         ("⌘R", "Refresh repository evidence"),
@@ -21,7 +22,7 @@ struct KeyboardGuide: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
-                    "The Boards menu lists shortcuts for the current board. Use Tab to move focus and Space to toggle a focused checkbox."
+                    "The Boards menu lists shortcuts for the current board and a Group submenu. Use Tab to move focus and Space to open a menu or toggle a checkbox."
                 )
                 .foregroundStyle(.secondary)
                 ForEach(commands, id: \.0) { key, action in

@@ -4,7 +4,6 @@ import AppKit
 struct MainView: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
-    @FocusState private var searchFocused: Bool
     @State private var appVisible = false
     private var automaticRefreshDate: Date? {
         workspace.nextAutomaticRefresh(visible: appVisible, modalOpen: navigation.panel != nil)
@@ -12,7 +11,8 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding(get: { navigation.board }, set: { navigation.switchBoard($0) })) {
-                ForEach(Board.allCases) { board in Label(board.rawValue, systemImage: board.symbol).tag(board)
+                ForEach(Board.allCases) { board in
+                    Label(board.rawValue, systemImage: board.symbol).tag(board)
                 }
             }
             .navigationTitle("Bigboard").navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
@@ -48,36 +48,6 @@ struct MainView: View {
                 } else if workspace.snapshot.repositories.isEmpty {
                     emptyWorkspace
                 } else {
-                    HStack {
-                        TextField(
-                            "Search \(navigation.board.rawValue.lowercased())",
-                            text: Binding(
-                                get: { navigation.currentFilters.query },
-                                set: { navigation.currentFilters.query = $0 })
-                        )
-                        .textFieldStyle(.roundedBorder).focused($searchFocused)
-                        .onSubmit { searchFocused = false }.onExitCommand { searchFocused = false }
-                        .focusedSceneValue(\.boardSearch, $searchFocused)
-                        Button("Filters", systemImage: "line.3.horizontal.decrease") {
-                            navigation.panel = .filters
-                        }
-                        if navigation.board != .pullRequests {
-                            Toggle(
-                                "Hide bots",
-                                isOn: Binding(
-                                    get: { navigation.currentFilters.hideBots },
-                                    set: { navigation.currentFilters.hideBots = $0 })
-                            )
-                            .toggleStyle(.checkbox)
-                        }
-                        Button("Copy view", systemImage: "doc.on.doc") {
-                            BoardMarkdown.copy(
-                                snapshot: workspace.snapshot, configuration: workspace.configuration,
-                                navigation: navigation)
-                        }
-                        .labelStyle(.iconOnly).help("Copy this view as Markdown")
-                    }
-                    .padding(12)
                     Group {
                         switch navigation.board {
                         case .heat: HeatBoard(workspace: workspace, navigation: navigation)
@@ -99,16 +69,13 @@ struct MainView: View {
             .navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
-            ToolbarItem(id: "date-filter", placement: .primaryAction) {
-                dateFilter
+            if navigation.board != .pullRequests {
+                ToolbarItem(id: "date-filter", placement: .primaryAction) {
+                    dateFilter
+                }
             }
             ToolbarItem(id: "repository-filter", placement: .primaryAction) {
                 repositoryFilter
-            }
-            if !workspace.configuration.groups.isEmpty {
-                ToolbarItem(id: "workspace-group", placement: .primaryAction) {
-                    groupFilter
-                }
             }
         }
         .onAppear { appVisible = NSApp.occlusionState.contains(.visible) }
@@ -153,34 +120,52 @@ struct MainView: View {
                 )
             }
             Divider()
-            Button("Custom range…") { navigation.panel = .filters }
+            Button("Custom range…") { navigation.panel = .dateRange }
         } label: {
             Label(navigation.rangeLabel, systemImage: "calendar")
         }
         .labelStyle(.titleAndIcon)
         .accessibilityLabel("Date filter")
         .accessibilityValue(navigation.rangeLabel)
-        .help("Date filter for all boards")
+        .help("Date range for Heat Maps, Activity, and Contributors")
     }
     private var repositoryFilter: some View {
         Button {
             navigation.repositoryFilterPresented.toggle()
         } label: {
-            Label("Repositories: \(navigation.repositoryFilterLabel)", systemImage: "line.3.horizontal.decrease.circle")
+            Label("Repositories: \(repositoryScopeLabel)", systemImage: "line.3.horizontal.decrease.circle")
         }
         .labelStyle(.titleAndIcon)
         .accessibilityLabel("Repository filter")
-        .accessibilityValue(navigation.repositoryFilterLabel)
-        .help("Filter loaded repositories across all boards")
+        .accessibilityValue(repositoryScopeLabel)
+        .help("Choose a group or filter repositories across all boards")
         .popover(
             isPresented: $navigation.repositoryFilterPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom
         ) {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Repository filter").font(.headline)
+                    Text("Repositories").font(.headline)
                     Spacer()
+                    Button("Manage Groups…") {
+                        navigation.repositoryFilterPresented = false
+                        navigation.panel = .groups
+                    }
                 }
                 .padding(16)
+                Picker("Group", selection: Binding(
+                    get: { workspace.activeGroup },
+                    set: { name in
+                        navigation.repositories = []
+                        Task { await workspace.selectGroup(name) }
+                    })
+                ) {
+                    Text("All repositories").tag("")
+                    ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                .padding(.horizontal, 16).padding(.bottom, 12)
                 Divider()
                 RepositoryFilterPanel(
                     repositories: workspace.snapshot.repositories, navigation: navigation,
@@ -192,26 +177,11 @@ struct MainView: View {
             .onExitCommand { navigation.repositoryFilterPresented = false }
         }
     }
-    private var groupFilter: some View {
-        Menu {
-            Picker("Workspace group", selection: Binding(
-                get: { workspace.activeGroup },
-                set: { name in Task { await workspace.selectGroup(name) } })
-            ) {
-                Text("All groups").tag("")
-                ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
-                    Text(name).tag(name)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            Label(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup, systemImage: "square.stack")
-        }
-        .labelStyle(.titleAndIcon)
-        .accessibilityLabel("Workspace group")
-        .accessibilityValue(workspace.activeGroup.isEmpty ? "All groups" : workspace.activeGroup)
-        .disabled(workspace.busy)
-        .help("Choose workspace group")
+    private var repositoryScopeLabel: String {
+        guard !workspace.activeGroup.isEmpty else { return navigation.repositoryFilterLabel }
+        return navigation.repositories.isEmpty
+            ? workspace.activeGroup
+            : "\(workspace.activeGroup) · \(navigation.repositoryFilterLabel)"
     }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(

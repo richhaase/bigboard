@@ -11,6 +11,11 @@ struct ContributorsBoard: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                BoardSearch(navigation: navigation)
+                PeopleFilter(records: workspace.snapshot.commits, filters: $navigation.contributors)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            HStack {
                 Picker("Sort", selection: $navigation.contributors.sort) {
                     Text("Lines changed").tag("change")
                     Text("Commits").tag("commits")

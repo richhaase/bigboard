@@ -45,7 +45,9 @@ Git history uses app-owned caches; developer checkouts are untouched.
 | Contributors | Explore each person's repository distribution, timelines, calendar, and recent commits. |
 | Pull requests | Find open PRs, review requests, failing checks, and work needing your attention. |
 
-Each board keeps its own search, sorting, and selection. The toolbar's repository
+Each board keeps its own relevant controls and selection. The Repositories control
+combines group selection and repository filtering. The historical boards share a date range, while
+Pull requests shows current open work regardless of age. The toolbar's repository
 filter changes what you see; Settings controls what the app collects.
 Heat Maps shows activity across the selected range.
 Activity, Contributors, and Pull requests provide the supporting detail.

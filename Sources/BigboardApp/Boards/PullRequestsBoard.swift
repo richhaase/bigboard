@@ -12,6 +12,11 @@ struct PullRequestsBoard: View {
     }
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("Current open work").foregroundStyle(.secondary)
+                BoardSearch(navigation: navigation)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
             if let context = navigation.contextualRepository {
                 HStack {
                     Button("Back to Activity", systemImage: "arrow.left") { navigation.returnToActivity() }
@@ -47,6 +52,7 @@ struct PullRequestsBoard: View {
                         ("attention", "Needs my attention"), ("authored", "Authored by me"),
                         ("requested", "Review requested"), ("updated", "Updated since my review"),
                     ], values: $navigation.prs.mine)
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
                 facetMenu(
                     "Review",
                     options: [
@@ -126,7 +132,6 @@ struct PullRequestsBoard: View {
         let selected = workspace.snapshot.pullRequests.filter {
             (navigation.repositories.isEmpty || navigation.repositories.contains($0.repo))
                 && (navigation.contextualRepository == nil || $0.repo == navigation.contextualRepository)
-                && navigation.dateMatches($0.updatedAt, snapshot: workspace.snapshot)
         }
         let count = selected.filter { Analysis.requested($0, viewer: workspace.snapshot.viewer) }.count
         return "\(count)\(unknown || selected.contains { !$0.reviewersComplete } ? " + ?" : "")"
@@ -186,7 +191,7 @@ struct PullRequestsBoard: View {
     private func facetMenu(_ title: String, options: [(String, String)], values: Binding<Set<String>>)
         -> some View
     {
-        Menu {
+        FilterPopover(title: values.wrappedValue.isEmpty ? title : "\(title) (\(values.wrappedValue.count))") {
             Button("All") { values.wrappedValue = [] }
             ForEach(options, id: \.0) { key, label in
                 Toggle(
@@ -197,8 +202,6 @@ struct PullRequestsBoard: View {
                             if $0 { values.wrappedValue.insert(key) } else { values.wrappedValue.remove(key) }
                         }))
             }
-        } label: {
-            Text(values.wrappedValue.isEmpty ? title : "\(title) (\(values.wrappedValue.count))")
         }
     }
 }

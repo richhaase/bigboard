@@ -57,10 +57,13 @@ can retry. GitHub authorization is revoked separately in GitHub's application se
 ## Navigation and scope
 
 The sidebar contains **Heat Maps**, **Activity**, **Contributors**, and **Pull requests**, in that order.
-The toolbar contains date scope and repository viewing scope.
-Data Status opens from the combined status and timestamp at the bottom right.
-A configured repository group adds a group picker. Each board retains
-its own search, sorting, filters, and selection while you move between boards.
+The toolbar's **Repositories** control combines group selection and repository
+filtering. Its label shows the active group and any narrower repository selection.
+**Manage Groups…** inside that popover opens Groups & areas in Settings.
+Groups are also available in **Boards → Group**.
+The toolbar contains repository viewing scope and, on historical boards, the
+date range. Data Status opens from the status and timestamp at the bottom right.
+Each board retains its own applicable search, sorting, filters, and selection.
 
 The toolbar's **Repository filter** is one checklist, initially showing all
 loaded repositories checked. It stays open while changes apply immediately
@@ -74,21 +77,28 @@ select a repository, and press Space to toggle it.
 This filter does not fetch history, make network requests, change saved
 collection choices, or unload caches. Use Settings to change what the app
 collects. Changing a named group narrows collection to its saved, selected
-repositories and refreshes; it never adds unchecked repositories.
+repositories and refreshes; it never adds unchecked repositories. Choosing a group
+resets the viewing checklist to all repositories in that group.
 
 The date menu offers the last 1, 4, 12, or 24 hours, 7, 14, 30, 90, and 365 days,
-All time, and a custom range through Filters. The default is 14 days unless
+All time, and **Custom range…**. The default is 14 days unless
 changed in Settings. Custom days accepts 0 for all time, up to 3650 days.
-Filters stages shared scope and the current board's search, sorting, and
-applicable people/bot filters until Apply.
+The custom-range sheet changes only the date range when you choose Apply.
+Heat Maps, Activity, and Contributors share that range. Pull requests shows
+current open work regardless of age and does not display the date control.
+
+Each historical board has a **People** control for contributor selection and
+**Hide bots**; changes apply immediately and remain independent across boards.
+Search appears for commits, people, and PRs. Heat Maps, directory browsing,
+and Related use drill-down instead of text search. Commit and people searches
+within Activity are independent.
 
 Ranges roll forward with the displayed snapshot when data refreshes. Refreshing
 keeps the selected duration. Each session starts with the configured default range.
 
-Activity and Contributors use Git author dates; PRs use update times. Date
-filtering is relative to the retained snapshot and uses an exclusive lower
-boundary. Unknown dates match only All time. Changing viewing scope makes no
-network request.
+Historical boards use Git author dates. Date filtering is relative to the
+retained snapshot and uses an exclusive lower boundary. Changing the date range
+or viewing checklist makes no network request.
 
 ## Heat Maps
 
@@ -162,7 +172,9 @@ silently overwritten.
 
 ## Pull requests
 
-This board lists open PRs within the shared date and repository scope. Search
+This board lists current open PRs, including drafts, within the active group
+and repository viewing scope. Historical dates do not hide old open PRs,
+including those linked from Activity. Search
 matches repository, title, author, or number. Select a PR to inspect review and
 check states, requested reviewers, changed files, latest reviews, and reported
 merge conflicts. **Open on GitHub** opens the actual PR. These details are
@@ -247,8 +259,9 @@ and Space to toggle a focused checkbox.
 | Control | Action |
 | --- | --- |
 | ⌘1, ⌘2, ⌘3, ⌘4 | Heat Maps, Activity, Contributors, Pull requests |
-| ⌘F | Focus the current board's search |
-| ⌘⇧F | Open Filters |
+| ⌘F | Find commits, contributors, or PRs where search is available |
+| ⌘⇧F | Open the board’s People or Mine filter |
+| ⌘⌥D | Custom date range on historical boards |
 | ⌘⇧I | Open the Repository Filter popover |
 | ⌘⇧D | Open Data Status |
 | ⌘R | Refresh repository evidence |

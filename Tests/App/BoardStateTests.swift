@@ -33,6 +33,47 @@ import Testing
         #expect(state.contextualRepository == nil)
         #expect(state.prs.query == "release")
     }
+    @Test func openPullRequestsIgnoreHistoricalDatesButKeepRepositoryAndAttentionFilters() {
+        let stale = PullRequest(repo: "acme/app", number: 1, title: "Waiting", author: "alex", url: "", updatedAt: now.addingTimeInterval(-90 * 86400), reviewers: ["viewer"])
+        let unknown = PullRequest(repo: "acme/app", number: 2, title: "Unknown date", author: "sam", url: "", updatedAt: nil)
+        let other = PullRequest(repo: "acme/other", number: 3, title: "Other repository", author: "alex", url: "", updatedAt: now)
+        let snapshot = Snapshot(generatedAt: now, viewer: "viewer", pullRequests: [stale, unknown, other])
+        let state = BoardState(); state.dateRange = .hours(1)
+        state.repositories = ["acme/app"]
+        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: DateInterval(start: now.addingTimeInterval(-60), end: now))
+        state.showPRs(repo: "acme/app")
+        #expect(state.pullRequests(snapshot).map(\.number) == [1, 2])
+        state.prs.mine = ["requested"]
+        #expect(state.pullRequests(snapshot).map(\.number) == [1])
+        let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
+        #expect(markdown.contains("Range: Current open work") && !markdown.contains("Last hour"))
+        #expect(markdown.contains("Waiting"))
+        state.returnToActivity()
+        #expect(state.dateRange == .hours(1) && state.activityInterval != nil)
+    }
+    @Test func searchesStayWithTheirContentInsteadOfFilteringDirectoryBrowsing() {
+        let state = BoardState()
+        let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [commit("one")])
+        #expect(state.searchPrompt == nil)
+        state.switchBoard(.activity)
+        #expect(state.searchPrompt == nil)
+        state.setLens(.commits)
+        state.searchQuery = "missing commit"
+        #expect(state.searchCommits(snapshot.commits).isEmpty)
+        state.setLens(.directories)
+        #expect(state.searchPrompt == nil)
+        #expect(state.activityRows(snapshot, configuration: WorkspaceConfiguration()).count == 1)
+        #expect(!BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state).contains("Search:"))
+        state.setLens(.people)
+        state.searchQuery = "Alex"
+        #expect(state.activityPeopleQuery == "Alex" && state.activity.query == "missing commit")
+        state.setLens(.commits)
+        #expect(state.searchQuery == "missing commit")
+        state.switchBoard(.contributors)
+        state.searchQuery = "Sam"
+        state.switchBoard(.activity)
+        #expect(state.searchQuery == "missing commit" && state.contributors.query == "Sam")
+    }
     @Test func prMineShortcutsDoNotChangeFiltersOnOtherBoards() {
         let state = BoardState()
         state.activity.query = "source"; state.activity.people = ["alex@example.test"]
@@ -76,7 +117,7 @@ import Testing
         #expect(state.heatRecords(snapshot).map(\.id) == ["recent", "old"])
     }
     @Test(arguments: [DateRange.hours(1), .hours(4), .hours(12), .days(1), .days(7), .days(43)])
-    func rollingRangesAgreeAcrossBoards(range: DateRange) throws {
+    func rollingRangesAgreeAcrossHistoricalBoards(range: DateRange) throws {
         let start = try #require(range.start(relativeTo: now))
         let dates = [start.addingTimeInterval(-1), start, start.addingTimeInterval(1), now]
         let records = dates.enumerated().map { index, date in
@@ -87,14 +128,12 @@ import Testing
         }
         let snapshot = Snapshot(generatedAt: now, commits: records, pullRequests: prs)
         let state = BoardState(); state.dateRange = range
-        for board in Board.allCases {
+        for board in [Board.heat, .activity, .contributors] {
             state.switchBoard(board)
             #expect(state.filteredCommits(snapshot).map(\.id) == ["2", "3"])
-            #expect(dates.filter { state.dateMatches($0, snapshot: snapshot) } == Array(dates.suffix(2)))
-            #expect(!state.dateMatches(nil, snapshot: snapshot))
             #expect(state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot).reduce(0) { $0 + $1.commits } == 2)
         }
-        #expect(state.pullRequests(snapshot).map(\.number) == [3, 2])
+        #expect(state.pullRequests(snapshot).map(\.number) == [3, 2, 1, 0])
         let heat = state.heatRange(snapshot)
         #expect(heat.current.start == start && heat.current.end == now)
         #expect(Analysis.heatSeries(records, metric: "commits", range: heat).total == 2)
@@ -135,7 +174,6 @@ import Testing
         #expect(state.activityInterval == nil && state.rangeLabel == "Last 24 hours")
         #expect(state.filteredCommits(snapshot).count == 1)
         state.dateRange = .days(0)
-        #expect(state.dateMatches(nil, snapshot: snapshot))
         #expect(state.filteredCommits(snapshot).count == 1 && state.rangeLabel == "All time")
     }
     @Test func fileDrillReturnsToParentAndAreaBoundaryRemains() {

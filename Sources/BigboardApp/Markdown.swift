@@ -17,11 +17,11 @@ import AppKit
         var lines = [
             "# Bigboard · \(navigation.board.rawValue)", "",
             "Snapshot: \(snapshot.generatedAt.formatted(.iso8601))",
-            "Range: \(navigation.board == .activity ? navigation.activityRangeLabel : navigation.rangeLabel)",
+            "Range: \(navigation.board == .pullRequests ? "Current open work" : navigation.board == .activity ? navigation.activityRangeLabel : navigation.rangeLabel)",
             "Repositories: \(navigation.repositories.isEmpty ? "All tracked" : navigation.repositories.sorted().joined(separator: ", "))",
         ]
-        if !navigation.currentFilters.query.isEmpty {
-            lines.append("Search: \(navigation.currentFilters.query)")
+        if navigation.searchPrompt != nil && !navigation.searchQuery.isEmpty {
+            lines.append("Search: \(navigation.searchQuery)")
         }
         if navigation.currentFilters.hideBots && navigation.board != .pullRequests {
             lines.append("Bots hidden")
@@ -44,7 +44,7 @@ import AppKit
                 navigation.heatRecords(snapshot), repositories: navigation.visibleRepositories(snapshot),
                 scope: navigation.heatScope, workAreas: configuration.workAreas,
                 metric: navigation.heatMetric, range: range
-            ).filter { matches($0.label, navigation.heat.query) }
+            )
             lines += table(
                 ["Area", "Total", "Coverage"],
                 rows.map {
@@ -91,7 +91,7 @@ import AppKit
                 } else {
                     lines += people(
                         Analysis.people(scoped, canonicalRecords: records)
-                            .filter { matches("\($0.name) \($0.email)", navigation.activity.query) })
+                            .filter { matches("\($0.name) \($0.email)", navigation.activityPeopleQuery) })
                 }
             case .related:
                 lines += [
@@ -104,7 +104,6 @@ import AppKit
                         records, scope: navigation.scope, mode: navigation.relatedMode,
                         workAreas: configuration.workAreas
                     )
-                    .filter { matches(scopeName($0.scope), navigation.activity.query) }
                     .map { [escaped(scopeName($0.scope)), "\($0.count)"] })
             }
         case .contributors:
