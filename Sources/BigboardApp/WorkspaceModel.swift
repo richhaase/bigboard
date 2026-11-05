@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Observation
 
@@ -126,17 +125,7 @@ final class WorkspaceModel {
         return task
     }
     private func selected(_ repositories: [Repository]) -> [Repository] {
-        let configured = Set(configuration.repositories)
-        let excluded = Set(configuration.excludedRepositories)
-        let group = activeGroup.isEmpty ? nil : Set(configuration.groups[activeGroup] ?? [])
-        return repositories.filter { repo in
-            if !configured.contains(repo.id) || excluded.contains(repo.id) { return false }
-            if let group, !group.contains(repo.id) { return false }
-            let name = String(repo.id.split(separator: "/").last ?? "")
-            return !configuration.exclude.contains { pattern in
-                fnmatch(pattern, repo.id, 0) == 0 || fnmatch(pattern, name, 0) == 0
-            }
-        }
+        configuration.collected(repositories, group: activeGroup)
     }
     private func performRefresh(operation: Int) async {
         guard operation == generation, let history, let github, !account.isEmpty else { return }

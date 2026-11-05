@@ -229,6 +229,36 @@ mirrors and parsed scans live in Caches. The app never scans developer checkouts
 that a repository is unavailable. Removal affects the owned local mirror, not
 GitHub. Settings discovery and cached-history mode alone do not authorize it.
 
+## Command line
+
+`bigboard` is the app's own executable, installed on your PATH by the Homebrew
+cask. With no arguments it opens Bigboard. Commands use the active GitHub CLI
+account and the same settings and caches as the app, so they can run while the
+app is open.
+
+| Command | Result |
+| --- | --- |
+| `bigboard` or `bigboard open` | Open the app. |
+| `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
+| `bigboard activity [options]` | Summarize recorded change from cached history: totals, repositories, top paths, and people. |
+| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch collected repositories with the GitHub CLI token. |
+| `bigboard help`, `bigboard version` | Show usage or the version. |
+
+`activity` options:
+
+- `--days N`: days to include. Defaults to the app's range; `0` includes all history.
+- `--repo OWNER/NAME`: limit to a collected repository; repeat for several.
+- `--group NAME`: limit to a saved repository group.
+- `--top N`: rows per section (default 10).
+- `--include-bots`: include bot accounts, which are hidden by default.
+- `--json`: print JSON with snake_case keys. People are identified by name only;
+  email addresses are omitted.
+
+`activity` reads cached history and makes no network requests. Run `refresh`
+first, or let the app refresh, for current evidence. Repositories without cached
+history are listed under incomplete evidence and the command exits with status 2.
+Usage errors exit with status 64.
+
 ## Troubleshooting
 
 | Symptom | What to check |

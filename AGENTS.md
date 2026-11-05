@@ -7,6 +7,7 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
 - `Bigboard.xcodeproj`: app target and development/release schemes.
 - `Package.swift`: application library and test targets.
 - `Sources/BigboardApp`: interface, navigation, and workspace orchestration.
+- `Sources/BigboardCLI`: the `bigboard` command, dispatched from the app executable.
 - `Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
 - `Tests`: native tests; `scripts`: app packaging and release checks.
 

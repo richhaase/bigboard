@@ -27,11 +27,13 @@ cask "bigboard" do
   depends_on formula: "gh"
 
   app "Bigboard.app"
+  binary "#{appdir}/Bigboard.app/Contents/MacOS/Bigboard", target: "bigboard"
 
   caveats <<~EOS
     Bigboard requires Git for repository history (Homebrew or Xcode Git).
     Install Git if it is missing before opening Bigboard.
     Run `gh auth login` before opening Bigboard; it uses the active GitHub CLI account.
+    Run `bigboard` to open the app, or `bigboard help` for terminal commands.
   EOS
 end
 CASK

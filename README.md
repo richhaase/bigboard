@@ -54,6 +54,21 @@ Heat Maps shows activity across the selected range.
 Activity, Contributors, and Pull requests provide the supporting detail.
 Activity describes recorded changes, not productivity.
 
+## Command line
+
+The Homebrew cask also installs `bigboard`. Run it with no arguments to open the
+app, or use a command:
+
+```sh
+bigboard status            # GitHub CLI account and collected repositories
+bigboard activity          # recorded change from cached history
+bigboard activity --days 30 --json
+bigboard refresh           # fetch collected repositories
+```
+
+Commands use the same account, settings, and caches as the app. See the
+[user reference](docs/reference.md#command-line) for options.
+
 See the [user reference](docs/reference.md) for workflows, keyboard shortcuts,
 data interpretation, and troubleshooting.
 
