@@ -30,14 +30,6 @@ actor GitHistory {
     static func validID(_ id: String) -> Bool {
         canonicalGitHubRepository(id) != nil && !id.hasPrefix("-")
     }
-    private func location(_ id: String) throws -> URL {
-        guard Self.validID(id) else {
-            throw BigboardError.message("Repository must use a valid owner/name identifier.")
-        }
-        let path = root.appendingPathComponent("github.com").appendingPathComponent(id + ".git")
-        try safePath(path)
-        return path
-    }
     private func safePath(_ path: URL) throws {
         guard path.standardizedFileURL.path.hasPrefix(root.path + "/") || path.standardizedFileURL == root
         else { throw BigboardError.message("Repository is outside Bigboard's cache.") }
@@ -82,102 +74,45 @@ actor GitHistory {
         try Task.checkCancellation()
         return lock
     }
-    private func verify(_ path: URL, id: String) async throws {
-        try safePath(path)
-        let marker = path.appendingPathComponent("bigboard-cache")
-        guard (try? String(contentsOf: marker, encoding: .utf8)) == id + "\n" else {
-            throw BigboardError.message("Cache ownership could not be verified for \(id).")
-        }
-        guard
-            let enumerator = FileManager.default.enumerator(
-                at: path, includingPropertiesForKeys: [.isSymbolicLinkKey])
-        else { throw BigboardError.message("Cannot inspect repository cache.") }
-        while let item = enumerator.nextObject() as? URL {
-            try Task.checkCancellation()
-            if try item.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true {
-                throw BigboardError.message("Repository cache contains a symbolic link.")
+    static let remoteBase = "https://github.com/"
+    static func scanRevision(_ repo: Repository) -> String { "refs/remotes/\(repo.remote)/\(repo.branch)" }
+    static func validRemote(_ name: String) -> Bool {
+        !name.isEmpty && name.utf8.count <= 100 && !name.hasPrefix("-") && !name.contains("..")
+            && name.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || "-_./".unicodeScalars.contains($0)
             }
-        }
-        for name in [
-            "commondir", "gitdir", ".git", "config.worktree", "shallow", "objects/info/alternates",
-            "objects/info/http-alternates",
-        ] {
-            if FileManager.default.fileExists(atPath: path.appendingPathComponent(name).path) {
-                throw BigboardError.message("Cache must be a complete independent bare repository.")
-            }
-        }
-        let configData = try await GitProcess.run(
-            ["--git-dir=" + path.path, "config", "--local", "--no-includes", "--null", "--list"],
-            limit: 1024 * 1024)
-        var origins: [String] = []
-        for entry in String(decoding: configData, as: UTF8.self).split(separator: "\0") {
-            let pieces = entry.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-                .map(String.init)
-            let key = pieces[0].lowercased(), value = pieces.count > 1 ? pieces[1] : ""
-            if key == "remote.origin.url" { origins.append(value) }
-            if key.hasPrefix("include.") || key.hasPrefix("includeif.") || key.hasPrefix("url.")
-                || key.hasPrefix("credential.") || key.hasPrefix("http.") || key.hasSuffix(".proxy")
-                || ["core.worktree", "core.sshcommand", "core.gitproxy"].contains(key)
-                || key.hasPrefix("extensions.") || key.hasSuffix(".promisor")
-                || key.hasSuffix(".partialclonefilter")
-            {
-                throw BigboardError.message("Repository cache has unsupported configuration.")
-            }
-        }
-        guard origins == ["https://github.com/\(id).git"],
-            try await GitProcess.text(["--git-dir=" + path.path, "rev-parse", "--is-bare-repository"])
-                == "true"
-        else { throw BigboardError.message("Repository cache origin or format does not match \(id).") }
     }
-    private func initializeCache(_ path: URL, id: String) async throws {
-        try FileManager.default.createDirectory(
-            at: path, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        _ = try await GitProcess.run(["init", "--bare", "--quiet", "--template=", path.path])
-        try Data((id + "\n").utf8).write(to: path.appendingPathComponent("bigboard-cache"), options: .atomic)
-        _ = try await GitProcess.run([
-            "--git-dir=" + path.path, "config", "remote.origin.url", "https://github.com/\(id).git",
-        ])
+    private func gitDirectory(_ repo: Repository) throws -> URL {
+        guard Self.validID(repo.id), repo.path.hasPrefix("/"), Self.validRemote(repo.remote) else {
+            throw BigboardError.message("Repository clone is not configured.")
+        }
+        let url = URL(fileURLWithPath: repo.path).standardizedFileURL
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directory), directory.boolValue else {
+            throw BigboardError.message("The local clone at \(repo.path) is missing. Refresh the repository list.")
+        }
+        return url
     }
-    private func fetchCache(_ path: URL, repo: Repository, token: String, empty: Bool) async throws -> String
-    {
-        let prefix = ["--git-dir=" + path.path]
-        let remote = "refs/remotes/origin/" + repo.branch, head = "refs/heads/" + repo.branch
-        let spec = "+refs/heads/" + repo.branch + ":" + remote
-        var oid = ""
-        if !empty {
-            _ = try await GitProcess.run(
-                prefix + [
-                    "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
-                    "--no-auto-maintenance", "--refmap=", "https://github.com/\(repo.id).git", spec,
-                ], token: token, timeout: GitProcess.transferTimeout)
-            oid = try await GitProcess.text(
-                prefix + ["rev-parse", "--verify", "--end-of-options", remote + "^{commit}"])
-            guard Self.validOID(oid) else {
-                throw BigboardError.message("Git returned an invalid default-branch revision.")
-            }
-            _ = try await GitProcess.run(prefix + ["update-ref", head, oid])
-            _ = try await GitProcess.run(prefix + ["symbolic-ref", "refs/remotes/origin/HEAD", remote])
+    private func checkBranch(_ repo: Repository) async throws {
+        guard !repo.branch.isEmpty else {
+            throw BigboardError.message("The default branch is unknown. Refresh to fetch it from GitHub.")
         }
-        for (key, value) in [("remote.origin.fetch", spec), ("remote.origin.tagOpt", "--no-tags")] {
-            if (try? await GitProcess.text(prefix + ["config", "--get", key])) != value {
-                _ = try await GitProcess.run(prefix + ["config", "--replace-all", key, value])
-            }
+        _ = try await GitProcess.run(["check-ref-format", "refs/heads/" + repo.branch])
+    }
+    static let networkConfigurationPrefixes = ["http.", "url.", "credential.", "include.", "includeif."]
+    static func overridesNetwork(_ configuration: String) -> Bool {
+        configuration.split(separator: "\0").contains { entry in
+            let key = entry.split(separator: "\n", maxSplits: 1).first.map { $0.lowercased() } ?? ""
+            return networkConfigurationPrefixes.contains { key.hasPrefix($0) } || key.hasSuffix(".proxy")
         }
-        _ = try await GitProcess.run(prefix + ["symbolic-ref", "HEAD", head])
-        let refs = try await GitProcess.text(prefix + ["for-each-ref", "--format=%(refname)"])
-        for ref in refs.split(separator: "\n").map(String.init)
-        where empty || ![remote, head, "refs/remotes/origin/HEAD"].contains(ref) {
-            _ = try await GitProcess.run(prefix + ["update-ref", "--no-deref", "-d", ref])
-        }
-        if !empty {
-            _ = try await GitProcess.run(
-                prefix + ["-c", "gc.auto=6700", "-c", "gc.autoDetach=false", "gc", "--auto", "--quiet"],
-                timeout: GitProcess.transferTimeout)
-            _ = try await GitProcess.run(
-                prefix + ["fsck", "--connectivity-only", "--no-dangling"], timeout: GitProcess.transferTimeout,
-                limit: 1024 * 1024)
-        }
-        return oid
+    }
+    static func fetchArguments(_ repo: Repository, gitDirectory: String) -> [String] {
+        [
+            "--git-dir=" + gitDirectory, "-c", "fetch.writeCommitGraph=false", "-c", "fetch.recurseSubmodules=false",
+            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", remoteBase + repo.id + ".git",
+            "+refs/heads/\(repo.branch):" + scanRevision(repo),
+        ]
     }
     func refresh(_ repo: Repository, token: String) async throws -> Repository {
         guard !active.contains(repo.id) else {
@@ -190,194 +125,53 @@ actor GitHistory {
         defer { active.remove(repo.id) }
         let lock = try await acquire(repo.id)
         defer { lock.release() }
-        let destination = try location(repo.id)
-        guard !repo.branch.isEmpty else { throw BigboardError.message("Repository has no default branch.") }
-        _ = try await GitProcess.run(["check-ref-format", "refs/heads/" + repo.branch])
-        let manager = FileManager.default
-        try manager.createDirectory(
-            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        try safePath(destination)
-        let exists = manager.fileExists(atPath: destination.path)
-        if exists { try await verify(destination, id: repo.id) }
-        let probe = try await GitProcess.text(
-            [
-                "ls-remote", "--symref", "https://github.com/\(repo.id).git", "HEAD",
-                "refs/heads/" + repo.branch,
-            ], token: token)
-        let expected =
-            probe.split(separator: "\n")
-            .compactMap { line -> String? in
-                let parts = line.split(separator: "\t", maxSplits: 1)
-                return parts.count == 2 && parts[1] == "refs/heads/" + repo.branch
-                    && Self.validOID(String(parts[0])) ? String(parts[0]) : nil
-            }
-            .first ?? ""
-        guard !expected.isEmpty || probe.isEmpty else {
+        let directory = try gitDirectory(repo)
+        let git = ["--git-dir=" + directory.path]
+        let local = try await GitProcess.run(
+            git + ["config", "--local", "--no-includes", "--null", "--list"], limit: 1024 * 1024)
+        guard !Self.overridesNetwork(String(decoding: local, as: UTF8.self)) else {
             throw BigboardError.message(
-                "The default branch changed during refresh. Refresh repository access and try again.")
+                "Not fetched: this clone's Git config sets network, credential, or include options. Fetch it yourself; its local history is still shown."
+            )
         }
-        var replace = !exists
-        if exists {
-            do {
-                _ = try await GitProcess.run(
-                    ["--git-dir=" + destination.path, "fsck", "--connectivity-only", "--no-dangling"],
-                    timeout: GitProcess.transferTimeout, limit: 1024 * 1024)
-            } catch is GitCommandFailure { replace = true }
-            if !replace {
-                let local =
-                    (try? await GitProcess.text([
-                        "--git-dir=" + destination.path, "rev-parse", "--verify", "HEAD^{commit}",
-                    ])) ?? ""
-                let branch = try await GitProcess.text([
-                    "--git-dir=" + destination.path, "symbolic-ref", "HEAD",
-                ])
-                if local == expected && branch == "refs/heads/" + repo.branch {
-                    var result = repo
-                    result.revision = expected
-                    result.stale = false
-                    result.error = ""
-                    return result
-                }
-            }
+        var result = repo
+        if result.branch.isEmpty {
+            let probe = try await GitProcess.text(
+                ["ls-remote", "--symref", Self.remoteBase + repo.id + ".git", "HEAD"], token: token)
+            guard let line = probe.split(separator: "\n").first(where: { $0.hasPrefix("ref: refs/heads/") }),
+                let name = line.dropFirst("ref: refs/heads/".count).split(separator: "\t").first
+            else { throw BigboardError.message("GitHub did not report a default branch.") }
+            result.branch = String(name)
         }
-        let path =
-            replace
-            ? destination.deletingLastPathComponent()
-                .appendingPathComponent(".bigboard-clone-" + UUID().uuidString) : destination
-        do {
-            if replace { try await initializeCache(path, id: repo.id) }
-            let oid = try await fetchCache(path, repo: repo, token: token, empty: expected.isEmpty)
-            if replace {
-                try await verify(path, id: repo.id)
-                try safePath(destination)
-                try Task.checkCancellation()
-                if exists {
-                    let backup = destination.deletingLastPathComponent()
-                        .appendingPathComponent(".bigboard-replaced-" + UUID().uuidString)
-                    try manager.moveItem(at: destination, to: backup)
-                    do { try manager.moveItem(at: path, to: destination) } catch {
-                        try? manager.moveItem(at: backup, to: destination)
-                        throw error
-                    }
-                    try? manager.removeItem(at: backup)
-                } else {
-                    try manager.moveItem(at: path, to: destination)
-                }
-            }
-            var result = repo
-            result.revision = oid
-            result.stale = false
-            result.error = ""
-            return result
-        } catch {
-            if replace { try? manager.removeItem(at: path) }
-            throw error
-        }
+        try await checkBranch(result)
+        _ = try await GitProcess.run(
+            Self.fetchArguments(result, gitDirectory: directory.path), token: token,
+            timeout: GitProcess.transferTimeout)
+        let revision = try await GitProcess.text(
+            git + ["rev-parse", "--verify", "--end-of-options", Self.scanRevision(result) + "^{commit}"])
+        guard Self.validOID(revision) else { throw BigboardError.message("Git returned an invalid revision.") }
+        result.revision = revision
+        result.stale = false
+        result.error = ""
+        return result
     }
     private func scanPath(_ id: String) -> URL {
         root.appendingPathComponent("scans")
             .appendingPathComponent(
                 SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() + ".json")
     }
-    private func externalScanInputs(_ path: URL) async throws -> [Data] {
-        let prefix = ["--git-dir=" + path.path]
-        let config = try await GitProcess.run(
-            prefix + ["config", "--local", "--no-includes", "--null", "--list"], limit: 1024 * 1024)
-        var inputs: [Data] = []
-        func appendFile(_ key: String, _ value: String) throws {
-            let name = (value as NSString).expandingTildeInPath
-            let url = (name.hasPrefix("/") ? URL(fileURLWithPath: name) : path.appendingPathComponent(name))
-                .resolvingSymlinksInPath()
-            inputs.append(Data((key + "\0" + url.path).utf8))
-            if url.path == "/dev/null" {
-                inputs.append(Data())
-                return
-            }
-            guard FileManager.default.fileExists(atPath: url.path) else {
-                inputs.append(Data("missing".utf8))
-                return
-            }
-            let info = try FileManager.default.attributesOfItem(atPath: url.path)
-            guard info[.type] as? FileAttributeType == .typeRegular,
-                (info[.size] as? NSNumber)?.intValue ?? 0 <= 16 * 1024 * 1024
-            else { throw BigboardError.message("Git scan configuration references an unsupported file.") }
-            inputs.append(try Data(contentsOf: url))
-        }
-        for entry in String(decoding: config, as: UTF8.self).split(separator: "\0") {
-            let pieces = entry.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-                .map(String.init)
-            guard pieces.count == 2,
-                ["mailmap.file", "core.attributesfile", "diff.orderfile"].contains(pieces[0].lowercased()),
-                !pieces[1].isEmpty
-            else { continue }
-            let value = try await GitProcess.run(
-                prefix + ["config", "--local", "--no-includes", "--null", "--path", "--get", pieces[0]],
-                limit: 1024 * 1024)
-            let name = String(decoding: value, as: UTF8.self)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
-            try appendFile(pieces[0], name)
-        }
-        for key in ["GIT_ATTR_SYSTEM", "GIT_ATTR_GLOBAL"] {
-            let data = try await GitProcess.run(prefix + ["var", key], limit: 1024 * 1024)
-            var name = String(decoding: data, as: UTF8.self)
-            if name.hasSuffix("\n") { name.removeLast() }
-            if !name.isEmpty { try appendFile(key, name) }
-        }
-        return inputs
-    }
     private func fingerprint(
-        _ path: URL, revision: String, configuration: WorkspaceConfiguration, version: String,
-        externalInputs: [Data]
+        _ repo: Repository, revision: String, attributes: Data, configuration: WorkspaceConfiguration,
+        version: String
     ) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var hasher = SHA256()
-        hasher.update(data: Data((revision + "\0" + version).utf8))
+        hasher.update(data: Data("clone-v1\0\(revision)\0\(version)\0\(repo.partial)\0\(repo.shallow)".utf8))
         hasher.update(data: try encoder.encode(configuration))
-        for data in externalInputs {
-            hasher.update(data: Data("\(data.count):".utf8))
-            hasher.update(data: data)
-        }
-        let manager = FileManager.default
-        guard
-            let enumerator = manager.enumerator(
-                at: path,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
-        else { throw BigboardError.message("Cannot inspect scan inputs.") }
-        var entries: [URL] = []
-        while let item = enumerator.nextObject() as? URL {
-            try Task.checkCancellation()
-            entries.append(item)
-        }
-        entries.sort { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) }
-        for item in entries {
-            try Task.checkCancellation()
-            let values = try item.resourceValues(forKeys: [
-                .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
-            ])
-            guard values.isRegularFile == true else { continue }
-            hasher.update(
-                data: Data(
-                    "\(item.path):\(values.fileSize ?? 0):\(values.contentModificationDate?.timeIntervalSince1970 ?? 0)"
-                        .utf8))
-            if !item.path.hasPrefix(path.appendingPathComponent("objects").path + "/") {
-                hasher.update(data: try Data(contentsOf: item))
-            }
-        }
+        hasher.update(data: Data("\(attributes.count):".utf8))
+        hasher.update(data: attributes)
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-    private func scanFingerprint(
-        _ path: URL, revision: String, configuration: WorkspaceConfiguration, version: String
-    ) async throws -> String? {
-        do {
-            return try fingerprint(
-                path, revision: revision, configuration: configuration, version: version,
-                externalInputs: try await externalScanInputs(path))
-        } catch {
-            try Task.checkCancellation()
-            return nil
-        }
     }
     func scan(_ repo: Repository, configuration: WorkspaceConfiguration) async throws -> (
         Repository, [Commit]
@@ -389,80 +183,82 @@ actor GitHistory {
         defer { active.remove(repo.id) }
         let lock = try await acquire(repo.id)
         defer { lock.release() }
-        let path = try location(repo.id)
-        try await verify(path, id: repo.id)
-        let prefix = ["--git-dir=" + path.path]
-        let refs = try await GitProcess.text(prefix + ["for-each-ref", "--format=%(refname)"])
-        if refs.isEmpty {
-            var result = repo
-            result.revision = ""
-            result.scannedAt = repo.scannedAt ?? Date()
-            return (result, [])
+        let directory = try gitDirectory(repo)
+        try await checkBranch(repo)
+        let git = [
+            "--git-dir=" + directory.path, "-c", "core.bare=true", "-c", "mailmap.file=", "-c",
+            "core.attributesFile=/dev/null",
+        ]
+        let ref = Self.scanRevision(repo)
+        guard
+            let revision = try? await GitProcess.text(
+                git + ["rev-parse", "--verify", "--quiet", "--end-of-options", ref + "^{commit}"]),
+            Self.validOID(revision)
+        else {
+            throw BigboardError.message("\(ref) has not been fetched yet. Refresh to fetch it from GitHub.")
         }
-        let revision = try await GitProcess.text(prefix + ["rev-parse", "--verify", "HEAD^{commit}"])
-        guard Self.validOID(revision) else {
-            throw BigboardError.message("Repository has an invalid scan revision.")
-        }
-        let version = try await GitProcess.text(["--version"])
-        let key = try await scanFingerprint(
-            path, revision: revision, configuration: configuration, version: version)
-        let cachePath = scanPath(repo.id)
-        try safePath(cachePath)
-        if let key,
-            let cache = try? HistoryScanCache.read(
-                cachePath, limits: limits, checkpoint: { try Task.checkCancellation() }), cache.schema == 2,
-            cache.fingerprint == key
-        {
-            try Task.checkCancellation()
-            var result = repo
-            result.revision = revision
-            result.scannedAt = cache.scannedAt
-            if let skipped = cache.skipped, skipped > 0 { result.error = Self.skippedCommitsMessage(skipped) }
-            return (result, cache.records)
-        }
-        let attributes: [AttributeRule]
         let listing =
             configuration.allFiles
             ? ""
             : try await GitProcess.text(
-                prefix + ["ls-tree", "--name-only", "--end-of-options", revision, "--", ".gitattributes"])
-        if listing.isEmpty {
-            attributes = []
-        } else {
-            let data = try await GitProcess.run(
-                prefix + ["cat-file", "blob", revision + ":.gitattributes"],
-                limit: HistoryRules.maximumAttributeBytes)
-            attributes = try HistoryRules.attributes(
-                String(decoding: data, as: UTF8.self), checkpoint: { try Task.checkCancellation() })
+                git + ["ls-tree", "--name-only", "--end-of-options", revision, "--", ".gitattributes"])
+        let attributeData =
+            listing.isEmpty
+            ? Data()
+            : try await GitProcess.run(
+                git + ["cat-file", "blob", revision + ":.gitattributes"], limit: HistoryRules.maximumAttributeBytes)
+        let version = try await GitProcess.text(["--version"])
+        let key = try fingerprint(
+            repo, revision: revision, attributes: attributeData, configuration: configuration, version: version)
+        let cachePath = scanPath(repo.id)
+        try safePath(cachePath)
+        func finish(_ records: [Commit], skipped: Int, scannedAt: Date) -> (Repository, [Commit]) {
+            var result = repo
+            result.revision = revision
+            result.scannedAt = scannedAt
+            var notes: [String] = []
+            if skipped > 0 { notes.append(Self.skippedCommitsMessage(skipped)) }
+            if repo.shallow { notes.append("Shallow clone: earlier history is not available locally.") }
+            if repo.partial { notes.append("Partial clone: line counts and paths are unknown.") }
+            if !notes.isEmpty { result.error = notes.joined(separator: " ") }
+            return (result, records)
         }
+        if let cache = try? HistoryScanCache.read(
+            cachePath, limits: limits, checkpoint: { try Task.checkCancellation() }), cache.schema == 3,
+            cache.fingerprint == key
+        {
+            try Task.checkCancellation()
+            return finish(cache.records, skipped: cache.skipped ?? 0, scannedAt: cache.scannedAt)
+        }
+        let attributes = try HistoryRules.attributes(
+            String(decoding: attributeData, as: UTF8.self), checkpoint: { try Task.checkCancellation() })
         let parser = GitLogParser(repo: repo.id, configuration: configuration, attributes: attributes)
-        let args = [
+        var args = [
+            "-c", "mailmap.blob=" + revision + ":.mailmap",
             "log", "--no-merges", "--root", "-M50%", "-C50%", "-l0", "--no-ext-diff", "--no-textconv",
             "--no-color", "--no-relative", "--no-show-signature", "--diff-algorithm=myers",
             "--no-indent-heuristic", "--ignore-submodules=none",
             "--format=%x00%H%x00%aN%x00%aE%x00%at%x00%(trailers:key=Co-authored-by,valueonly,separator=%x1f)%x00%s%x00",
-            "--numstat", "-z", revision, "--",
         ]
+        if !repo.partial { args.append("--numstat") }
+        args += ["-z", revision, "--"]
         _ = try await GitProcess.run(
-            prefix + args, timeout: GitProcess.transferTimeout, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
-        let records = try parser.finish()
-        try Task.checkCancellation()
-        let after = try await GitProcess.text(prefix + ["rev-parse", "--verify", "HEAD^{commit}"])
-        var result = repo
-        result.revision = after == revision ? revision : ""
-        result.scannedAt = Date()
-        if parser.skipped > 0 { result.error = Self.skippedCommitsMessage(parser.skipped) }
-        if let key, after == revision,
-            try await scanFingerprint(
-                path, revision: revision, configuration: configuration, version: version) == key
-        {
-            let cache = HistoryScanCache(
-                schema: 2, fingerprint: key, scannedAt: result.scannedAt!, records: records,
-                skipped: parser.skipped)
-            _ = try? cache.write(to: cachePath, limits: limits, checkpoint: { try Task.checkCancellation() })
+            git + args, timeout: GitProcess.transferTimeout,
+            stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
+        var records = try parser.finish()
+        if repo.partial {
+            for index in records.indices {
+                records[index].linesUnknown = true
+                records[index].pathsUnknown = true
+            }
         }
         try Task.checkCancellation()
-        return (result, records)
+        let scannedAt = Date()
+        let cache = HistoryScanCache(
+            schema: 3, fingerprint: key, scannedAt: scannedAt, records: records, skipped: parser.skipped)
+        _ = try? cache.write(to: cachePath, limits: limits, checkpoint: { try Task.checkCancellation() })
+        try Task.checkCancellation()
+        return finish(records, skipped: parser.skipped, scannedAt: scannedAt)
     }
     static func skippedCommitsMessage(_ count: Int) -> String {
         switch count {
@@ -470,55 +266,14 @@ actor GitHistory {
         default: "Skipped \(count) commits with unreadable author dates."
         }
     }
-    func cachedRepositories() async throws -> [Repository] {
-        let host = root.appendingPathComponent("github.com")
-        try safePath(host)
-        guard FileManager.default.fileExists(atPath: host.path) else { return [] }
-        var result: [Repository] = []
-        for owner in try FileManager.default.contentsOfDirectory(
-            at: host, includingPropertiesForKeys: [.isDirectoryKey])
-        {
-            try safePath(owner)
-            guard try owner.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { continue }
-            for path in try FileManager.default.contentsOfDirectory(
-                at: owner, includingPropertiesForKeys: [.isDirectoryKey]) where path.pathExtension == "git"
-            {
-                let id = owner.lastPathComponent + "/" + path.deletingPathExtension().lastPathComponent
-                let lock = try await acquire(id)
-                defer { lock.release() }
-                try await verify(path, id: id)
-                let ref = try await GitProcess.text(["--git-dir=" + path.path, "symbolic-ref", "HEAD"])
-                result.append(Repository(id: id, branch: String(ref.dropFirst("refs/heads/".count))))
-            }
-        }
-        return result.sorted { Analysis.literalLess($0.id, $1.id) }
-    }
-    func remove(_ id: String) async throws {
-        guard !active.contains(id) else {
-            throw BigboardError.message("Repository operation is already running.")
-        }
-        active.insert(id)
-        defer { active.remove(id) }
-        let lock = try await acquire(id)
-        defer { lock.release() }
-        let path = try location(id)
-        try await verify(path, id: id)
-        try safePath(path)
-        try Task.checkCancellation()
-        try FileManager.default.removeItem(at: path)
-        let scan = scanPath(id)
-        try safePath(scan)
-        if FileManager.default.fileExists(atPath: scan.path) { try FileManager.default.removeItem(at: scan) }
-    }
     func pathURL(repo: Repository, path literal: String) async throws -> URL {
         let lock = try await acquire(repo.id)
         defer { lock.release() }
-        let directory = try location(repo.id)
-        try await verify(directory, id: repo.id)
+        let directory = try gitDirectory(repo)
         guard Self.validOID(repo.revision) else {
             throw BigboardError.message("The retained scan revision is unavailable. Refresh and try again.")
         }
-        if literal.isEmpty { return URL(string: "https://github.com/" + repo.id)! }
+        if literal.isEmpty { return URL(string: Self.remoteBase + repo.id)! }
         guard
             literal.split(separator: "/", omittingEmptySubsequences: false)
                 .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\0") })
@@ -529,7 +284,7 @@ actor GitHistory {
         guard ["blob", "tree"].contains(type) else {
             throw BigboardError.message("This path is absent at the retained scan revision.")
         }
-        var url = URL(string: "https://github.com/" + repo.id)!
+        var url = URL(string: Self.remoteBase + repo.id)!
             .appendingPathComponent(type == "tree" ? "tree" : "blob").appendingPathComponent(repo.revision)
         for part in literal.split(separator: "/") { url.appendPathComponent(String(part)) }
         return url

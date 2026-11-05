@@ -17,8 +17,10 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
   filters only affect viewing; Settings controls saved collection choices.
 - Use atomic, account-scoped storage. Keep durable data in Application
   Support and rebuildable history in Caches. GitHub access comes only from the
-  GitHub CLI (`gh auth token`); Bigboard stores no credentials. Operate only on
-  app-owned Git caches, never developer checkouts.
+  GitHub CLI (`gh auth token`); Bigboard stores no credentials. History comes from
+  the user's own clones: only fetch into `refs/remotes/<remote>/<default branch>`,
+  and never write branches, the index, the working tree, or config, or run gc or
+  other maintenance in them.
 - Preserve cancellation, access checks, identity rules, and honest stale/partial
   coverage. Update affected projections and tests when changing data models.
 - Do not add source comments unless requested. Keep signing settings and

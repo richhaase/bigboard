@@ -28,14 +28,17 @@ brew upgrade --cask richhaase/tap/bigboard
 
 1. Run `gh auth login` in Terminal if you haven't already.
 2. Open Bigboard. It uses the active GitHub CLI account.
-3. Open **Settings → Repositories**, select the repositories to collect, and
+3. Choose the folders that hold your Git clones. You can change them later in
+   **Settings → Repositories**.
+4. In **Settings → Repositories**, select the repositories to collect, and
    click **Apply**.
 
-Bigboard loads Git history and pull request evidence directly from GitHub using
-the GitHub CLI token. Organization access policies, including SSO authorization
-for the GitHub CLI, still apply. Bigboard stores no credentials of its own.
-Settings and cached history persist between launches and upgrades. Git history
-uses app-owned caches; developer checkouts are untouched.
+Bigboard reads Git history from your own clones in the source folders you
+choose and loads pull request
+evidence from GitHub with the GitHub CLI token. Refresh fetches only each clone's
+remote-tracking default branch; it never changes your branches, index, or working
+files. Bigboard stores no credentials of its own. Settings and parsed history
+persist between launches and upgrades.
 
 ## Explore
 
@@ -61,9 +64,9 @@ app, or use a command:
 
 ```sh
 bigboard status            # GitHub CLI account and collected repositories
-bigboard activity          # recorded change from cached history
+bigboard activity          # recorded change in your clones' default branches
 bigboard activity --days 30 --json
-bigboard refresh           # fetch collected repositories
+bigboard refresh           # fetch each clone's remote-tracking default branch
 ```
 
 Commands use the same account, settings, and caches as the app. See the

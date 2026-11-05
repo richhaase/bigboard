@@ -34,17 +34,13 @@ private struct CLIFixture {
         root = history.base.appendingPathComponent("workspace")
         storage = WorkspaceStorage(
             supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+        let empty = history.base.appendingPathComponent("empty-src")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         var configuration = WorkspaceConfiguration()
         configuration.repositories = ["owner/repo"]
         configuration.groups = ["Core": ["owner/repo"]]
+        configuration.sourceRoots = [cache ? history.sources.path : empty.path]
         try storage.saveConfiguration(configuration, account: "123")
-        try storage.saveGrant([Repository(id: "owner/repo", branch: "main")], account: "123")
-        if cache {
-            let destination = try storage.repositoryRoot("123").appendingPathComponent("github.com/owner/repo.git")
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: history.bare, to: destination)
-        }
     }
     func tool(
         token: CLITokenSource = CLITokenSource(), openFails: Bool = false,
@@ -94,14 +90,23 @@ struct CommandLineTests {
         defer { fixture.remove() }
         #expect(await fixture.tool().run(["status"]) == 0)
         #expect(fixture.captured.output.contains("GitHub CLI: fixture (123)"))
-        #expect(fixture.captured.output.contains("owner/repo  main  cached"))
+        #expect(fixture.captured.output.contains("owner/repo  main  "))
+        #expect(fixture.captured.output.contains("src/owner/repo\n"))
+        #expect(fixture.captured.output.contains("Sources:    /") && fixture.captured.output.contains("/src\n"))
         let json = try CLIFixture()
         defer { json.remove() }
         #expect(await json.tool().run(["status", "--json"]) == 0)
         let decoded = try JSONSerialization.jsonObject(with: Data(json.captured.output.utf8)) as? [String: Any]
         #expect(decoded?["account_id"] as? String == "123")
         let rows = decoded?["repositories"] as? [[String: Any]]
-        #expect(rows?.first?["id"] as? String == "owner/repo" && rows?.first?["cached"] as? Bool == true)
+        #expect(rows?.first?["id"] as? String == "owner/repo")
+        #expect(rows?.first?["clone"] as? String == (try json.history.gitDirectory()))
+        #expect(rows?.first?["shallow"] as? Bool == false && rows?.first?["partial"] as? Bool == false)
+        #expect((decoded?["source_folders"] as? [String])?.count == 1)
+        let missing = try CLIFixture(cache: false)
+        defer { missing.remove() }
+        #expect(await missing.tool().run(["status"]) == 0)
+        #expect(missing.captured.output.contains("owner/repo    no local clone found in source folders"))
     }
     @Test func activitySummarizesCachedHistory() async throws {
         let fixture = try CLIFixture()
@@ -142,20 +147,33 @@ struct CommandLineTests {
         #expect(await fixture.tool().run(arguments) == 64)
         #expect(fixture.captured.error.contains("Usage: bigboard"))
     }
+    @Test func missingSourceFoldersAreExplained() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        var configuration = try fixture.storage.loadConfiguration("123")
+        configuration.sourceRoots = []
+        try fixture.storage.saveConfiguration(configuration, account: "123")
+        #expect(await fixture.tool().run(["activity"]) == 1)
+        #expect(fixture.captured.error.contains("No source folders are set"))
+        #expect(await fixture.tool().run(["refresh"]) == 1)
+        #expect(await fixture.tool().run(["status"]) == 0)
+        #expect(fixture.captured.output.contains("Sources:    none. Choose folders in Bigboard Settings."))
+        #expect(fixture.captured.output.contains("no local clone found in source folders"))
+    }
     @Test func signedOutGitHubCLIExplainsWhatToRun() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
         #expect(await fixture.tool(token: CLITokenSource(nil)).run(["status"]) == 1)
         #expect(fixture.captured.error.contains("gh auth login"))
     }
-    @Test func refreshFetchesAvailableRepositoriesAndReportsTheRest() async throws {
+    @Test func refreshFetchesLocalClonesAndReportsMissingOnes() async throws {
         let fixture = try CLIFixture()
         defer { fixture.remove() }
         #expect(await fixture.tool().run(["refresh"]) == 0)
         #expect(fixture.captured.output.contains("owner/repo: 2 commits at aaaaaaaaaaaa"))
-        let missing = try CLIFixture()
+        let missing = try CLIFixture(cache: false)
         defer { missing.remove() }
-        #expect(await missing.tool(repositories: "[]").run(["refresh", "--repo", "owner/repo"]) == 2)
-        #expect(missing.captured.error.contains("owner/repo: not available to the GitHub CLI account"))
+        #expect(await missing.tool().run(["refresh", "--repo", "owner/repo"]) == 2)
+        #expect(missing.captured.error.contains("owner/repo: no local clone found in source folders"))
     }
 }

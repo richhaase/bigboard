@@ -86,6 +86,9 @@ final class WorkspaceStorage: @unchecked Sendable {
                 throw BigboardError.message("Repository must use lowercase owner/name: \(id)")
             }
         }
+        guard config.sourceRoots.count <= 32,
+            config.sourceRoots.allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") && $0.utf8.count <= 1024 })
+        else { throw BigboardError.message("Source folders must be absolute paths (up to 32).") }
         var identities = Set<String>()
         for (email, rule) in config.identities {
             for value in [email] + rule.aliases {

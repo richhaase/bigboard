@@ -108,7 +108,7 @@ struct HistoryCacheLimitTests {
     @Test func scanCanReturnCompleteHistoryWithoutReplacingAnOversizedCache() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
-        let repo = Repository(id: "owner/repo")
+        let repo = try fixture.repository()
         let original = try await GitHistory(root: fixture.root).scan(repo, configuration: WorkspaceConfiguration())
         let files = try FileManager.default.contentsOfDirectory(at: fixture.root.appendingPathComponent("scans"), includingPropertiesForKeys: nil)
         let url = try #require(files.first)

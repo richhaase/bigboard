@@ -30,7 +30,7 @@ struct StartupTests {
         defer { try? FileManager.default.removeItem(at: history.base) }
         for account in ["123", "456"] {
             try fixture.saveWorkspace(account: account)
-            try fixture.installCache(history, account: account)
+            try fixture.installClone(history, account: account)
         }
 
         for account in ["123", "456"] {
@@ -45,7 +45,7 @@ struct StartupTests {
             #expect(workspace.snapshot.repositories.map(\.id) == [fixture.repository(account: account)])
             #expect(workspace.snapshot.commits.count == 2)
             #expect(Set(workspace.snapshot.commits.map(\.repo)) == [fixture.repository(account: account)])
-            #expect(workspace.cachedRepositoryRows.map(\.id) == [fixture.repository(account: account)])
+            #expect(workspace.snapshot.repositories.first?.path == (try history.gitDirectory(history.cloneURL(fixture.repository(account: account)))))
             #expect(workspace.snapshot.cachedOnly && workspace.snapshot.coverage.phase == "ready")
             #expect(workspace.error.isEmpty)
             await workspace.shutdown()
@@ -68,7 +68,7 @@ struct StartupTests {
         #expect(!workspace.checkingSignIn && !workspace.busy && !workspace.authStatus.signedIn)
         #expect(workspace.snapshot.coverage.phase == "signin")
         #expect(workspace.snapshot.accountID.isEmpty && workspace.snapshot.repositories.isEmpty)
-        #expect(workspace.snapshot.commits.isEmpty && workspace.cachedRepositoryRows.isEmpty)
+        #expect(workspace.snapshot.commits.isEmpty && workspace.discovered.isEmpty)
         #expect(workspace.configuration == WorkspaceConfiguration())
         #expect(workspace.error == condition.localizedDescription)
         #expect(workspace.authStatus.configured == (condition != .missing))
@@ -90,7 +90,7 @@ struct StartupTests {
         #expect(workspace.authStatus.signedIn)
         #expect(!workspace.checkingSignIn && !workspace.busy && !workspace.error.isEmpty)
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-        #expect(workspace.cachedRepositoryRows.isEmpty)
+        #expect(workspace.discovered.isEmpty)
         #expect(await fixture.network.requests == 0)
         #expect(try fixture.savedFiles() == before)
     }
@@ -117,13 +117,13 @@ struct StartupTests {
     }
 
     @Test(arguments: [false, true])
-    func cachedRepositoryDoesNotReplaceMissingOrRevokedAccess(revoked: Bool) async throws {
+    func localCloneDoesNotReplaceMissingOrRevokedDiscovery(revoked: Bool) async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
         let history = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: history.base) }
         try fixture.saveWorkspace()
-        try fixture.installCache(history)
+        try fixture.installClone(history)
         let file = try fixture.storage.accountRoot("123").appendingPathComponent("access.json")
         if revoked { try fixture.storage.invalidateGrant("123") }
         else { try FileManager.default.removeItem(at: file) }
@@ -132,9 +132,7 @@ struct StartupTests {
 
         #expect(workspace.authStatus.signedIn && !workspace.checkingSignIn && !workspace.busy)
         #expect(workspace.configuration == fixture.configuration())
-        #expect(workspace.cachedRepositoryRows.map(\.id) == [fixture.repository()])
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-        #expect(workspace.removableCacheIDs.isEmpty)
         #expect(workspace.error.isEmpty)
         #expect(try fixture.storage.loadGrant("123").isEmpty)
         #expect(await fixture.network.requests == 0)
@@ -177,13 +175,10 @@ struct StartupTests {
         let auth = cliAuth(storage: storage, token: token, user: user, now: { now })
         return WorkspaceModel(storage: storage, authentication: auth, transport: network)
     }
-    func installCache(_ history: HistoryFixture, account: String = "123") throws {
+    func installClone(_ history: HistoryFixture, account: String = "123") throws {
         let id = repository(account: account)
-        let destination = try storage.repositoryRoot(account).appendingPathComponent("github.com/" + id + ".git")
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: history.bare, to: destination)
-        try Data((id + "\n").utf8).write(to: destination.appendingPathComponent("bigboard-cache"))
-        _ = try history.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
+        try history.addClone(id)
+        try storage.saveGrant([try history.repository(id)], account: account)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
 }

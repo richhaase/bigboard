@@ -63,3 +63,16 @@ func cliAuth(
     return GitHubCLIAuth(
         storage: storage, run: { try token.read($0) }, transport: transport, now: now)
 }
+@discardableResult func isolateSources(
+    _ storage: WorkspaceStorage, sources: URL, accounts: [String] = ["123"],
+    configure: (inout WorkspaceConfiguration) -> Void = { _ in }
+) throws -> URL {
+    try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+    for account in accounts {
+        var config = try storage.loadConfiguration(account)
+        config.sourceRoots = [sources.path]
+        configure(&config)
+        try storage.saveConfiguration(config, account: account)
+    }
+    return sources
+}

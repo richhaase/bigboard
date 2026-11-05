@@ -28,6 +28,7 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try isolateSources(storage, sources: root.appendingPathComponent("src"), accounts: ["123", "456"])
     let user = CLIUserTransport()
     let network = DelayedWorkspaceTransport()
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, user: user), transport: network)
@@ -39,7 +40,6 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     #expect(await network.count == 1)
     await workspace.refresh()
     #expect(await network.count == 1)
-    workspace.cachedRepositoryRows = [Repository(id: "private/repo")]
     workspace.discovered = [Repository(id: "private/repo")]
     workspace.activeGroup = "Old account"
     user.respond(login: "user456", account: "456")
@@ -50,26 +50,25 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     #expect(workspace.authStatus.signedIn && workspace.authStatus.accountID == "456")
     #expect(workspace.snapshot.accountID == "456" && workspace.snapshot.viewer == "user456")
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-    #expect(workspace.cachedRepositoryRows.isEmpty && workspace.discovered.isEmpty)
-    #expect(workspace.removableCacheIDs.isEmpty && workspace.activeGroup.isEmpty)
+    #expect(workspace.discovered.isEmpty && workspace.activeGroup.isEmpty)
     #expect(workspace.busy == false)
     #expect(try storage.loadGrant("123").isEmpty)
 }
 private actor SequenceWorkspaceTransport: GitHubTransport {
-    private var responses: [GitHubHTTPResponse]
-    init(_ statuses: [Int]) {
-        responses = statuses.map { GitHubHTTPResponse(status: $0, headers: [:], data: Data(($0 == 200 ? "[]" : "{}").utf8)) }
-    }
+    private var statuses: [Int]
+    init(_ statuses: [Int]) { self.statuses = statuses }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
-        if request.url?.path == "/user" { return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)) }
-        guard !responses.isEmpty else { throw GitHubFailure.unavailable }
-        return responses.removeFirst()
+        guard request.url?.path == "/user" else { throw GitHubFailure.unavailable }
+        let status = statuses.isEmpty ? 200 : statuses.removeFirst()
+        let body = status == 200 ? #"{"login":"fixture","id":123}"# : "{}"
+        return GitHubHTTPResponse(status: status, headers: [:], data: Data(body.utf8))
     }
 }
 @Test(arguments: [401, 403]) @MainActor func workspaceSeparatesAuthenticationAndRepositoryPermissionDenials(status: Int) async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try isolateSources(storage, sources: root.appendingPathComponent("src"))
     try storage.saveGrant([Repository(id: "private/repo")], account: "123")
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: SequenceWorkspaceTransport([status]))
     await workspace.start()
@@ -80,22 +79,22 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     if status == 401 {
         #expect(workspace.snapshot.coverage.phase == "signin")
         #expect(workspace.snapshot.accountID.isEmpty)
-        #expect(workspace.cachedRepositoryRows.isEmpty && workspace.discovered.isEmpty)
+        #expect(workspace.discovered.isEmpty)
     }
 }
 @Test @MainActor func settingsDiscoveryAuthenticationFailureInvalidatesSession() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try isolateSources(storage, sources: root.appendingPathComponent("src"))
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: SequenceWorkspaceTransport([200, 401]))
     await workspace.start()
     #expect(workspace.authStatus.signedIn)
-    workspace.cachedRepositoryRows = [Repository(id: "private/repo")]
     workspace.discovered = [Repository(id: "private/repo")]
     await workspace.discover()
     #expect(workspace.authStatus.signedIn == false)
     #expect(workspace.snapshot.coverage.phase == "signin")
-    #expect(workspace.cachedRepositoryRows.isEmpty && workspace.discovered.isEmpty)
+    #expect(workspace.discovered.isEmpty)
     #expect(try storage.loadGrant("123").isEmpty)
     await workspace.checkConnection()
     #expect(workspace.authStatus.signedIn && workspace.snapshot.accountID == "123")
@@ -137,19 +136,19 @@ private final class WaitingCLI: @unchecked Sendable {
     #expect(workspace.error == GitHubCLIFailure.signedOut.localizedDescription)
 }
 private actor ConfigurationWorkspaceTransport: GitHubTransport {
-    private var responses: [GitHubHTTPResponse]
+    private var failViewer: Bool
     private var waiter: CheckedContinuation<GitHubHTTPResponse, Never>?
     private(set) var count = 0
-    init(initialFailure: Bool = false) {
-        responses = [
-            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"[{"full_name":"owner/repo","default_branch":"main","archived":false,"pushed_at":"2026-10-31T12:00:00Z"}]"#.utf8))
-        ]
-        if initialFailure { responses.insert(GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8)), at: 0) }
-    }
+    init(initialFailure: Bool = false) { failViewer = initialFailure }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         count += 1
-        if request.url?.path == "/user" { return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)) }
-        if !responses.isEmpty { return responses.removeFirst() }
+        if request.url?.path == "/user" {
+            if failViewer {
+                failViewer = false
+                return GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8))
+            }
+            return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8))
+        }
         return await withCheckedContinuation { waiter = $0 }
     }
     func release() {
@@ -158,11 +157,12 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     }
 }
 @Test(arguments: [false, true]) @MainActor func configurationApplyReturnsAfterLocalSaveAndRefreshesIndependently(initialFailure: Bool) async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let history = try HistoryFixture()
+    defer { try? FileManager.default.removeItem(at: history.base) }
+    let storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
+    try isolateSources(storage, sources: history.sources)
     let network = ConfigurationWorkspaceTransport(initialFailure: initialFailure)
-    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo, _ in repo })
     await workspace.start()
     #expect(workspace.configuration.repositories.isEmpty)
     var draft = workspace.configuration; draft.repositories = ["owner/repo"]
@@ -172,7 +172,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(try storage.loadConfiguration("123") == draft)
     #expect(workspace.busy)
     #expect(workspace.snapshot.coverage.phase == "refreshing")
-    let expected = initialFailure ? 6 : 4
+    let expected = initialFailure ? 4 : 3
     for _ in 0..<100 {
         if await network.count == expected { break }
         try await Task.sleep(for: .milliseconds(5))
@@ -182,18 +182,19 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     await workspace.shutdown()
 }
 @Test @MainActor func configurationApplyFailurePreservesDraftAndSavedConfiguration() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    let history = try HistoryFixture()
+    defer { try? FileManager.default.removeItem(at: history.base) }
+    let storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
+    try isolateSources(storage, sources: history.sources)
     let network = ConfigurationWorkspaceTransport()
-    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo, _ in repo })
     await workspace.start()
     let original = workspace.configuration
     var unavailable = original; unavailable.repositories = ["other/private"]
     #expect(await workspace.saveConfiguration(unavailable) == false)
     #expect(unavailable.repositories == ["other/private"])
     #expect(workspace.configuration == original)
-    #expect(workspace.error.contains("other/private"))
+    #expect(workspace.error.contains("No local clone was found for: other/private"))
     var draft = original; draft.repositories = ["owner/repo"]
     let settingsURL = try storage.accountRoot("123").appendingPathComponent("workspace.json")
     try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -203,7 +204,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(draft.repositories == ["owner/repo"])
     #expect(workspace.error.contains("changed outside"))
     #expect(workspace.busy == false)
-    #expect(await network.count == 2)
+    #expect(await network.count == 1)
 }
 
 private actor ViewerWorkspaceTransport: GitHubTransport {
@@ -225,6 +226,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try isolateSources(storage, sources: root.appendingPathComponent("src"))
     let auth = cliAuth(storage: storage)
     let network = ViewerWorkspaceTransport([#"{"login":"fixture","id":123}"#, #"{"login":"renamed","id":123}"#])
     let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
@@ -242,12 +244,13 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     #expect(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["authored"])).map(\.number) == [1])
     #expect(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["requested"])).map(\.number) == [2])
     #expect(Set(Analysis.filterPRs(rows, viewer: workspace.snapshot.viewer, filters: PRFilters(mine: ["attention"])).map(\.number)) == [1, 2])
-    #expect(await network.count == 4)
+    #expect(await network.count == 2)
 }
 @Test @MainActor func changedLiveViewerAccountInvalidatesWorkspace() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
+    try isolateSources(storage, sources: root.appendingPathComponent("src"))
     try storage.saveGrant([Repository(id: "private/repo")], account: "123")
     let network = ViewerWorkspaceTransport([#"{"login":"other","id":456}"#])
     let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)

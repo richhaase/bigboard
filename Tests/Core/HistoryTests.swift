@@ -185,13 +185,15 @@ struct HistoryTests {
         #expect(GitProcess.authenticatedFailure("rate limit exceeded; HTTP 403")?.isAccessDenied == false)
         #expect(GitProcess.authenticatedFailure("Could not resolve host: github.com") == nil)
     }
-    @Test func scansOwnedBareCacheAndReusesOnlyMatchingInputs() async throws {
+    @Test func scansRemoteTrackingHistoryAndReusesMatchingCache() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         let history = GitHistory(root: fixture.root)
-        let repo = Repository(id: "owner/repo")
+        let repo = try fixture.repository()
         let (scanned, records) = try await history.scan(repo, configuration: WorkspaceConfiguration())
         #expect(records.count == 2)
+        #expect(scanned.revision == (try fixture.git(["-C", fixture.clone.path, "rev-parse", "refs/remotes/origin/main"])))
+        #expect(scanned.error.isEmpty)
         #expect(Set(records.map(\.author)) == ["Mapped Author"])
         #expect(records.contains { $0.ai })
         #expect(records.flatMap(\.files).contains { $0.path == "new\tname\n.swift" && $0.previousPath == "source.swift" })
@@ -205,65 +207,136 @@ struct HistoryTests {
         let url = try await history.pathURL(repo: scanned, path: "new\tname\n.swift")
         #expect(url.absoluteString.contains(scanned.revision))
         #expect(url.absoluteString.contains("%09") && url.absoluteString.contains("%0A"))
-        let inventory = try await history.cachedRepositories()
-        #expect(inventory.map(\.id) == [repo.id])
-        try await history.remove(repo.id)
-        #expect(try await history.cachedRepositories().isEmpty)
     }
     @Test func separateHistoryInstancesCoordinateSharedCache() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let repo = try fixture.repository()
         let first = GitHistory(root: fixture.root), second = GitHistory(root: fixture.root)
-        async let a = first.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration())
-        async let b = second.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration())
+        async let a = first.scan(repo, configuration: WorkspaceConfiguration())
+        async let b = second.scan(repo, configuration: WorkspaceConfiguration())
         let results = try await (a, b)
         #expect(results.0.1 == results.1.1)
         #expect(results.0.0.scannedAt == results.1.0.scannedAt)
     }
-    @Test func externalMailmapChangeInvalidatesCachedScan() async throws {
+    @Test func scanIgnoresLocalBranchesWorkingTreeAndRepositoryMailmapSettings() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
-        let map = fixture.base.appendingPathComponent("override-mailmap")
-        try Data("First <first@test> Original Author <old@example.test>\n".utf8).write(to: map)
-        _ = try fixture.git(["--git-dir=" + fixture.bare.path, "config", "mailmap.file", "../../../../override-mailmap"])
-        let history = GitHistory(root: fixture.root)
-        let first = try await history.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration())
-        #expect(first.1.first?.email == "first@test")
-        try Data("Second <second@test> Original Author <old@example.test>\n".utf8).write(to: map)
-        let second = try await history.scan(first.0, configuration: WorkspaceConfiguration())
-        #expect(second.1.first?.email == "second@test")
-    }
-    @Test func unavailableFingerprintDoesNotPreventValidHistoryScan() async throws {
-        let fixture = try HistoryFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.base) }
-        let attributes = fixture.base.appendingPathComponent("large-attributes")
-        try Data(("#" + String(repeating: " ", count: 17 * 1024 * 1024) + "\n").utf8).write(to: attributes)
-        _ = try fixture.git(["--git-dir=" + fixture.bare.path, "config", "core.attributesFile", attributes.path])
-        let history = GitHistory(root: fixture.root)
-        let result = try await history.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration())
+        let clone = fixture.clone
+        try fixture.write("local.swift", "local only\n", in: clone)
+        _ = try fixture.git(["-C", clone.path, "add", "local.swift"])
+        _ = try fixture.git(["-C", clone.path, "commit", "--quiet", "-m", "Unpushed local work"])
+        try fixture.write("uncommitted.swift", "draft\n", in: clone)
+        try fixture.write(".mailmap", "Working Tree <tree@example.test> Original Author <old@example.test>\n", in: clone)
+        let override = fixture.base.appendingPathComponent("override-mailmap")
+        try Data("Config Author <config@example.test> Original Author <old@example.test>\n".utf8).write(to: override)
+        _ = try fixture.git(["-C", clone.path, "config", "mailmap.file", override.path])
+        let local = try fixture.git(["-C", clone.path, "rev-parse", "HEAD"])
+        let result = try await GitHistory(root: fixture.root).scan(try fixture.repository(), configuration: WorkspaceConfiguration())
         #expect(result.1.count == 2)
-        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("scans").path))
+        #expect(result.0.revision != local)
+        #expect(!result.1.contains { $0.subject == "Unpushed local work" })
+        #expect(!result.1.flatMap(\.files).contains { $0.path == "uncommitted.swift" || $0.path == "local.swift" })
+        #expect(Set(result.1.map(\.author)) == ["Mapped Author"])
+        #expect(Set(result.1.map(\.email)) == ["mapped@example.test"])
     }
-    @Test func ownershipAndSymlinksProtectDeveloperFiles() async throws {
+    @Test func scanCacheIsReplacedWhenTheRemoteTrackingRefMoves() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         let history = GitHistory(root: fixture.root)
-        try FileManager.default.removeItem(at: fixture.bare.appendingPathComponent("bigboard-cache"))
-        await #expect(throws: (any Error).self) { try await history.remove("owner/repo") }
-        #expect(FileManager.default.fileExists(atPath: fixture.bare.path))
-        try Data("owner/repo\n".utf8).write(to: fixture.bare.appendingPathComponent("bigboard-cache"))
-        try FileManager.default.createSymbolicLink(at: fixture.bare.appendingPathComponent("outside"), withDestinationURL: fixture.checkout)
-        await #expect(throws: (any Error).self) { try await history.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration()) }
-        #expect(FileManager.default.fileExists(atPath: fixture.checkout.appendingPathComponent(".git").path))
+        let repo = try fixture.repository()
+        let first = try await history.scan(repo, configuration: WorkspaceConfiguration())
+        try fixture.advance()
+        let second = try await history.scan(repo, configuration: WorkspaceConfiguration())
+        #expect(first.1.count == 2 && second.1.count == 3)
+        #expect(first.0.revision != second.0.revision)
+        #expect(second.1.contains { $0.subject == "Later" })
     }
-    @Test func unexpectedOriginIsNeverScannedOrDeleted() async throws {
+    @Test func unfetchedOrMissingClonesExplainWhatToDo() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
-        _ = try fixture.git(["--git-dir=" + fixture.bare.path, "config", "remote.origin.url", "https://example.test/unowned.git"])
         let history = GitHistory(root: fixture.root)
-        await #expect(throws: (any Error).self) { try await history.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration()) }
-        await #expect(throws: (any Error).self) { try await history.remove("owner/repo") }
-        #expect(FileManager.default.fileExists(atPath: fixture.bare.path))
+        var repo = try fixture.repository()
+        repo.branch = ""
+        await #expect { try await history.scan(repo, configuration: WorkspaceConfiguration()) } throws: {
+            $0.localizedDescription.contains("default branch is unknown")
+        }
+        repo.branch = "release"
+        await #expect { try await history.scan(repo, configuration: WorkspaceConfiguration()) } throws: {
+            $0.localizedDescription.contains("refs/remotes/origin/release has not been fetched yet")
+        }
+        repo.branch = "main"
+        repo.path = fixture.base.appendingPathComponent("gone/.git").path
+        await #expect { try await history.scan(repo, configuration: WorkspaceConfiguration()) } throws: {
+            $0.localizedDescription.contains("is missing")
+        }
+        repo.path = ""
+        await #expect(throws: (any Error).self) { try await history.scan(repo, configuration: WorkspaceConfiguration()) }
+    }
+    @Test func partialClonesHaveUnknownLinesAndPaths() async throws {
+        let fixture = try HistoryFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        _ = try fixture.git(["--git-dir=" + fixture.server.path, "config", "uploadpack.allowFilter", "true"])
+        let clone = try fixture.addClone("owner/partial", arguments: ["--filter=blob:none"])
+        let repo = try #require(await CloneDiscovery.inspect(clone))
+        #expect(repo.partial && !repo.shallow)
+        let result = try await GitHistory(root: fixture.root).scan(repo, configuration: WorkspaceConfiguration())
+        #expect(result.1.count == 2)
+        #expect(result.1.allSatisfy { $0.linesUnknown && $0.pathsUnknown && $0.files.isEmpty })
+        #expect(result.0.error.contains("Partial clone"))
+        #expect(Analysis.totals(result.1).unknown)
+    }
+    @Test func shallowClonesAreMarkedAsPartialHistory() async throws {
+        let fixture = try HistoryFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let clone = try fixture.addClone("owner/shallow", arguments: ["--depth", "1"])
+        let repo = try #require(await CloneDiscovery.inspect(clone))
+        #expect(repo.shallow && !repo.partial)
+        let result = try await GitHistory(root: fixture.root).scan(repo, configuration: WorkspaceConfiguration())
+        #expect(result.1.count == 1)
+        #expect(result.0.error.contains("Shallow clone"))
+    }
+    @Test func fetchArgumentsOnlyUpdateTheRemoteTrackingDefaultBranch() {
+        var repo = Repository(id: "owner/repo", branch: "trunk")
+        repo.remote = "upstream"
+        #expect(GitHistory.fetchArguments(repo, gitDirectory: "/clone/.git") == [
+            "--git-dir=/clone/.git", "-c", "fetch.writeCommitGraph=false", "-c", "fetch.recurseSubmodules=false",
+            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", "https://github.com/owner/repo.git",
+            "+refs/heads/trunk:refs/remotes/upstream/trunk",
+        ])
+        #expect(GitHistory.scanRevision(repo) == "refs/remotes/upstream/trunk")
+    }
+    @Test func repositoryNetworkSettingsAreDetected() {
+        func config(_ entries: [String]) -> String { entries.joined(separator: "\0") }
+        #expect(!GitHistory.overridesNetwork(config(["core.bare\nfalse", "remote.origin.url\nhttps://github.com/o/r.git", "user.name\nMe"])))
+        for key in ["http.extraheader", "http.https://github.com/.proxy", "url.git@github.com:.insteadof", "credential.helper", "include.path", "includeif.gitdir:~/.path", "remote.origin.proxy"] {
+            #expect(GitHistory.overridesNetwork(config(["core.bare\nfalse", key + "\nvalue"])), "\(key)")
+        }
+    }
+    @Test func refreshRefusesUnsafeConfigurationOrTokensWithoutChangingTheClone() async throws {
+        let fixture = try HistoryFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let clone = fixture.clone
+        func state() throws -> String {
+            try fixture.git(["-C", clone.path, "for-each-ref", "--format=%(refname) %(objectname)"]) + "\n"
+                + fixture.git(["-C", clone.path, "status", "--porcelain=v1"]) + "\n"
+                + fixture.git(["-C", clone.path, "rev-parse", "HEAD"])
+        }
+        let history = GitHistory(root: fixture.root)
+        let repo = try fixture.repository()
+        let before = try state()
+        for token in ["", "bad token"] {
+            await #expect(throws: (any Error).self) { try await history.refresh(repo, token: token) }
+        }
+        #expect(try state() == before)
+        _ = try fixture.git(["-C", clone.path, "config", "url.https://example.test/.insteadOf", "https://github.com/"])
+        let configured = try state()
+        await #expect { try await history.refresh(repo, token: "fixture-token") } throws: {
+            $0.localizedDescription.hasPrefix("Not fetched")
+        }
+        #expect(try state() == configured)
+        #expect(!FileManager.default.fileExists(atPath: clone.appendingPathComponent(".git/FETCH_HEAD").path))
     }
     private var processFamilyFixture: String {
         """
@@ -403,7 +476,8 @@ struct HistoryTests {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         let history = GitHistory(root: fixture.root)
-        let task = Task { try await history.scan(Repository(id: "owner/repo"), configuration: WorkspaceConfiguration()) }
+        let repo = try fixture.repository()
+        let task = Task { try await history.scan(repo, configuration: WorkspaceConfiguration()) }
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("scans").path))
@@ -448,12 +522,17 @@ struct HistoryFixture {
     let base: URL
     let root: URL
     let checkout: URL
-    let bare: URL
-    init() throws {
+    let server: URL
+    let sources: URL
+    let id: String
+    var clone: URL { cloneURL(id) }
+    init(id: String = "owner/repo") throws {
+        self.id = id
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         root = base.appendingPathComponent("cache")
-        checkout = base.appendingPathComponent("checkout")
-        bare = root.appendingPathComponent("github.com/owner/repo.git")
+        checkout = base.appendingPathComponent("author")
+        server = base.appendingPathComponent("server/repo.git")
+        sources = base.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
         _ = try git(["init", "--quiet", "--initial-branch=main", checkout.path])
         _ = try git(["-C", checkout.path, "config", "user.name", "Original Author"])
@@ -470,20 +549,47 @@ struct HistoryFixture {
         _ = try git(["-C", checkout.path, "add", "."])
         _ = try git(["-C", checkout.path, "commit", "--quiet", "-m", "Feature"])
         _ = try git(["-C", checkout.path, "checkout", "--quiet", "main"])
-        try FileManager.default.createDirectory(at: bare.deletingLastPathComponent(), withIntermediateDirectories: true)
-        _ = try git(["clone", "--quiet", "--bare", "--single-branch", "--branch", "main", checkout.path, bare.path])
-        _ = try git(["--git-dir=" + bare.path, "config", "remote.origin.url", "https://github.com/owner/repo.git"])
-        try Data("owner/repo\n".utf8).write(to: bare.appendingPathComponent("bigboard-cache"))
+        try FileManager.default.createDirectory(at: server.deletingLastPathComponent(), withIntermediateDirectories: true)
+        _ = try git(["clone", "--quiet", "--bare", "--single-branch", "--branch", "main", checkout.path, server.path])
+        try addClone(id)
     }
-    func write(_ path: String, _ contents: String) throws {
-        let url = checkout.appendingPathComponent(path)
+    func cloneURL(_ id: String) -> URL { sources.appendingPathComponent(id) }
+    @discardableResult func addClone(_ id: String, at location: URL? = nil, arguments: [String] = []) throws -> URL {
+        let destination = location ?? cloneURL(id)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        _ = try git(["clone", "--quiet"] + arguments + ["file://" + server.path, destination.path])
+        _ = try git(["-C", destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
+        _ = try git(["-C", destination.path, "config", "user.name", "Local Author"])
+        _ = try git(["-C", destination.path, "config", "user.email", "local@example.test"])
+        return destination
+    }
+    func gitDirectory(_ clone: URL? = nil) throws -> String {
+        try git(["-C", (clone ?? self.clone).path, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    }
+    func repository(_ id: String? = nil, clone: URL? = nil) throws -> Repository {
+        let id = id ?? self.id
+        var repo = Repository(id: id, branch: "main")
+        repo.path = try gitDirectory(clone ?? cloneURL(id))
+        return repo
+    }
+    func advance(_ path: String = "later.swift", _ contents: String = "later\n", message: String = "Later", clones: [URL]? = nil) throws {
+        try write(path, contents)
+        _ = try git(["-C", checkout.path, "add", "."])
+        _ = try git(["-C", checkout.path, "commit", "--quiet", "-m", message])
+        _ = try git(["-C", checkout.path, "push", "--quiet", "file://" + server.path, "main:main"])
+        for clone in clones ?? [self.clone] {
+            _ = try git(["-C", clone.path, "fetch", "--quiet", "file://" + server.path, "+refs/heads/main:refs/remotes/origin/main"])
+        }
+    }
+    func write(_ path: String, _ contents: String, in directory: URL? = nil) throws {
+        let url = (directory ?? checkout).appendingPathComponent(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(contents.utf8).write(to: url)
     }
     func git(_ arguments: [String]) throws -> String {
         let process = Process(), pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"] + arguments
+        process.arguments = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "protocol.file.allow=always"] + arguments
         process.environment = ["PATH": "/usr/bin:/bin", "HOME": base.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_DATE": "2026-10-01T12:00:00Z", "GIT_COMMITTER_DATE": "2026-10-01T12:00:00Z"]
         process.standardOutput = pipe; process.standardError = pipe; process.standardInput = FileHandle.nullDevice
         try process.run()

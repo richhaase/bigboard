@@ -5,12 +5,8 @@ import Testing
 @Suite @MainActor struct GrantRecoveryTests {
     @Test(arguments: [false, true])
     func orderlyQuitPreservesOfflineHistory(settingsDiscovery: Bool) async throws {
-        let history = try HistoryFixture()
-        defer { try? FileManager.default.removeItem(at: history.base) }
-        let fixture = try GrantRecoveryFixture(base: history.base, repositories: ["owner/repo"])
-        let destination = try fixture.storage.repositoryRoot("123").appendingPathComponent("github.com/owner/repo.git")
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: history.bare, to: destination)
+        let fixture = try GrantRecoveryFixture(repositories: ["owner/repo"])
+        defer { fixture.remove() }
         await fixture.workspace.start()
         let commits = fixture.workspace.snapshot.commits.map(\.id)
         #expect(!commits.isEmpty)
@@ -25,14 +21,14 @@ import Testing
         await fixture.network.release(.failure(CancellationError()))
         await shutdown.value; await refresh.value
         #expect(try fixture.storage.loadGrant("123").map(\.id) == ["owner/repo"])
-        let restarted = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableGrantTransport())
+        let restarted = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableGrantTransport(), refreshHistory: { _, repo, _ in repo })
         await restarted.start()
         #expect(restarted.snapshot.repositories.map(\.id) == ["owner/repo"])
         #expect(restarted.snapshot.commits.map(\.id) == commits)
         #expect(restarted.snapshot.repositories.allSatisfy { $0.stale })
         config.cachedOnly = true
         try fixture.storage.saveConfiguration(config, account: "123")
-        let cached = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableGrantTransport())
+        let cached = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableGrantTransport(), refreshHistory: { _, repo, _ in repo })
         await cached.start()
         #expect(cached.snapshot.cachedOnly)
         #expect(cached.snapshot.commits.map(\.id) == commits)
@@ -54,7 +50,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func shutdownRecordsCompletedNarrowerInventory(settingsDiscovery: Bool) async throws {
+    func shutdownBeforeLocalDiscoveryPreservesPreviousInventory(settingsDiscovery: Bool) async throws {
         let fixture = try GrantRecoveryFixture()
         defer { fixture.remove() }
         await fixture.workspace.start()
@@ -62,16 +58,15 @@ import Testing
         await fixture.network.waitUntilBlocked()
         let shutdown = Task { await fixture.workspace.shutdown() }
         await fixture.network.waitUntilCancelled()
-        let response = GrantRecoveryTransport.response(body: #"[{"full_name":"other/keep","default_branch":"main","archived":false}]"#)
-        await fixture.network.release(.success(response))
+        await fixture.network.release(.success(GrantRecoveryTransport.response(body: #"{"login":"fixture","id":123}"#)))
         await shutdown.value; await refresh.value
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == ["other/keep"])
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == ["owner/repo", "other/keep"])
         #expect(try fixture.storage.loadGrant("456").map(\.id) == ["separate/private"])
     }
 
     @Test(arguments: [false, true])
     func shutdownDoesNotHideDeliveredViewerAccountMismatch(settingsDiscovery: Bool) async throws {
-        let fixture = try GrantRecoveryFixture(gate: "/user")
+        let fixture = try GrantRecoveryFixture()
         defer { fixture.remove() }
         await fixture.workspace.start()
         let refresh = fixture.begin(settingsDiscovery: settingsDiscovery)
@@ -98,7 +93,7 @@ import Testing
         await fixture.workspace.checkConnection()
         #expect(fixture.workspace.authStatus.accountID == "456")
         #expect(try fixture.storage.loadGrant("456").map(\.id) == ["other/new"])
-        await fixture.network.release(.success(GrantRecoveryTransport.response(body: "[]")))
+        await fixture.network.release(.success(GrantRecoveryTransport.response(body: #"{"login":"fixture","id":123}"#)))
         await shutdown.value; await refresh.value
         #expect(fixture.workspace.snapshot.accountID == "456")
         #expect(try fixture.storage.loadGrant("123").map(\.id) == ["owner/repo", "other/keep"])
@@ -141,29 +136,36 @@ import Testing
 }
 
 @MainActor private struct GrantRecoveryFixture {
-    let base: URL
+    let history: HistoryFixture
     let storage: WorkspaceStorage
     let token = CLITokenSource()
     let user = CLIUserTransport()
     let network: GrantRecoveryTransport
     let workspace: WorkspaceModel
-    init(base: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), repositories: [String] = [], gate: String = "/user/repos") throws {
-        self.base = base
+    init(repositories: [String] = [], gate: String = "/user") throws {
+        let history = try HistoryFixture()
+        self.history = history
+        let base = history.base
         storage = WorkspaceStorage(supportRoot: base.appendingPathComponent("support"), cacheRoot: base.appendingPathComponent("workspace-cache"))
         var config = WorkspaceConfiguration(); config.cachedOnly = true; config.repositories = repositories
+        config.sourceRoots = [history.sources.path]
         try storage.saveConfiguration(config, account: "123")
         let grant = repositories.isEmpty ? ["owner/repo", "other/keep"] : repositories
-        try storage.saveGrant(grant.map { Repository(id: $0) }, account: "123")
+        try storage.saveGrant(try grant.map { $0 == history.id ? try history.repository() : Repository(id: $0) }, account: "123")
+        let other = base.appendingPathComponent("other-src")
+        try history.addClone("other/new", at: other.appendingPathComponent("other/new"))
+        var second = WorkspaceConfiguration(); second.sourceRoots = [other.path]
+        try storage.saveConfiguration(second, account: "456")
         try storage.saveGrant([Repository(id: "separate/private")], account: "456")
         network = GrantRecoveryTransport(gate: gate)
-        workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, token: token, user: user), transport: network)
+        workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, token: token, user: user), transport: network, refreshHistory: { _, repo, _ in repo })
     }
     func authentication() -> GitHubCLIAuth { cliAuth(storage: storage) }
     func begin(settingsDiscovery: Bool) -> Task<Void, Never> {
         if !settingsDiscovery { workspace.configuration.cachedOnly = false }
         return Task { if settingsDiscovery { await workspace.discover() } else { await workspace.refresh() } }
     }
-    func remove() { try? FileManager.default.removeItem(at: base) }
+    func remove() { try? FileManager.default.removeItem(at: history.base) }
 }
 
 private actor GrantRecoveryTransport: GitHubTransport {

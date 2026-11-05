@@ -45,6 +45,10 @@ struct MainView: View {
                 }
                 if !workspace.authStatus.signedIn {
                     signedOut
+                } else if !workspace.checkingSignIn, workspace.configuration.sourceRoots.isEmpty,
+                    !workspace.configuration.cachedOnly
+                {
+                    chooseSources
                 } else if workspace.snapshot.repositories.isEmpty {
                     emptyWorkspace
                 } else {
@@ -231,6 +235,25 @@ struct MainView: View {
             if !workspace.authStatus.error.isEmpty {
                 Text(workspace.authStatus.error).foregroundStyle(.orange).textSelection(.enabled)
             }
+        }
+        .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private var chooseSources: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "folder.badge.gearshape").font(.system(size: 54)).foregroundStyle(.tint)
+            Text("Where are your clones?").font(.largeTitle.bold())
+            Text(
+                "Bigboard reads history from Git clones you already have. Choose the folders that hold them. You can change these at any time in Settings."
+            )
+            .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
+            Button("Choose Folders…") {
+                let folders = SettingsRepositories.chooseFolders()
+                guard !folders.isEmpty else { return }
+                Task {
+                    if await workspace.addSourceFolders(folders) { navigation.panel = .settings }
+                }
+            }
+            .buttonStyle(.borderedProminent).disabled(workspace.busy)
         }
         .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
     }

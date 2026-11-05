@@ -103,7 +103,7 @@ Paths in this table are relative to the repository root.
 | `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
 | `Sources/BigboardCore/GitHubCLI.swift`, `Sources/BigboardCore/ApplicationIdentity.swift` | GitHub CLI token and identity, and build identities. |
 | `Sources/BigboardCore/GitHub.swift` | Repository discovery, PR evidence, pagination, and request budgets. |
-| `Sources/BigboardCore/History/` | Git processes, owned caches, history parsing, and counting rules. |
+| `Sources/BigboardCore/History/` | Git processes, clone discovery, fetch-only refresh, history parsing, and counting rules. |
 | `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | Account-scoped JSON, atomic writes, and conflict detection. |
 | `Tests/App/`, `Tests/CLI/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, command line, core logic, workspace integration, and shared fixtures. |
@@ -116,8 +116,9 @@ Xcode assembles the bundle and processes its Info.plist and icon catalog.
 
 Durable settings and access grants use versioned JSON under
 `~/Library/Application Support/<identity>/accounts/<account-id>/`.
-Git mirrors and parsed scans live under
-`~/Library/Caches/<identity>/accounts/<account-id>/repos/`.
+Parsed scans and repository locks live under
+`~/Library/Caches/<identity>/accounts/<account-id>/repos/`. Git history stays in
+the user's clones.
 The identity directory names are listed above. The last verified GitHub identity
 (login and numeric ID) is kept in the support root so cached history opens
 offline. Bigboard stores no tokens; it runs `gh auth token` when it needs one and
@@ -127,19 +128,28 @@ keeps the result in memory for at most five minutes.
 roots for isolated testing. Use Bigboard Dev for authenticated testing alongside
 the installed release.
 
-Git runs as a cancellable child process against app-owned bare repositories.
-The app discovers Git through PATH and standard Homebrew/system locations.
-It isolates Git configuration and credentials from developer checkouts.
-History is streamed; parsed JSON caches are optional and can be rebuilt.
+Git runs as a cancellable child process against the user's clones. The app
+discovers Git through PATH and standard Homebrew/system locations, ignores
+global and system Git config, and pins hooks, fsmonitor, maintenance, and
+protocol settings off. Refresh is a single `git fetch` of
+`+refs/heads/<branch>:refs/remotes/<remote>/<branch>` from
+`https://github.com/<owner>/<name>.git`, authenticated with an `extraHeader`
+passed through the environment; it is skipped when repo-local config sets
+`http.*`, `url.*`, `credential.*`, `include*`, or proxy keys. Scans read the
+remote-tracking ref as a bare repository with the mailmap pinned to the scanned
+revision, so working files never affect results. Partial clones are scanned
+without `--numstat` and marked as unknown lines and paths. Tests must never fetch
+from the network or touch real clones. History is streamed; parsed JSON caches
+are optional and can be rebuilt.
 Resource limits and interrupted collection retain honest stale or partial
 coverage instead of silently truncating results.
 
-Account-scoped grants control cached access. A pending check preserves the last
-verified grant; confirmed denials remove the affected access. A failed save after
-grant invalidation requires live verification again. Cancellation cannot restore
-access after the GitHub CLI account changes. See the
-[user reference](reference.md#data-status-offline-work-and-storage) for
-offline behavior and cache removal.
+The account-scoped grant records the last discovered clones so cached history
+opens offline. Fetch denials mark a repository stale without hiding its local
+history; a rejected GitHub CLI token invalidates the session. Cancellation cannot
+restore access after the GitHub CLI account changes. See the
+[user reference](reference.md#data-status-offline-work-and-storage) for offline
+behavior.
 
 ## Testing
 
