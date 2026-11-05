@@ -13,7 +13,7 @@ struct StartupTests {
         let obsolete = Data("{broken".utf8)
         if existingFile { try obsolete.write(to: file) }
         let saved = try fixture.savedFiles()
-        let workspace = fixture.workspace(store: StartupCredentials(try fixture.credentials()))
+        let workspace = fixture.workspace()
         await workspace.start()
         #expect(workspace.error.isEmpty && workspace.authStatus.signedIn)
         #expect(workspace.configuration == fixture.configuration())
@@ -34,8 +34,7 @@ struct StartupTests {
         }
 
         for account in ["123", "456"] {
-            let store = StartupCredentials(try fixture.credentials(account: account))
-            let workspace = fixture.workspace(store: store)
+            let workspace = fixture.workspace(account: account)
             await workspace.start()
 
             #expect(!workspace.checkingSignIn && !workspace.busy)
@@ -49,26 +48,21 @@ struct StartupTests {
             #expect(workspace.cachedRepositoryRows.map(\.id) == [fixture.repository(account: account)])
             #expect(workspace.snapshot.cachedOnly && workspace.snapshot.coverage.phase == "ready")
             #expect(workspace.error.isEmpty)
-            #expect(store.mutations == 0)
             await workspace.shutdown()
         }
         #expect(await fixture.network.requests == 0)
     }
 
-    @Test(arguments: ["missing", "malformed", "unreadable"])
-    func unavailableCredentialsLeaveSavedWorkspaceUnopened(condition: String) async throws {
+    @Test(arguments: [GitHubCLIFailure.signedOut, .missing, .rejected])
+    func unavailableCredentialsLeaveSavedWorkspaceUnopened(condition: GitHubCLIFailure) async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
         try fixture.saveWorkspace()
         let before = try fixture.savedFiles()
-        let data: Data?
-        switch condition {
-        case "missing": data = nil
-        case "malformed": data = Data("invalid credential data".utf8)
-        default: data = try fixture.credentials()
-        }
-        let store = StartupCredentials(data, unreadable: condition == "unreadable")
-        let workspace = fixture.workspace(store: store)
+        let token = CLITokenSource()
+        if condition == .signedOut { token.set(nil) }
+        if condition == .missing { token.set(nil, failure: GitHubCLIFailure.missing) }
+        let workspace = fixture.workspace(token: token, status: condition == .rejected ? 401 : 200)
         await workspace.start()
 
         #expect(!workspace.checkingSignIn && !workspace.busy && !workspace.authStatus.signedIn)
@@ -76,9 +70,9 @@ struct StartupTests {
         #expect(workspace.snapshot.accountID.isEmpty && workspace.snapshot.repositories.isEmpty)
         #expect(workspace.snapshot.commits.isEmpty && workspace.cachedRepositoryRows.isEmpty)
         #expect(workspace.configuration == WorkspaceConfiguration())
-        #expect(workspace.error == (condition == "missing" ? "" : AuthFailure.storage.localizedDescription))
+        #expect(workspace.error == condition.localizedDescription)
+        #expect(workspace.authStatus.configured == (condition != .missing))
         #expect(await fixture.network.requests == 0)
-        #expect(store.mutations == 0)
         #expect(try fixture.savedFiles() == before)
     }
 
@@ -90,8 +84,7 @@ struct StartupTests {
         let file = try fixture.storage.accountRoot("123").appendingPathComponent(filename)
         try Data("{broken".utf8).write(to: file)
         let before = try fixture.savedFiles()
-        let store = StartupCredentials(try fixture.credentials())
-        let workspace = fixture.workspace(store: store)
+        let workspace = fixture.workspace()
         await workspace.start()
 
         #expect(workspace.authStatus.signedIn)
@@ -99,7 +92,6 @@ struct StartupTests {
         #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
         #expect(workspace.cachedRepositoryRows.isEmpty)
         #expect(await fixture.network.requests == 0)
-        #expect(store.mutations == 0)
         #expect(try fixture.savedFiles() == before)
     }
 
@@ -112,7 +104,7 @@ struct StartupTests {
         let other = try fixture.storage.accountRoot("456").appendingPathComponent("access.json")
         try Data(contentsOf: other).write(to: file)
         let before = try fixture.savedFiles()
-        let workspace = fixture.workspace(store: StartupCredentials(try fixture.credentials()))
+        let workspace = fixture.workspace()
         await workspace.start()
 
         #expect(workspace.authStatus.signedIn && workspace.authStatus.accountID == "123")
@@ -135,7 +127,7 @@ struct StartupTests {
         let file = try fixture.storage.accountRoot("123").appendingPathComponent("access.json")
         if revoked { try fixture.storage.invalidateGrant("123") }
         else { try FileManager.default.removeItem(at: file) }
-        let workspace = fixture.workspace(store: StartupCredentials(try fixture.credentials()))
+        let workspace = fixture.workspace()
         await workspace.start()
 
         #expect(workspace.authStatus.signedIn && !workspace.checkingSignIn && !workspace.busy)
@@ -179,20 +171,10 @@ struct StartupTests {
             try Data(contentsOf: storage.accountRoot("123").appendingPathComponent($0))
         }
     }
-    func credentials(account: String = "123") throws -> Data {
-        let value = AuthCredentials(
-            accessToken: "fixture-access", refreshToken: "fixture-refresh",
-            expiresAt: Self.now.addingTimeInterval(3600), refreshExpiresAt: Self.now.addingTimeInterval(86400),
-            login: "user" + account, accountID: account, clientID: "fixture-client")
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(value)
-    }
-    func workspace(store: StartupCredentials) -> WorkspaceModel {
+    func workspace(account: String = "123", token: CLITokenSource = CLITokenSource(), status: Int = 200) -> WorkspaceModel {
         let now = Self.now
-        let auth = AuthManager(
-            configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"),
-            store: store, transport: network, now: { now })
+        let user = CLIUserTransport(login: "user" + account, account: account, status: status)
+        let auth = cliAuth(storage: storage, token: token, user: user, now: { now })
         return WorkspaceModel(storage: storage, authentication: auth, transport: network)
     }
     func installCache(_ history: HistoryFixture, account: String = "123") throws {
@@ -204,24 +186,6 @@ struct StartupTests {
         _ = try history.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
-}
-
-private final class StartupCredentials: CredentialStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private let data: Data?
-    private let unreadable: Bool
-    private var mutationCount = 0
-    var mutations: Int { lock.withLock { mutationCount } }
-    init(_ data: Data?, unreadable: Bool = false) {
-        self.data = data
-        self.unreadable = unreadable
-    }
-    func load() throws -> Data? {
-        if unreadable { throw AuthFailure.storage }
-        return data
-    }
-    func save(_ data: Data) throws { lock.withLock { mutationCount += 1 } }
-    func delete() throws { lock.withLock { mutationCount += 1 } }
 }
 
 private actor StartupTransport: GitHubTransport {

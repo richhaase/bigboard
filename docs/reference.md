@@ -4,13 +4,14 @@
 
 ## Setup and settings
 
-Choose **Sign in with GitHub** and authorize Bigboard in your browser. In
-**Settings → Repositories**, **Manage access…** opens GitHub's app
-installation page. Select the repositories it may read, return to Bigboard, and
-choose **Refresh repository list**. Repository access is limited by both your
-GitHub permissions and the installation; organization approval and SSO still
-apply. GitHub CLI and personal access tokens are not required. History collection
-requires Git, available through Homebrew or Xcode Command Line Tools.
+Bigboard uses the active [GitHub CLI](https://cli.github.com) account on
+github.com. Run `gh auth login` before opening Bigboard; if the CLI is missing or
+signed out, Bigboard explains what to run and offers **Check again**.
+**Settings → Repositories** lists repositories you own, collaborate on, or can
+see as an organization member. Choose **Refresh repository list** after access
+changes. Organizations that require SSO must authorize the GitHub CLI token
+(`gh auth refresh` or GitHub's SSO prompt). History collection requires Git,
+available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
 Select repositories individually or use **Select all**, then **Apply**. The
@@ -50,9 +51,10 @@ then **Update area**. This replaces the original entry in the draft; an existing
 destination area is preserved and reported as a conflict. **Cancel edit** leaves
 the draft unchanged. **Apply** saves the complete settings draft.
 
-Credentials are stored in macOS Keychain. Sign out removes the local credential;
-if removal fails, the account remains signed in and Settings stays open so you
-can retry. GitHub authorization is revoked separately in GitHub's application settings.
+Bigboard stores no credentials. It reads the GitHub CLI token when it needs one
+and keeps it only in memory. To switch accounts, run `gh auth switch` and choose
+**Check again**; each account keeps its own settings and caches. To disconnect,
+run `gh auth logout`.
 
 ## Navigation and scope
 
@@ -217,8 +219,8 @@ transient failure and labels stale or incomplete evidence.
 **Settings → General → Use cached history only** reads eligible owned history
 without GitHub refreshes. After verified access, a restart with the same account
 can use its saved offline grant. Quitting while an access check is pending keeps
-that previously verified offline access. New sign-in and account changes require
-live verification. Confirmed access denials hide affected evidence; a failed save
+that previously verified offline access. Connecting a new GitHub CLI account
+requires live verification. Confirmed access denials hide affected evidence; a failed save
 of access settings may require live verification again.
 
 Durable account-scoped JSON lives in Application Support; rebuildable Git
@@ -231,7 +233,7 @@ GitHub. Settings discovery and cached-history mode alone do not authorize it.
 
 | Symptom | What to check |
 | --- | --- |
-| A repository is missing from Settings | Use **Manage access…** to check the GitHub App installation, including organization approval and SSO. Return and refresh the repository list. |
+| A repository is missing from Settings | Confirm `gh repo view owner/name` works for the active GitHub CLI account, including SSO authorization for the organization, then refresh the repository list. |
 | A selected repository is missing from a board | Check the toolbar repository filter, selected group, and Advanced exclusion patterns. Settings controls collection; viewing filters narrow the results. |
 | A view is empty or a count includes `+ ?` | Check the date range and board filters, then open Data Status. Incomplete coverage does not establish that no activity exists. |
 | Data stays stale | Check **Use cached history only** in Settings → General. Data Status identifies access errors, request limits, and unfinished collection. |

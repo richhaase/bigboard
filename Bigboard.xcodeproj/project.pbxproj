@@ -12,24 +12,6 @@
 			path = .;
 			sourceTree = "<group>";
 		};
-		A00000000000000000000043 = {
-			name = "Configure publisher";
-			inputPaths = (
-				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
-			);
-			buildActionMask = 2147483647;
-			shellPath = /bin/bash;
-			showEnvVarsInLog = 0;
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/publisher-configured",
-			);
-			isa = PBXShellScriptBuildPhase;
-			runOnlyForDeploymentPostprocessing = 0;
-			shellScript = "set -euo pipefail\nxcrun swift \"$SRCROOT/scripts/configure-publisher.swift\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\ntouch \"$DERIVED_FILE_DIR/publisher-configured\"\n";
-			files = (
-			);
-			alwaysOutOfDate = 1;
-		};
 		A00000000000000000000032 = {
 			isa = PBXBuildFile;
 			productRef = A00000000000000000000031;
@@ -167,7 +149,6 @@
 				A00000000000000000000040,
 				A00000000000000000000041,
 				A00000000000000000000042,
-				A00000000000000000000043,
 			);
 			dependencies = (
 			);

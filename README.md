@@ -6,8 +6,8 @@ Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
 ## Install
 
-Requires **macOS 26 Tahoe or later** and Git, available through Homebrew or
-Xcode Command Line Tools.
+Requires **macOS 26 Tahoe or later**, Git (Homebrew or Xcode Command Line
+Tools), and the [GitHub CLI](https://cli.github.com) signed in with `gh auth login`.
 
 ```sh
 brew install --cask richhaase/tap/bigboard
@@ -26,15 +26,16 @@ brew upgrade --cask richhaase/tap/bigboard
 
 ## Get started
 
-1. Open Bigboard and choose **Sign in with GitHub**.
-2. Open **Settings → Repositories**. Use **Manage access…** to choose the
-   repositories the GitHub App may read, then return and refresh the list.
-3. Select the repositories to collect and click **Apply**.
+1. Run `gh auth login` in Terminal if you haven't already.
+2. Open Bigboard. It uses the active GitHub CLI account.
+3. Open **Settings → Repositories**, select the repositories to collect, and
+   click **Apply**.
 
-Bigboard loads Git history and pull request evidence directly from GitHub.
-Organization access policies still apply. Your sign-in is stored in Keychain,
-and settings and cached history persist between launches and upgrades.
-Git history uses app-owned caches; developer checkouts are untouched.
+Bigboard loads Git history and pull request evidence directly from GitHub using
+the GitHub CLI token. Organization access policies, including SSO authorization
+for the GitHub CLI, still apply. Bigboard stores no credentials of its own.
+Settings and cached history persist between launches and upgrades. Git history
+uses app-owned caches; developer checkouts are untouched.
 
 ## Explore
 
@@ -59,12 +60,9 @@ data interpretation, and troubleshooting.
 ## Develop
 
 Bigboard uses Swift 6, SwiftUI, AppKit, and Charts. Development requires Xcode 26
-or later. Start with the [development guide](docs/development.md) to configure
-GitHub sign-in and run `make dev`. Bigboard Dev has separate credentials and
-data, so the installed release can remain open.
-
-[Publisher setup](docs/github-app.md) covers GitHub App registration and release
-credentials.
+or later. Start with the [development guide](docs/development.md) and run
+`make dev`. Bigboard Dev has separate data, so the installed release can remain
+open.
 
 ## License
 

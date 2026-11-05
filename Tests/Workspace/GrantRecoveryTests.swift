@@ -54,21 +54,19 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func shutdownRecordsOwnerDenialAndCompletedNarrowerInventory(settingsDiscovery: Bool) async throws {
-        for denied in [true, false] {
-            let fixture = try GrantRecoveryFixture(gate: "/user/installations/1/repositories")
-            defer { fixture.remove() }
-            await fixture.workspace.start()
-            let refresh = fixture.begin(settingsDiscovery: settingsDiscovery)
-            await fixture.network.waitUntilBlocked()
-            let shutdown = Task { await fixture.workspace.shutdown() }
-            await fixture.network.waitUntilCancelled()
-            let response = denied ? GrantRecoveryTransport.response(status: 403) : GrantRecoveryTransport.response(body: #"{"total_count":0,"repositories":[]}"#)
-            await fixture.network.release(.success(response))
-            await shutdown.value; await refresh.value
-            #expect(try fixture.storage.loadGrant("123").map(\.id) == (denied ? ["other/keep"] : []))
-            #expect(try fixture.storage.loadGrant("456").map(\.id) == ["separate/private"])
-        }
+    func shutdownRecordsCompletedNarrowerInventory(settingsDiscovery: Bool) async throws {
+        let fixture = try GrantRecoveryFixture()
+        defer { fixture.remove() }
+        await fixture.workspace.start()
+        let refresh = fixture.begin(settingsDiscovery: settingsDiscovery)
+        await fixture.network.waitUntilBlocked()
+        let shutdown = Task { await fixture.workspace.shutdown() }
+        await fixture.network.waitUntilCancelled()
+        let response = GrantRecoveryTransport.response(body: #"[{"full_name":"other/keep","default_branch":"main","archived":false}]"#)
+        await fixture.network.release(.success(response))
+        await shutdown.value; await refresh.value
+        #expect(try fixture.storage.loadGrant("123").map(\.id) == ["other/keep"])
+        #expect(try fixture.storage.loadGrant("456").map(\.id) == ["separate/private"])
     }
 
     @Test(arguments: [false, true])
@@ -86,24 +84,6 @@ import Testing
         #expect(try fixture.storage.loadGrant("456").map(\.id) == ["separate/private"])
     }
 
-    @Test(arguments: [false, true], [false, true])
-    func signOutSupersedesShutdownAccessResult(settingsDiscovery: Bool, deleteFails: Bool) async throws {
-        let fixture = try GrantRecoveryFixture(deleteFails: deleteFails)
-        defer { fixture.remove() }
-        await fixture.workspace.start()
-        let refresh = fixture.begin(settingsDiscovery: settingsDiscovery)
-        await fixture.network.waitUntilBlocked()
-        let shutdown = Task { await fixture.workspace.shutdown() }
-        await fixture.network.waitUntilCancelled()
-        #expect(await fixture.workspace.signOut() == !deleteFails)
-        await fixture.network.release(.success(GrantRecoveryTransport.response(body: #"{"total_count":0,"installations":[]}"#)))
-        await shutdown.value; await refresh.value
-        #expect(try fixture.storage.loadGrant("123").map(\.id) == ["owner/repo", "other/keep"])
-        #expect(fixture.workspace.authStatus.signedIn == deleteFails)
-        #expect(await fixture.authentication().status().signedIn == deleteFails)
-        #expect(try fixture.storage.loadGrant("456").map(\.id) == ["separate/private"])
-    }
-
     @Test(arguments: [false, true])
     func accountChangeSupersedesShutdownAccessResult(settingsDiscovery: Bool) async throws {
         let fixture = try GrantRecoveryFixture()
@@ -113,14 +93,12 @@ import Testing
         await fixture.network.waitUntilBlocked()
         let shutdown = Task { await fixture.workspace.shutdown() }
         await fixture.network.waitUntilCancelled()
-        let signIn = try await fixture.auth.start()
-        let state = try #require(URLComponents(url: signIn, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "state" }?.value)
-        let callback = try #require(URL(string: "com.richhaase.bigboard://oauth/github?code=fixture-code&state=" + state))
-        try await fixture.auth.complete(callback)
-        await fixture.workspace.finishSignIn()
+        fixture.token.set("switched-access")
+        fixture.user.respond(login: "other", account: "456")
+        await fixture.workspace.checkConnection()
         #expect(fixture.workspace.authStatus.accountID == "456")
         #expect(try fixture.storage.loadGrant("456").map(\.id) == ["other/new"])
-        await fixture.network.release(.success(GrantRecoveryTransport.response(body: #"{"total_count":0,"installations":[]}"#)))
+        await fixture.network.release(.success(GrantRecoveryTransport.response(body: "[]")))
         await shutdown.value; await refresh.value
         #expect(fixture.workspace.snapshot.accountID == "456")
         #expect(try fixture.storage.loadGrant("123").map(\.id) == ["owner/repo", "other/keep"])
@@ -165,11 +143,11 @@ import Testing
 @MainActor private struct GrantRecoveryFixture {
     let base: URL
     let storage: WorkspaceStorage
-    let credentials: GrantRecoveryCredentials
+    let token = CLITokenSource()
+    let user = CLIUserTransport()
     let network: GrantRecoveryTransport
-    let auth: AuthManager
     let workspace: WorkspaceModel
-    init(base: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), repositories: [String] = [], gate: String = "/user/installations", deleteFails: Bool = false) throws {
+    init(base: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), repositories: [String] = [], gate: String = "/user/repos") throws {
         self.base = base
         storage = WorkspaceStorage(supportRoot: base.appendingPathComponent("support"), cacheRoot: base.appendingPathComponent("workspace-cache"))
         var config = WorkspaceConfiguration(); config.cachedOnly = true; config.repositories = repositories
@@ -177,33 +155,15 @@ import Testing
         let grant = repositories.isEmpty ? ["owner/repo", "other/keep"] : repositories
         try storage.saveGrant(grant.map { Repository(id: $0) }, account: "123")
         try storage.saveGrant([Repository(id: "separate/private")], account: "456")
-        credentials = try GrantRecoveryCredentials(deleteFails: deleteFails)
         network = GrantRecoveryTransport(gate: gate)
-        auth = AuthManager(configuration: Self.authConfiguration, store: credentials, transport: SwitchedGrantAuthTransport())
-        workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
+        workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, token: token, user: user), transport: network)
     }
-    static var authConfiguration: AuthConfiguration { AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app") }
-    func authentication() -> AuthManager { AuthManager(configuration: Self.authConfiguration, store: credentials) }
+    func authentication() -> GitHubCLIAuth { cliAuth(storage: storage) }
     func begin(settingsDiscovery: Bool) -> Task<Void, Never> {
         if !settingsDiscovery { workspace.configuration.cachedOnly = false }
         return Task { if settingsDiscovery { await workspace.discover() } else { await workspace.refresh() } }
     }
     func remove() { try? FileManager.default.removeItem(at: base) }
-}
-
-private final class GrantRecoveryCredentials: CredentialStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var data: Data?
-    private let deleteFails: Bool
-    init(deleteFails: Bool) throws {
-        self.deleteFails = deleteFails
-        let value = AuthCredentials(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: Date().addingTimeInterval(3600), refreshExpiresAt: Date().addingTimeInterval(86400), login: "fixture", accountID: "123", clientID: "fixture-client")
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-        data = try encoder.encode(value)
-    }
-    func load() throws -> Data? { lock.withLock { data } }
-    func save(_ data: Data) throws { lock.withLock { self.data = data } }
-    func delete() throws { try lock.withLock { if deleteFails { throw AuthFailure.storage }; data = nil } }
 }
 
 private actor GrantRecoveryTransport: GitHubTransport {
@@ -217,8 +177,7 @@ private actor GrantRecoveryTransport: GitHubTransport {
         if request.value(forHTTPHeaderField: "Authorization") == "Bearer switched-access" {
             switch request.url?.path {
             case "/user": return Self.response(body: #"{"login":"other","id":456}"#)
-            case "/user/installations": return Self.response(body: #"{"total_count":1,"installations":[{"id":2,"account":{"login":"other","type":"User"}}]}"#)
-            case "/user/installations/2/repositories": return Self.response(body: #"{"total_count":1,"repositories":[{"full_name":"other/new","default_branch":"","archived":false}]}"#)
+            case "/user/repos": return Self.response(body: #"[{"full_name":"other/new","default_branch":"","archived":false}]"#)
             default: throw GitHubFailure.unavailable
             }
         }
@@ -230,7 +189,7 @@ private actor GrantRecoveryTransport: GitHubTransport {
         }
         switch request.url?.path {
         case "/user": return Self.response(body: #"{"login":"fixture","id":123}"#)
-        case "/user/installations": return Self.response(body: #"{"total_count":1,"installations":[{"id":1,"account":{"login":"owner","type":"Organization"}}]}"#)
+        case "/user/repos": return Self.response(body: #"[{"full_name":"owner/repo","default_branch":"main","archived":false}]"#)
         default: throw GitHubFailure.unavailable
         }
     }
@@ -250,11 +209,4 @@ private actor GrantRecoveryTransport: GitHubTransport {
 
 private struct UnavailableGrantTransport: GitHubTransport {
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse { throw GitHubFailure.unavailable }
-}
-
-private struct SwitchedGrantAuthTransport: GitHubTransport {
-    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
-        if request.url?.path == "/user" { return GrantRecoveryTransport.response(body: #"{"login":"other","id":456}"#) }
-        return GrantRecoveryTransport.response(body: #"{"access_token":"switched-access","refresh_token":"switched-refresh","token_type":"bearer","expires_in":3600,"refresh_token_expires_in":86400}"#)
-    }
 }

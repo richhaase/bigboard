@@ -8,7 +8,5 @@ enum ApplicationIdentity: String, CaseIterable, Sendable {
         ApplicationIdentity(rawValue: bundle.bundleIdentifier ?? "") ?? .production
     }
 
-    var callbackURI: String { "\(rawValue)://oauth/github" }
-    var keychainService: String { "\(rawValue).github" }
     var storageDirectory: String { "\(rawValue).native" }
 }

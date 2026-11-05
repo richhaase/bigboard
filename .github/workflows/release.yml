@@ -64,9 +64,6 @@ jobs:
       - name: Archive, notarize, and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BIGBOARD_GITHUB_CLIENT_ID: ${{ vars.BIGBOARD_GITHUB_CLIENT_ID }}
-          BIGBOARD_GITHUB_CLIENT_SECRET: ${{ secrets.BIGBOARD_GITHUB_CLIENT_SECRET }}
-          BIGBOARD_GITHUB_APP_SLUG: ${{ vars.BIGBOARD_GITHUB_APP_SLUG }}
           NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
         run: bash scripts/release.sh "$RELEASE_TAG"

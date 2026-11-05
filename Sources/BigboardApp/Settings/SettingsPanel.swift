@@ -84,22 +84,17 @@ struct SettingsPanel: View {
                 VStack(alignment: .leading) {
                     Text(
                         workspace.authStatus.signedIn
-                            ? "Signed in as \(workspace.authStatus.login)" : "GitHub account"
+                            ? "GitHub CLI: \(workspace.authStatus.login)" : "GitHub CLI not connected"
                     )
                     .font(.headline)
-                    Text("Only repositories available through the Bigboard GitHub App are listed.")
+                    Text("Repositories you own, collaborate on, or can see as an organization member are listed.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if workspace.checkingSignIn {
-                    ProgressView("Checking saved sign-in…").controlSize(.small)
-                } else if workspace.authStatus.signedIn {
-                    Button("Manage access…") { Task { await workspace.manageAccess() } }
-                    Button("Sign out") { Task { if await workspace.signOut() { dismiss() } } }
-                        .disabled(workspace.signingOut)
+                    ProgressView("Checking GitHub CLI…").controlSize(.small)
                 } else {
-                    Button("Sign in") { Task { await workspace.signIn() } }
-                        .disabled(!workspace.authStatus.configured)
+                    Button("Check again") { Task { await workspace.checkConnection() } }
                 }
             }
             HStack {

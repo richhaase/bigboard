@@ -3,7 +3,7 @@ import Testing
 @testable import Bigboard
 
 @Test(arguments: ApplicationIdentity.allCases)
-func bundleIdentitySelectsAuthenticationAndStorage(identity: ApplicationIdentity) throws {
+func bundleIdentitySelectsStorage(identity: ApplicationIdentity) throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let contents = root.appendingPathComponent("Identity.bundle/Contents")
@@ -12,10 +12,6 @@ func bundleIdentitySelectsAuthenticationAndStorage(identity: ApplicationIdentity
     try plist.write(to: contents.appendingPathComponent("Info.plist"))
     let bundle = try #require(Bundle(url: contents.deletingLastPathComponent()))
     #expect(ApplicationIdentity.fromBundle(bundle) == identity)
-    let configuration = AuthConfiguration.fromBundle(bundle)
-    #expect(configuration.identity == identity)
-    #expect(configuration.callbackURI == "\(identity.rawValue)://oauth/github")
-    #expect(KeychainCredentialStore(identity: configuration.identity).service == "\(identity.rawValue).github")
     let storage = WorkspaceStorage.system(identity: .fromBundle(bundle), environment: [:])
     #expect(storage.supportRoot == FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("\(identity.rawValue).native").resolvingSymlinksInPath())
     #expect(storage.cacheRoot == FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("\(identity.rawValue).native").resolvingSymlinksInPath())
@@ -42,7 +38,6 @@ func bundleIdentitySelectsAuthenticationAndStorage(identity: ApplicationIdentity
     #expect(try storage(.production).loadConfiguration("123") == original)
     #expect(try production.loadGrant("123").map(\.id) == ["owner/production"])
     #expect(try development.repositoryRoot("123") != production.repositoryRoot("123"))
-    #expect(KeychainCredentialStore(identity: .development).service != KeychainCredentialStore(identity: .production).service)
 }
 
 @Test(arguments: ApplicationIdentity.allCases)

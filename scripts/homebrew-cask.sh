@@ -24,13 +24,14 @@ cask "bigboard" do
   homepage "https://github.com/richhaase/bigboard"
 
   depends_on macos: :tahoe
+  depends_on formula: "gh"
 
   app "Bigboard.app"
 
   caveats <<~EOS
     Bigboard requires Git for repository history (Homebrew or Xcode Git).
     Install Git if it is missing before opening Bigboard.
-    Open Bigboard and choose Sign in with GitHub to connect your repositories.
+    Run `gh auth login` before opening Bigboard; it uses the active GitHub CLI account.
   EOS
 end
 CASK

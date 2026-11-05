@@ -218,24 +218,15 @@ struct MainView: View {
         VStack(spacing: 18) {
             Image(systemName: "square.grid.3x3.square").font(.system(size: 54)).foregroundStyle(.tint)
             Text("Your work, in view.").font(.largeTitle.bold())
-            Text("Connect GitHub to explore repository history, contributors, and pull requests.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(
+                "Bigboard uses your GitHub CLI sign-in to explore repository history, contributors, and pull requests."
+            )
+            .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
             if workspace.checkingSignIn {
-                ProgressView("Checking saved sign-in…")
-            } else if workspace.authStatus.configured {
-                Button(workspace.authStatus.pending ? "Waiting for GitHub…" : "Sign in with GitHub") {
-                    Task { await workspace.signIn() }
-                }
-                .buttonStyle(.borderedProminent).disabled(workspace.authStatus.pending)
-                if workspace.authStatus.pending {
-                    Button("Cancel sign-in") { Task { await workspace.cancelSignIn() } }
-                }
+                ProgressView("Checking GitHub CLI…")
             } else {
-                Text(
-                    "GitHub sign-in is not configured in this build. Build with the publisher’s GitHub App settings to connect."
-                )
-                .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 460)
-                .multilineTextAlignment(.center)
+                Button("Check again") { Task { await workspace.checkConnection() } }
+                    .buttonStyle(.borderedProminent)
             }
             if !workspace.authStatus.error.isEmpty {
                 Text(workspace.authStatus.error).foregroundStyle(.orange).textSelection(.enabled)
@@ -262,7 +253,7 @@ struct DataStatusPresentation: Equatable {
     var warning = false
     init(snapshot: Snapshot, busy: Bool, checkingSignIn: Bool, signedIn: Bool, error: String) {
         if checkingSignIn {
-            label = "Checking saved sign-in"
+            label = "Checking GitHub CLI"
             symbol = "arrow.triangle.2.circlepath"
             loading = true
         } else if busy {
@@ -283,7 +274,7 @@ struct DataStatusPresentation: Equatable {
             label = "Cached history"
             symbol = "externaldrive"
         } else if !signedIn {
-            label = "Sign in to load repository evidence"
+            label = "Connect GitHub CLI to load repository evidence"
             symbol = "info.circle"
         } else if snapshot.repositories.isEmpty {
             label = "No repository evidence loaded"

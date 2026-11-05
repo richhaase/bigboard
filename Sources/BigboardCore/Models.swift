@@ -158,7 +158,6 @@ struct ActivityScope: Hashable, Sendable {
 struct AuthStatus: Sendable {
     var configured = false
     var signedIn = false
-    var pending = false
     var login = ""
     var accountID = ""
     var error = ""

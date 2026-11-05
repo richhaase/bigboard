@@ -2,44 +2,35 @@ import Foundation
 import Testing
 @testable import Bigboard
 
-private final class WorkspaceTestCredentials: CredentialStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Data?
-    private var calls = 0
-    init(_ value: Data? = nil) { self.value = value }
-    func load() throws -> Data? { lock.withLock { calls += 1; return value } }
-    func save(_ data: Data) throws { lock.withLock { calls += 1; value = data } }
-    func delete() throws { lock.withLock { calls += 1; value = nil } }
-    var count: Int { lock.withLock { calls } }
-}
 private actor DelayedWorkspaceTransport: GitHubTransport {
     private var waiter: CheckedContinuation<GitHubHTTPResponse, Never>?
+    private var held = false
+    private var account = "123"
     private(set) var count = 0
+    func use(account: String) { self.account = account }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         count += 1
-        return await withCheckedContinuation { waiter = $0 }
+        if !held {
+            held = true
+            return await withCheckedContinuation { waiter = $0 }
+        }
+        if request.url?.path == "/user" {
+            return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"user\#(account)","id":\#(account)}"#.utf8))
+        }
+        return GitHubHTTPResponse(status: 200, headers: [:], data: Data("[]".utf8))
     }
     func release() {
-        waiter?.resume(returning: GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":0,"installations":[]}"#.utf8)))
+        waiter?.resume(returning: GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)))
         waiter = nil
     }
 }
-private func workspaceTestAuth(_ store: WorkspaceTestCredentials) -> AuthManager {
-    AuthManager(configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"), store: store)
-}
-private func workspaceTestStore() throws -> WorkspaceTestCredentials {
-    let now = Date()
-    let value = AuthCredentials(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: now.addingTimeInterval(3600), refreshExpiresAt: now.addingTimeInterval(86400), login: "fixture", accountID: "123", clientID: "fixture-client")
-    let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-    return WorkspaceTestCredentials(try encoder.encode(value))
-}
-@Test @MainActor func signOutSuppressesLateWorkspaceRefreshAndClearsAccountMetadata() async throws {
+@Test @MainActor func accountChangeSuppressesLateWorkspaceRefreshAndClearsAccountMetadata() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-    let store = try workspaceTestStore()
+    let user = CLIUserTransport()
     let network = DelayedWorkspaceTransport()
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(store), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, user: user), transport: network)
     let startup = Task { await workspace.start() }
     for _ in 0..<100 {
         if await network.count > 0 { break }
@@ -51,11 +42,13 @@ private func workspaceTestStore() throws -> WorkspaceTestCredentials {
     workspace.cachedRepositoryRows = [Repository(id: "private/repo")]
     workspace.discovered = [Repository(id: "private/repo")]
     workspace.activeGroup = "Old account"
-    await workspace.signOut()
+    user.respond(login: "user456", account: "456")
+    await network.use(account: "456")
+    await workspace.checkConnection()
     await network.release()
     await startup.value
-    #expect(workspace.authStatus.signedIn == false)
-    #expect(workspace.snapshot.accountID.isEmpty)
+    #expect(workspace.authStatus.signedIn && workspace.authStatus.accountID == "456")
+    #expect(workspace.snapshot.accountID == "456" && workspace.snapshot.viewer == "user456")
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
     #expect(workspace.cachedRepositoryRows.isEmpty && workspace.discovered.isEmpty)
     #expect(workspace.removableCacheIDs.isEmpty && workspace.activeGroup.isEmpty)
@@ -65,7 +58,7 @@ private func workspaceTestStore() throws -> WorkspaceTestCredentials {
 private actor SequenceWorkspaceTransport: GitHubTransport {
     private var responses: [GitHubHTTPResponse]
     init(_ statuses: [Int]) {
-        responses = statuses.map { GitHubHTTPResponse(status: $0, headers: [:], data: Data(($0 == 200 ? #"{"total_count":0,"installations":[]}"# : "{}").utf8)) }
+        responses = statuses.map { GitHubHTTPResponse(status: $0, headers: [:], data: Data(($0 == 200 ? "[]" : "{}").utf8)) }
     }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         if request.url?.path == "/user" { return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8)) }
@@ -78,16 +71,12 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     try storage.saveGrant([Repository(id: "private/repo")], account: "123")
-    let store = try workspaceTestStore()
-    let auth = workspaceTestAuth(store)
-    let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: SequenceWorkspaceTransport([status]))
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: SequenceWorkspaceTransport([status]))
     await workspace.start()
     #expect(workspace.authStatus.signedIn == (status == 403))
-    #expect(await auth.status().signedIn == (status == 403))
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-    #expect(try storage.loadGrant("123").isEmpty)
-    #expect(try store.load() != nil)
     #expect(workspace.busy == false)
+    #expect(try storage.loadGrant("123").isEmpty)
     if status == 401 {
         #expect(workspace.snapshot.coverage.phase == "signin")
         #expect(workspace.snapshot.accountID.isEmpty)
@@ -98,8 +87,7 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-    let store = try workspaceTestStore()
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(store), transport: SequenceWorkspaceTransport([200, 401]))
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: SequenceWorkspaceTransport([200, 401]))
     await workspace.start()
     #expect(workspace.authStatus.signedIn)
     workspace.cachedRepositoryRows = [Repository(id: "private/repo")]
@@ -109,44 +97,44 @@ private actor SequenceWorkspaceTransport: GitHubTransport {
     #expect(workspace.snapshot.coverage.phase == "signin")
     #expect(workspace.cachedRepositoryRows.isEmpty && workspace.discovered.isEmpty)
     #expect(try storage.loadGrant("123").isEmpty)
-    #expect(try store.load() != nil)
+    await workspace.checkConnection()
+    #expect(workspace.authStatus.signedIn && workspace.snapshot.accountID == "123")
 }
-private final class WaitingWorkspaceCredentials: CredentialStore, @unchecked Sendable {
+private final class WaitingCLI: @unchecked Sendable {
     private let condition = NSCondition()
     private var released = false
-    private var loading = false
-    func load() throws -> Data? {
+    private var reading = false
+    func read() throws -> String {
         condition.lock(); defer { condition.unlock() }
-        loading = true
+        reading = true
         while !released { condition.wait() }
-        return nil
+        throw GitCommandFailure(status: 1, detail: "not logged in")
     }
-    func save(_ data: Data) throws {}
-    func delete() throws {}
-    var isLoading: Bool { condition.withLock { loading } }
+    var isReading: Bool { condition.withLock { reading } }
     func release() { condition.lock(); released = true; condition.broadcast(); condition.unlock() }
 }
-@Test @MainActor func initialSignInCheckRemainsExplicitUntilCredentialReadCompletes() async throws {
+@Test @MainActor func initialConnectionCheckRemainsExplicitUntilGitHubCLIReadCompletes() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
-    let store = WaitingWorkspaceCredentials()
-    defer { store.release() }
-    let auth = AuthManager(configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"), store: store)
+    let cli = WaitingCLI()
+    defer { cli.release() }
+    let auth = GitHubCLIAuth(run: { _ in try cli.read() }, transport: CLIUserTransport())
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: SequenceWorkspaceTransport([]))
     #expect(workspace.checkingSignIn)
     let startup = Task { await workspace.start() }
     for _ in 0..<100 {
-        if store.isLoading { break }
+        if cli.isReading { break }
         try await Task.sleep(for: .milliseconds(5))
     }
-    #expect(store.isLoading)
+    #expect(cli.isReading)
     #expect(workspace.checkingSignIn)
-    store.release()
+    cli.release()
     await startup.value
     #expect(workspace.checkingSignIn == false)
     #expect(workspace.authStatus.configured)
     #expect(workspace.authStatus.signedIn == false)
+    #expect(workspace.error == GitHubCLIFailure.signedOut.localizedDescription)
 }
 private actor ConfigurationWorkspaceTransport: GitHubTransport {
     private var responses: [GitHubHTTPResponse]
@@ -154,8 +142,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     private(set) var count = 0
     init(initialFailure: Bool = false) {
         responses = [
-            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":1,"installations":[{"id":1,"account":{"login":"owner","type":"User"}}]}"#.utf8)),
-            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":1,"repositories":[{"full_name":"owner/repo","default_branch":"main","archived":false,"pushed_at":"2026-10-31T12:00:00Z"}]}"#.utf8))
+            GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"[{"full_name":"owner/repo","default_branch":"main","archived":false,"pushed_at":"2026-10-31T12:00:00Z"}]"#.utf8))
         ]
         if initialFailure { responses.insert(GitHubHTTPResponse(status: 503, headers: [:], data: Data("{}".utf8)), at: 0) }
     }
@@ -175,7 +162,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     let network = ConfigurationWorkspaceTransport(initialFailure: initialFailure)
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()
     #expect(workspace.configuration.repositories.isEmpty)
     var draft = workspace.configuration; draft.repositories = ["owner/repo"]
@@ -185,21 +172,21 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(try storage.loadConfiguration("123") == draft)
     #expect(workspace.busy)
     #expect(workspace.snapshot.coverage.phase == "refreshing")
-    let expected = initialFailure ? 7 : 5
+    let expected = initialFailure ? 6 : 4
     for _ in 0..<100 {
         if await network.count == expected { break }
         try await Task.sleep(for: .milliseconds(5))
     }
     #expect(await network.count == expected)
-    await workspace.signOut()
     await network.release()
+    await workspace.shutdown()
 }
 @Test @MainActor func configurationApplyFailurePreservesDraftAndSavedConfiguration() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     let network = ConfigurationWorkspaceTransport()
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()
     let original = workspace.configuration
     var unavailable = original; unavailable.repositories = ["other/private"]
@@ -216,7 +203,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(draft.repositories == ["owner/repo"])
     #expect(workspace.error.contains("changed outside"))
     #expect(workspace.busy == false)
-    #expect(await network.count == 3)
+    #expect(await network.count == 2)
 }
 
 private actor ViewerWorkspaceTransport: GitHubTransport {
@@ -228,8 +215,8 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
         if request.url?.path == "/user", !users.isEmpty {
             return GitHubHTTPResponse(status: 200, headers: [:], data: Data(users.removeFirst().utf8))
         }
-        if request.url?.path == "/user/installations" {
-            return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"total_count":0,"installations":[]}"#.utf8))
+        if request.url?.path == "/user/repos" {
+            return GitHubHTTPResponse(status: 200, headers: [:], data: Data("[]".utf8))
         }
         throw GitHubFailure.unavailable
     }
@@ -238,8 +225,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-    let store = try workspaceTestStore()
-    let auth = workspaceTestAuth(store)
+    let auth = cliAuth(storage: storage)
     let network = ViewerWorkspaceTransport([#"{"login":"fixture","id":123}"#, #"{"login":"renamed","id":123}"#])
     let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
     await workspace.start()
@@ -247,7 +233,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     if settingsDiscovery { await workspace.discover() } else { await workspace.refresh() }
     #expect(workspace.authStatus.login == "renamed")
     #expect(workspace.snapshot.viewer == "renamed" && workspace.snapshot.accountID == "123")
-    #expect(await workspaceTestAuth(store).status().login == "renamed")
+    #expect(try storage.loadIdentity()?.login == "renamed")
     var authored = PullRequest(repo: "owner/repo", number: 1, title: "Own change", author: "renamed", url: "", updatedAt: Date())
     authored.checks = "FAILURE"
     var requested = PullRequest(repo: "owner/repo", number: 2, title: "Review change", author: "other", url: "", updatedAt: Date())
@@ -263,15 +249,13 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
     try storage.saveGrant([Repository(id: "private/repo")], account: "123")
-    let store = try workspaceTestStore()
     let network = ViewerWorkspaceTransport([#"{"login":"other","id":456}"#])
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(store), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()
     #expect(!workspace.authStatus.signedIn)
     #expect(workspace.snapshot.accountID.isEmpty && workspace.snapshot.viewer.isEmpty)
     #expect(workspace.snapshot.repositories.isEmpty && workspace.discovered.isEmpty)
     #expect(try storage.loadGrant("123").isEmpty)
-    #expect(try store.load() != nil)
     #expect(await network.count == 1)
 }
 @Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositories(rename: Bool) async throws {
@@ -285,7 +269,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     try storage.saveConfiguration(config, account: "123")
     try storage.saveGrant(config.repositories.map { Repository(id: $0) }, account: "123")
     let network = ViewerWorkspaceTransport([])
-    let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
     await workspace.start()
     await workspace.selectGroup("Focus")
     #expect(workspace.snapshot.repositories.map(\.id) == ["fixture/one"])

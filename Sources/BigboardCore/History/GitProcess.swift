@@ -74,7 +74,7 @@ private final class ProcessRead: @unchecked Sendable {
 }
 enum GitExecutable {
     static func select(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
+        _ name: String = "git", environment: [String: String] = ProcessInfo.processInfo.environment,
         executable: (String) -> Bool = { path in
             var directory: ObjCBool = false
             return FileManager.default.fileExists(atPath: path, isDirectory: &directory)
@@ -86,9 +86,10 @@ enum GitExecutable {
                 "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
             ]
         for directory in directories where directory.hasPrefix("/") {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("git")
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(name)
             if executable(candidate.path) { return candidate }
         }
+        if name == "gh" { throw GitHubCLIFailure.missing }
         throw BigboardError.message(
             "Git is unavailable. Install Git with Homebrew or Xcode Command Line Tools, then reopen Bigboard."
         )

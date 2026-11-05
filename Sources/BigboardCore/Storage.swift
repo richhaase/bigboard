@@ -141,6 +141,16 @@ final class WorkspaceStorage: @unchecked Sendable {
     static func validRepository(_ id: String) -> Bool {
         canonicalGitHubRepository(id) != nil
     }
+    func loadIdentity() throws -> GitHubIdentity? {
+        guard let data = try read(supportRoot.appendingPathComponent("github-identity.json")) else { return nil }
+        let value = try JSONDecoder().decode(GitHubIdentity.self, from: data)
+        guard value.valid else { throw BigboardError.message("Saved GitHub identity is invalid.") }
+        return value
+    }
+    func saveIdentity(_ value: GitHubIdentity) throws {
+        guard value.valid else { throw BigboardError.message("GitHub identity is invalid.") }
+        try write(JSONEncoder().encode(value), to: supportRoot.appendingPathComponent("github-identity.json"))
+    }
     func loadGrant(_ id: String) throws -> [Repository] {
         guard let data = try read(accountRoot(id).appendingPathComponent("access.json")), !data.isEmpty else {
             return []

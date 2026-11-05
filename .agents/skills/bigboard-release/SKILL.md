@@ -23,6 +23,6 @@ The workflow runs on new tag pushes only. On failure, report the actual failing
 command, make the smallest fix, and use a new version for the next release.
 Do not build recovery infrastructure for a one-off release failure.
 
-Publisher settings and signing credentials stay in GitHub Actions secrets/variables.
+Signing credentials stay in GitHub Actions secrets.
 For packaging, signing, authentication, or storage changes, follow the
 [installed-upgrade checks](../../../docs/development.md#installed-upgrade-verification).

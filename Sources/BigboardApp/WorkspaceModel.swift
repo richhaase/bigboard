@@ -1,4 +1,3 @@
-import AppKit
 import Darwin
 import Foundation
 import Observation
@@ -10,7 +9,6 @@ final class WorkspaceModel {
     var authStatus = AuthStatus()
     var checkingSignIn = true
     var busy = false
-    private(set) var signingOut = false
     var error = ""
     var discovered: [Repository] = []
     var cachedRepositoryRows: [Repository] = []
@@ -22,9 +20,7 @@ final class WorkspaceModel {
         "Settings: \(storage.supportRoot.path)\nHistory: \(storage.cacheRoot.path)"
     }
     private let storage: WorkspaceStorage
-    private let auth: AuthManager
-    private let webAuthentication: any WebAuthenticating
-    private var signInAttempt: UUID?
+    private let auth: GitHubCLIAuth
     private let transport: any GitHubTransport
     private let now: @Sendable () -> Date
     private var lastRefreshFinished: Date?
@@ -44,8 +40,7 @@ final class WorkspaceModel {
     private var pendingGitDenials: Set<String> = []
     private var pendingGitAuthentication = false
     init(
-        storage: WorkspaceStorage = .system(), authentication: AuthManager? = nil,
-        webAuthentication: any WebAuthenticating = WebAuthentication(),
+        storage: WorkspaceStorage = .system(), authentication: GitHubCLIAuth? = nil,
         transport: any GitHubTransport = URLSessionGitHubTransport(),
         now: @escaping @Sendable () -> Date = Date.init,
         refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = {
@@ -53,13 +48,10 @@ final class WorkspaceModel {
         }
     ) {
         self.storage = storage
-        self.webAuthentication = webAuthentication
         self.transport = transport
         self.now = now
         self.refreshHistory = refreshHistory
-        self.auth =
-            authentication
-            ?? AuthManager(configuration: AuthConfiguration.fromBundle(), store: KeychainCredentialStore())
+        self.auth = authentication ?? GitHubCLIAuth(storage: storage, transport: transport, now: now)
     }
     func start() async {
         guard !started else { return }
@@ -81,7 +73,7 @@ final class WorkspaceModel {
     }
     private func connect() throws {
         guard authStatus.signedIn else {
-            throw BigboardError.message("Sign in with GitHub to open a workspace.")
+            throw BigboardError.message("Connect GitHub CLI to open a workspace.")
         }
         if account == authStatus.accountID, history != nil { return }
         generation += 1
@@ -105,7 +97,7 @@ final class WorkspaceModel {
         await beginRefresh()?.value
     }
     func nextAutomaticRefresh(visible: Bool, modalOpen: Bool) -> Date? {
-        guard visible, !modalOpen, !shuttingDown, !checkingSignIn, !busy, !signingOut,
+        guard visible, !modalOpen, !shuttingDown, !checkingSignIn, !busy,
             authStatus.signedIn, !configuration.cachedOnly, !configuration.repositories.isEmpty,
             configuration.refreshIntervalMinutes > 0, let lastRefreshFinished
         else { return nil }
@@ -238,7 +230,7 @@ final class WorkspaceModel {
             restrictSnapshot()
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
-            if error as? GitHubFailure == .auth {
+            if error as? GitHubFailure == .auth || error is GitHubCLIFailure {
                 await invalidateAuthentication(operation: operation)
                 return
             }
@@ -252,10 +244,6 @@ final class WorkspaceModel {
             }
             self.error = error.localizedDescription
         }
-        let state = await auth.status()
-        guard operation == generation, !Task.isCancelled else { return }
-        authStatus = state
-        if !state.signedIn { await invalidateAuthentication(operation: operation) }
     }
     private struct ScanOutcome: Sendable {
         enum Access: Sendable { case unchanged, denied, authenticationRequired }
@@ -283,7 +271,7 @@ final class WorkspaceModel {
                     group.addTask {
                         var current = repo
                         do {
-                            if live { current = try await refreshHistory(history, repo, auth.token(validFor: GitProcess.transferTimeout)) }
+                            if live { current = try await refreshHistory(history, repo, auth.token()) }
                             let scanned = try await history.scan(current, configuration: configuration)
                             return ScanOutcome(repository: scanned.0, commits: scanned.1)
                         } catch {
@@ -363,16 +351,13 @@ final class WorkspaceModel {
         authStatus.signedIn = false
         authStatus.login = ""
         authStatus.accountID = ""
-        authStatus.pending = false
         error = GitHubFailure.auth.localizedDescription
         if !id.isEmpty {
             do { try storage.invalidateGrant(id) } catch { self.error = error.localizedDescription }
         }
-        await auth.invalidateSession()
-        let state = await auth.status()
+        await auth.invalidate()
         guard invalidation == generation else { return }
-        authStatus = state
-        authStatus.signedIn = false
+        authStatus.error = error
     }
     private func restrictSnapshot() {
         let allowed = Set(authorized.map(\.id))
@@ -390,10 +375,9 @@ final class WorkspaceModel {
         -> [Repository]?
     {
         guard operation == generation, account == id, !Task.isCancelled else { return nil }
-        let previousGrant = authorized
         let rows: [Repository]
         do {
-            let state = try await auth.refreshViewer(using: github)
+            let state = try await auth.verify(using: github, account: id)
             guard operation == generation, !Task.isCancelled else { return nil }
             authStatus = state
             snapshot.viewer = state.login
@@ -409,18 +393,12 @@ final class WorkspaceModel {
                         try storage.invalidateGrant(id)
                     }
                 } else {
-                    let remaining =
-                        failure.installationOwner.map { owner in
-                            previousGrant.filter {
-                                $0.id.split(separator: "/").first.map(String.init) != owner
-                            }
-                        } ?? []
                     if operation == generation {
-                        authorized = remaining
+                        authorized = []
                         restrictSnapshot()
                     }
                     try storage.invalidateGrant(id)
-                    try storage.saveGrant(remaining, account: id)
+                    try storage.saveGrant([], account: id)
                 }
             }
             throw error
@@ -474,7 +452,7 @@ final class WorkspaceModel {
             error =
                 busy
                 ? "Wait for the current operation to finish before applying settings."
-                : "Sign in before applying settings."
+                : "Connect GitHub CLI before applying settings."
             return false
         }
         let operation = generation
@@ -561,98 +539,26 @@ final class WorkspaceModel {
         let rows = (try? await history?.cachedRepositories()) ?? []
         return operation == generation ? rows : []
     }
-    func signIn() async {
-        guard !checkingSignIn, !signingOut, !authStatus.pending, signInAttempt == nil else { return }
-        let attempt = UUID()
-        signInAttempt = attempt
-        authStatus.pending = true
-        defer { if signInAttempt == attempt { signInAttempt = nil } }
+    func checkConnection() async {
+        guard !checkingSignIn else { return }
+        checkingSignIn = true
         let operation = generation
         error = ""
-        do {
-            let url = try await auth.start()
-            let state = await auth.status()
-            guard operation == generation, signInAttempt == attempt else { return }
-            authStatus = state
-            let callback = try await webAuthentication.authenticate(url: url, callbackScheme: auth.callbackScheme)
-            guard operation == generation, signInAttempt == attempt else { return }
-            try await auth.complete(callback)
-            guard operation == generation, signInAttempt == attempt else { return }
-            await finishSignIn()
-        } catch {
-            guard operation == generation, signInAttempt == attempt else { return }
-            await auth.cancel()
-            let state = await auth.status()
-            guard operation == generation, signInAttempt == attempt else { return }
-            if !(error is CancellationError) { self.error = error.localizedDescription }
-            authStatus = state
-        }
-    }
-    func cancelSignIn() async {
-        let operation = generation
-        signInAttempt = nil
-        webAuthentication.cancel()
-        await auth.cancel()
+        await auth.invalidate()
         let state = await auth.status()
-        if operation == generation, signInAttempt == nil { authStatus = state }
-    }
-    @discardableResult
-    func signOut() async -> Bool {
-        guard !signingOut else { return false }
-        signingOut = true
-        if signInAttempt != nil { await cancelSignIn() }
-        let interruptedRefresh = refreshTask != nil || snapshot.coverage.phase == "refreshing"
-        generation += 1
-        refreshTask?.cancel()
-        refreshTask = nil
-        discoveryTask?.cancel()
-        discoveryTask = nil
-        let operation = generation
-        busy = true
-        defer {
-            signingOut = false
-            if operation == generation { busy = false }
-        }
-        do { try await auth.signOut() } catch {
-            let state = await auth.status()
-            guard operation == generation else { return false }
-            authStatus = state
-            let retained =
-                state.signedIn ? "You are still signed in." : "Your saved sign-in could not be removed."
-            self.error =
-                "Could not sign out. \(retained) \(error.localizedDescription) Try signing out again."
-            if interruptedRefresh {
-                snapshot.coverage.phase = "partial"
-                snapshot.coverage.message = "Refresh canceled. Retained evidence may be stale."
-                for index in snapshot.repositories.indices {
-                    snapshot.repositories[index].stale = true
-                    snapshot.repositories[index].prStale = true
-                }
-            }
-            return false
-        }
-        guard operation == generation else { return false }
-        snapshot = Snapshot()
-        configuration = WorkspaceConfiguration()
-        discovered = []
-        authorized = []
-        cachedRepositoryRows = []
-        account = ""
-        history = nil
-        github = nil
-        activeGroup = ""
-        pendingGitDenials = []
-        pendingGitAuthentication = false
-        inventoryVerified = false
-        discoveryVerified = false
+        guard operation == generation else { return }
         checkingSignIn = false
-        error = ""
-        authStatus.signedIn = false
-        authStatus.login = ""
-        authStatus.accountID = ""
-        authStatus.pending = false
-        authStatus.error = ""
-        return true
+        authStatus = state
+        if !state.error.isEmpty { error = state.error }
+        guard state.signedIn else {
+            snapshot.coverage.phase = "signin"
+            return
+        }
+        if state.accountID == account, history != nil {
+            await refresh()
+        } else {
+            await finishSignIn()
+        }
     }
     func finishSignIn() async {
         var operation = generation
@@ -684,10 +590,6 @@ final class WorkspaceModel {
             authStatus = state
         }
     }
-    func manageAccess() async {
-        let operation = generation
-        if let url = await auth.installationURL(), operation == generation { NSWorkspace.shared.open(url) }
-    }
     func openPath(_ scope: ActivityScope) async throws -> URL {
         guard let history, let repo = snapshot.repositories.first(where: { $0.id == scope.repo }) else {
             throw BigboardError.message("Select a loaded repository.")
@@ -703,7 +605,6 @@ final class WorkspaceModel {
         shutdownOperation = generation
         generation += 1
         let refresh = refreshTask, discovery = discoveryTask
-        if signInAttempt != nil { await cancelSignIn() }
         refresh?.cancel()
         discovery?.cancel()
         await refresh?.value
