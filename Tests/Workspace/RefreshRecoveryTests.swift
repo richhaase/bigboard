@@ -121,12 +121,10 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
     let storage: WorkspaceStorage
     let network: RefreshRecoveryTransport
     let historyRefresh = RefreshRecoveryHistoryRefresh()
-    let credentials: RefreshRecoveryCredentials
     init(missing: Set<String> = [], configuration: WorkspaceConfiguration = RefreshRecoveryFixture.configuration) throws {
         history = try HistoryFixture()
         storage = WorkspaceStorage(supportRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
         network = RefreshRecoveryTransport(repositories: [Self.first, Self.second])
-        credentials = try RefreshRecoveryCredentials()
         try storage.saveConfiguration(configuration, account: "123")
         try storage.saveGrant([Repository(id: Self.first), Repository(id: Self.second)], account: "123")
         for id in [Self.first, Self.second] where !missing.contains(id) { try install(id) }
@@ -139,7 +137,7 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
         _ = try history.git(["--git-dir=" + destination.path, "config", "remote.origin.url", "https://github.com/\(id).git"])
     }
     func workspace() -> WorkspaceModel {
-        let auth = AuthManager(configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"), store: credentials, transport: network)
+        let auth = cliAuth(storage: storage)
         let refresh = historyRefresh
         return WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: { _, repo, _ in try await refresh.refresh(repo) })
     }
@@ -165,13 +163,11 @@ private actor RefreshRecoveryTransport: GitHubTransport {
     func setMode(_ mode: Mode, for id: String) { modes[id] = mode }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         requests += 1
-        let object: [String: Any]
+        let object: Any
         switch request.url?.path {
         case "/user": object = ["login": "fixture", "id": 123]
-        case "/user/installations":
-            object = ["total_count": 1, "installations": [["id": 1, "account": ["login": "owner", "type": "Organization"]]]]
-        case "/user/installations/1/repositories":
-            object = ["total_count": repositories.count, "repositories": repositories.map { ["full_name": $0, "default_branch": "main", "archived": false] as [String: Any] }]
+        case "/user/repos":
+            object = repositories.map { ["full_name": $0, "default_branch": "main", "archived": false] as [String: Any] }
         case "/graphql":
             guard let body = request.httpBody, let document = try JSONSerialization.jsonObject(with: body) as? [String: Any], let variables = document["variables"] as? [String: Any], let owner = variables["owner"] as? String, let name = variables["name"] as? String else { throw GitHubFailure.response }
             let id = owner + "/" + name
@@ -190,17 +186,4 @@ private actor RefreshRecoveryTransport: GitHubTransport {
         }
         return GitHubHTTPResponse(status: 200, headers: [:], data: try JSONSerialization.data(withJSONObject: object))
     }
-}
-
-private final class RefreshRecoveryCredentials: CredentialStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var data: Data?
-    init() throws {
-        let value = AuthCredentials(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: Date().addingTimeInterval(3600), refreshExpiresAt: Date().addingTimeInterval(86400), login: "fixture", accountID: "123", clientID: "fixture-client")
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-        data = try encoder.encode(value)
-    }
-    func load() throws -> Data? { lock.withLock { data } }
-    func save(_ data: Data) throws { lock.withLock { self.data = data } }
-    func delete() throws { lock.withLock { data = nil } }
 }

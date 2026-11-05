@@ -184,7 +184,7 @@ actor GitHistory {
             throw BigboardError.message("Repository operation is already running.")
         }
         guard !token.isEmpty, token.utf8.allSatisfy({ (33...126).contains($0) }) else {
-            throw BigboardError.message("Sign in before refreshing repositories.")
+            throw BigboardError.message("Connect GitHub CLI before refreshing repositories.")
         }
         active.insert(repo.id)
         defer { active.remove(repo.id) }

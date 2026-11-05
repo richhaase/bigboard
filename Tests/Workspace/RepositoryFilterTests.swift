@@ -2,14 +2,6 @@ import Foundation
 import Testing
 @testable import Bigboard
 
-private final class FilterTestCredentials: CredentialStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var calls = 0
-    func load() throws -> Data? { lock.withLock { calls += 1 }; return nil }
-    func save(_ data: Data) throws { lock.withLock { calls += 1 } }
-    func delete() throws { lock.withLock { calls += 1 } }
-    var count: Int { lock.withLock { calls } }
-}
 private actor FilterTestTransport: GitHubTransport {
     private(set) var count = 0
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
@@ -37,9 +29,9 @@ private actor FilterTestTransport: GitHubTransport {
         try storage.saveConfiguration(configuration, account: "123")
         let settingsURL = try storage.accountRoot("123").appendingPathComponent("workspace.json")
         let settingsBefore = try Data(contentsOf: settingsURL)
-        let credentials = FilterTestCredentials()
+        let token = CLITokenSource()
         let network = FilterTestTransport()
-        let auth = AuthManager(configuration: AuthConfiguration(clientID: "fixture", clientSecret: "fixture", appSlug: "fixture"), store: credentials)
+        let auth = cliAuth(storage: storage, token: token)
         let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network)
         workspace.configuration = configuration
         workspace.snapshot = snapshot()
@@ -60,7 +52,7 @@ private actor FilterTestTransport: GitHubTransport {
         #expect(workspace.snapshot.generatedAt == now)
         #expect(workspace.configuration == configuration)
         #expect(try Data(contentsOf: settingsURL) == settingsBefore)
-        #expect(credentials.count == 0)
+        #expect(token.count == 0)
         #expect(await network.count == 0)
         #expect(!workspace.busy)
         #expect(state.setRepositoryFilter([], available: workspace.snapshot.repositories))

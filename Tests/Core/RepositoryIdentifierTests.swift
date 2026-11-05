@@ -45,10 +45,8 @@ private struct IdentifierTransport: GitHubTransport {
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         let body: String
         switch request.url?.path {
-        case "/user/installations":
-            body = #"{"total_count":1,"installations":[{"id":1,"account":{"login":"Owner","type":"Organization"}}]}"#
-        case "/user/installations/1/repositories":
-            body = #"{"total_count":1,"repositories":[{"full_name":"Owner/-Repo","default_branch":"main","archived":false}]}"#
+        case "/user/repos":
+            body = #"[{"full_name":"Owner/-Repo","default_branch":"main","archived":false}]"#
         default: throw GitHubFailure.unavailable
         }
         return GitHubHTTPResponse(status: 200, headers: [:], data: Data(body.utf8))

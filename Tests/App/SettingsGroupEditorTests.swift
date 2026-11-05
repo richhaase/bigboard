@@ -142,11 +142,8 @@ struct SettingsGroupEditorTests {
         try storage.saveConfiguration(original, account: "123")
         try storage.saveConfiguration(original, account: "456")
         try storage.saveGrant(original.repositories.map { Repository(id: $0) }, account: "123")
-        let now = Date()
-        let credentials = AuthCredentials(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: now.addingTimeInterval(3600), refreshExpiresAt: now.addingTimeInterval(86400), login: "fixture", accountID: "123", clientID: "fixture-client")
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let transport = GroupEditorTransport()
-        let auth = AuthManager(configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"), store: GroupEditorCredentials(value: try encoder.encode(credentials)), transport: transport)
+        let auth = cliAuth(storage: storage)
         let workspace = WorkspaceModel(storage: storage, authentication: auth, transport: transport)
         await workspace.start()
         #expect(workspace.authStatus.signedIn)
@@ -181,12 +178,6 @@ struct SettingsGroupEditorTests {
     }
 }
 
-private struct GroupEditorCredentials: CredentialStore {
-    var value: Data
-    func load() throws -> Data? { value }
-    func save(_ data: Data) throws { throw AuthFailure.storage }
-    func delete() throws { throw AuthFailure.storage }
-}
 private actor GroupEditorTransport: GitHubTransport {
     private(set) var count = 0
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {

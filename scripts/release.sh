@@ -35,7 +35,6 @@ xcodebuild -quiet \
   CURRENT_PROJECT_VERSION="$bundle_version" \
   CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-  BIGBOARD_REQUIRE_AUTH=YES \
   archive
 
 export_options="$output_dir/ExportOptions.plist"

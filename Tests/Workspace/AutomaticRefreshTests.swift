@@ -109,15 +109,7 @@ struct AutomaticRefreshTests {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
         try storage.saveConfiguration(WorkspaceConfiguration(repositories: ["owner/repo"]), account: "123")
-        let credentials = AuthCredentials(
-            accessToken: "fixture-access", refreshToken: "fixture-refresh",
-            expiresAt: clock.now().addingTimeInterval(86400), refreshExpiresAt: clock.now().addingTimeInterval(172800),
-            login: "fixture", accountID: "123", clientID: "fixture-client")
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let auth = AuthManager(
-            configuration: AuthConfiguration(clientID: "fixture-client", clientSecret: "fixture-secret", appSlug: "fixture-app"),
-            store: AutomaticRefreshCredentials(data: try encoder.encode(credentials)), transport: network, now: clock.now)
+        let auth = cliAuth(storage: storage, now: clock.now)
         workspace = WorkspaceModel(storage: storage, authentication: auth, transport: network, now: clock.now)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
@@ -128,13 +120,6 @@ private final class AutomaticRefreshClock: @unchecked Sendable {
     private var date = Date(timeIntervalSince1970: 1_800_000_000)
     func now() -> Date { lock.withLock { date } }
     func advance(by seconds: TimeInterval) { lock.withLock { date.addTimeInterval(seconds) } }
-}
-
-private struct AutomaticRefreshCredentials: CredentialStore {
-    let data: Data
-    func load() throws -> Data? { data }
-    func save(_ data: Data) throws { Issue.record("Automatic refresh unexpectedly changed credentials") }
-    func delete() throws { Issue.record("Automatic refresh unexpectedly deleted credentials") }
 }
 
 private actor AutomaticRefreshTransport: GitHubTransport {
@@ -149,8 +134,8 @@ private actor AutomaticRefreshTransport: GitHubTransport {
         switch request.url?.path {
         case "/user":
             return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8))
-        case "/user/installations":
-            return GitHubHTTPResponse(status: unavailable ? 503 : 200, headers: [:], data: Data(#"{"total_count":0,"installations":[]}"#.utf8))
+        case "/user/repos":
+            return GitHubHTTPResponse(status: unavailable ? 503 : 200, headers: [:], data: Data("[]".utf8))
         default:
             Issue.record("Unexpected request during automatic refresh: \(request.url?.path ?? "")")
             throw GitHubFailure.unavailable

@@ -7,21 +7,16 @@ func githubDate(_ string: String?) -> Date? {
     return formatter.date(from: string) ?? ISO8601DateFormatter().date(from: string)
 }
 enum GitHubFailure: LocalizedError, Sendable {
-    case auth, permission, notFound, rateLimited, unavailable, response, budget, outputLimit, incomplete,
-        installation(String)
+    case auth, permission, notFound, rateLimited, unavailable, response, budget, outputLimit, incomplete
     var isAccessDenied: Bool {
         switch self {
-        case .auth, .permission, .notFound, .installation: true
+        case .auth, .permission, .notFound: true
         default: false
         }
     }
-    var installationOwner: String? {
-        if case .installation(let owner) = self { return owner }
-        return nil
-    }
     var errorDescription: String? {
         switch self {
-        case .auth: "Sign in to GitHub in Settings."
+        case .auth: "GitHub rejected the GitHub CLI token. Run `gh auth login` in Terminal, then check again."
         case .permission: "GitHub access is not granted for this account or repository."
         case .notFound: "The GitHub repository is unavailable."
         case .rateLimited: "GitHub requests are paused by a rate limit. Refresh after the cooldown."
@@ -30,7 +25,6 @@ enum GitHubFailure: LocalizedError, Sendable {
         case .budget: "The refresh request budget was reached."
         case .outputLimit: "GitHub response exceeded the size limit."
         case .incomplete: "GitHub returned incomplete evidence."
-        case .installation(let owner): "Repository access for \(owner) was denied. Manage GitHub access."
         }
     }
 }
@@ -232,50 +226,21 @@ actor GitHubService {
             viewerRequests = 0
             busy = false
         }
-        var installations: [Installation] = [], seen = Set<Int64>(), expected: Int?
-        for page in 1...128 {
-            let data = try await request("user/installations?per_page=100&page=\(page)")
-            let result = try decode(Installations.self, data)
-            try validatePage(
-                count: result.total_count, expected: &expected, loaded: installations.count,
-                rows: result.installations.count)
-            for item in result.installations {
-                guard item.id > 0, validGitHubLogin(item.account.login), seen.insert(item.id).inserted,
-                    ["User", "Organization"].contains(item.account.type)
-                else { throw GitHubFailure.response }
-                installations.append(item)
-            }
-            if installations.count == result.total_count { break }
-        }
         var repositories: [String: Repository] = [:]
-        for installation in installations {
-            var count = 0, expected: Int?
-            var installationSeen = Set<String>()
-            for page in 1...128 {
-                let data: Data
-                do {
-                    data = try await request(
-                        "user/installations/\(installation.id)/repositories?per_page=100&page=\(page)")
-                } catch let failure as GitHubFailure where failure == .permission || failure == .notFound {
-                    throw GitHubFailure.installation(installation.account.login.lowercased())
+        for page in 1...128 {
+            let data = try await request(
+                "user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100&page=\(page)")
+            let rows = try decode([RepositoryRow].self, data)
+            guard rows.count <= 100 else { throw GitHubFailure.response }
+            for item in rows {
+                guard let id = canonicalGitHubRepository(item.full_name) else { throw GitHubFailure.response }
+                if !item.archived {
+                    repositories[id] = Repository(
+                        id: id, branch: item.default_branch, pushedAt: githubDate(item.pushed_at))
                 }
-                let result = try decode(RepositoryPage.self, data)
-                try validatePage(
-                    count: result.total_count, expected: &expected, loaded: count,
-                    rows: result.repositories.count)
-                for item in result.repositories {
-                    guard let id = canonicalGitHubRepository(item.full_name),
-                        id.split(separator: "/").first?.lowercased()
-                            == installation.account.login.lowercased(), installationSeen.insert(id).inserted
-                    else { throw GitHubFailure.response }
-                    if !item.archived {
-                        repositories[id] = Repository(
-                            id: id, branch: item.default_branch, pushedAt: githubDate(item.pushed_at))
-                    }
-                }
-                count += result.repositories.count
-                if count == result.total_count { break }
             }
+            if rows.count < 100 { break }
+            if page == 128 { throw GitHubFailure.incomplete }
         }
         return repositories.values.sorted { $0.pushedAt ?? .distantPast > $1.pushedAt ?? .distantPast }
     }
@@ -599,34 +564,11 @@ func canonicalGitHubRepository(_ value: String) -> String? {
 private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
     do { return try JSONDecoder().decode(type, from: data) } catch { throw GitHubFailure.response }
 }
-private func validatePage(count: Int, expected: inout Int?, loaded: Int, rows: Int) throws {
-    guard count >= 0, rows <= 100, loaded + rows <= count, expected == nil || expected == count else {
-        throw GitHubFailure.incomplete
-    }
-    expected = count
-    if loaded + rows != count && rows < 100 { throw GitHubFailure.incomplete }
-}
-private struct Installation: Decodable {
-    struct Account: Decodable {
-        var login: String
-        var type: String
-    }
-    var id: Int64
-    var account: Account
-}
-private struct Installations: Decodable {
-    var total_count: Int
-    var installations: [Installation]
-}
-private struct RepositoryPage: Decodable {
-    struct Row: Decodable {
-        var full_name: String
-        var default_branch: String
-        var archived: Bool
-        var pushed_at: String?
-    }
-    var total_count: Int
-    var repositories: [Row]
+private struct RepositoryRow: Decodable {
+    var full_name: String
+    var default_branch: String
+    var archived: Bool
+    var pushed_at: String?
 }
 private struct PageInfo: Decodable {
     var hasNextPage: Bool
