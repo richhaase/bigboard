@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 struct HistoryCacheLimits: Sendable {
-    var cacheBytes = 16 * 1024 * 1024
+    var cacheBytes = 256 * 1024 * 1024
 }
 
 struct HistoryScanCache: Codable {
@@ -10,6 +10,7 @@ struct HistoryScanCache: Codable {
     var fingerprint: String
     var scannedAt: Date
     var records: [Commit]
+    var skipped: Int? = nil
     static func read(
         _ url: URL, limits: HistoryCacheLimits = HistoryCacheLimits(), checkpoint: () throws -> Void = {}
     ) throws -> HistoryScanCache {

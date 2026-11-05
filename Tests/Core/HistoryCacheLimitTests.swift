@@ -28,7 +28,8 @@ struct HistoryCacheLimitTests {
         #expect(records.last?.subject == subject)
         #expect(records.last?.files.last?.previousPath == "old.swift")
         let cache = HistoryScanCache(schema: 2, fingerprint: "large", scannedAt: Date(), records: records)
-        #expect(try cache.encoded() == nil)
+        #expect(try cache.encoded() != nil)
+        #expect(try cache.encoded(limits: HistoryCacheLimits(cacheBytes: 16 * 1024 * 1024)) == nil)
     }
     @Test func streamingHistoryHasNoBufferedOutputCeiling() async throws {
         let directory = try directory()

@@ -154,6 +154,16 @@ func authRejectsOtherBuildAndMalformedCallback(identity: ApplicationIdentity, al
     #expect(saved.contains("new-refresh"))
     #expect(!saved.contains("old-refresh"))
 }
+@Test func gitTokensRefreshWhenTheyCannotOutlastTheOperation() async throws {
+    let store = MemoryCredentials(try storedCredentials())
+    let network = ScriptedGitHub([reply(tokenResponse)])
+    let auth = AuthManager(configuration: testConfiguration, store: store, transport: network, now: { testNow })
+    #expect(try await auth.token() == "old-access")
+    #expect(try await auth.token(validFor: 1800) == "old-access")
+    #expect(await network.count == 0)
+    #expect(try await auth.token(validFor: 7200) == "new-access")
+    #expect(await network.count == 1)
+}
 @Test(arguments: [599.0, 600.0])
 func signInCallbackExpiresAtTenMinutes(elapsed: TimeInterval) async throws {
     let clock = GitHubTestClock()

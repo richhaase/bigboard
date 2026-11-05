@@ -160,7 +160,25 @@ struct HistoryTests {
         try parser.feed(payload(files: ["\n1\t1\t", "old"]))
         #expect(throws: (any Error).self) { try parser.finish() }
     }
+    @Test func unreadableAuthorDatesSkipOnlyThatCommit() throws {
+        let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration())
+        let bad = ["", String(repeating: "b", count: 40), "B", "b@example.test", "", "", "Broken", "\n9\t9\tbroken.swift", "0\t0\t", "old.swift", "new.swift", ""]
+        try parser.feed(Data(bad.joined(separator: "\0").utf8))
+        try parser.feed(payload(files: ["\n1\t0\tkept.swift"]))
+        try parser.feed(Data((["", String(repeating: "c", count: 40), "C", "c@example.test", "abc", "", "Garbage", "\n4\t4\tlate.swift", ""]).joined(separator: "\0").utf8))
+        let records = try parser.finish()
+        #expect(records.map(\.id) == [String(repeating: "a", count: 40)])
+        #expect(records[0].files.map(\.path) == ["kept.swift"])
+        #expect(records[0].added == 1)
+        #expect(parser.skipped == 2)
+        #expect(GitHistory.skippedCommitsMessage(1) == "Skipped 1 commit with an unreadable author date.")
+        #expect(GitHistory.skippedCommitsMessage(2) == "Skipped 2 commits with unreadable author dates.")
+    }
     @Test func authFailuresAreAuthoritativeOnlyWhenEvidenced() {
+        #expect(GitProcess.authenticatedFailure("error: unable to create temporary file: Permission denied") == nil)
+        #expect(GitProcess.authenticatedFailure("fatal: could not open '/cache/objects/pack/x.pack': Permission denied") == nil)
+        #expect(GitProcess.authenticatedFailure("error: Access denied while writing index") == nil)
+        #expect(GitProcess.authenticatedFailure("remote: Permission to o/r.git denied to someone.") == .permission)
         #expect(GitProcess.authenticatedFailure("fatal: Authentication failed for https://github.com/o/r")?.isAccessDenied == true)
         #expect(GitProcess.authenticatedFailure("remote: Repository not found.")?.isAccessDenied == true)
         #expect(GitProcess.authenticatedFailure("fatal: unable to access: The requested URL returned error: 403")?.isAccessDenied == true)

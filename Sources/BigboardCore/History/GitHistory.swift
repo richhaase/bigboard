@@ -149,7 +149,7 @@ actor GitHistory {
                 prefix + [
                     "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
                     "--no-auto-maintenance", "--refmap=", "https://github.com/\(repo.id).git", spec,
-                ], token: token)
+                ], token: token, timeout: GitProcess.transferTimeout)
             oid = try await GitProcess.text(
                 prefix + ["rev-parse", "--verify", "--end-of-options", remote + "^{commit}"])
             guard Self.validOID(oid) else {
@@ -171,7 +171,11 @@ actor GitHistory {
         }
         if !empty {
             _ = try await GitProcess.run(
-                prefix + ["fsck", "--connectivity-only", "--no-dangling"], limit: 1024 * 1024)
+                prefix + ["-c", "gc.auto=6700", "-c", "gc.autoDetach=false", "gc", "--auto", "--quiet"],
+                timeout: GitProcess.transferTimeout)
+            _ = try await GitProcess.run(
+                prefix + ["fsck", "--connectivity-only", "--no-dangling"], timeout: GitProcess.transferTimeout,
+                limit: 1024 * 1024)
         }
         return oid
     }
@@ -218,7 +222,7 @@ actor GitHistory {
             do {
                 _ = try await GitProcess.run(
                     ["--git-dir=" + destination.path, "fsck", "--connectivity-only", "--no-dangling"],
-                    limit: 1024 * 1024)
+                    timeout: GitProcess.transferTimeout, limit: 1024 * 1024)
             } catch is GitCommandFailure { replace = true }
             if !replace {
                 let local =
@@ -413,6 +417,7 @@ actor GitHistory {
             var result = repo
             result.revision = revision
             result.scannedAt = cache.scannedAt
+            if let skipped = cache.skipped, skipped > 0 { result.error = Self.skippedCommitsMessage(skipped) }
             return (result, cache.records)
         }
         let attributes: [AttributeRule]
@@ -439,23 +444,31 @@ actor GitHistory {
             "--numstat", "-z", revision, "--",
         ]
         _ = try await GitProcess.run(
-            prefix + args, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
+            prefix + args, timeout: GitProcess.transferTimeout, stream: { data, checkpoint in try parser.feed(data, checkpoint: checkpoint) })
         let records = try parser.finish()
         try Task.checkCancellation()
         let after = try await GitProcess.text(prefix + ["rev-parse", "--verify", "HEAD^{commit}"])
         var result = repo
         result.revision = after == revision ? revision : ""
         result.scannedAt = Date()
+        if parser.skipped > 0 { result.error = Self.skippedCommitsMessage(parser.skipped) }
         if let key, after == revision,
             try await scanFingerprint(
                 path, revision: revision, configuration: configuration, version: version) == key
         {
             let cache = HistoryScanCache(
-                schema: 2, fingerprint: key, scannedAt: result.scannedAt!, records: records)
+                schema: 2, fingerprint: key, scannedAt: result.scannedAt!, records: records,
+                skipped: parser.skipped)
             _ = try? cache.write(to: cachePath, limits: limits, checkpoint: { try Task.checkCancellation() })
         }
         try Task.checkCancellation()
         return (result, records)
+    }
+    static func skippedCommitsMessage(_ count: Int) -> String {
+        switch count {
+        case 1: "Skipped 1 commit with an unreadable author date."
+        default: "Skipped \(count) commits with unreadable author dates."
+        }
     }
     func cachedRepositories() async throws -> [Repository] {
         let host = root.appendingPathComponent("github.com")
