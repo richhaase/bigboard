@@ -16,12 +16,14 @@ make dev
 ```
 
 This builds and opens `build/Bigboard Dev.app`, which uses your active GitHub CLI
-account. Select repositories in Settings. Quit Bigboard Dev before rebuilding.
-Its settings and caches persist across builds.
+account. Choose the folders that hold your clones, then select repositories in
+Settings. Quit Bigboard Dev before rebuilding. Its settings and caches persist
+across builds.
 
-The app executable is also the `bigboard` command. Invoked through a link whose
-name is not `Bigboard`, it runs as a command line tool and uses the data of the
-app bundle it belongs to. For Bigboard Dev:
+The app executable is also the `bigboard` command. It runs as a command line
+tool when invoked through a link whose name is not `Bigboard`, or when its first
+argument is a command such as `status`, and uses the data of the app bundle it
+belongs to. For Bigboard Dev:
 
 ```sh
 ln -sf "$PWD/build/Bigboard Dev.app/Contents/MacOS/Bigboard" /opt/homebrew/bin/bigboard-dev

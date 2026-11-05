@@ -30,9 +30,9 @@ available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
 Select repositories individually or use **Select all**, then **Apply**. The
-list supports search, recent-push and name sorting, and visible last-push dates.
-Push dates can reflect branches outside the default-branch history shown on the
-boards. Apply saves the workspace and closes Settings; collection continues in
+list supports search and sorting by latest commit or name. Each row shows the
+date of the latest commit on the clone's remote-tracking default branch, the
+clone's path, and whether it is shallow or partial. Apply saves the workspace and closes Settings; collection continues in
 the main window. Errors keep the draft open. Cancel discards the draft. Newly
 available repositories remain unchecked until you select and apply them.
 Repository exclusion patterns in Advanced can further narrow the saved selection.
@@ -42,14 +42,14 @@ Its sections are:
 
 | Section | Purpose |
 | --- | --- |
-| Repositories | GitHub account, available repositories, and saved collection choices. |
+| Repositories | GitHub CLI account, source folders, the clones found in them, and saved collection choices. |
 | Groups & areas | Named repository groups and named sets of paths within a repository. |
-| General | Startup date range, contributor sorting, and cached-history mode. |
+| General | Startup date range, contributor sorting, automatic refresh interval, and cached-history mode. |
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
 | Storage | Show where settings and parsed history are stored. |
 
 Repository IDs entered in groups and work areas are saved in lowercase, matching
-GitHub discovery.
+the IDs of discovered clones.
 
 Area paths are repository-relative prefixes, such as `src/ui` or `docs`. One
 trailing slash is optional, so `src` and `src/` cannot be assigned separately.
@@ -277,7 +277,8 @@ Usage errors exit with status 64.
 
 | Symptom | What to check |
 | --- | --- |
-| A repository is missing from Settings | Confirm `gh repo view owner/name` works for the active GitHub CLI account, including SSO authorization for the organization, then refresh the repository list. |
+| A repository is missing from Settings | Confirm its clone is within four folder levels of a source folder and has a GitHub remote, then choose **Refresh repository list**. Hidden folders and build or dependency folders such as `node_modules`, `build`, `vendor`, and `Library` are skipped. |
+| A repository stays stale after refresh | Confirm `gh repo view owner/name` works for the active GitHub CLI account, including SSO authorization for the organization. Clones whose own Git config sets network, credential, or include options are never fetched. |
 | A selected repository is missing from a board | Check the toolbar repository filter, selected group, and Advanced exclusion patterns. Settings controls collection; viewing filters narrow the results. |
 | A view is empty or a count includes `+ ?` | Check the date range and board filters, then open Data Status. Incomplete coverage does not establish that no activity exists. |
 | Data stays stale | Check **Use cached history only** in Settings → General. Data Status identifies access errors, request limits, and unfinished collection. |
