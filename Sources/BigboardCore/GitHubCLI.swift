@@ -85,11 +85,10 @@ actor GitHubCLIAuth {
         cachedAt = .distantPast
     }
     func status() async -> AuthStatus {
-        var result = AuthStatus(configured: true)
+        var result = AuthStatus()
         do {
             _ = try await token()
         } catch {
-            result.configured = error as? GitHubCLIFailure != .missing
             result.error = error.localizedDescription
             return result
         }
@@ -124,7 +123,7 @@ actor GitHubCLIAuth {
             identity = current
             try? storage?.saveIdentity(current)
         }
-        var result = AuthStatus(configured: true, signedIn: true)
+        var result = AuthStatus(signedIn: true)
         result.login = current.login
         result.accountID = current.accountID
         return result

@@ -7,7 +7,7 @@ struct WorkspacePanel: View {
     @Environment(\.dismiss) private var dismiss
     var title: String {
         switch panel {
-        case .settings, .groups: "Workspace settings"
+        case .settings, .groups: "Settings"
         case .dateRange: "Custom date range"
         case .status: "Data status"
         case .help: "Keyboard guide"

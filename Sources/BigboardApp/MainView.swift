@@ -260,7 +260,7 @@ struct MainView: View {
             EmptyBoard(
                 title: workspace.busy ? "Loading repositories" : "Choose your repositories",
                 message: workspace.snapshot.coverage.message.isEmpty
-                    ? "Discover repositories in Settings, choose what to track, and save your workspace."
+                    ? "Choose the repositories to track in Settings."
                     : workspace.snapshot.coverage.message, symbol: "shippingbox")
             Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent)
                 .padding(.bottom, 50)

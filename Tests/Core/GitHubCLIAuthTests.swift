@@ -17,7 +17,7 @@ struct GitHubCLIAuthTests {
         let token = CLITokenSource("gho_fixture")
         let auth = cliAuth(storage: storage, login: "octo", account: "42", token: token)
         let state = await auth.status()
-        #expect(state.signedIn && state.configured && state.error.isEmpty)
+        #expect(state.signedIn && state.error.isEmpty)
         #expect(state.login == "octo" && state.accountID == "42")
         #expect(try await auth.token() == "gho_fixture")
         #expect(token.count == 1)
@@ -40,12 +40,12 @@ struct GitHubCLIAuthTests {
     }
     @Test func signedOutAndMissingCLIAreActionable() async {
         let signedOut = await cliAuth(token: CLITokenSource(nil)).status()
-        #expect(!signedOut.signedIn && signedOut.configured)
+        #expect(!signedOut.signedIn)
         #expect(signedOut.error.contains("gh auth login"))
         let missingSource = CLITokenSource()
         missingSource.set(nil, failure: GitHubCLIFailure.missing)
         let missing = await cliAuth(token: missingSource).status()
-        #expect(!missing.signedIn && !missing.configured)
+        #expect(!missing.signedIn)
         #expect(missing.error.contains("brew install gh"))
         do {
             _ = try await cliAuth(token: CLITokenSource("bad token\n")).token()

@@ -10,7 +10,7 @@ struct HistoryScanCache: Codable {
     var fingerprint: String
     var scannedAt: Date
     var records: [Commit]
-    var skipped: Int? = nil
+    var skipped: Int
     static func read(
         _ url: URL, limits: HistoryCacheLimits = HistoryCacheLimits(), checkpoint: () throws -> Void = {}
     ) throws -> HistoryScanCache {

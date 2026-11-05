@@ -3,24 +3,6 @@ import Testing
 @testable import Bigboard
 
 struct StorageTests {
-    @Test func existingWorkspaceDefaultsToFifteenMinuteRefreshWithoutRewriting() throws {
-        let storage = try temporary()
-        defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
-        var config = WorkspaceConfiguration(repositories: ["owner/repo"])
-        config.sinceDays = 90
-        try storage.saveConfiguration(config)
-        let file = storage.configurationFile
-        var document = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
-        document.removeValue(forKey: "refreshIntervalMinutes")
-        let original = try JSONSerialization.data(withJSONObject: document)
-        try original.write(to: file)
-        #expect(try storage.loadConfiguration() == config)
-        #expect(try Data(contentsOf: file) == original)
-        config.refreshIntervalMinutes = 30
-        try storage.saveConfiguration(config)
-        #expect(try storage.loadConfiguration().refreshIntervalMinutes == 30)
-    }
-
     @Test(arguments: [0, 5, 15, 30, 60, -1, 1, 1440])
     func refreshIntervalsAreValidatedAndPersisted(minutes: Int) throws {
         let storage = try temporary()
@@ -52,6 +34,15 @@ struct StorageTests {
         #expect(storage.configurationFile == storage.configRoot.appendingPathComponent("config.json"))
         #expect(storage.historyRoot == storage.cacheRoot.appendingPathComponent("history"))
         #expect(try FileManager.default.contentsOfDirectory(atPath: storage.configRoot.path) == ["config.json"])
+    }
+    @Test func unreadableSettingsNameTheFile() throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: storage.configRoot, withIntermediateDirectories: true)
+        try Data(#"{"mode":"personal","repositories":[]}"#.utf8).write(to: storage.configurationFile)
+        #expect { try storage.loadConfiguration() } throws: {
+            $0.localizedDescription.contains(storage.configurationFile.path) && $0.localizedDescription.contains("delete it")
+        }
     }
     @Test func externalEditIsNotOverwritten() throws {
         let storage = try temporary()
@@ -96,14 +87,12 @@ struct StorageTests {
         #expect(!WorkspaceStorage.validRepository("../repo"))
         #expect(!WorkspaceStorage.validRepository("owner/repo/extra"))
     }
-    @Test(arguments: ["repositories", "excludedRepositories", "groups", "workAreas"])
-    func mixedCaseRepositoryReferencesRequireRepairBeforeSaving(field: String) throws {
+    @Test(arguments: ["repositories", "groups", "workAreas"])
+    func mixedCaseRepositoryReferencesAreRejected(field: String) throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
         let area = WorkArea(name: "Sources", paths: ["src/"])
-        var original = try storage.loadConfiguration()
-        original.repositories = ["owner/repo"]
-        original.excludedRepositories = ["other/repo"]
+        var original = WorkspaceConfiguration(repositories: ["owner/repo"])
         original.groups = ["Focus": ["owner/repo"]]
         original.workAreas = ["owner/repo": [area]]
         try storage.saveConfiguration(original)
@@ -112,42 +101,13 @@ struct StorageTests {
         var mixed = original
         switch field {
         case "repositories": mixed.repositories = ["Owner/Repo"]
-        case "excludedRepositories": mixed.excludedRepositories = ["Other/Repo"]
         case "groups": mixed.groups["Focus"] = ["Owner/Repo", "owner/repo"]
         default: mixed.workAreas = ["Owner/Repo": [area]]
         }
-        do {
-            try storage.validate(mixed)
-            Issue.record("Accepted a mixed-case repository reference")
-        } catch {
-            #expect(error.localizedDescription.contains("lowercase"))
-        }
-        #expect(throws: (any Error).self) { try storage.saveConfiguration(mixed) }
+        #expect { try storage.saveConfiguration(mixed) } throws: { $0.localizedDescription.contains("lowercase") }
         #expect(try Data(contentsOf: file) == saved)
-        let existing = try JSONEncoder().encode(mixed)
-        try existing.write(to: file)
-        var repaired = try storage.loadConfiguration()
-        #expect(repaired == mixed)
-        #expect(try Data(contentsOf: file) == existing)
-        #expect(throws: (any Error).self) { try storage.saveConfiguration(repaired) }
-        #expect(try Data(contentsOf: file) == existing)
-        switch field {
-        case "repositories", "excludedRepositories":
-            repaired = SettingsRepositories.applying(Set(repaired.repositories), available: [], to: repaired)
-        case "groups":
-            var editor = SettingsGroupEditor()
-            editor.edit(name: "Focus", repositories: repaired.groups["Focus"]!)
-            let didSave = editor.save(to: &repaired.groups)
-            #expect(didSave)
-        default:
-            var editor = SettingsWorkAreaEditor()
-            editor.edit(repository: "Owner/Repo", area: area)
-            let didSave = editor.save(to: &repaired.workAreas)
-            #expect(didSave)
-        }
-        try storage.saveConfiguration(repaired)
-        let reopened = WorkspaceStorage(configRoot: storage.configRoot, cacheRoot: storage.cacheRoot)
-        #expect(try reopened.loadConfiguration() == original)
+        try JSONEncoder().encode(mixed).write(to: file)
+        #expect { try storage.loadConfiguration() } throws: { $0.localizedDescription.contains("lowercase") }
     }
     @Test func equivalentWorkAreaPrefixesCannotReplaceSavedSettings() throws {
         let storage = try temporary()
@@ -191,7 +151,7 @@ struct StorageTests {
         #expect(Analysis.classifyWorkArea("src/core/parser.swift", rules: rules) == "Core")
     }
     @Test(arguments: [".", "./", "./src", "src/.", "src/./", "src/./ui", "src//ui", "src//", "src///", "src//\u{301}ui", "src/./\u{301}ui", "./\u{301}src"])
-    func noncanonicalWorkAreaPathsRequireRepairBeforeSaving(path: String) throws {
+    func noncanonicalWorkAreaPathsAreRejected(path: String) throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
         var original = try storage.loadConfiguration()
@@ -212,18 +172,8 @@ struct StorageTests {
         #expect(throws: (any Error).self) { try storage.saveConfiguration(malformed) }
         #expect(try Data(contentsOf: file) == saved)
         #expect(try storage.loadConfiguration() == original)
-        let existing = try JSONEncoder().encode(malformed)
-        try existing.write(to: file)
-        let loaded = try storage.loadConfiguration()
-        #expect(loaded == malformed)
-        #expect(try Data(contentsOf: file) == existing)
-        #expect(throws: (any Error).self) { try storage.saveConfiguration(loaded) }
-        #expect(try Data(contentsOf: file) == existing)
-        var repaired = loaded
-        repaired.workAreas["owner/repo"]?[0].paths = ["src/ui/"]
-        try storage.saveConfiguration(repaired)
-        #expect(try storage.loadConfiguration() == original)
-        #expect(Analysis.classifyWorkArea("src/ui/view.swift", rules: repaired.workAreas["owner/repo"] ?? []) == "UI")
+        try JSONEncoder().encode(malformed).write(to: file)
+        #expect(throws: (any Error).self) { try storage.loadConfiguration() }
     }
     @Test(arguments: [".github/workflows/", "src/.../ui", "src/ spaced /ui ", "src/line\nbreak", "src/back\\slash", "src/\u{301}ui", "src/\u{301}ui/", "\u{301}src/ui", "src/.\u{301}/ui", "src/..\u{301}/ui"])
     func literalWorkAreaPathComponentsRoundTripUnchanged(path: String) throws {
@@ -251,45 +201,6 @@ struct StorageTests {
         try existing.write(to: file)
         #expect(throws: (any Error).self) { try storage.loadConfiguration() }
         #expect(try Data(contentsOf: file) == existing)
-    }
-    @Test(arguments: [false, true]) func previouslySavedAmbiguousWorkAreasCanBeOpenedAndRepaired(externalEdit: Bool) throws {
-        let storage = try temporary()
-        defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
-        var original = WorkspaceConfiguration()
-        original.workAreas = ["owner/repo": [WorkArea(name: "First", paths: ["src"]), WorkArea(name: "Second", paths: ["src/"])]]
-        let file = storage.configurationFile
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let saved = try encoder.encode(original)
-        try saved.write(to: file)
-        let loaded = try storage.loadConfiguration()
-        #expect(loaded == original)
-        #expect(try Data(contentsOf: file) == saved)
-        #expect(Analysis.classifyWorkArea("src/main.swift", rules: loaded.workAreas["owner/repo"] ?? []) == "First")
-        #expect(throws: (any Error).self) { try storage.saveConfiguration(loaded) }
-        #expect(try Data(contentsOf: file) == saved)
-        var repaired = loaded
-        repaired.workAreas["owner/repo"]?[1].paths = ["tests/"]
-        if externalEdit {
-            var changed = original; changed.sinceDays = 90
-            let external = try encoder.encode(changed)
-            try external.write(to: file)
-            do {
-                try storage.saveConfiguration(repaired)
-                Issue.record("Overwrote externally changed settings while repairing work areas")
-            } catch { #expect(error.localizedDescription.contains("changed outside")) }
-            #expect(try Data(contentsOf: file) == external)
-            repaired = try storage.loadConfiguration()
-            repaired.workAreas["owner/repo"]?[1].paths = ["tests/"]
-        }
-        try storage.saveConfiguration(repaired)
-        let reloaded = try storage.loadConfiguration()
-        #expect(reloaded == repaired)
-        #expect(reloaded.sinceDays == (externalEdit ? 90 : original.sinceDays))
-        #expect(reloaded.workAreas["owner/repo"]?.map(\.name) == ["First", "Second"])
-        let rules = try #require(reloaded.workAreas["owner/repo"])
-        #expect(Analysis.classifyWorkArea("src/main.swift", rules: rules) == "First")
-        #expect(Analysis.classifyWorkArea("tests/test.swift", rules: rules) == "Second")
     }
 }
 private extension Array where Element == String { var identityRule: IdentityRule { IdentityRule(aliases:self) } }

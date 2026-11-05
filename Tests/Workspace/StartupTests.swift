@@ -48,7 +48,6 @@ struct StartupTests {
         #expect(workspace.snapshot.commits.isEmpty && workspace.discovered.isEmpty)
         #expect(workspace.configuration == WorkspaceConfiguration())
         #expect(workspace.error == condition.localizedDescription)
-        #expect(workspace.authStatus.configured == (condition != .missing))
         #expect(await fixture.network.requests == 0)
         #expect(try fixture.savedSettings() == before)
     }

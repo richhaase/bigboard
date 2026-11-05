@@ -27,7 +27,7 @@ struct HistoryCacheLimitTests {
         #expect(records.reduce(0) { $0 + $1.files.count } == 150_003)
         #expect(records.last?.subject == subject)
         #expect(records.last?.files.last?.previousPath == "old.swift")
-        let cache = HistoryScanCache(schema: 2, fingerprint: "large", scannedAt: Date(), records: records)
+        let cache = HistoryScanCache(schema: 2, fingerprint: "large", scannedAt: Date(), records: records, skipped: 0)
         #expect(try cache.encoded() != nil)
         #expect(try cache.encoded(limits: HistoryCacheLimits(cacheBytes: 16 * 1024 * 1024)) == nil)
     }
@@ -51,7 +51,7 @@ struct HistoryCacheLimitTests {
     }
     private func cache() -> HistoryScanCache {
         let record = Commit(id: String(repeating: "a", count: 40), repo: "o/r", author: "A", email: "a@x", date: Date(timeIntervalSince1970: 1_700_000_000), subject: "A subject\nwith \"quotes\" and é", files: [FileChange(path: "new\tname\n.swift", previousPath: "old.swift", added: 2, removed: 1)])
-        return HistoryScanCache(schema: 2, fingerprint: "fingerprint", scannedAt: Date(timeIntervalSince1970: 1_700_000_001), records: [record])
+        return HistoryScanCache(schema: 2, fingerprint: "fingerprint", scannedAt: Date(timeIntervalSince1970: 1_700_000_001), records: [record], skipped: 0)
     }
     private func directory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -36,8 +36,12 @@ final class WorkspaceStorage: @unchecked Sendable {
             expected = nil
             return WorkspaceConfiguration()
         }
-        let value = try JSONDecoder().decode(WorkspaceConfiguration.self, from: data)
-        try validate(value, forSaving: false)
+        let value: WorkspaceConfiguration
+        do { value = try JSONDecoder().decode(WorkspaceConfiguration.self, from: data) } catch {
+            throw BigboardError.message(
+                "Bigboard could not read \(configurationFile.path). Fix it, or delete it to start with new settings.")
+        }
+        try validate(value)
         expected = data
         return value
     }
@@ -55,23 +59,17 @@ final class WorkspaceStorage: @unchecked Sendable {
         expected = data
     }
     func validate(_ config: WorkspaceConfiguration) throws {
-        try validate(config, forSaving: true)
-    }
-    private func validate(_ config: WorkspaceConfiguration, forSaving: Bool) throws {
-        guard config.schemaVersion == 1 else {
-            throw BigboardError.message("This workspace was created by an unsupported Bigboard version.")
-        }
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else {
             throw BigboardError.message("Invalid request budget or startup range.")
         }
         guard [0, 5, 15, 30, 60].contains(config.refreshIntervalMinutes) else {
             throw BigboardError.message("Choose a supported automatic refresh interval.")
         }
-        for id in config.repositories + config.excludedRepositories + config.groups.values.flatMap({ $0 }) {
+        for id in config.repositories + config.groups.values.flatMap({ $0 }) {
             guard Self.validRepository(id) else {
                 throw BigboardError.message("Repository must be owner/name: \(id)")
             }
-            guard !forSaving || canonicalGitHubRepository(id) == id else {
+            guard canonicalGitHubRepository(id) == id else {
                 throw BigboardError.message("Repository must use lowercase owner/name: \(id)")
             }
         }
@@ -91,7 +89,7 @@ final class WorkspaceStorage: @unchecked Sendable {
             guard Self.validRepository(repo) else {
                 throw BigboardError.message("Invalid work-area repository.")
             }
-            guard !forSaving || canonicalGitHubRepository(repo) == repo else {
+            guard canonicalGitHubRepository(repo) == repo else {
                 throw BigboardError.message("Work-area repository must use lowercase owner/name: \(repo)")
             }
             var names = Set<String>(), paths = Set<String>(), prefixes = Set<String>()
@@ -110,21 +108,18 @@ final class WorkspaceStorage: @unchecked Sendable {
                         throw BigboardError.message(
                             "Work-area paths must be unique literal repository paths.")
                     }
-                    if forSaving {
-                        let prefix = WorkArea.canonicalPrefix(path)
-                        let prefixComponents = prefix.utf8.split(
-                            separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
-                        guard prefixComponents.allSatisfy({ !$0.isEmpty && !$0.elementsEqual(".".utf8) })
-                        else {
-                            throw BigboardError.message(
-                                "Work-area path \(path) in \(repo) must not contain empty or '.' components. A single trailing slash is allowed."
-                            )
-                        }
-                        guard prefixes.insert(prefix).inserted else {
-                            throw BigboardError.message(
-                                "Work-area path \(path) duplicates the prefix \(prefix) in \(repo). A trailing slash does not make a separate prefix."
-                            )
-                        }
+                    let prefix = WorkArea.canonicalPrefix(path)
+                    let prefixComponents = prefix.utf8.split(
+                        separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
+                    guard prefixComponents.allSatisfy({ !$0.isEmpty && !$0.elementsEqual(".".utf8) }) else {
+                        throw BigboardError.message(
+                            "Work-area path \(path) in \(repo) must not contain empty or '.' components. A single trailing slash is allowed."
+                        )
+                    }
+                    guard prefixes.insert(prefix).inserted else {
+                        throw BigboardError.message(
+                            "Work-area path \(path) duplicates the prefix \(prefix) in \(repo). A trailing slash does not make a separate prefix."
+                        )
                     }
                 }
             }

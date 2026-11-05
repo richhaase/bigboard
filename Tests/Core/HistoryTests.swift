@@ -174,17 +174,6 @@ struct HistoryTests {
         #expect(GitHistory.skippedCommitsMessage(1) == "Skipped 1 commit with an unreadable author date.")
         #expect(GitHistory.skippedCommitsMessage(2) == "Skipped 2 commits with unreadable author dates.")
     }
-    @Test func authFailuresAreAuthoritativeOnlyWhenEvidenced() {
-        #expect(GitProcess.authenticatedFailure("error: unable to create temporary file: Permission denied") == nil)
-        #expect(GitProcess.authenticatedFailure("fatal: could not open '/cache/objects/pack/x.pack': Permission denied") == nil)
-        #expect(GitProcess.authenticatedFailure("error: Access denied while writing index") == nil)
-        #expect(GitProcess.authenticatedFailure("remote: Permission to o/r.git denied to someone.") == .permission)
-        #expect(GitProcess.authenticatedFailure("fatal: Authentication failed for https://github.com/o/r")?.isAccessDenied == true)
-        #expect(GitProcess.authenticatedFailure("remote: Repository not found.")?.isAccessDenied == true)
-        #expect(GitProcess.authenticatedFailure("fatal: unable to access: The requested URL returned error: 403")?.isAccessDenied == true)
-        #expect(GitProcess.authenticatedFailure("rate limit exceeded; HTTP 403")?.isAccessDenied == false)
-        #expect(GitProcess.authenticatedFailure("Could not resolve host: github.com") == nil)
-    }
     @Test func scansRemoteTrackingHistoryAndReusesMatchingCache() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
@@ -301,42 +290,48 @@ struct HistoryTests {
         repo.remote = "upstream"
         #expect(GitHistory.fetchArguments(repo, gitDirectory: "/clone/.git") == [
             "--git-dir=/clone/.git", "-c", "fetch.writeCommitGraph=false", "-c", "fetch.recurseSubmodules=false",
-            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
-            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", "https://github.com/owner/repo.git",
+            "fetch", "--quiet", "--no-tags", "--no-prune", "--no-recurse-submodules", "--no-write-fetch-head",
+            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", "upstream",
             "+refs/heads/trunk:refs/remotes/upstream/trunk",
         ])
         #expect(GitHistory.scanRevision(repo) == "refs/remotes/upstream/trunk")
     }
-    @Test func repositoryNetworkSettingsAreDetected() {
-        func config(_ entries: [String]) -> String { entries.joined(separator: "\0") }
-        #expect(!GitHistory.overridesNetwork(config(["core.bare\nfalse", "remote.origin.url\nhttps://github.com/o/r.git", "user.name\nMe"])))
-        for key in ["http.extraheader", "http.https://github.com/.proxy", "url.git@github.com:.insteadof", "credential.helper", "include.path", "includeif.gitdir:~/.path", "remote.origin.proxy"] {
-            #expect(GitHistory.overridesNetwork(config(["core.bare\nfalse", key + "\nvalue"])), "\(key)")
-        }
+    @Test func sshNeverPromptsUnlessTheUserChoseACommand() {
+        #expect(GitHistory.batchSSH(configured: "", environment: [:]) == ["-c", "core.sshCommand=ssh -o BatchMode=yes"])
+        #expect(GitHistory.batchSSH(configured: "ssh -i ~/.ssh/work", environment: [:]).isEmpty)
+        #expect(GitHistory.batchSSH(configured: "", environment: ["GIT_SSH_COMMAND": "ssh -v"]).isEmpty)
+        #expect(GitHistory.batchSSH(configured: "", environment: ["GIT_SSH": "/usr/bin/ssh"]).isEmpty)
     }
-    @Test func refreshRefusesUnsafeConfigurationOrTokensWithoutChangingTheClone() async throws {
+    @Test func refreshFetchesThroughTheClonesOwnGitSetupWithoutChangingIt() async throws {
         let fixture = try HistoryFixture()
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         let clone = fixture.clone
+        _ = try fixture.git(["-C", clone.path, "config", "url.file://\(fixture.server.path).insteadOf", "https://github.com/\(fixture.id).git"])
         func state() throws -> String {
-            try fixture.git(["-C", clone.path, "for-each-ref", "--format=%(refname) %(objectname)"]) + "\n"
+            try fixture.git(["-C", clone.path, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"]) + "\n"
                 + fixture.git(["-C", clone.path, "status", "--porcelain=v1"]) + "\n"
-                + fixture.git(["-C", clone.path, "rev-parse", "HEAD"])
+                + fixture.git(["-C", clone.path, "rev-parse", "HEAD"]) + "\n"
+                + fixture.git(["-C", clone.path, "config", "--local", "--list"])
         }
-        let history = GitHistory(root: fixture.root)
-        let repo = try fixture.repository()
         let before = try state()
-        for token in ["", "bad token"] {
-            await #expect(throws: (any Error).self) { try await history.refresh(repo, token: token) }
-        }
+        try fixture.advance(clones: [])
+        let expected = try fixture.git(["--git-dir=" + fixture.server.path, "rev-parse", "refs/heads/main"])
+        let history = GitHistory(root: fixture.root, environment: ["HOME": fixture.base.path])
+        var repo = try fixture.repository()
+        repo.remote = "origin"
+        let refreshed = try await history.refresh(repo)
+        #expect(refreshed.revision == expected)
+        #expect(try fixture.git(["-C", clone.path, "rev-parse", "refs/remotes/origin/main"]) == expected)
         #expect(try state() == before)
-        _ = try fixture.git(["-C", clone.path, "config", "url.https://example.test/.insteadOf", "https://github.com/"])
-        let configured = try state()
-        await #expect { try await history.refresh(repo, token: "fixture-token") } throws: {
-            $0.localizedDescription.hasPrefix("Not fetched")
-        }
-        #expect(try state() == configured)
         #expect(!FileManager.default.fileExists(atPath: clone.appendingPathComponent(".git/FETCH_HEAD").path))
+        var unknown = repo
+        unknown.branch = ""
+        #expect(try await history.refresh(unknown).branch == "main")
+        _ = try fixture.git(["-C", clone.path, "config", "--unset", "url.file://\(fixture.server.path).insteadOf"])
+        _ = try fixture.git(["-C", clone.path, "config", "url.file://\(fixture.base.path)/missing.git.insteadOf", "https://github.com/\(fixture.id).git"])
+        let configured = try state()
+        await #expect { try await history.refresh(repo) } throws: { $0 is GitCommandFailure && !$0.localizedDescription.isEmpty }
+        #expect(try state() == configured)
     }
     private var processFamilyFixture: String {
         """

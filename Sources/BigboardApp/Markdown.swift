@@ -100,7 +100,7 @@ import AppKit
                 ]
                 lines += table(
                     ["Area", "Evidence count"],
-                    Analysis.relatedScopes(
+                    Analysis.related(
                         records, scope: navigation.scope, mode: navigation.relatedMode,
                         workAreas: configuration.workAreas
                     )

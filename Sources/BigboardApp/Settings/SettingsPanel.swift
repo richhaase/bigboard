@@ -285,7 +285,8 @@ struct SettingsPanel: View {
         }
     }
     private func preparedConfiguration() -> WorkspaceConfiguration {
-        var candidate = SettingsRepositories.applying(selected, available: availableIDs, to: draft)
+        var candidate = draft
+        candidate.repositories = selected.sorted()
         candidate.exclude = parseListEntries(draft.exclude.joined(separator: "\n"))
         candidate.aiIdentities = parseListEntries(draft.aiIdentities.joined(separator: "\n"))
         candidate.botIdentities = parseListEntries(draft.botIdentities.joined(separator: "\n"))

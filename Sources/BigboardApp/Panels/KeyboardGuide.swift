@@ -9,7 +9,7 @@ struct KeyboardGuide: View {
         ("⌘⇧I", "Repository Filter"),
         ("⌘⇧D", "Data Status"),
         ("⌘R", "Refresh repository evidence"),
-        ("⌘,", "Workspace Settings"),
+        ("⌘,", "Settings"),
         ("⌘[", "Back in Heat Maps or Activity"),
         ("⌘⇧C", "Copy view as Markdown"),
         ("⌘Return", "Open selection on GitHub"),

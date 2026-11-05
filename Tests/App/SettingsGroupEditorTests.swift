@@ -156,7 +156,7 @@ struct SettingsGroupEditorTests {
         editor.repositories = " Owner/Library, OWNER/App\nowner/library "
         let didSave = editor.save(to: &draft.groups)
         #expect(didSave)
-        draft = SettingsRepositories.applying(Set(original.repositories), available: [], to: draft)
+        draft.repositories = Set(original.repositories).sorted()
         #expect(workspace.configuration == original)
         #expect(try storage.loadConfiguration() == original)
 

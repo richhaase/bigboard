@@ -15,13 +15,6 @@ private final class Captured: @unchecked Sendable {
     var opens: Int { lock.withLock { opened } }
 }
 
-private struct RoutedTransport: GitHubTransport {
-    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
-        guard request.url?.path == "/user" else { throw GitHubFailure.unavailable }
-        return GitHubHTTPResponse(status: 200, headers: [:], data: Data(#"{"login":"fixture","id":123}"#.utf8))
-    }
-}
-
 private struct CLIFixture {
     let history: HistoryFixture
     let root: URL
@@ -42,15 +35,14 @@ private struct CLIFixture {
     }
     func tool(token: CLITokenSource = CLITokenSource(), openFails: Bool = false) -> CommandLineTool {
         let captured = captured
-        let transport = RoutedTransport()
         let environment = CommandLineEnvironment(
             storage: storage, auth: cliAuth(storage: storage, token: token, user: CLIUserTransport()),
-            transport: transport, now: { Date(timeIntervalSince1970: 1791201600) },
+            now: { Date(timeIntervalSince1970: 1791201600) },
             openApplication: {
                 if openFails { throw BigboardError.message("Bigboard.app was not found next to this command.") }
                 captured.open()
             },
-            refreshHistory: { _, repo, _ in
+            refreshHistory: { _, repo in
                 var result = repo
                 result.revision = String(repeating: "a", count: 40)
                 return result

@@ -19,14 +19,14 @@ import Testing
         await fixture.network.release(.failure(CancellationError()))
         await shutdown.value; await refresh.value
         #expect(try fixture.storage.loadConfiguration() == config)
-        let restarted = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableTransport(), refreshHistory: { _, repo, _ in repo })
+        let restarted = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableTransport(), refreshHistory: { _, repo in repo })
         await restarted.start()
         #expect(restarted.snapshot.repositories.map(\.id) == ["owner/repo"])
         #expect(restarted.snapshot.commits.map(\.id) == commits)
         #expect(restarted.snapshot.repositories.allSatisfy { $0.stale })
         config.cachedOnly = true
         try fixture.storage.saveConfiguration(config)
-        let cached = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableTransport(), refreshHistory: { _, repo, _ in repo })
+        let cached = WorkspaceModel(storage: fixture.storage, authentication: fixture.authentication(), transport: UnavailableTransport(), refreshHistory: { _, repo in repo })
         await cached.start()
         #expect(cached.snapshot.cachedOnly)
         #expect(cached.snapshot.commits.map(\.id) == commits)
@@ -117,7 +117,7 @@ import Testing
         config.sourceRoots = [history.sources.path]
         try storage.saveConfiguration(config)
         network = ShutdownRecoveryTransport(gate: "/user")
-        workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, token: token, user: user), transport: network, refreshHistory: { _, repo, _ in repo })
+        workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage, token: token, user: user), transport: network, refreshHistory: { _, repo in repo })
     }
     func authentication() -> GitHubCLIAuth { cliAuth(storage: storage) }
     func begin() -> Task<Void, Never> {
