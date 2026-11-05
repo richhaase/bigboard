@@ -132,13 +132,13 @@ roots for isolated testing. Use Bigboard Dev for
 authenticated testing alongside the installed release.
 
 Git runs as a cancellable child process against the user's clones. The app
-discovers Git through PATH and standard Homebrew/system locations, ignores
-global and system Git config, and pins hooks, fsmonitor, maintenance, and
-protocol settings off. Refresh is a single `git fetch` of
-`+refs/heads/<branch>:refs/remotes/<remote>/<branch>` from
-`https://github.com/<owner>/<name>.git`, authenticated with an `extraHeader`
-passed through the environment; it is skipped when repo-local config sets
-`http.*`, `url.*`, `credential.*`, `include*`, or proxy keys. Scans read the
+discovers Git through PATH and standard Homebrew/system locations. Refresh is a
+single `git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`
+that uses the user's own Git setup: global and repository config, credential
+helpers, SSH agent, and proxy variables. Prompts are disabled, SSH runs with
+`BatchMode=yes` unless `core.sshCommand` or `GIT_SSH_COMMAND` is set, and hooks,
+maintenance, tags, pruning, and `FETCH_HEAD` are off. Bigboard never passes the
+GitHub CLI token to Git. Scans ignore global and system Git config, and read the
 remote-tracking ref as a bare repository with the mailmap pinned to the scanned
 revision, so working files never affect results. Partial clones are scanned
 without `--numstat` and marked as unknown lines and paths. Tests must never fetch
@@ -147,8 +147,8 @@ are optional and can be rebuilt.
 Resource limits and interrupted collection retain honest stale or partial
 coverage instead of silently truncating results.
 
-Fetch denials mark a repository stale without hiding its local history; a
-rejected GitHub CLI token disconnects the session. See the
+A failed fetch marks the repository stale with Git's message and keeps its local
+history; a rejected GitHub CLI token disconnects the session. See the
 [user reference](reference.md#data-status-offline-work-and-storage) for offline
 behavior.
 

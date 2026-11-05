@@ -26,6 +26,15 @@ struct GitExecutableTests {
         #expect(result["SSH_ASKPASS"] == "" && result["SSH_ASKPASS_REQUIRE"] == "never")
         for key in ["DEVELOPER_DIR", "TOOLCHAINS", "SDKROOT", "GIT_EXEC_PATH", "GIT_CONFIG_COUNT", "GITHUB_TOKEN", "BIGBOARD_GIT_AUTHORIZATION", "DYLD_INSERT_LIBRARIES", "SSLKEYLOGFILE", "HTTPS_PROXY", "CURL_CA_BUNDLE"] { #expect(result[key] == nil) }
     }
+    @Test func fetchEnvironmentKeepsTheUsersGitSetupButNeverPrompts() {
+        let input = ["HOME": "/fixture/home", "PATH": "/fixture/bin", "SSH_AUTH_SOCK": "/fixture/agent", "GIT_SSH_COMMAND": "ssh -v", "HTTPS_PROXY": "https://proxy.invalid", "GITHUB_TOKEN": "fixture-token", "DYLD_INSERT_LIBRARIES": "/fixture/library", "GIT_CONFIG_GLOBAL": "/fixture/gitconfig"]
+        let result = GitProcess.userEnvironment(input)
+        #expect(result["HOME"] == "/fixture/home" && result["SSH_AUTH_SOCK"] == "/fixture/agent")
+        #expect(result["GIT_SSH_COMMAND"] == "ssh -v" && result["HTTPS_PROXY"] == "https://proxy.invalid")
+        #expect(result["PATH"]?.hasPrefix("/fixture/bin:") == true && result["PATH"]?.contains("/opt/homebrew/bin") == true)
+        #expect(result["GIT_TERMINAL_PROMPT"] == "0" && result["SSH_ASKPASS_REQUIRE"] == "never" && result["GCM_INTERACTIVE"] == "never")
+        for key in ["GITHUB_TOKEN", "DYLD_INSERT_LIBRARIES", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"] { #expect(result[key] == nil) }
+    }
     @Test func installedGitSupportsPinnedCommands() async throws {
         let version = try await GitProcess.text(["--version"])
         #expect(version.hasPrefix("git version "))

@@ -107,7 +107,7 @@ import Testing
         #expect(workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second } == (interruption == .history))
         if interruption == .history {
             let row = workspace.snapshot.repositories.first { $0.id == RefreshRecoveryFixture.second }
-            #expect(row?.stale == true && row?.error.hasPrefix("GitHub denied the fetch; showing local history.") == true)
+            #expect(row?.stale == true && row?.error == GitHubFailure.permission.localizedDescription)
         }
         #expect(workspace.discovered.map(\.id) == both)
         await workspace.shutdown()
@@ -139,7 +139,7 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
     func workspace() -> WorkspaceModel {
         let auth = cliAuth(storage: storage)
         let refresh = historyRefresh
-        return WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: { _, repo, _ in try await refresh.refresh(repo) })
+        return WorkspaceModel(storage: storage, authentication: auth, transport: network, refreshHistory: { _, repo in try await refresh.refresh(repo) })
     }
     func remove() { try? FileManager.default.removeItem(at: history.base) }
 }

@@ -34,10 +34,10 @@ brew upgrade --cask richhaase/tap/bigboard
    click **Apply**.
 
 Bigboard reads Git history from your own clones in the source folders you
-choose and loads pull request
-evidence from GitHub with the GitHub CLI token. Refresh fetches only each clone's
-remote-tracking default branch; it never changes your branches, index, or working
-files. Bigboard stores no credentials of its own. Settings and parsed history
+choose and loads pull request evidence from GitHub with the GitHub CLI token.
+Refresh fetches only each clone's remote-tracking default branch, using your own
+Git setup; it never changes your branches, index, or working files. Bigboard
+stores no credentials of its own. Settings and parsed history
 persist between launches and upgrades.
 
 ## Explore

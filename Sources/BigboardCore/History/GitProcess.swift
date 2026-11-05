@@ -112,37 +112,54 @@ enum GitProcess {
         ]) { _, new in new }
         return environment
     }
+    static func userEnvironment(_ inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String:
+        String]
+    {
+        let passed: Set<String> = [
+            "HOME", "TMPDIR", "XDG_CONFIG_HOME", "USER", "LOGNAME", "SSH_AUTH_SOCK", "GIT_SSH", "GIT_SSH_COMMAND",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy",
+            "no_proxy",
+        ]
+        var environment = inherited.filter { passed.contains($0.key) }
+        let path = (inherited["PATH"].map { [$0] } ?? []) + [
+            "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        ]
+        environment.merge([
+            "PATH": path.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+            "SSH_ASKPASS_REQUIRE": "never", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C",
+        ]) { _, new in new }
+        return environment
+    }
     static func run(
-        _ arguments: [String], directory: URL? = nil, token: String = "", timeout: TimeInterval = 120,
-        limit: Int = 256 * 1024 * 1024,
+        _ arguments: [String], directory: URL? = nil, userEnvironment inherited: [String: String]? = nil,
+        timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024,
         stream: (@Sendable (Data, @Sendable () throws -> Void) throws -> Void)? = nil
     ) async throws -> Data {
         let executable = try executable()
-        var pinned = [
-            "-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c",
-            "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c",
-            "credential.interactive=false", "-c", "credential.helper=", "-c", "http.followRedirects=false",
-            "-c", "http.sslVerify=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c",
-            "protocol.ext.allow=never", "-c", "protocol.file.allow=never",
-        ]
-        if !token.isEmpty {
-            pinned += ["--config-env=http.https://github.com/.extraHeader=BIGBOARD_GIT_AUTHORIZATION"]
-        }
+        let pinned =
+            inherited == nil
+            ? [
+                "-c", "core.quotePath=false", "-c", "log.showRoot=true", "-c", "log.showSignature=false", "-c",
+                "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c",
+                "credential.interactive=false", "-c", "credential.helper=", "-c", "http.followRedirects=false",
+                "-c", "http.sslVerify=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c",
+                "protocol.ext.allow=never", "-c", "protocol.file.allow=never",
+            ]
+            : [
+                "-c", "core.hooksPath=/dev/null", "-c", "credential.interactive=false", "-c",
+                "maintenance.auto=false", "-c", "gc.auto=0",
+            ]
         let gitDirectory = arguments.first(where: { $0.hasPrefix("--git-dir=") })
             .map { URL(fileURLWithPath: String($0.dropFirst("--git-dir=".count))) }
-        var environment = Self.environment()
-        if !token.isEmpty {
-            environment["BIGBOARD_GIT_AUTHORIZATION"] =
-                "Authorization: Basic " + Data("x-access-token:\(token)".utf8).base64EncodedString()
-        }
         return try await execute(
-            executable, arguments: pinned + arguments, environment: environment,
+            executable, arguments: pinned + arguments,
+            environment: inherited.map { userEnvironment($0) } ?? environment(),
             directory: directory ?? gitDirectory ?? URL(fileURLWithPath: "/"), timeout: timeout, limit: limit,
-            authenticated: !token.isEmpty, stream: stream)
+            stream: stream)
     }
     static func execute(
         _ executable: URL, arguments: [String], environment: [String: String], directory: URL,
-        timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024, authenticated: Bool = false,
+        timeout: TimeInterval = 120, limit: Int = 256 * 1024 * 1024,
         stream: (@Sendable (Data, @Sendable () throws -> Void) throws -> Void)? = nil
     ) async throws -> Data {
         let control = ProcessControl()
@@ -218,17 +235,10 @@ enum GitProcess {
                         } else if control.isCancelled {
                             continuation.resume(throwing: CancellationError())
                         } else if process.terminationStatus != 0 {
-                            if authenticated,
-                                let failure = authenticatedFailure(String(decoding: err.bytes, as: UTF8.self))
-                            {
-                                continuation.resume(throwing: failure)
-                                return
-                            }
-                            let detail =
-                                !authenticated
-                                ? String(decoding: err.bytes, as: UTF8.self)
-                                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                                : "Authenticated Git request failed. Check repository access and try again."
+                            let detail = String(decoding: err.bytes, as: UTF8.self)
+                                .split(whereSeparator: \.isNewline)
+                                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                                .joined(separator: " ")
                             continuation.resume(
                                 throwing: GitCommandFailure(
                                     status: process.terminationStatus,
@@ -243,29 +253,10 @@ enum GitProcess {
             control.stop()
         }
     }
-    static func authenticatedFailure(_ diagnostic: String) -> GitHubFailure? {
-        let value = diagnostic.lowercased()
-        if value.contains("rate limit") || value.contains("error: 429") || value.contains("http 429") {
-            return .rateLimited
-        }
-        if value.contains("error: 401") || value.contains("http 401")
-            || value.contains("authentication failed") || value.contains("invalid username or token")
-        {
-            return .auth
-        }
-        if value.contains("error: 403") || value.contains("http 403") || value.contains("remote: permission to") {
-            return .permission
-        }
-        if value.contains("error: 404") || value.contains("http 404")
-            || value.contains("repository not found")
-        {
-            return .notFound
-        }
-        return nil
-    }
-    static func text(_ arguments: [String], directory: URL? = nil, token: String = "") async throws -> String
-    {
-        String(decoding: try await run(arguments, directory: directory, token: token), as: UTF8.self)
+    static func text(
+        _ arguments: [String], directory: URL? = nil, userEnvironment: [String: String]? = nil
+    ) async throws -> String {
+        String(decoding: try await run(arguments, directory: directory, userEnvironment: userEnvironment), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

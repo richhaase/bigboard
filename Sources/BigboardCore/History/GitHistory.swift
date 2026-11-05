@@ -18,10 +18,15 @@ private final class RepositoryLock: @unchecked Sendable {
 actor GitHistory {
     let root: URL
     private let limits: HistoryCacheLimits
+    private let environment: [String: String]
     private var active: Set<String> = []
-    init(root: URL, limits: HistoryCacheLimits = HistoryCacheLimits()) {
+    init(
+        root: URL, limits: HistoryCacheLimits = HistoryCacheLimits(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.root = root.standardizedFileURL
         self.limits = limits
+        self.environment = environment
     }
     static func validOID(_ value: String) -> Bool {
         [40, 64].contains(value.utf8.count)
@@ -32,7 +37,7 @@ actor GitHistory {
     }
     private func safePath(_ path: URL) throws {
         guard path.standardizedFileURL.path.hasPrefix(root.path + "/") || path.standardizedFileURL == root
-        else { throw BigboardError.message("Repository is outside Bigboard's cache.") }
+        else { throw BigboardError.message("Path is outside Bigboard's history cache.") }
         var current = path.standardizedFileURL
         while current.path.count >= root.path.count {
             if let info = try? FileManager.default.attributesOfItem(atPath: current.path),
@@ -99,27 +104,23 @@ actor GitHistory {
         }
         _ = try await GitProcess.run(["check-ref-format", "refs/heads/" + repo.branch])
     }
-    static let networkConfigurationPrefixes = ["http.", "url.", "credential.", "include.", "includeif."]
-    static func overridesNetwork(_ configuration: String) -> Bool {
-        configuration.split(separator: "\0").contains { entry in
-            let key = entry.split(separator: "\n", maxSplits: 1).first.map { $0.lowercased() } ?? ""
-            return networkConfigurationPrefixes.contains { key.hasPrefix($0) } || key.hasSuffix(".proxy")
-        }
-    }
     static func fetchArguments(_ repo: Repository, gitDirectory: String) -> [String] {
         [
             "--git-dir=" + gitDirectory, "-c", "fetch.writeCommitGraph=false", "-c", "fetch.recurseSubmodules=false",
-            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
-            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", remoteBase + repo.id + ".git",
+            "fetch", "--quiet", "--no-tags", "--no-prune", "--no-recurse-submodules", "--no-write-fetch-head",
+            "--no-auto-maintenance", "--no-auto-gc", "--refmap=", repo.remote,
             "+refs/heads/\(repo.branch):" + scanRevision(repo),
         ]
     }
-    func refresh(_ repo: Repository, token: String) async throws -> Repository {
+    static func batchSSH(configured: String, environment: [String: String]) -> [String] {
+        guard configured.isEmpty, environment["GIT_SSH_COMMAND"] == nil, environment["GIT_SSH"] == nil else {
+            return []
+        }
+        return ["-c", "core.sshCommand=ssh -o BatchMode=yes"]
+    }
+    func refresh(_ repo: Repository) async throws -> Repository {
         guard !active.contains(repo.id) else {
             throw BigboardError.message("Repository operation is already running.")
-        }
-        guard !token.isEmpty, token.utf8.allSatisfy({ (33...126).contains($0) }) else {
-            throw BigboardError.message("Connect GitHub CLI before refreshing repositories.")
         }
         active.insert(repo.id)
         defer { active.remove(repo.id) }
@@ -127,25 +128,22 @@ actor GitHistory {
         defer { lock.release() }
         let directory = try gitDirectory(repo)
         let git = ["--git-dir=" + directory.path]
-        let local = try await GitProcess.run(
-            git + ["config", "--local", "--no-includes", "--null", "--list"], limit: 1024 * 1024)
-        guard !Self.overridesNetwork(String(decoding: local, as: UTF8.self)) else {
-            throw BigboardError.message(
-                "Not fetched: this clone's Git config sets network, credential, or include options. Fetch it yourself; its local history is still shown."
-            )
-        }
+        let configured =
+            (try? await GitProcess.text(git + ["config", "--get", "core.sshCommand"], userEnvironment: environment))
+            ?? ""
+        let ssh = Self.batchSSH(configured: configured, environment: environment)
         var result = repo
         if result.branch.isEmpty {
             let probe = try await GitProcess.text(
-                ["ls-remote", "--symref", Self.remoteBase + repo.id + ".git", "HEAD"], token: token)
+                ssh + git + ["ls-remote", "--symref", repo.remote, "HEAD"], userEnvironment: environment)
             guard let line = probe.split(separator: "\n").first(where: { $0.hasPrefix("ref: refs/heads/") }),
                 let name = line.dropFirst("ref: refs/heads/".count).split(separator: "\t").first
-            else { throw BigboardError.message("GitHub did not report a default branch.") }
+            else { throw BigboardError.message("The remote did not report a default branch.") }
             result.branch = String(name)
         }
         try await checkBranch(result)
         _ = try await GitProcess.run(
-            Self.fetchArguments(result, gitDirectory: directory.path), token: token,
+            ssh + Self.fetchArguments(result, gitDirectory: directory.path), userEnvironment: environment,
             timeout: GitProcess.transferTimeout)
         let revision = try await GitProcess.text(
             git + ["rev-parse", "--verify", "--end-of-options", Self.scanRevision(result) + "^{commit}"])
@@ -228,7 +226,7 @@ actor GitHistory {
             cache.fingerprint == key
         {
             try Task.checkCancellation()
-            return finish(cache.records, skipped: cache.skipped ?? 0, scannedAt: cache.scannedAt)
+            return finish(cache.records, skipped: cache.skipped, scannedAt: cache.scannedAt)
         }
         let attributes = try HistoryRules.attributes(
             String(decoding: attributeData, as: UTF8.self), checkpoint: { try Task.checkCancellation() })

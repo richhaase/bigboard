@@ -34,16 +34,4 @@ struct SettingsRepositories {
                 return $0.id < $1.id
             }
     }
-    static func applying(_ selected: Set<String>, available: Set<String>, to config: WorkspaceConfiguration)
-        -> WorkspaceConfiguration
-    {
-        let selectedIDs = Set(selected.map { $0.lowercased() })
-        let availableIDs = Set(available.map { $0.lowercased() })
-        let excludedIDs = Set(config.excludedRepositories.map { $0.lowercased() })
-        var next = config
-        next.repositories = selectedIDs.sorted()
-        next.excludedRepositories = excludedIDs.union(availableIDs.subtracting(selectedIDs))
-            .subtracting(selectedIDs).sorted()
-        return next
-    }
 }

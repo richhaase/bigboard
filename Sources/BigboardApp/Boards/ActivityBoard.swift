@@ -249,7 +249,7 @@ struct ActivityBoard: View {
             Text("Historical overlap describes related work, not ownership or current presence.")
                 .font(.caption).foregroundStyle(.secondary)
             let related =
-                Analysis.relatedScopes(
+                Analysis.related(
                     records, scope: navigation.scope, mode: navigation.relatedMode,
                     workAreas: workspace.configuration.workAreas
                 )

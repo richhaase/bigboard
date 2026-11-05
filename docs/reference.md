@@ -17,15 +17,17 @@ repository, the first by path is used. Choose **Refresh repository list** after
 cloning. Repositories without a local clone cannot be collected.
 
 History comes from each clone's remote-tracking default branch, such as
-`origin/main`. Refresh fetches only that ref from GitHub with the GitHub CLI
-token; it never changes your local branches, the index, working files, or Git
-config, and it never runs maintenance in your repository. Local commits and
-uncommitted work are not counted until they reach the default branch on GitHub.
-Clones whose own Git config sets network, credential, or include options are not
-fetched; their local history is still shown. Shallow clones show only the history
-they contain, and partial (blobless) clones show commits with unknown line counts
-and paths. Organizations that require SSO must authorize the GitHub CLI token
-(`gh auth refresh` or GitHub's SSO prompt). History collection requires Git,
+`origin/main`. Refresh fetches only that ref from the clone's own remote, the
+same way `git fetch` does in Terminal: your SSH keys, credential helper, and Git
+config apply. It never prompts; a fetch that would need a password, passphrase,
+or host-key confirmation fails, and the repository keeps its local history. It
+never changes your local branches, the index, working files, or Git config, and
+it never runs maintenance in your repository. Local commits and uncommitted work
+are not counted until they reach the default branch on GitHub. Shallow clones
+show only the history they contain, and partial (blobless) clones show commits
+with unknown line counts and paths. Pull request evidence uses the GitHub CLI
+token; organizations that require SSO must authorize it (`gh auth refresh` or
+GitHub's SSO prompt). History collection requires Git,
 available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
@@ -234,8 +236,8 @@ transient failure and labels stale or incomplete evidence.
 **Settings → General → Use cached history only** reads your clones without
 fetching or contacting GitHub. Clones are found again on every refresh, so
 cached history opens offline after a restart. Connecting a new GitHub CLI
-account requires live verification. If GitHub denies a fetch, the repository is
-marked stale and its local history is still shown.
+account requires live verification. If a fetch fails, the repository is marked
+stale with Git's message and its local history is still shown.
 
 Settings live in `~/.config/bigboard/config.json` (or under `$XDG_CONFIG_HOME`)
 and can be edited by hand while Bigboard is closed. Rebuildable parsed history
@@ -254,7 +256,7 @@ app is open.
 | `bigboard` or `bigboard open` | Open the app. |
 | `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
 | `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
-| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with the GitHub CLI token. |
+| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. |
 | `bigboard help`, `bigboard version` | Show usage or the version. |
 
 `activity` options:
@@ -278,7 +280,7 @@ Usage errors exit with status 64.
 | Symptom | What to check |
 | --- | --- |
 | A repository is missing from Settings | Confirm its clone is within four folder levels of a source folder and has a GitHub remote, then choose **Refresh repository list**. Hidden folders and build or dependency folders such as `node_modules`, `build`, `vendor`, and `Library` are skipped. |
-| A repository stays stale after refresh | Confirm `gh repo view owner/name` works for the active GitHub CLI account, including SSO authorization for the organization. Clones whose own Git config sets network, credential, or include options are never fetched. |
+| A repository stays stale after refresh | Run `git fetch` in that clone in Terminal. Bigboard fetches the same way but never prompts, so load SSH keys into your agent and accept new host keys first. |
 | A selected repository is missing from a board | Check the toolbar repository filter, selected group, and Advanced exclusion patterns. Settings controls collection; viewing filters narrow the results. |
 | A view is empty or a count includes `+ ?` | Check the date range and board filters, then open Data Status. Incomplete coverage does not establish that no activity exists. |
 | Data stays stale | Check **Use cached history only** in Settings → General. Data Status identifies access errors, request limits, and unfinished collection. |

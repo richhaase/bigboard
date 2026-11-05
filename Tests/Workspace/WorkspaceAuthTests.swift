@@ -134,7 +134,6 @@ private final class WaitingCLI: @unchecked Sendable {
     cli.release()
     await startup.value
     #expect(workspace.checkingSignIn == false)
-    #expect(workspace.authStatus.configured)
     #expect(workspace.authStatus.signedIn == false)
     #expect(workspace.error == GitHubCLIFailure.signedOut.localizedDescription)
 }
@@ -165,7 +164,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     let storage = WorkspaceStorage(configRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
     try isolateSources(storage, sources: history.sources)
     let network = ConfigurationWorkspaceTransport(initialFailure: initialFailure)
-    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo, _ in repo })
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo in repo })
     await workspace.start()
     #expect(workspace.configuration.repositories.isEmpty)
     var draft = workspace.configuration; draft.repositories = ["owner/repo"]
@@ -190,7 +189,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     let storage = WorkspaceStorage(configRoot: history.base.appendingPathComponent("support"), cacheRoot: history.base.appendingPathComponent("workspace-cache"))
     try isolateSources(storage, sources: history.sources)
     let network = ConfigurationWorkspaceTransport()
-    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo, _ in repo })
+    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network, refreshHistory: { _, repo in repo })
     await workspace.start()
     let original = workspace.configuration
     var unavailable = original; unavailable.repositories = ["other/private"]

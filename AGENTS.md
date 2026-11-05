@@ -17,11 +17,12 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
   filters only affect viewing; Settings controls saved collection choices.
 - Use atomic storage under the XDG base directories: one settings file in
   `$XDG_CONFIG_HOME/bigboard` and rebuildable history in `$XDG_CACHE_HOME/bigboard`
-  (`bigboard-dev` for Bigboard Dev). GitHub access comes only from the
+  (`bigboard-dev` for Bigboard Dev). GitHub API access comes only from the
   GitHub CLI (`gh auth token`); Bigboard stores no credentials. History comes from
-  the user's own clones: only fetch into `refs/remotes/<remote>/<default branch>`,
-  and never write branches, the index, the working tree, or config, or run gc or
-  other maintenance in them.
+  the user's own clones, fetched with the user's own Git setup: only fetch into
+  `refs/remotes/<remote>/<default branch>`, never prompt, and never write
+  branches, the index, the working tree, or config, or run gc or other
+  maintenance in them.
 - Preserve cancellation, access checks, identity rules, and honest stale/partial
   coverage. Update affected projections and tests when changing data models.
 - Do not add source comments unless requested. Keep signing settings and

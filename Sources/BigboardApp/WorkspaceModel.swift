@@ -20,23 +20,20 @@ final class WorkspaceModel {
     private let now: @Sendable () -> Date
     private var lastRefreshFinished: Date?
     private var shuttingDown = false
-    private let refreshHistory: @Sendable (GitHistory, Repository, String) async throws -> Repository
+    private let refreshHistory: @Sendable (GitHistory, Repository) async throws -> Repository
     private var github: GitHubService?
     private var history: GitHistory?
     private var account = ""
-    private var clones: [Repository] = []
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var started = false
-    private var discoveryVerified = false
-    private var pendingGitAuthentication = false
     init(
         storage: WorkspaceStorage = .system(), authentication: GitHubCLIAuth? = nil,
         transport: any GitHubTransport = URLSessionGitHubTransport(),
         now: @escaping @Sendable () -> Date = Date.init,
-        refreshHistory: @escaping @Sendable (GitHistory, Repository, String) async throws -> Repository = {
-            try await $0.refresh($1, token: $2)
+        refreshHistory: @escaping @Sendable (GitHistory, Repository) async throws -> Repository = {
+            try await $0.refresh($1)
         }
     ) {
         self.storage = storage
@@ -65,17 +62,14 @@ final class WorkspaceModel {
     }
     private func connect() throws {
         guard authStatus.signedIn else {
-            throw BigboardError.message("Connect GitHub CLI to open a workspace.")
+            throw BigboardError.message("Connect GitHub CLI first.")
         }
         if account == authStatus.accountID, history != nil { return }
         generation += 1
         account = authStatus.accountID
         lastRefreshFinished = nil
         configuration = try storage.loadConfiguration()
-        clones = []
         discovered = []
-        discoveryVerified = false
-        pendingGitAuthentication = false
         activeGroup = ""
         history = GitHistory(root: storage.historyRoot)
         let manager = auth
@@ -101,7 +95,7 @@ final class WorkspaceModel {
         guard !busy, history != nil, github != nil, !account.isEmpty else { return nil }
         busy = true
         snapshot.coverage.phase = "refreshing"
-        snapshot.coverage.message = "Refreshing workspace…"
+        snapshot.coverage.message = "Refreshing…"
         let operation = generation
         let task = Task {
             await self.performRefresh(operation: operation)
@@ -133,7 +127,7 @@ final class WorkspaceModel {
         snapshot.coverage = current.coverage
         if config.cachedOnly || snapshot.commits.isEmpty {
             current = await scan(
-                selected(clones), previous: current, history: history, configuration: config, live: false)
+                selected(discovered), previous: current, history: history, configuration: config, live: false)
             guard operation == generation, !Task.isCancelled else { return }
             current.cachedOnly = config.cachedOnly
             if config.cachedOnly {
@@ -150,19 +144,13 @@ final class WorkspaceModel {
         do {
             guard try await verifyViewer(github, account: id, operation: operation) else { return }
             current = snapshot
-            let repos = selected(clones)
+            let repos = selected(discovered)
             guard !configuration.repositories.isEmpty else {
                 snapshot.coverage = Coverage(phase: "setup", message: "Choose repositories in Settings.")
                 return
             }
-            pendingGitAuthentication = false
             current = await scan(
                 repos, previous: current, history: history, configuration: config, live: true)
-            guard operation == generation, !Task.isCancelled else { return }
-            if pendingGitAuthentication {
-                await invalidateAuthentication(operation: operation)
-                return
-            }
             guard operation == generation, !Task.isCancelled else { return }
             snapshot = current
             snapshot.coverage.message = "Loading pull-request evidence…"
@@ -176,7 +164,6 @@ final class WorkspaceModel {
             current.repositories = prs.repositories
             current.pullRequests = prs.pullRequests
             current.coverage.errors += prs.coverage.errors
-            current.coverage.probeRequests += prs.coverage.probeRequests
             current.coverage.inventoryRequests = prs.coverage.inventoryRequests
             current.coverage.fileRequests = prs.coverage.fileRequests
             current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
@@ -204,17 +191,13 @@ final class WorkspaceModel {
         }
     }
     private struct ScanOutcome: Sendable {
-        enum Access: Sendable { case unchanged, authenticationRequired }
-
         var repository: Repository
         var commits: [Commit]
-        var access: Access = .unchanged
     }
     private func scan(
         _ repos: [Repository], previous: Snapshot, history: GitHistory, configuration: WorkspaceConfiguration,
         live: Bool
     ) async -> Snapshot {
-        let scanGeneration = generation
         var result = Snapshot(generatedAt: Date(), accountID: previous.accountID, viewer: previous.viewer)
         result.pullRequests = previous.pullRequests
         result.cachedOnly = !live
@@ -222,14 +205,13 @@ final class WorkspaceModel {
         for start in stride(from: 0, to: repos.count, by: 8) {
             if Task.isCancelled { break }
             let batch = Array(repos[start..<min(start + 8, repos.count)])
-            let auth = self.auth
             let refreshHistory = self.refreshHistory
             let outcomes = await withTaskGroup(of: ScanOutcome.self, returning: [ScanOutcome].self) { group in
                 for repo in batch {
                     group.addTask {
                         var current = repo
                         do {
-                            if live { current = try await refreshHistory(history, repo, auth.token()) }
+                            if live { current = try await refreshHistory(history, repo) }
                             let scanned = try await history.scan(current, configuration: configuration)
                             return ScanOutcome(repository: scanned.0, commits: scanned.1)
                         } catch {
@@ -238,13 +220,6 @@ final class WorkspaceModel {
                             let prior = previous.repositories.first { $0.id == repo.id }
                             current.revision = prior?.revision ?? ""
                             current.scannedAt = prior?.scannedAt
-                            if error as? GitHubFailure == .auth || error is GitHubCLIFailure {
-                                return ScanOutcome(
-                                    repository: current, commits: [], access: .authenticationRequired)
-                            }
-                            if let failure = error as? GitHubFailure, failure.isAccessDenied {
-                                current.error = "GitHub denied the fetch; showing local history. " + current.error
-                            }
                             if live, !Task.isCancelled,
                                 let cached = try? await history.scan(repo, configuration: configuration)
                             {
@@ -263,17 +238,10 @@ final class WorkspaceModel {
             }
             for outcome in outcomes.sorted(by: { $0.repository.id < $1.repository.id }) {
                 let repo = outcome.repository
-                if scanGeneration == generation {
-                    switch outcome.access {
-                    case .unchanged: break
-                    case .authenticationRequired: pendingGitAuthentication = true
-                    }
-                }
                 result.repositories.append(repo)
                 result.commits += outcome.commits
                 if !repo.error.isEmpty { result.coverage.errors.append("\(repo.id): \(repo.error)") }
             }
-            if scanGeneration == generation, pendingGitAuthentication { break }
         }
         let retained = Set(result.repositories.map(\.id))
         result.pullRequests.removeAll { !retained.contains($0.repo) }
@@ -288,7 +256,6 @@ final class WorkspaceModel {
         discoveryTask?.cancel()
         discoveryTask = nil
         busy = false
-        clones = []
         discovered = []
         configuration = WorkspaceConfiguration()
         snapshot = Snapshot()
@@ -297,8 +264,6 @@ final class WorkspaceModel {
         history = nil
         github = nil
         activeGroup = ""
-        pendingGitAuthentication = false
-        discoveryVerified = false
         checkingSignIn = false
         authStatus.signedIn = false
         authStatus.login = ""
@@ -309,19 +274,15 @@ final class WorkspaceModel {
         authStatus.error = error
     }
     private func restrictSnapshot() {
-        let allowed = Set(clones.map(\.id))
-        let collected = Set(selected(clones).map(\.id))
+        let collected = Set(selected(discovered).map(\.id))
         snapshot.repositories.removeAll { !collected.contains($0.id) }
         snapshot.commits.removeAll { !collected.contains($0.repo) }
         snapshot.pullRequests.removeAll { !collected.contains($0.repo) }
-        discovered.removeAll { !allowed.contains($0.id) }
     }
     private func findClones(operation: Int, roots: [String]) async -> Bool {
         let rows = await CloneDiscovery.find(in: CloneDiscovery.roots(roots))
         guard operation == generation, !Task.isCancelled else { return false }
-        clones = rows
         discovered = rows
-        discoveryVerified = true
         restrictSnapshot()
         return true
     }
@@ -337,7 +298,6 @@ final class WorkspaceModel {
         guard !busy, !account.isEmpty else { return }
         busy = true
         error = ""
-        discoveryVerified = false
         let operation = generation
         let folders = roots ?? configuration.sourceRoots
         let task = Task { _ = await self.findClones(operation: operation, roots: folders) }
@@ -360,7 +320,6 @@ final class WorkspaceModel {
         guard config.sourceRoots != configuration.sourceRoots else { return true }
         let operation = generation
         do {
-            try storage.validate(config)
             try storage.saveConfiguration(config)
             configuration = config
             error = ""
@@ -390,15 +349,9 @@ final class WorkspaceModel {
             }
             let foldersChanged = config.sourceRoots != configuration.sourceRoots
             if foldersChanged || Set(config.repositories) != Set(configuration.repositories) {
-                if !discoveryVerified || foldersChanged {
+                if foldersChanged || discovered.isEmpty {
                     await discover(roots: config.sourceRoots)
                     guard operation == generation, !Task.isCancelled else { return false }
-                    guard discoveryVerified else {
-                        if error.isEmpty {
-                            error = "Repository access could not be verified. Try applying again."
-                        }
-                        return false
-                    }
                 }
                 let unavailable = Set(config.repositories).subtracting(discovered.map(\.id)).sorted()
                 guard unavailable.isEmpty else {
@@ -429,12 +382,22 @@ final class WorkspaceModel {
             busy = true
             let operation = generation
             let old = snapshot
-            let rescanned = await scan(
-                old.repositories, previous: old, history: history, configuration: next, live: false)
-            guard operation == generation else { return }
-            snapshot.commits = rescanned.commits
-            snapshot.coverage.errors += rescanned.coverage.errors
-            busy = false
+            let task = Task {
+                let rescanned = await self.scan(
+                    old.repositories, previous: old, history: history, configuration: next, live: false)
+                guard operation == self.generation else { return }
+                var errors: [String] = []
+                for error in old.coverage.errors + rescanned.coverage.errors where !errors.contains(error) {
+                    errors.append(error)
+                }
+                self.snapshot.repositories = rescanned.repositories
+                self.snapshot.commits = rescanned.commits
+                self.snapshot.coverage.errors = errors
+                self.refreshTask = nil
+                self.busy = false
+            }
+            refreshTask = task
+            await task.value
         } catch {
             self.error = error.localizedDescription
             busy = false

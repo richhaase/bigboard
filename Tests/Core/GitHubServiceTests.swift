@@ -45,7 +45,7 @@ private let onePR = #"{"data":{"repository":{"nameWithOwner":"owner/repo","defau
     #expect(transient.repositories.first?.prInventoryComplete == false)
     let denial = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [old])
     #expect(denial.pullRequests.isEmpty)
-    #expect(denial.deniedRepositories == ["owner/repo"])
+    #expect(denial.repositories.filter { !$0.prStale }.isEmpty)
 }
 @Test func rateLimitPausesRequestsUntilCooldownEnds() async throws {
     let clock = GitHubTestClock()
@@ -58,7 +58,7 @@ private let onePR = #"{"data":{"repository":{"nameWithOwner":"owner/repo","defau
     clock.advance(by: 1)
     let recovered = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
     #expect(await network.count == 2)
-    #expect(recovered.coverage.phase == "ready")
+    #expect(recovered.coverage.errors.isEmpty)
     #expect(recovered.pullRequests.map(\.number) == [1])
 }
 @Test func repositoryIdentifiersRejectPathEscape() {
@@ -116,7 +116,7 @@ private func graphCursor(in request: URLRequest) throws -> String? {
     #expect(result.pullRequests.map(\.number) == [1, 2])
     #expect(result.pullRequests.allSatisfy { $0.inventoryComplete })
     #expect(result.repositories.first?.prInventoryComplete == true)
-    #expect(result.coverage.phase == "ready")
+    #expect(result.coverage.errors.isEmpty)
     #expect(result.coverage.inventoryRequests == 2)
     let requests = await network.requests
     try #require(requests.count == 2)
@@ -142,8 +142,7 @@ func interruptedInventoryRetainsOldEvidenceUntilCompleteRefresh(exhaustBudget: B
     #expect(partial.pullRequests.allSatisfy { !$0.inventoryComplete })
     #expect(partial.repositories.first?.prInventoryComplete == false)
     #expect(partial.repositories.first?.prStale == true)
-    #expect(partial.coverage.phase == "partial")
-    #expect(partial.deniedRepositories.isEmpty)
+    #expect(!partial.coverage.errors.isEmpty)
     #expect(await network.count == (exhaustBudget ? 1 : 2))
 
     let recovered = await service.fetch(partial.repositories, budget: 10, previous: partial.pullRequests)
@@ -151,7 +150,7 @@ func interruptedInventoryRetainsOldEvidenceUntilCompleteRefresh(exhaustBudget: B
     #expect(recovered.pullRequests.allSatisfy { $0.inventoryComplete })
     #expect(recovered.repositories.first?.prInventoryComplete == true)
     #expect(recovered.repositories.first?.prStale == false)
-    #expect(recovered.coverage.phase == "ready")
+    #expect(recovered.coverage.errors.isEmpty)
     #expect(await network.count == (exhaustBudget ? 2 : 3))
 }
 
@@ -184,8 +183,7 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     #expect(!pr.filesComplete && pr.inventoryComplete)
     #expect(result.repositories.first?.prFilesComplete == false)
     #expect(result.repositories.first?.prInventoryComplete == true)
-    #expect(result.coverage.phase == "partial")
-    #expect(result.deniedRepositories.isEmpty)
+    #expect(!result.coverage.errors.isEmpty)
     #expect(result.coverage.fileRequests == 2)
     let requests = await network.requests
     try #require(requests.count == 3)
@@ -196,11 +194,10 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     let partial = try alteredPR({ $0["reviewRequests"] = NSNull() }, errors: [["type": "FORBIDDEN", "path": ["repository", "pullRequests", "nodes", 0, "reviewRequests"]]])
     let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([partial]), now: { testNow })
     let result = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
-    #expect(result.deniedRepositories.isEmpty)
     #expect(result.repositories.first?.prInventoryComplete == true)
     #expect(result.repositories.first?.prReviewersComplete == false)
     #expect(result.pullRequests.count == 1)
-    #expect(result.coverage.phase == "partial")
+    #expect(!result.coverage.errors.isEmpty)
 }
 @Test func nullCheckRollupStateIsUnknownWithoutDroppingPR() async throws {
     let partial = try alteredPR { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": NSNull()]]]]] }
@@ -214,7 +211,7 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([malformed]), now: { testNow })
     let result = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
     #expect(result.repositories.first?.prInventoryComplete == false)
-    #expect(result.coverage.phase == "partial")
+    #expect(!result.coverage.errors.isEmpty)
 }
 @Test func fileLimitRetainsThousandPathsAndIncompleteCoverage() async throws {
     var responses = [try alteredPR { $0["files"] = ["totalCount": 1001, "pageInfo": ["hasNextPage": true, "endCursor": "initial"], "nodes": [["path": "file0"]]] }]
@@ -229,7 +226,7 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     #expect(result.pullRequests.first?.filesComplete == false)
     #expect(result.repositories.first?.prInventoryComplete == true)
     #expect(result.coverage.fileRequests == 10)
-    #expect(result.coverage.phase == "partial")
+    #expect(!result.coverage.errors.isEmpty)
     #expect(await network.count == 11)
 }
 @Test func authenticationDenialBlocksRemainingRepositoryRequests() async throws {
@@ -237,6 +234,6 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
     let result = await service.fetch([Repository(id: "owner/one"), Repository(id: "owner/two")], budget: 128, previous: [])
     #expect(result.authenticationRequired)
-    #expect(result.deniedRepositories == ["owner/one", "owner/two"])
+    #expect(result.repositories.map(\.id) == ["owner/one", "owner/two"] && result.repositories.filter { !$0.prStale }.isEmpty)
     #expect(await network.count == 1)
 }

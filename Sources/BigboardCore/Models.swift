@@ -13,9 +13,7 @@ struct WorkArea: Codable, Sendable, Equatable {
     }
 }
 struct WorkspaceConfiguration: Codable, Sendable, Equatable {
-    var schemaVersion = 1
     var repositories: [String] = []
-    var excludedRepositories: [String] = []
     var groups: [String: [String]] = [:]
     var identities: [String: IdentityRule] = [:]
     var workAreas: [String: [WorkArea]] = [:]
@@ -33,41 +31,15 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
 extension WorkspaceConfiguration {
     func collected(_ repositories: [Repository], group: String = "") -> [Repository] {
         let configured = Set(self.repositories)
-        let excluded = Set(excludedRepositories)
         let members = group.isEmpty ? nil : Set(groups[group] ?? [])
         return repositories.filter { repo in
-            if !configured.contains(repo.id) || excluded.contains(repo.id) { return false }
+            if !configured.contains(repo.id) { return false }
             if let members, !members.contains(repo.id) { return false }
             let name = String(repo.id.split(separator: "/").last ?? "")
             return !exclude.contains { pattern in
                 fnmatch(pattern, repo.id, 0) == 0 || fnmatch(pattern, name, 0) == 0
             }
         }
-    }
-    enum CodingKeys: String, CodingKey {
-        case schemaVersion, repositories, excludedRepositories, groups, identities, workAreas, exclude
-        case allFiles, aiIdentities, botIdentities, sinceDays, contributorSort, requestBudget, cachedOnly
-        case refreshIntervalMinutes, sourceRoots
-    }
-
-    init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
-        repositories = try values.decode([String].self, forKey: .repositories)
-        excludedRepositories = try values.decode([String].self, forKey: .excludedRepositories)
-        groups = try values.decode([String: [String]].self, forKey: .groups)
-        identities = try values.decode([String: IdentityRule].self, forKey: .identities)
-        workAreas = try values.decode([String: [WorkArea]].self, forKey: .workAreas)
-        exclude = try values.decode([String].self, forKey: .exclude)
-        allFiles = try values.decode(Bool.self, forKey: .allFiles)
-        aiIdentities = try values.decode([String].self, forKey: .aiIdentities)
-        botIdentities = try values.decode([String].self, forKey: .botIdentities)
-        sinceDays = try values.decode(Int.self, forKey: .sinceDays)
-        contributorSort = try values.decode(String.self, forKey: .contributorSort)
-        requestBudget = try values.decode(Int.self, forKey: .requestBudget)
-        cachedOnly = try values.decode(Bool.self, forKey: .cachedOnly)
-        refreshIntervalMinutes = try values.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 15
-        sourceRoots = try values.decodeIfPresent([String].self, forKey: .sourceRoots) ?? []
     }
 }
 struct FileChange: Codable, Sendable, Equatable {
@@ -98,7 +70,7 @@ struct Commit: Codable, Sendable, Identifiable, Equatable {
     }
     var change: Int { added + removed }
 }
-struct Repository: Codable, Sendable, Identifiable, Equatable {
+struct Repository: Sendable, Identifiable, Equatable {
     var id: String
     var branch = "main"
     var revision = ""
@@ -106,7 +78,6 @@ struct Repository: Codable, Sendable, Identifiable, Equatable {
     var scannedAt: Date? = nil
     var stale = false
     var error = ""
-    var included = true
     var prCheckedAt: Date? = nil
     var prInventoryComplete = false
     var prFilesComplete = false
@@ -116,40 +87,13 @@ struct Repository: Codable, Sendable, Identifiable, Equatable {
     var remote = "origin"
     var shallow = false
     var partial = false
-    var name: String { id }
 }
-extension Repository {
-    enum CodingKeys: String, CodingKey {
-        case id, branch, revision, pushedAt, scannedAt, stale, error, included, prCheckedAt
-        case prInventoryComplete, prFilesComplete, prReviewersComplete, prStale, path, remote, shallow, partial
-    }
-    init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        id = try values.decode(String.self, forKey: .id)
-        branch = try values.decodeIfPresent(String.self, forKey: .branch) ?? "main"
-        revision = try values.decodeIfPresent(String.self, forKey: .revision) ?? ""
-        pushedAt = try values.decodeIfPresent(Date.self, forKey: .pushedAt)
-        scannedAt = try values.decodeIfPresent(Date.self, forKey: .scannedAt)
-        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
-        error = try values.decodeIfPresent(String.self, forKey: .error) ?? ""
-        included = try values.decodeIfPresent(Bool.self, forKey: .included) ?? true
-        prCheckedAt = try values.decodeIfPresent(Date.self, forKey: .prCheckedAt)
-        prInventoryComplete = try values.decodeIfPresent(Bool.self, forKey: .prInventoryComplete) ?? false
-        prFilesComplete = try values.decodeIfPresent(Bool.self, forKey: .prFilesComplete) ?? false
-        prReviewersComplete = try values.decodeIfPresent(Bool.self, forKey: .prReviewersComplete) ?? false
-        prStale = try values.decodeIfPresent(Bool.self, forKey: .prStale) ?? false
-        path = try values.decodeIfPresent(String.self, forKey: .path) ?? ""
-        remote = try values.decodeIfPresent(String.self, forKey: .remote) ?? "origin"
-        shallow = try values.decodeIfPresent(Bool.self, forKey: .shallow) ?? false
-        partial = try values.decodeIfPresent(Bool.self, forKey: .partial) ?? false
-    }
-}
-struct Review: Codable, Sendable, Equatable {
+struct Review: Sendable, Equatable {
     var author: String
     var state: String
     var submittedAt: Date?
 }
-struct PullRequest: Codable, Sendable, Identifiable, Equatable {
+struct PullRequest: Sendable, Identifiable, Equatable {
     var repo: String
     var number: Int
     var title: String
@@ -170,14 +114,12 @@ struct PullRequest: Codable, Sendable, Identifiable, Equatable {
     var filesComplete = false
     var reviewersComplete = false
     var reviewsComplete = false
-    var checkedAt: Date? = nil
     var id: String { "\(repo)#\(number)" }
 }
-struct Coverage: Codable, Sendable, Equatable {
+struct Coverage: Sendable, Equatable {
     var phase = "initial"
     var message = ""
     var errors: [String] = []
-    var probeRequests = 0
     var inventoryRequests = 0
     var fileRequests = 0
 }
@@ -201,7 +143,6 @@ struct ActivityScope: Hashable, Sendable {
     }
 }
 struct AuthStatus: Sendable {
-    var configured = false
     var signedIn = false
     var login = ""
     var accountID = ""

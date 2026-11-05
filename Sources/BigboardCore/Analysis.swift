@@ -47,8 +47,6 @@ struct RelatedRow: Identifiable, Sendable {
 struct PRFilters: Sendable {
     var query = ""
     var repos: Set<String> = []
-    var days = 0
-    var since: Date? = nil
     var authors: Set<String> = []
     var reviews: Set<String> = []
     var checks: Set<String> = []
@@ -308,10 +306,6 @@ enum Analysis {
             }
             .sorted { a, b in a.count != b.count ? a.count > b.count : literalLess(a.id, b.id) }
     }
-    static func relatedScopes(
-        _ commits: [Commit], scope: ActivityScope, mode: String = "commits",
-        workAreas: [String: [WorkArea]] = [:]
-    ) -> [RelatedRow] { related(commits, scope: scope, mode: mode, workAreas: workAreas) }
     static func daily(
         _ commits: [Commit], days: Int = 30, since: Date? = nil, now: Date = Date(),
         calendar: Calendar = .current
@@ -390,7 +384,7 @@ enum Analysis {
         let own = pr.author.lowercased() == viewer.lowercased()
         return (!own && (requested(pr, viewer: viewer) || updatedSinceReview(pr, viewer: viewer)))
             || (own
-                && (["FAILURE", "ERROR", "FAILING"].contains(pr.checks) || pr.review == "CHANGES_REQUESTED"
+                && (["FAILURE", "ERROR"].contains(pr.checks) || pr.review == "CHANGES_REQUESTED"
                     || (!pr.draft && pr.review == "APPROVED" && pr.checks == "SUCCESS")))
     }
     static func filterPRs(
@@ -415,13 +409,12 @@ enum Analysis {
         func priority(_ pr: PullRequest) -> Int {
             requested(pr, viewer: viewer)
                 ? 0
-                : ["FAILURE", "ERROR", "FAILING"].contains(pr.checks)
+                : ["FAILURE", "ERROR"].contains(pr.checks)
                     ? 1 : pr.review == "CHANGES_REQUESTED" ? 2 : pr.review == "APPROVED" ? 3 : 4
         }
         let query = filters.query.lowercased()
         let selected = prs.filter { p in
             matches(filters.repos, p.repo)
-                && inRange(p.updatedAt, days: filters.days, since: filters.since, now: now)
                 && (query.isEmpty
                     || "\(p.repo) \(p.title) \(p.author) \(p.number)".lowercased().contains(query))
                 && matches(Set(filters.authors.map { $0.lowercased() }), p.author.lowercased())

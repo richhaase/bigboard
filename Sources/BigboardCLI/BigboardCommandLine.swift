@@ -29,11 +29,10 @@ public enum BigboardCommandLine {
 struct CommandLineEnvironment: Sendable {
     var storage: WorkspaceStorage
     var auth: GitHubCLIAuth
-    var transport: any GitHubTransport
     var now: @Sendable () -> Date
     var openApplication: @Sendable () throws -> Void
-    var refreshHistory: @Sendable (GitHistory, Repository, String) async throws -> Repository = {
-        try await $0.refresh($1, token: $2)
+    var refreshHistory: @Sendable (GitHistory, Repository) async throws -> Repository = {
+        try await $0.refresh($1)
     }
     var write: @Sendable (String) -> Void = { FileHandle.standardOutput.write(Data($0.utf8)) }
     var writeError: @Sendable (String) -> Void = { FileHandle.standardError.write(Data($0.utf8)) }
@@ -44,10 +43,8 @@ struct CommandLineEnvironment: Sendable {
             bundle.flatMap { Bundle(url: $0)?.bundleIdentifier }.flatMap(ApplicationIdentity.init(rawValue:))
             ?? .production
         let storage = WorkspaceStorage.system(identity: identity)
-        let transport = URLSessionGitHubTransport()
         return CommandLineEnvironment(
-            storage: storage, auth: GitHubCLIAuth(storage: storage, transport: transport), transport: transport,
-            now: Date.init,
+            storage: storage, auth: GitHubCLIAuth(storage: storage), now: Date.init,
             openApplication: {
                 guard let bundle else {
                     throw BigboardError.message(
@@ -263,8 +260,7 @@ struct CommandLineTool: Sendable {
                 continue
             }
             do {
-                let token = try await environment.auth.token()
-                let refreshed = try await environment.refreshHistory(workspace.history, repo, token)
+                let refreshed = try await environment.refreshHistory(workspace.history, repo)
                 let scanned = try await workspace.history.scan(refreshed, configuration: workspace.configuration)
                 environment.write("\(repo.id): \(scanned.1.count) commits at \(refreshed.revision.prefix(12))\n")
             } catch {
@@ -334,12 +330,7 @@ struct StatusReport: Encodable {
         var clone: String
         var shallow: Bool
         var partial: Bool
-        var displayPath: String {
-            var value = clone
-            if value.hasSuffix("/.git") { value.removeLast(5) }
-            let home = NSHomeDirectory()
-            return value.hasPrefix(home + "/") ? "~" + value.dropFirst(home.count) : value
-        }
+        var displayPath: String { SettingsRepositories.displayPath(clone) }
     }
     var login: String
     var accountID: String

@@ -118,7 +118,6 @@ struct GitHubResult: Sendable {
     var repositories: [Repository]
     var pullRequests: [PullRequest]
     var coverage: Coverage
-    var deniedRepositories: Set<String> = []
     var authenticationRequired = false
 }
 struct GitHubUser: Decodable, Sendable {
@@ -137,7 +136,6 @@ actor GitHubService {
     private var deadline = Date.distantFuture
     private var retryAt = Date.distantPast
     private var failures = 0
-    private var conditional: [String: (String, Data)] = [:]
     init(
         token: @escaping @Sendable () async throws -> String,
         transport: any GitHubTransport = URLSessionGitHubTransport(),
@@ -180,8 +178,6 @@ actor GitHubService {
             request.httpMethod = "POST"
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        } else if let cached = conditional[endpoint] {
-            request.setValue(cached.0, forHTTPHeaderField: "If-None-Match")
         }
         requests += 1
         let response = try await transport.send(request, maximumBytes: 2 * 1024 * 1024)
@@ -190,7 +186,6 @@ actor GitHubService {
             failures += 1
         }
         if response.isRateLimited { throw GitHubFailure.rateLimited }
-        if response.status == 304, let cached = conditional[endpoint] { return cached.1 }
         switch response.status {
         case 200..<300: break
         case 401: throw GitHubFailure.auth
@@ -200,11 +195,6 @@ actor GitHubService {
         default: throw GitHubFailure.response
         }
         if response.headers["x-ratelimit-remaining"] != "0" { failures = 0 }
-        if body == nil, let etag = response.headers["etag"], etag.utf8.count < 512, !etag.contains("\n"),
-            !etag.contains("\r")
-        {
-            conditional[endpoint] = (etag, response.data)
-        }
         return response.data
     }
     func viewer() async throws -> GitHubUser {
@@ -218,14 +208,10 @@ actor GitHubService {
         do { try await begin(budget: budget) } catch {
             return GitHubResult(
                 repositories: repos, pullRequests: previous,
-                coverage: Coverage(
-                    phase: "partial", message: error.localizedDescription,
-                    errors: [error.localizedDescription]))
+                coverage: Coverage(errors: [error.localizedDescription]))
         }
         defer { busy = false }
-        var result = GitHubResult(
-            repositories: [], pullRequests: [],
-            coverage: Coverage(phase: "ready"))
+        var result = GitHubResult(repositories: [], pullRequests: [], coverage: Coverage())
         let previousByID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for original in repos {
             var repo = original
@@ -234,17 +220,9 @@ actor GitHubService {
                 repo.prStale = true
                 repo.prInventoryComplete = false
                 result.repositories.append(repo)
-                result.deniedRepositories.insert(repo.id)
                 continue
             }
             let cached = previous.filter { $0.repo == repo.id }
-            if !repo.prStale, repo.prInventoryComplete, let date = repo.prCheckedAt,
-                (0..<60).contains(now().timeIntervalSince(date))
-            {
-                result.repositories.append(repo)
-                result.pullRequests += cached
-                continue
-            }
             var rows: [PullRequest] = [], cursor: String?, complete = false, expectedCount: Int?
             var inventoryError: Error?
             do {
@@ -274,7 +252,6 @@ actor GitHubService {
                         throw GitHubFailure.incomplete
                     }
                     expectedCount = totalCount
-                    if let branch = data.defaultBranchRef { repo.branch = branch.name }
                     for raw in nodes {
                         guard let raw, raw.number > 0, raw.updatedAt.flatMap(githubDate) != nil else {
                             inventoryError = GitHubFailure.incomplete
@@ -299,7 +276,6 @@ actor GitHubService {
             } catch { inventoryError = error }
             if let failure = inventoryError as? GitHubFailure, failure.isAccessDenied {
                 if failure == .auth { result.authenticationRequired = true }
-                result.deniedRepositories.insert(repo.id)
                 repo.prInventoryComplete = false
                 repo.prStale = true
                 result.coverage.errors.append("\(repo.id): \(failure.localizedDescription)")
@@ -338,7 +314,6 @@ actor GitHubService {
                 }
             }
             if deniedDuringFiles {
-                result.deniedRepositories.insert(repo.id)
                 rows = []
                 complete = false
                 inventoryError = GitHubFailure.permission
@@ -359,17 +334,12 @@ actor GitHubService {
             result.pullRequests += rows
         }
         if result.authenticationRequired {
-            result.deniedRepositories.formUnion(repos.map(\.id))
             result.pullRequests = []
             for index in result.repositories.indices {
                 result.repositories[index].prStale = true
                 result.repositories[index].prInventoryComplete = false
             }
         }
-        if !result.coverage.errors.isEmpty { result.coverage.phase = "partial" }
-        result.coverage.message =
-            result.coverage.phase == "ready"
-            ? "GitHub evidence refreshed." : "Some GitHub evidence is incomplete."
         return result
     }
     private func collectFiles(_ original: PullRequest) async -> (PullRequest, (any Error)?) {
@@ -486,14 +456,12 @@ actor GitHubService {
             raw.latestReviews?.nodes != nil && (raw.latestReviews?.nodes?.count ?? 0) <= 50
             && raw.latestReviews?.pageInfo?.hasNextPage == false
             && raw.latestReviews?.totalCount == row.reviews.count
-        row.checkedAt = now()
         return row
     }
     private static let inventoryQuery = """
         query BigboardInventory($owner:String!,$name:String!,$cursor:String) {
           repository(owner:$owner,name:$name) {
             nameWithOwner
-            defaultBranchRef { name target { oid } }
             pullRequests(first:50,after:$cursor,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}) {
               totalCount pageInfo { hasNextPage endCursor }
               nodes { number title author { login } isDraft reviewDecision mergeable updatedAt headRefOid baseRefOid
@@ -605,13 +573,7 @@ private struct GraphError: Decodable {
     }
 }
 private struct GraphRepository: Decodable {
-    struct Branch: Decodable {
-        struct Target: Decodable { var oid: String }
-        var name: String
-        var target: Target?
-    }
     var nameWithOwner: String?
-    var defaultBranchRef: Branch?
     var pullRequests: Connection<RawPR>?
     var pullRequest: RawPR?
 }
