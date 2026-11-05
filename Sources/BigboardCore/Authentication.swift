@@ -272,13 +272,13 @@ actor AuthManager {
         guard state.signedIn else { throw GitHubFailure.auth }
         return state
     }
-    func token() async throws -> String {
+    func token(validFor minimum: TimeInterval = 60) async throws -> String {
         try Task.checkCancellation()
         guard configuration.valid else { throw AuthFailure.configuration }
         try load()
         if let unsaved { try save(unsaved) }
         guard let saved = credentials, saved.refreshExpiresAt > now() else { throw GitHubFailure.auth }
-        if saved.expiresAt > now().addingTimeInterval(60) { return saved.accessToken }
+        if saved.expiresAt > now().addingTimeInterval(max(60, minimum)) { return saved.accessToken }
         let expected = generation
         let task: Task<AuthCredentials, Error>
         if let existing = refreshTask {

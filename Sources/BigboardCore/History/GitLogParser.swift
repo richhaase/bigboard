@@ -14,7 +14,9 @@ final class GitLogParser: @unchecked Sendable {
     private var cachedPathBytes = 0
     private var failure: (any Error)?
     private var identityMap: [String: (String, String)] = [:]
+    private var skipping = false
     private(set) var records: [Commit] = []
+    private(set) var skipped = 0
     init(
         repo: String, configuration: WorkspaceConfiguration, attributes: [AttributeRule] = [],
         matchingWorkLimit: Int = HistoryRules.maximumAttributeWork
@@ -74,8 +76,12 @@ final class GitLogParser: @unchecked Sendable {
             metadata.append(raw)
             if metadata.count == 6 {
                 guard let seconds = Int64(metadata[3]) else {
-                    throw BigboardError.message("Git history contains an invalid author date.")
+                    skipped += 1
+                    skipping = true
+                    metadata = []
+                    return
                 }
+                skipping = false
                 var name = metadata[1].trimmingCharacters(in: .whitespacesAndNewlines),
                     email = metadata[2].trimmingCharacters(in: .whitespacesAndNewlines)
                 if let mapped = identityMap[email.lowercased()] {
@@ -118,7 +124,7 @@ final class GitLogParser: @unchecked Sendable {
         }
         let pieces = token.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
             .map(String.init)
-        guard pieces.count == 3, !records.isEmpty else {
+        guard pieces.count == 3, skipping || !records.isEmpty else {
             throw BigboardError.message("Git history contains an invalid file-change record.")
         }
         var file = FileChange(path: pieces[2])
@@ -139,6 +145,7 @@ final class GitLogParser: @unchecked Sendable {
         }
     }
     private func append(_ original: FileChange, checkpoint: @Sendable () throws -> Void) throws {
+        if skipping { return }
         guard !records.isEmpty, !original.path.isEmpty else {
             throw BigboardError.message("Git history contains an empty path.")
         }

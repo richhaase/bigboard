@@ -283,7 +283,7 @@ final class WorkspaceModel {
                     group.addTask {
                         var current = repo
                         do {
-                            if live { current = try await refreshHistory(history, repo, auth.token()) }
+                            if live { current = try await refreshHistory(history, repo, auth.token(validFor: GitProcess.transferTimeout)) }
                             let scanned = try await history.scan(current, configuration: configuration)
                             return ScanOutcome(repository: scanned.0, commits: scanned.1)
                         } catch {

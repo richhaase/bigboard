@@ -95,6 +95,7 @@ enum GitExecutable {
     }
 }
 enum GitProcess {
+    static let transferTimeout: TimeInterval = 30 * 60
     static func executable() throws -> URL {
         try GitExecutable.select()
     }
@@ -251,9 +252,7 @@ enum GitProcess {
         {
             return .auth
         }
-        if value.contains("error: 403") || value.contains("http 403") || value.contains("permission denied")
-            || value.contains("access denied")
-        {
+        if value.contains("error: 403") || value.contains("http 403") || value.contains("remote: permission to") {
             return .permission
         }
         if value.contains("error: 404") || value.contains("http 404")
