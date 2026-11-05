@@ -13,11 +13,6 @@ struct DataStatusPanel: View {
                 Text(workspace.snapshot.coverage.message)
                 LabeledContent("Snapshot", value: workspace.snapshot.generatedAt.formatted())
                 LabeledContent(
-                    "Since-last-look baseline",
-                    value: workspace.snapshot.bookmark?.formatted() ?? "Not established yet")
-                Text("A successful workspace snapshot becomes the next baseline when the app quits normally.")
-                    .font(.caption).foregroundStyle(.secondary)
-                LabeledContent(
                     "Requests",
                     value:
                         "\(workspace.snapshot.coverage.probeRequests) probes · \(workspace.snapshot.coverage.inventoryRequests) inventory · \(workspace.snapshot.coverage.fileRequests) files · \(workspace.snapshot.coverage.accountRequests) account"

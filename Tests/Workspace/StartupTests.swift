@@ -4,6 +4,25 @@ import Testing
 
 @Suite @MainActor
 struct StartupTests {
+    @Test(arguments: [false, true])
+    func obsoleteBookmarksDoNotAffectStartupOrShutdown(existingFile: Bool) async throws {
+        let fixture = StartupFixture()
+        defer { fixture.remove() }
+        try fixture.saveWorkspace()
+        let file = try fixture.storage.accountRoot("123").appendingPathComponent("bookmarks.json")
+        let obsolete = Data("{broken".utf8)
+        if existingFile { try obsolete.write(to: file) }
+        let saved = try fixture.savedFiles()
+        let workspace = fixture.workspace(store: StartupCredentials(try fixture.credentials()))
+        await workspace.start()
+        #expect(workspace.error.isEmpty && workspace.authStatus.signedIn)
+        #expect(workspace.configuration == fixture.configuration())
+        await workspace.shutdown()
+        #expect(try fixture.savedFiles() == saved)
+        if existingFile { #expect(try Data(contentsOf: file) == obsolete) }
+        else { #expect(!FileManager.default.fileExists(atPath: file.path)) }
+        #expect(await fixture.network.requests == 0)
+    }
     @Test func restoresOnlyTheSignedInAccountsSavedState() async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
@@ -24,7 +43,6 @@ struct StartupTests {
             #expect(workspace.configuration == fixture.configuration(account: account))
             #expect(workspace.snapshot.accountID == account)
             #expect(workspace.snapshot.viewer == "user" + account)
-            #expect(workspace.snapshot.bookmark == fixture.bookmark(account: account))
             #expect(workspace.snapshot.repositories.map(\.id) == [fixture.repository(account: account)])
             #expect(workspace.snapshot.commits.count == 2)
             #expect(Set(workspace.snapshot.commits.map(\.repo)) == [fixture.repository(account: account)])
@@ -33,7 +51,6 @@ struct StartupTests {
             #expect(workspace.error.isEmpty)
             #expect(store.mutations == 0)
             await workspace.shutdown()
-            #expect(try fixture.storage.bookmarks(account)["all"] == fixture.bookmark(account: account))
         }
         #expect(await fixture.network.requests == 0)
     }
@@ -65,7 +82,7 @@ struct StartupTests {
         #expect(try fixture.savedFiles() == before)
     }
 
-    @Test(arguments: ["workspace.json", "access.json", "bookmarks.json"])
+    @Test(arguments: ["workspace.json", "access.json"])
     func damagedSavedFileStopsStartupWithoutReplacingData(filename: String) async throws {
         let fixture = StartupFixture()
         defer { fixture.remove() }
@@ -143,9 +160,6 @@ struct StartupTests {
     }
 
     func repository(account: String = "123") -> String { "user\(account)/repo" }
-    func bookmark(account: String = "123") -> Date {
-        Date(timeIntervalSince1970: account == "123" ? 1_780_000_000 : 1_790_000_000)
-    }
     func configuration(account: String = "123") -> WorkspaceConfiguration {
         var config = WorkspaceConfiguration()
         config.repositories = [repository(account: account)]
@@ -159,10 +173,9 @@ struct StartupTests {
         let storage = storage
         try storage.saveConfiguration(configuration(account: account), account: account)
         try storage.saveGrant([Repository(id: repository(account: account))], account: account)
-        try storage.saveBookmarks(["all": bookmark(account: account)], account: account)
     }
     func savedFiles() throws -> [Data] {
-        try ["workspace.json", "access.json", "bookmarks.json"].map {
+        try ["workspace.json", "access.json"].map {
             try Data(contentsOf: storage.accountRoot("123").appendingPathComponent($0))
         }
     }

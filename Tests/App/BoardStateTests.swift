@@ -7,7 +7,7 @@ import Testing
     func commit(_ id: String, repo: String = "acme/app", email: String = "alex@example.test", days: Int = 1, added: Int = 10) -> Commit { Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-Double(days) * 86400), subject: "Change \(id)", added: added, files: [FileChange(path: "Sources/App.swift", added: added)]) }
     @Test func contextualPRNavigationRestoresIndependentState() {
         let state = BoardState()
-        state.days = 30; state.repositories = ["acme/app"]
+        state.dateRange = .days(30); state.repositories = ["acme/app"]
         state.activity.query = "source"; state.contributors.query = "alex"
         state.prs.query = "release"; state.prs.authors = ["alex"]
         state.scope = ActivityScope(repo: "acme/app", path: "Sources")
@@ -26,7 +26,7 @@ import Testing
         #expect(state.prs.query == "release")
         #expect(state.prs.authors == ["alex"])
         #expect(state.prs.checks.isEmpty)
-        #expect(state.days == 30)
+        #expect(state.dateRange == .days(30))
         #expect(state.repositories == ["acme/app"])
         state.showPRs(repo: "acme/app")
         state.switchBoard(.contributors)
@@ -70,31 +70,50 @@ import Testing
         }
     }
     @Test func heatKeepsHistoryWhileHonoringSharedRepositoriesAndPeople() {
-        let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100), commit("other", repo: "acme/other"), commit("otherperson", email: "sam@example.test")], bookmark: now.addingTimeInterval(-2 * 86400))
-        let state = BoardState(); state.repositories = ["acme/app"]; state.activity.people = ["alex@example.test"]; state.heat.people = ["alex@example.test"]; state.sinceLastLook = true
+        let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100), commit("other", repo: "acme/other"), commit("otherperson", email: "sam@example.test")])
+        let state = BoardState(); state.repositories = ["acme/app"]; state.activity.people = ["alex@example.test"]; state.heat.people = ["alex@example.test"]; state.dateRange = .days(2)
         #expect(state.filteredCommits(snapshot).map(\.id) == ["recent"])
         #expect(state.heatRecords(snapshot).map(\.id) == ["recent", "old"])
     }
-    @Test func boardTimelinesFollowBookmarkInsteadOfPreviousDaySelection() {
-        let snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("older", days: 40), commit("oldest", days: 700), commit("before", days: 850)], bookmark: now.addingTimeInterval(-800 * 86400))
-        let state = BoardState(); state.days = 14; state.sinceLastLook = true
-        for board in [Board.activity, .contributors] {
-            state.board = board
-            let records = state.filteredCommits(snapshot)
-            #expect(records.map(\.id) == ["recent", "older", "oldest"])
-            let points = state.timelinePoints(records, snapshot: snapshot)
-            #expect(points.reduce(0) { $0 + $1.commits } == records.count)
-            #expect(points.count > 24)
+    @Test(arguments: [DateRange.hours(1), .hours(4), .hours(12), .days(1), .days(7), .days(43)])
+    func rollingRangesAgreeAcrossBoards(range: DateRange) throws {
+        let start = try #require(range.start(relativeTo: now))
+        let dates = [start.addingTimeInterval(-1), start, start.addingTimeInterval(1), now]
+        let records = dates.enumerated().map { index, date in
+            var value = commit(String(index)); value.date = date; return value
         }
-        state.sinceLastLook = false
-        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
+        let prs = dates.enumerated().map { index, date in
+            PullRequest(repo: "acme/app", number: index, title: "Change", author: "alex", url: "", updatedAt: date)
+        }
+        let snapshot = Snapshot(generatedAt: now, commits: records, pullRequests: prs)
+        let state = BoardState(); state.dateRange = range
+        for board in Board.allCases {
+            state.switchBoard(board)
+            #expect(state.filteredCommits(snapshot).map(\.id) == ["2", "3"])
+            #expect(dates.filter { state.dateMatches($0, snapshot: snapshot) } == Array(dates.suffix(2)))
+            #expect(!state.dateMatches(nil, snapshot: snapshot))
+            #expect(state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot).reduce(0) { $0 + $1.commits } == 2)
+        }
+        #expect(state.pullRequests(snapshot).map(\.number) == [3, 2])
+        let heat = state.heatRange(snapshot)
+        #expect(heat.current.start == start && heat.current.end == now)
+        #expect(Analysis.heatSeries(records, metric: "commits", range: heat).total == 2)
     }
-    @Test func bookmarkTimelineFallsBackWithoutBookmark() {
-        var snapshot = Snapshot(generatedAt: now, commits: [commit("recent"), commit("old", days: 100)])
-        let state = BoardState(); state.days = 14; state.sinceLastLook = true
-        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
-        snapshot.bookmark = now.addingTimeInterval(-2 * 86400)
-        #expect(state.timelinePoints(snapshot.commits, snapshot: snapshot).reduce(0) { $0 + $1.commits } == 1)
+    @Test func refreshMovesTheWindowWithoutChangingItsDuration() {
+        var recent = commit("recent"); recent.date = now.addingTimeInterval(-1800)
+        var snapshot = Snapshot(generatedAt: now, commits: [recent])
+        let state = BoardState(); state.dateRange = .hours(1)
+        #expect(state.filteredCommits(snapshot).count == 1)
+        snapshot.generatedAt = now.addingTimeInterval(3600)
+        #expect(state.filteredCommits(snapshot).isEmpty)
+        #expect(state.dateRange == .hours(1) && state.rangeLabel == "Last hour")
+        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: DateInterval(start: now, duration: 60))
+        state.dateRange = .days(1)
+        #expect(state.activityInterval == nil && state.rangeLabel == "Last 24 hours")
+        #expect(state.filteredCommits(snapshot).count == 1)
+        state.dateRange = .days(0)
+        #expect(state.dateMatches(nil, snapshot: snapshot))
+        #expect(state.filteredCommits(snapshot).count == 1 && state.rangeLabel == "All time")
     }
     @Test func fileDrillReturnsToParentAndAreaBoundaryRemains() {
         let state = BoardState()
@@ -238,11 +257,10 @@ import Testing
         #expect(state.scope.repo.isEmpty)
         #expect(state.repositories.isEmpty)
         #expect(state.contextualRepository == nil)
-        state.sinceLastLook = true; state.contributors.people = ["old@example.test"]
+        state.dateRange = .hours(1); state.contributors.people = ["old@example.test"]
         var configuration = WorkspaceConfiguration(); configuration.sinceDays = 90; configuration.contributorSort = "commits"
         state.resetForAccount(configuration)
-        #expect(state.days == 90)
-        #expect(!state.sinceLastLook)
+        #expect(state.dateRange == .days(90))
         #expect(state.contributors.people.isEmpty)
         #expect(state.contributors.sort == "commits")
     }

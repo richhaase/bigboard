@@ -32,18 +32,15 @@ func bundleIdentitySelectsAuthenticationAndStorage(identity: ApplicationIdentity
     original.repositories = ["owner/production"]
     try production.saveConfiguration(original, account: "123")
     try production.saveGrant([Repository(id: "owner/production")], account: "123")
-    try production.saveBookmarks(["all": Date(timeIntervalSince1970: 100)], account: "123")
     let development = storage(.development)
     var config = try development.loadConfiguration("123")
     #expect(config.repositories.isEmpty)
     #expect(try development.loadGrant("123").isEmpty)
-    #expect(try development.bookmarks("123").isEmpty)
     config.repositories = ["owner/development"]
     try development.saveConfiguration(config, account: "123")
     #expect(try storage(.development).loadConfiguration("123") == config)
     #expect(try storage(.production).loadConfiguration("123") == original)
     #expect(try production.loadGrant("123").map(\.id) == ["owner/production"])
-    #expect(try production.bookmarks("123")["all"] == Date(timeIntervalSince1970: 100))
     #expect(try development.repositoryRoot("123") != production.repositoryRoot("123"))
     #expect(KeychainCredentialStore(identity: .development).service != KeychainCredentialStore(identity: .production).service)
 }

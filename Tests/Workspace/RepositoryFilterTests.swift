@@ -44,7 +44,7 @@ private actor FilterTestTransport: GitHubTransport {
         workspace.configuration = configuration
         workspace.snapshot = snapshot()
         let state = BoardState()
-        state.days = 30
+        state.dateRange = .days(30)
         #expect(state.setRepositoryFilter(["acme/library"], available: workspace.snapshot.repositories))
         #expect(state.visibleRepositories(workspace.snapshot).map(\.id) == ["acme/library"])
         #expect(state.filteredCommits(workspace.snapshot).map(\.id) == ["library"])
@@ -53,7 +53,7 @@ private actor FilterTestTransport: GitHubTransport {
         state.switchBoard(.pullRequests)
         #expect(state.pullRequests(workspace.snapshot).map(\.id) == ["acme/library#2"])
         #expect(state.repositories == ["acme/library"])
-        #expect(state.days == 30)
+        #expect(state.dateRange == .days(30))
         #expect(workspace.snapshot.repositories.count == 2)
         #expect(workspace.snapshot.commits.count == 2)
         #expect(workspace.snapshot.pullRequests.count == 2)
@@ -76,7 +76,7 @@ private actor FilterTestTransport: GitHubTransport {
     @Test func repositoryFilterAcceptsOnlyLoadedSelectionsAndPreservesOtherFilters() {
         let value = snapshot()
         let state = BoardState()
-        state.days = 90
+        state.dateRange = .days(90)
         state.activity.query = "source"
         state.contributors.hideBots = true
         state.prs.authors = ["alex"]
@@ -93,6 +93,6 @@ private actor FilterTestTransport: GitHubTransport {
         #expect(state.prs.authors == ["alex"])
         #expect(state.activity.query == "source")
         #expect(state.contributors.hideBots)
-        #expect(state.days == 90)
+        #expect(state.dateRange == .days(90))
     }
 }

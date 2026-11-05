@@ -71,14 +71,6 @@ struct StorageTests {
         #expect(try storage.loadGrant("42").isEmpty)
         #expect(try storage.loadGrant("43").isEmpty)
     }
-    @Test func bookmarksRemainMonotonicAndScoped() throws {
-        let storage = try temporary()
-        defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
-        try storage.saveBookmarks(["all":Date(timeIntervalSince1970:200),"group:backend":Date(timeIntervalSince1970:100)], account:"42")
-        try storage.saveBookmarks(["all":Date(timeIntervalSince1970:50)], account:"42")
-        #expect(try storage.bookmarks("42")["all"] == Date(timeIntervalSince1970:200))
-        #expect(try storage.bookmarks("42")["group:backend"] == Date(timeIntervalSince1970:100))
-    }
     @Test func symbolicLinksAreRejectedAndStateIsPrivate() throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.supportRoot.deletingLastPathComponent()) }
@@ -96,7 +88,7 @@ struct StorageTests {
         #expect(try Data(contentsOf: target) == Data("private".utf8))
         let other = try storage.accountRoot("43")
         try FileManager.default.createSymbolicLink(at: other, withDestinationURL: account)
-        #expect(throws: (any Error).self) { try storage.bookmarks("43") }
+        #expect(throws: (any Error).self) { try storage.loadConfiguration("43") }
     }
     @Test func malformedIdentityAndPathsRejected() throws {
         let storage = try temporary()

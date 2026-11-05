@@ -190,13 +190,13 @@ struct AnalysisTests {
         #expect(series.allSatisfy { cal.component(.hour, from: $0.date) == 0 })
         #expect(zip(series, series.dropFirst()).contains { $1.date.timeIntervalSince($0.date) == 25 * 3600 })
     }
-    @Test func dailyCalendarFollowsBookmarkAndAllTimeRanges() {
+    @Test func dailyCalendarFollowsCutoffAndAllTimeRanges() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let bookmark = now.addingTimeInterval(-3 * 86_400)
+        let cutoff = now.addingTimeInterval(-3 * 86_400)
         let records = [commit("old", days: 400), commit("boundary", days: 3), commit("recent", days: 1), commit("future", days: -7)]
-        let since = Analysis.daily(records, days: 14, since: bookmark, now: now, calendar: calendar)
-        #expect(since.first?.date == calendar.startOfDay(for: bookmark))
+        let since = Analysis.daily(records, days: 14, since: cutoff, now: now, calendar: calendar)
+        #expect(since.first?.date == calendar.startOfDay(for: cutoff))
         #expect(since.count == 4)
         #expect(since.reduce(0) { $0 + $1.commits } == 1)
         let all = Analysis.daily(records, days: 0, now: now, calendar: calendar)
@@ -219,13 +219,13 @@ struct AnalysisTests {
         #expect(timeline.last?.date == monday)
         #expect(timeline.suffix(2).map(\.commits) == [1, 1])
     }
-    @Test func bookmarkTimelineUsesActualSpanAndExclusiveBoundary() {
+    @Test func cutoffTimelineUsesActualSpanAndExclusiveBoundary() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
         cal.firstWeekday = 1
-        let bookmark = now.addingTimeInterval(-45 * 86400)
+        let cutoff = now.addingTimeInterval(-45 * 86400)
         let records = [commit("before", days: 46), commit("boundary", days: 45), commit("after", days: 40), commit("recent", days: 1), commit("future", days: -8)]
-        let points = Analysis.timeline(records, days: 14, since: bookmark, now: now, calendar: cal)
-        let day = cal.startOfDay(for: bookmark)
+        let points = Analysis.timeline(records, days: 14, since: cutoff, now: now, calendar: cal)
+        let day = cal.startOfDay(for: cutoff)
         #expect(points.first?.date == cal.date(byAdding: .day, value: -(cal.component(.weekday, from: day) - 1), to: day))
         #expect(points.reduce(0) { $0 + $1.commits } == 3)
         #expect(points.filter { $0.commits > 0 }.count == 3)
@@ -233,10 +233,10 @@ struct AnalysisTests {
     }
     @Test func monthlyTimelineRetainsExplicitRangesBeyondOneYear() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(secondsFromGMT: 0)!
-        let bookmark = now.addingTimeInterval(-800 * 86400)
+        let cutoff = now.addingTimeInterval(-800 * 86400)
         let records = [commit("before", days: 801), commit("boundary", days: 800), commit("old", days: 700), commit("recent", days: 1)]
-        let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: bookmark))
-        let points = Analysis.timeline(records, days: 14, since: bookmark, now: now, calendar: cal)
+        let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: cutoff))
+        let points = Analysis.timeline(records, days: 14, since: cutoff, now: now, calendar: cal)
         #expect(points.first?.date == firstMonth)
         #expect(points.count > 24)
         #expect(points.reduce(0) { $0 + $1.commits } == 2)

@@ -274,7 +274,7 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     #expect(try store.load() != nil)
     #expect(await network.count == 1)
 }
-@Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositoriesAndBookmark(rename: Bool) async throws {
+@Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositories(rename: Bool) async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let storage = WorkspaceStorage(supportRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
@@ -284,29 +284,23 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     config.cachedOnly = true
     try storage.saveConfiguration(config, account: "123")
     try storage.saveGrant(config.repositories.map { Repository(id: $0) }, account: "123")
-    let allBookmark = Date(timeIntervalSince1970: 100), groupBookmark = Date(timeIntervalSince1970: 200)
-    try storage.saveBookmarks(["all": allBookmark, "group:Focus": groupBookmark], account: "123")
     let network = ViewerWorkspaceTransport([])
     let workspace = WorkspaceModel(storage: storage, authentication: workspaceTestAuth(try workspaceTestStore()), transport: network)
     await workspace.start()
     await workspace.selectGroup("Focus")
     #expect(workspace.snapshot.repositories.map(\.id) == ["fixture/one"])
-    #expect(workspace.snapshot.bookmark == groupBookmark)
     config.groups = rename ? ["Renamed": ["fixture/one"]] : [:]
     #expect(await workspace.saveConfiguration(config))
     #expect(workspace.activeGroup.isEmpty)
-    #expect(workspace.snapshot.bookmark == allBookmark)
     for _ in 0..<100 {
         if !workspace.busy { break }
         try await Task.sleep(for: .milliseconds(5))
     }
     #expect(!workspace.busy)
     #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
-    #expect(workspace.snapshot.bookmark == allBookmark)
     await workspace.selectGroup("Focus")
     #expect(workspace.activeGroup.isEmpty)
     #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
     #expect(await network.count == 0)
     await workspace.shutdown()
-    #expect(try storage.bookmarks("123")["all"] == allBookmark)
 }

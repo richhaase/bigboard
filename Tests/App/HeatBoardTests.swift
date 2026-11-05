@@ -34,7 +34,7 @@ import Testing
         #expect(state.contributors.query == "Sam")
         state.switchBoard(.activity)
         #expect(state.lens == .directories && state.scope == state.heatScope)
-        state.days = 90
+        state.dateRange = .days(90)
         #expect(state.activityInterval == nil)
     }
     @Test func heatBackPreservesWorkAreaAndActivityScope() {
@@ -68,9 +68,9 @@ import Testing
                 commit("after", date: interval.end.addingTimeInterval(1)), commit("now", date: now),
             ])
         let state = BoardState()
-        state.days = 14
+        state.dateRange = .days(14)
         state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: interval)
-        #expect(state.days == 14 && state.lens == .directories)
+        #expect(state.dateRange == .days(14) && state.lens == .directories)
         #expect(state.filteredCommits(snapshot).map(\.id) == ["inside", "end"])
         #expect(
             state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot).reduce(0) {
@@ -94,7 +94,7 @@ import Testing
             subject: "First")
         let snapshot = Snapshot(generatedAt: now, commits: [commit])
         let state = BoardState()
-        state.days = 0
+        state.dateRange = .days(0)
         let series = Analysis.heatSeries([commit], metric: "commits", range: state.heatRange(snapshot))
         #expect(series.series.reduce(0) { $0 + $1.value } == 1)
         let cell = try #require(series.series.first)

@@ -55,10 +55,35 @@ struct RepositoryChecklist {
         return updated == available ? [] : updated
     }
 }
+enum DateRange: Hashable {
+    case hours(Int)
+    case days(Int)
+
+    static let presets: [DateRange] = [
+        .hours(1), .hours(4), .hours(12), .days(1),
+        .days(7), .days(14), .days(30), .days(90), .days(365), .days(0),
+    ]
+
+    var label: String {
+        switch self {
+        case .hours(1): "Last hour"
+        case .hours(let count): "Last \(count) hours"
+        case .days(0): "All time"
+        case .days(1): "Last 24 hours"
+        case .days(let count): "Last \(count) days"
+        }
+    }
+    func start(relativeTo date: Date) -> Date? {
+        switch self {
+        case .hours(let count): date.addingTimeInterval(-Double(count) * 3600)
+        case .days(0): nil
+        case .days(let count): date.addingTimeInterval(-Double(count) * 86400)
+        }
+    }
+}
 @MainActor @Observable final class BoardState {
     var board: Board = .heat
-    var days = 14 { didSet { if days != oldValue { activityInterval = nil } } }
-    var sinceLastLook = false { didSet { if sinceLastLook != oldValue { activityInterval = nil } } }
+    var dateRange = DateRange.days(14) { didSet { if dateRange != oldValue { activityInterval = nil } } }
     var repositories: Set<String> = []
     var heat = BoardFilters()
     var heatScope = ActivityScope()
@@ -85,7 +110,7 @@ struct RepositoryChecklist {
     var panel: Panel? { didSet { if panel != nil { repositoryFilterPresented = false } } }
     var preferencesApplied = false
     var rangeLabel: String {
-        sinceLastLook ? "Since last look" : days == 0 ? "All time" : days == 1 ? "Last day" : "Last \(days) days"
+        dateRange.label
     }
     var currentFilters: BoardFilters {
         get {
@@ -112,11 +137,7 @@ struct RepositoryChecklist {
                     && $0 <= interval.end
             } ?? false
         }
-        if sinceLastLook, let bookmark = snapshot.bookmark {
-            return date.map { $0 > bookmark } ?? false
-        }
-        guard days > 0 else { return true }
-        return date.map { $0 > snapshot.generatedAt.addingTimeInterval(-Double(days) * 86400) } ?? false
+        return Analysis.inRange(date, since: dateRange.start(relativeTo: snapshot.generatedAt), now: snapshot.generatedAt)
     }
     var repositoryFilterLabel: String {
         repositories.isEmpty ? "All" : "\(repositories.count) selected"
@@ -136,7 +157,7 @@ struct RepositoryChecklist {
     }
     func heatRange(_ snapshot: Snapshot, calendar: Calendar = .current) -> HeatRange {
         HeatRange(
-            days: days, since: sinceLastLook ? snapshot.bookmark : nil,
+            days: 0, since: dateRange.start(relativeTo: snapshot.generatedAt),
             now: snapshot.generatedAt,
             records: snapshot.commits.filter {
                 repositories.isEmpty || repositories.contains($0.repo)
@@ -152,8 +173,8 @@ struct RepositoryChecklist {
         let filters = selectedBoard == .heat ? heat : selectedBoard == .contributors ? contributors : activity
         let interval = selectedBoard == .activity ? activityInterval : nil
         return Analysis.select(
-            snapshot.commits, days: interval == nil ? days : 0,
-            since: interval == nil && sinceLastLook ? snapshot.bookmark : nil,
+            snapshot.commits,
+            since: interval == nil ? dateRange.start(relativeTo: snapshot.generatedAt) : nil,
             repos: repositories, hideBots: filters.hideBots, people: filters.people,
             now: interval?.end ?? snapshot.generatedAt
         ).filter { commit in
@@ -166,7 +187,7 @@ struct RepositoryChecklist {
     func timelinePoints(_ records: [Commit], snapshot: Snapshot) -> [TimelinePoint] {
         let interval = board == .activity ? activityInterval : nil
         return Analysis.timeline(
-            records, days: days, since: interval?.start ?? (sinceLastLook ? snapshot.bookmark : nil),
+            records, days: 0, since: interval?.start ?? dateRange.start(relativeTo: snapshot.generatedAt),
             now: interval?.end ?? snapshot.generatedAt,
             includesStart: interval != nil && activityIncludesStart)
     }
@@ -334,8 +355,7 @@ struct RepositoryChecklist {
     }
     func resetForAccount(_ configuration: WorkspaceConfiguration) {
         repositoryFilterPresented = false
-        days = configuration.sinceDays
-        sinceLastLook = false
+        dateRange = .days(configuration.sinceDays)
         repositories = []
         heat = BoardFilters()
         heatScope = ActivityScope()
@@ -395,8 +415,8 @@ struct RepositoryChecklist {
 
     func pullRequests(_ snapshot: Snapshot) -> [PullRequest] {
         let filters = PRFilters(
-            query: prs.query, repos: repositories, days: days,
-            since: sinceLastLook ? snapshot.bookmark : nil,
+            query: prs.query, repos: repositories,
+            since: dateRange.start(relativeTo: snapshot.generatedAt),
             authors: prs.authors, reviews: prs.reviews, checks: prs.checks, states: prs.states,
             mine: prs.mine, sort: prs.sort, reverse: prs.reversed)
         return
