@@ -7,8 +7,8 @@ struct WorkspacePanel: View {
     @Environment(\.dismiss) private var dismiss
     var title: String {
         switch panel {
-        case .settings: "Workspace settings"
-        case .filters: "Filters"
+        case .settings, .groups: "Workspace settings"
+        case .dateRange: "Custom date range"
         case .status: "Data status"
         case .help: "Keyboard guide"
         case .identities: "Contributor identities"
@@ -19,7 +19,7 @@ struct WorkspacePanel: View {
             HStack {
                 Text(title).font(.title2.bold())
                 Spacer()
-                if panel != .settings {
+                if !panel.isSettings && panel != .dateRange {
                     Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
                 }
             }
@@ -28,11 +28,11 @@ struct WorkspacePanel: View {
             if !workspace.error.isEmpty {
                 Text(workspace.error).foregroundStyle(.orange).textSelection(.enabled).padding(12)
             }
-            if workspace.busy, panel != .settings { ProgressView().controlSize(.small).padding(8) }
+            if workspace.busy, !panel.isSettings && panel != .dateRange { ProgressView().controlSize(.small).padding(8) }
             Group {
                 switch panel {
-                case .settings: SettingsPanel(workspace: workspace)
-                case .filters: FiltersPanel(workspace: workspace, navigation: navigation)
+                case .settings, .groups: SettingsPanel(workspace: workspace, showGroups: panel == .groups)
+                case .dateRange: CustomDateRangePanel(navigation: navigation)
                 case .status: DataStatusPanel(workspace: workspace)
                 case .help: KeyboardGuide()
                 case .identities: IdentitiesPanel(workspace: workspace)
@@ -40,6 +40,6 @@ struct WorkspacePanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 780, height: 700)
+        .frame(width: panel == .dateRange ? 420 : 780, height: panel == .dateRange ? 230 : 700)
     }
 }

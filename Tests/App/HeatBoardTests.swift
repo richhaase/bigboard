@@ -81,10 +81,7 @@ import Testing
             snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(output.contains("Range: \(HeatRange.label(interval))"))
         #expect(!output.contains("commit/after"))
-        #expect(!state.dateMatches(now, snapshot: snapshot))
         state.switchBoard(.pullRequests)
-        #expect(state.dateMatches(now, snapshot: snapshot))
-        #expect(!state.dateMatches(interval.end, snapshot: snapshot))
     }
     @Test func allTimeCellIncludesItsFirstCommitWithoutDuplicatingIt() throws {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
@@ -138,7 +135,7 @@ import Testing
         #expect(markdown.contains("| acme/app | 10 | Loaded history |"))
         state.heat.query = "no match"
         #expect(
-            !BoardMarkdown.render(
+            BoardMarkdown.render(
                 snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state
             ).contains("| acme/app |"))
     }

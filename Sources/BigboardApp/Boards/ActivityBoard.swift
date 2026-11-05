@@ -30,6 +30,12 @@ struct ActivityBoard: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                BoardSearch(navigation: navigation)
+                Spacer()
+                PeopleFilter(records: workspace.snapshot.commits, filters: $navigation.activity)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
             if navigation.activityInterval != nil {
                 HStack {
                     Text("From Heat Maps: \(navigation.activityRangeLabel)")
@@ -207,9 +213,9 @@ struct ActivityBoard: View {
                 ForEach(
                     Analysis.people(scoped, canonicalRecords: records)
                         .filter {
-                            navigation.activity.query.isEmpty
+                            navigation.activityPeopleQuery.isEmpty
                                 || "\($0.name) \($0.email)"
-                                    .localizedCaseInsensitiveContains(navigation.activity.query)
+                                    .localizedCaseInsensitiveContains(navigation.activityPeopleQuery)
                         }
                 ) { person in
                     Button {
@@ -247,11 +253,6 @@ struct ActivityBoard: View {
                     records, scope: navigation.scope, mode: navigation.relatedMode,
                     workAreas: workspace.configuration.workAreas
                 )
-                .filter {
-                    navigation.activity.query.isEmpty
-                        || "\($0.scope.repo) \($0.scope.path) \($0.scope.areaName)"
-                            .localizedCaseInsensitiveContains(navigation.activity.query)
-                }
             if related.isEmpty {
                 EmptyBoard(
                     title: "No related evidence", message: "Choose a repository or directory with activity.")
@@ -351,6 +352,5 @@ struct ActivityBoard: View {
         Analysis.relatedPRs(
             workspace.snapshot.pullRequests, scope: inspectScope, workAreas: workspace.configuration.workAreas
         )
-        .filter { navigation.dateMatches($0.updatedAt, snapshot: workspace.snapshot) }
     }
 }

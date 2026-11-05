@@ -25,10 +25,6 @@ struct HeatBoard: View {
             records, repositories: repositories, scope: scope,
             workAreas: workspace.configuration.workAreas, metric: navigation.heatMetric, range: range
         )
-        .filter {
-            navigation.heat.query.isEmpty
-                || $0.label.localizedCaseInsensitiveContains(navigation.heat.query)
-        }
         let maximum = ([current] + rows.map(\.heat)).flatMap(\.series).map(\.value).max() ?? 0
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -36,6 +32,7 @@ struct HeatBoard: View {
                 HStack {
                     Text("Activity over time").font(.title2.bold())
                     Spacer()
+                    PeopleFilter(records: snapshot.commits, filters: $navigation.heat)
                     Picker("Measure", selection: $navigation.heatMetric) {
                         Text("Lines").tag("lines")
                         Text("Commits").tag("commits")
@@ -141,6 +138,7 @@ struct HeatBoard: View {
             }
             .padding(16)
         }
+        .scrollEdgeEffectStyle(.hard, for: .top)
     }
     private func axisLabel(_ date: Date, range: HeatRange) -> String {
         date.formatted(date: .abbreviated, time: range.unit == .hour ? .shortened : .omitted)

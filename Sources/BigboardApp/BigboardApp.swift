@@ -66,12 +66,12 @@ private struct BoardCommands: Commands {
                     .disabled(modalOpen)
             }
             Divider()
-            Button("Find on Board") { boardSearch?.wrappedValue = true }
+            Button(navigation.searchPrompt ?? "Find on Board") { boardSearch?.wrappedValue = true }
                 .keyboardShortcut("f")
                 .disabled(modalOpen || boardSearch == nil)
-            Button("Filters…") { navigation.panel = .filters }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
-                .disabled(modalOpen)
+            Button("Custom Date Range…") { navigation.panel = .dateRange }
+                .keyboardShortcut("d", modifiers: [.command, .option])
+                .disabled(modalOpen || navigation.board == .pullRequests)
             Button("Repository Filter…") { navigation.repositoryFilterPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(modalOpen)
@@ -83,6 +83,21 @@ private struct BoardCommands: Commands {
                 .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
             Button("Contributor Identities…") { navigation.panel = .identities }
                 .disabled(modalOpen)
+            Menu("Group") {
+                Button("All repositories") {
+                    navigation.repositories = []
+                    Task { await workspace.selectGroup("") }
+                }
+                ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
+                    Button(name) {
+                        navigation.repositories = []
+                        Task { await workspace.selectGroup(name) }
+                    }
+                }
+                Divider()
+                Button("Manage Groups…") { navigation.panel = .groups }
+            }
+            .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
             Divider()
             Button(navigation.board == .heat ? "Back in Heat Maps" : "Back in Activity") {
                 if navigation.board == .heat { navigation.backInHeat() } else { navigation.back() }

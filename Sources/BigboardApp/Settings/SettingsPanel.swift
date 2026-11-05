@@ -6,6 +6,7 @@ struct SettingsPanel: View {
     }
 
     @Bindable var workspace: WorkspaceModel
+    var showGroups = false
     @Environment(\.dismiss) private var dismiss
     @State private var draft = WorkspaceConfiguration()
     @State private var selected: Set<String> = []
@@ -72,6 +73,7 @@ struct SettingsPanel: View {
         .onAppear {
             guard !initialized else { return }
             initialized = true
+            section = showGroups ? .organization : .repositories
             draft = workspace.configuration
             selected = Set(draft.repositories)
         }

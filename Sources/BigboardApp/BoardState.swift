@@ -24,8 +24,9 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum Panel: String, Identifiable {
-    case settings, filters, status, help, identities
+    case settings, groups, dateRange, status, help, identities
     var id: String { rawValue }
+    var isSettings: Bool { self == .settings || self == .groups }
 }
 struct RelatedEvidence: Equatable {
     var mode: String
@@ -90,6 +91,7 @@ enum DateRange: Hashable {
     var activityInterval: DateInterval?
     var activityIncludesStart = false
     var activity = BoardFilters()
+    var activityPeopleQuery = ""
     var contributors = BoardFilters()
     var prs = BoardFilters(sort: "updated")
     var scope = ActivityScope()
@@ -112,6 +114,32 @@ enum DateRange: Hashable {
     var rangeLabel: String {
         dateRange.label
     }
+    var searchPrompt: String? {
+        switch board {
+        case .heat: nil
+        case .activity:
+            switch lens {
+            case .commits: "Search commits"
+            case .people: scopedPerson == nil ? "Find a contributor" : "Search commits"
+            case .directories, .related: nil
+            }
+        case .contributors: "Find a contributor"
+        case .pullRequests: "Search pull requests"
+        }
+    }
+    var searchQuery: String {
+        get {
+            board == .activity && lens == .people && scopedPerson == nil
+                ? activityPeopleQuery : currentFilters.query
+        }
+        set {
+            if board == .activity && lens == .people && scopedPerson == nil {
+                activityPeopleQuery = newValue
+            } else {
+                currentFilters.query = newValue
+            }
+        }
+    }
     var currentFilters: BoardFilters {
         get {
             switch board {
@@ -129,15 +157,6 @@ enum DateRange: Hashable {
             case .pullRequests: prs = newValue
             }
         }
-    }
-    func dateMatches(_ date: Date?, snapshot: Snapshot) -> Bool {
-        if board == .activity, let interval = activityInterval {
-            return date.map {
-                ($0 > interval.start || (activityIncludesStart && $0 == interval.start))
-                    && $0 <= interval.end
-            } ?? false
-        }
-        return Analysis.inRange(date, since: dateRange.start(relativeTo: snapshot.generatedAt), now: snapshot.generatedAt)
     }
     var repositoryFilterLabel: String {
         repositories.isEmpty ? "All" : "\(repositories.count) selected"
@@ -212,6 +231,7 @@ enum DateRange: Hashable {
         explore(scope)
         lens = scope.isFile ? .commits : .directories
         activity.query = ""
+        activityPeopleQuery = ""
         activity.hideBots = heat.hideBots
         activity.people = heat.people
         activityInterval = interval
@@ -230,7 +250,6 @@ enum DateRange: Hashable {
                 filteredCommits(snapshot, for: .activity), repositories: visibleRepositories(snapshot), scope: scope,
                 workAreas: configuration.workAreas
             )
-            .filter { activity.query.isEmpty || $0.label.localizedCaseInsensitiveContains(activity.query) }
         func compare(_ a: ActivityRow, _ b: ActivityRow) -> Bool {
             switch activity.sort {
             case "commits":
@@ -364,6 +383,7 @@ enum DateRange: Hashable {
         activityInterval = nil
         activityIncludesStart = false
         activity = BoardFilters()
+        activityPeopleQuery = ""
         contributors = BoardFilters(sort: configuration.contributorSort)
         prs = BoardFilters(sort: "updated")
         scope = ActivityScope()
@@ -416,7 +436,6 @@ enum DateRange: Hashable {
     func pullRequests(_ snapshot: Snapshot) -> [PullRequest] {
         let filters = PRFilters(
             query: prs.query, repos: repositories,
-            since: dateRange.start(relativeTo: snapshot.generatedAt),
             authors: prs.authors, reviews: prs.reviews, checks: prs.checks, states: prs.states,
             mine: prs.mine, sort: prs.sort, reverse: prs.reversed)
         return
