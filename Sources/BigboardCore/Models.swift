@@ -87,6 +87,7 @@ struct Repository: Sendable, Identifiable, Equatable {
     var remote = "origin"
     var shallow = false
     var partial = false
+    var skippedCommits = 0
 }
 struct Review: Sendable, Equatable {
     var author: String

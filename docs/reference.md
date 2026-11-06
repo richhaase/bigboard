@@ -282,9 +282,27 @@ excluded).
 
 `activity` reads your clones and makes no network requests. Run `refresh` first,
 or let the app refresh, for current evidence. Repositories without a local clone,
-or with shallow or partial history, are listed under incomplete evidence and the
-command exits with status 2. `status` lists each collected repository's clone.
-Usage errors exit with status 64.
+with shallow or partial history, or whose scan failed are listed under incomplete
+evidence and the command exits with status 2. `status` lists each collected
+repository's clone. Usage errors exit with status 64.
+
+Every totals object in the JSON includes `unknown_line_commits`, the number of
+commits whose line counts are unknown (partial clones). When it is above zero,
+line totals are a lower bound. The JSON also has:
+
+- `evidence`: one entry for every requested repository, including those with no
+  activity in the range or a failed scan. Each entry has the `branch`, `remote`,
+  scanned `revision`, `scanned_at` (when that history was parsed), and
+  `fetched_at` (the last successful fetch by Bigboard or `bigboard refresh`;
+  `null` if unknown, for example after fetching outside Bigboard). `history` is
+  `complete`, `shallow`, `missing` (no local clone), or `failed`; `line_counts`
+  and `paths` are `complete` or `unknown`. Its `problems` list each issue as
+  `kind` and `message`.
+- `problems`: every issue across repositories, as `repository`, `kind`, and
+  `message`. Kinds are `no_clone`, `scan_failed`, `shallow`, `partial`, and
+  `skipped_commits`.
+
+`generated_at` is when the report ran, not when the history was fetched.
 
 ## Troubleshooting
 

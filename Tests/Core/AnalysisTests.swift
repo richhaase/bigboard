@@ -7,6 +7,13 @@ struct AnalysisTests {
     func commit(_ id: String, repo: String = "o/a", email: String = "a@test", days: Double = 0, added: Int = 10, removed: Int = 2, files: [FileChange] = []) -> Commit {
         Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-days * 86400), subject: id, added: added, removed: removed, files: files)
     }
+    @Test func totalsCountCommitsWithUnknownLineCounts() {
+        var first = commit("first"); first.linesUnknown = true
+        var second = commit("second"); second.linesUnknown = true
+        let totals = Analysis.totals([first, second, commit("known")])
+        #expect(totals.unknownLineCommits == 2 && totals.unknown)
+        #expect(Analysis.totals([commit("known")]).unknownLineCommits == 0)
+    }
     @Test func sharedCommitsPreferCompleteThenLexicalRepo() {
         var unknown = commit("same", repo: "o/a"); unknown.linesUnknown = true
         let known = commit("same", repo: "o/z")
