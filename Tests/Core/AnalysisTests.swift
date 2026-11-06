@@ -7,6 +7,11 @@ struct AnalysisTests {
     func commit(_ id: String, repo: String = "o/a", email: String = "a@test", days: Double = 0, added: Int = 10, removed: Int = 2, files: [FileChange] = []) -> Commit {
         Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-days * 86400), subject: id, added: added, removed: removed, files: files)
     }
+    @Test func selectionCanEndAtAnInclusiveUpperBound() {
+        let start = now.addingTimeInterval(-14 * 86_400), end = now.addingTimeInterval(-7 * 86_400)
+        let records = [commit("start", days: 14), commit("inside", days: 10), commit("end", days: 7), commit("after", days: 3)]
+        #expect(Set(Analysis.select(records, since: start, until: end, now: now).map(\.id)) == ["inside", "end"])
+    }
     @Test func totalsCountCommitsWithUnknownLineCounts() {
         var first = commit("first"); first.linesUnknown = true
         var second = commit("second"); second.linesUnknown = true
