@@ -66,32 +66,6 @@ import Testing
         await workspace.shutdown()
     }
 
-    @Test func groupsAndEmptyScopesWorkOffline() async throws {
-        var config = RefreshRecoveryFixture.configuration
-        config.groups = ["Focus": [RefreshRecoveryFixture.first], "Empty": []]
-        let fixture = try RefreshRecoveryFixture(configuration: config)
-        defer { fixture.remove() }
-        await fixture.historyRefresh.fail(RefreshRecoveryFixture.second)
-        let workspace = fixture.workspace()
-        await workspace.start()
-        await workspace.selectGroup("Focus")
-        #expect(workspace.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
-        #expect(workspace.snapshot.coverage.phase == "ready")
-        await workspace.selectGroup("Empty")
-        #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-        await workspace.shutdown()
-        config = try fixture.storage.loadConfiguration(); config.cachedOnly = true
-        try fixture.storage.saveConfiguration(config)
-        let requests = await fixture.network.requests
-        let offline = fixture.workspace()
-        await offline.start()
-        #expect(offline.snapshot.cachedOnly && !offline.snapshot.commits.isEmpty)
-        await offline.selectGroup("Focus")
-        #expect(offline.snapshot.repositories.map(\.id) == [RefreshRecoveryFixture.first])
-        await offline.shutdown()
-        #expect(await fixture.network.requests == requests)
-    }
-
     @Test(arguments: RefreshRecoveryInterruption.allCases)
     func accessDenialKeepsLocalHistory(_ interruption: RefreshRecoveryInterruption) async throws {
         let fixture = try RefreshRecoveryFixture()

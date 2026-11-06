@@ -10,7 +10,6 @@ final class WorkspaceModel {
     var busy = false
     var error = ""
     var discovered: [Repository] = []
-    var activeGroup = ""
     var storageDescription: String {
         "Settings: \(storage.configurationFile.path)\nHistory: \(storage.cacheRoot.path)"
     }
@@ -70,7 +69,6 @@ final class WorkspaceModel {
         lastRefreshFinished = nil
         configuration = try storage.loadConfiguration()
         discovered = []
-        activeGroup = ""
         history = GitHistory(root: storage.historyRoot)
         let manager = auth
         github = GitHubService(token: { try await manager.token() }, transport: transport)
@@ -109,7 +107,7 @@ final class WorkspaceModel {
         return task
     }
     private func selected(_ repositories: [Repository]) -> [Repository] {
-        configuration.collected(repositories, group: activeGroup)
+        configuration.collected(repositories)
     }
     private func performRefresh(operation: Int) async {
         guard operation == generation, let history, let github, !account.isEmpty else { return }
@@ -270,7 +268,6 @@ final class WorkspaceModel {
         account = ""
         history = nil
         github = nil
-        activeGroup = ""
         checkingSignIn = false
         authStatus.signedIn = false
         authStatus.login = ""
@@ -385,7 +382,6 @@ final class WorkspaceModel {
             try storage.saveConfiguration(config)
             configuration = config
             error = ""
-            reconcileActiveGroup()
             restrictSnapshot()
             _ = beginRefresh()
             return true
@@ -426,16 +422,6 @@ final class WorkspaceModel {
             self.error = error.localizedDescription
             busy = false
         }
-    }
-    private func reconcileActiveGroup() {
-        if !activeGroup.isEmpty, configuration.groups[activeGroup] == nil { activeGroup = "" }
-    }
-    func selectGroup(_ name: String) async {
-        guard !shuttingDown, name.isEmpty || configuration.groups[name] != nil else { return }
-        await stopRefresh()
-        activeGroup = name
-        restrictSnapshot()
-        await refresh()
     }
     func checkConnection() async {
         guard !checkingSignIn else { return }

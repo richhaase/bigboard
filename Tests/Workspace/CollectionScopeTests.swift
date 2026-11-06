@@ -38,7 +38,7 @@ import Testing
         #expect(passed == [ids[0]])
     }
 
-    @Test func cachedStartupAndGroupsOnlyCollectSavedRepositories() async throws {
+    @Test func cachedStartupOnlyCollectsSavedRepositories() async throws {
         let ids = ["owner/chosen", "owner/unchecked", "owner/new-private"]
         var config = WorkspaceConfiguration(repositories: [ids[0]])
         config.cachedOnly = true
@@ -51,12 +51,6 @@ import Testing
         #expect(fixture.workspace.snapshot.commits.count == 2)
         #expect(fixture.scanExists(ids[0]))
         #expect(!fixture.scanExists(ids[1]) && !fixture.scanExists(ids[2]))
-        await fixture.workspace.selectGroup("Mixed")
-        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
-        await fixture.workspace.selectGroup("Unchecked")
-        #expect(fixture.workspace.snapshot.repositories.isEmpty)
-        #expect(fixture.workspace.snapshot.commits.isEmpty && fixture.workspace.snapshot.pullRequests.isEmpty)
-        #expect(!fixture.scanExists(ids[2]))
         #expect(await fixture.network.calls == 0)
     }
 
@@ -189,8 +183,6 @@ import Testing
         let fixture = try CollectionFixture(config: config, cloned: ids)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         await fixture.workspace.start()
-        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
-        await fixture.workspace.selectGroup("Mixed")
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
         #expect(ids.dropFirst().allSatisfy { !fixture.scanExists($0) })
         #expect(fixture.workspace.configuration.repositories == Array(ids.prefix(2)))

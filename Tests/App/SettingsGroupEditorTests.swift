@@ -166,9 +166,6 @@ struct SettingsGroupEditorTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(!workspace.busy)
-        await workspace.selectGroup("Product")
-        #expect(workspace.activeGroup == "Product")
-        #expect(Set(workspace.snapshot.repositories.map(\.id)) == ["owner/app", "owner/library"])
         await workspace.shutdown()
 
         #expect(applied)

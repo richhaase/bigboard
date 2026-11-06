@@ -77,7 +77,8 @@ run `gh auth logout`.
 
 The sidebar contains **Heat Maps**, **Activity**, **Contributors**, and **Pull requests**, in that order.
 The toolbar's **Repositories** control combines group selection and repository
-filtering. Its label shows the active group and any narrower repository selection.
+filtering. Its label shows the group whose repositories are checked, or how many
+repositories are checked when the selection matches no group.
 **Manage Groups…** inside that popover opens Groups & areas in Settings.
 Groups are also available in **Boards → Group**.
 The toolbar contains repository viewing scope and, on historical boards, the
@@ -95,9 +96,10 @@ select a repository, and press Space to toggle it.
 
 This filter does not fetch history, make network requests, change saved
 collection choices, or unload caches. Use Settings to change what the app
-collects. Changing a named group narrows collection to its saved, selected
-repositories and refreshes; it never adds unchecked repositories. Choosing a group
-resets the viewing checklist to all repositories in that group.
+collects. Choosing a named group checks that group's collected repositories in
+the viewing checklist and nothing else; it never refreshes or changes what is
+collected. Groups with no collected repositories are unavailable. The
+`bigboard` command's `--group` option still limits what a command collects.
 
 The date menu offers the last 1, 4, 12, or 24 hours, 7, 14, 30, 90, and 365 days,
 All time, and **Custom range…**. The default is 14 days unless
@@ -196,8 +198,8 @@ silently overwritten.
 
 ## Pull requests
 
-This board lists current open PRs, including drafts, within the active group
-and repository viewing scope. Historical dates do not hide old open PRs,
+This board lists current open PRs, including drafts, within the repository
+viewing scope. Historical dates do not hide old open PRs,
 including those linked from Activity. Search
 matches repository, title, author, or number.
 
