@@ -1,10 +1,34 @@
 import SwiftUI
+import AppKit
+
+struct PRRow: Identifiable {
+    var pr: PullRequest
+    var attention: Int
+    var id: String { pr.id }
+    var title: String { pr.title }
+    var repo: String { pr.repo }
+    var author: String { pr.author.lowercased() }
+    var reviewRank: Int { Analysis.reviewRank(pr) }
+    var checksRank: Int { Analysis.checksRank(pr) }
+    var size: Int { Analysis.prSize(pr) }
+    var opened: Date { pr.createdAt ?? .distantPast }
+    var updated: Date { pr.updatedAt ?? .distantPast }
+}
 
 struct PullRequestsBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     var prs: [PullRequest] { navigation.pullRequests(workspace.snapshot) }
-    var selected: PullRequest? { prs.first { $0.id == navigation.prSelection } ?? prs.first }
+    var viewer: String { workspace.snapshot.viewer }
+    var rows: [PRRow] {
+        prs.map { pr in
+            PRRow(
+                pr: pr,
+                attention: viewer.isEmpty
+                    ? 1 : Analysis.requested(pr, viewer: viewer) ? 0 : Analysis.needsAttention(pr, viewer: viewer) ? 0 : 1)
+        }
+    }
+    var selected: PullRequest? { prs.first { $0.id == navigation.prSelection } }
     var repositories: [Repository] {
         navigation.visibleRepositories(workspace.snapshot)
             .filter { navigation.contextualRepository == nil || $0.id == navigation.contextualRepository }
@@ -17,11 +41,42 @@ struct PullRequestsBoard: View {
             ($0.prCheckedAt != nil || !workspace.busy) && (!$0.prInventoryComplete || $0.prStale)
         }
     }
+    private static let sortKeys: [(String, KeyPathComparator<PRRow>)] = [
+        ("attention", KeyPathComparator(\PRRow.attention)),
+        ("title", KeyPathComparator(\PRRow.title)),
+        ("repository", KeyPathComparator(\PRRow.repo)),
+        ("author", KeyPathComparator(\PRRow.author)),
+        ("review", KeyPathComparator(\PRRow.reviewRank)),
+        ("checks", KeyPathComparator(\PRRow.checksRank)),
+        ("size", KeyPathComparator(\PRRow.size, order: .reverse)),
+        ("created", KeyPathComparator(\PRRow.opened, order: .reverse)),
+        ("updated", KeyPathComparator(\PRRow.updated, order: .reverse)),
+    ]
+    private var sortOrder: Binding<[KeyPathComparator<PRRow>]> {
+        Binding(
+            get: {
+                guard var comparator = Self.sortKeys.first(where: { $0.0 == navigation.prs.sort })?.1 else {
+                    return []
+                }
+                if navigation.prs.reversed {
+                    comparator.order = comparator.order == .forward ? .reverse : .forward
+                }
+                return [comparator]
+            },
+            set: { order in
+                guard let chosen = order.first,
+                    let match = Self.sortKeys.first(where: { $0.1.keyPath == chosen.keyPath })
+                else { return }
+                navigation.prs.sort = match.0
+                navigation.prs.reversed = chosen.order != match.1.order
+            })
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Current open work").foregroundStyle(.secondary)
                 BoardSearch(navigation: navigation)
+                Spacer()
+                Text(summary).foregroundStyle(.secondary).monospacedDigit()
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
             if let context = navigation.contextualRepository {
@@ -32,27 +87,6 @@ struct PullRequestsBoard: View {
                 }
                 .padding(.horizontal, 12).padding(.bottom, 10)
             }
-            HStack {
-                MetricView(
-                    title: "Open in this view",
-                    value: workspace.snapshot.cachedOnly || (loading && prs.isEmpty)
-                        ? "—" : "\(prs.count)\(unknown || loading ? " + ?" : "")")
-                MetricView(title: "Awaiting your review", value: awaitingReview)
-                Picker("Sort", selection: $navigation.prs.sort) {
-                    Text("Updated").tag("updated")
-                    Text("Repository").tag("repository")
-                    Text("Author").tag("author")
-                    Text("Title").tag("title")
-                    Text("Attention").tag("attention")
-                }
-                .frame(width: 200)
-                Button {
-                    navigation.prs.reversed.toggle()
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                }
-            }
-            .padding(.horizontal, 16).padding(.bottom, 12)
             HStack {
                 facetMenu(
                     "Mine",
@@ -81,99 +115,197 @@ struct PullRequestsBoard: View {
                     options: Set(workspace.snapshot.pullRequests.map(\.author)).sorted().map { ($0, $0) },
                     values: $navigation.prs.authors)
                 Spacer()
-                Button("Reset") { navigation.resetBoard() }
+                Button("Clear Filters") { navigation.resetBoard() }
+                    .disabled(!filtered)
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
-            HSplitView {
-                if prs.isEmpty && loading {
-                    ProgressView("Loading pull requests…").frame(minWidth: 450, maxWidth: .infinity, maxHeight: .infinity)
-                } else if prs.isEmpty {
-                    EmptyBoard(
-                        title: workspace.snapshot.cachedOnly
-                            ? "PR context is unavailable offline"
-                            : unknown ? "PR evidence is incomplete" : "No pull requests match",
-                        message: workspace.snapshot.cachedOnly
-                            ? "Turn off Cached history in Settings to load open PRs."
-                            : "Adjust filters or refresh. Data status explains any missing evidence.",
-                        symbol: "arrow.triangle.pull"
-                    )
-                    .frame(minWidth: 450)
-                } else {
-                    List(prs, selection: $navigation.prSelection) { pr in
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text(pr.repo).foregroundStyle(.secondary)
-                                Text("#\(pr.number)")
-                                if pr.draft { StateBadge(value: "DRAFT") }
-                                Spacer()
-                                Text(age(pr)).foregroundStyle(.secondary)
-                            }
-                            .font(.caption)
-                            Text(pr.title).font(.headline).lineLimit(2)
-                            HStack {
-                                Text(pr.author)
-                                    .foregroundStyle(
-                                        pr.author.lowercased() == workspace.snapshot.viewer.lowercased()
-                                            ? Color.accentColor : .secondary)
-                                Spacer()
-                                StateBadge(value: pr.review)
-                                StateBadge(value: pr.checks)
-                            }
-                            .font(.caption)
-                        }
-                        .padding(.vertical, 7).tag(pr.id)
-                    }
-                    .frame(minWidth: 450)
+            VSplitView {
+                content.frame(minHeight: 160, idealHeight: 320)
+                if let pr = selected {
+                    detailPane(pr).frame(minHeight: 280, idealHeight: 400)
                 }
-                ScrollView {
-                    if let pr = selected {
-                        detail(pr).padding(18)
-                    } else {
-                        Text("Select a pull request to inspect its evidence.").foregroundStyle(.secondary)
-                            .padding()
-                    }
-                }
-                .frame(minWidth: 280, idealWidth: 340, maxWidth: 450)
             }
         }
     }
-    private var awaitingReview: String {
-        guard !workspace.snapshot.viewer.isEmpty, !workspace.snapshot.cachedOnly else { return "—" }
-        let selected = workspace.snapshot.pullRequests.filter {
+    private func detailPane(_ pr: PullRequest) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(pr.repo) #\(pr.number)").font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Spacer()
+                Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
+                Button("Copy Link", systemImage: "link") { copy(pr.url) }
+                Button("Close", systemImage: "xmark") { navigation.prSelection = nil }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                    .help("Close details")
+            }
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
+            ScrollView { detail(pr).padding(.horizontal, 16).padding(.bottom, 14) }
+        }
+        .background(.background)
+    }
+    @ViewBuilder private var content: some View {
+        if prs.isEmpty && loading {
+            ProgressView("Loading pull requests…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if prs.isEmpty {
+            EmptyBoard(
+                title: workspace.snapshot.cachedOnly
+                    ? "PR context is unavailable offline"
+                    : unknown ? "PR evidence is incomplete" : "No pull requests match",
+                message: workspace.snapshot.cachedOnly
+                    ? "Turn off Cached history in Settings to load open PRs."
+                    : "Adjust filters or refresh. Data status explains any missing evidence.",
+                symbol: "arrow.triangle.pull"
+            )
+        } else {
+            table
+        }
+    }
+    private var table: some View {
+        Table(rows, selection: $navigation.prSelection, sortOrder: sortOrder) {
+            TableColumn("", sortUsing: KeyPathComparator(\PRRow.attention)) { row in
+                if row.attention == 0 {
+                    Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(.tint)
+                        .help("Needs your attention")
+                        .accessibilityLabel("Needs your attention")
+                }
+            }
+            .width(14)
+            TableColumn("Pull Request", sortUsing: KeyPathComparator(\PRRow.title)) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("#\(row.pr.number)").foregroundStyle(.secondary).monospacedDigit()
+                        Text(row.pr.title).lineLimit(1)
+                        if row.pr.draft { StateBadge(value: "DRAFT") }
+                    }
+                    if !row.pr.labels.isEmpty {
+                        Text(row.pr.labels.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .width(min: 220, ideal: 360)
+            TableColumn("Repository", sortUsing: KeyPathComparator(\PRRow.repo)) { row in
+                Text(row.pr.repo).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .width(min: 90, ideal: 150)
+            TableColumn("Author", sortUsing: KeyPathComparator(\PRRow.author)) { row in
+                Text(row.pr.author).lineLimit(1)
+                    .foregroundStyle(row.pr.author.lowercased() == viewer.lowercased() ? Color.accentColor : .primary)
+            }
+            .width(min: 70, ideal: 100)
+            TableColumn("Review", sortUsing: KeyPathComparator(\PRRow.reviewRank)) { row in
+                StateBadge(value: row.pr.review)
+            }
+            .width(min: 80, ideal: 120)
+            TableColumn("Checks", sortUsing: KeyPathComparator(\PRRow.checksRank)) { row in
+                HStack(spacing: 4) {
+                    StateBadge(value: row.pr.checks)
+                    if !row.pr.failingChecks.isEmpty {
+                        Text("\(row.pr.failingChecks.count)").font(.caption).foregroundStyle(.orange)
+                            .help(row.pr.failingChecks.joined(separator: "\n"))
+                    }
+                }
+            }
+            .width(min: 80, ideal: 110)
+            TableColumn("Size", sortUsing: KeyPathComparator(\PRRow.size, order: .reverse)) { row in
+                if let additions = row.pr.additions, let deletions = row.pr.deletions {
+                    HStack(spacing: 4) {
+                        Text("+\(additions)").foregroundStyle(.green)
+                        Text("−\(deletions)").foregroundStyle(.red)
+                    }
+                    .font(.callout.monospacedDigit())
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
+            }
+            .width(min: 70, ideal: 100)
+            TableColumn("Opened", sortUsing: KeyPathComparator(\PRRow.opened, order: .reverse)) { row in
+                Text(relative(row.pr.createdAt)).foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 90)
+            TableColumn("Updated", sortUsing: KeyPathComparator(\PRRow.updated, order: .reverse)) { row in
+                HStack(spacing: 4) {
+                    Text(relative(row.pr.updatedAt)).foregroundStyle(.secondary)
+                    if idle(row.pr) {
+                        Image(systemName: "hourglass").foregroundStyle(.orange)
+                            .help("No updates in 14 days or more")
+                            .accessibilityLabel("Idle")
+                    }
+                }
+            }
+            .width(min: 70, ideal: 100)
+        }
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let pr = prs.first(where: { ids.contains($0.id) }), ids.count == 1 {
+                Button("Open on GitHub") { openGitHub(pr.url) }
+                Button("Copy Link") { copy(pr.url) }
+                Button("Copy Title and Number") { copy("\(pr.repo)#\(pr.number) \(pr.title)") }
+            }
+        } primaryAction: { ids in
+            for pr in prs where ids.contains(pr.id) { openGitHub(pr.url) }
+        }
+        .focusedSceneValue(\.selectedPullRequestURL, selected?.url)
+    }
+    private var filtered: Bool {
+        let filters = navigation.prs
+        return !filters.query.isEmpty || !filters.authors.isEmpty || !filters.reviews.isEmpty
+            || !filters.checks.isEmpty || !filters.states.isEmpty || !filters.mine.isEmpty
+    }
+    private var summary: String {
+        guard !workspace.snapshot.cachedOnly else { return "Unavailable offline" }
+        if loading && prs.isEmpty { return "Loading…" }
+        let count = "\(prs.count) open\(unknown || loading ? " (incomplete)" : "")"
+        guard !viewer.isEmpty else { return count }
+        let scoped = workspace.snapshot.pullRequests.filter {
             (navigation.repositories.isEmpty || navigation.repositories.contains($0.repo))
                 && (navigation.contextualRepository == nil || $0.repo == navigation.contextualRepository)
         }
-        let count = selected.filter { Analysis.requested($0, viewer: workspace.snapshot.viewer) }.count
-        return "\(count)\(unknown || selected.contains { !$0.reviewersComplete } ? " + ?" : "")"
+        let awaiting = scoped.filter { Analysis.requested($0, viewer: viewer) }.count
+        let partial = unknown || scoped.contains { !$0.reviewersComplete }
+        return "\(count) · \(awaiting) awaiting your review\(partial ? " (incomplete)" : "")"
     }
-    private func age(_ pr: PullRequest) -> String {
-        guard let date = pr.updatedAt else { return "Unknown" }
-        let stale = workspace.snapshot.generatedAt.timeIntervalSince(date) >= 14 * 86400
-        return
-            "\(date.formatted(date: .abbreviated, time: .omitted))\(stale ? " !" : "")"
+    private func relative(_ date: Date?) -> String {
+        guard let date else { return "Unknown" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: workspace.snapshot.generatedAt)
+    }
+    private func idle(_ pr: PullRequest) -> Bool {
+        guard let date = pr.updatedAt else { return false }
+        return workspace.snapshot.generatedAt.timeIntervalSince(date) >= 14 * 86400
+    }
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+    private func dated(_ date: Date?) -> String {
+        guard let date else { return "Unknown" }
+        return "\(date.formatted(date: .abbreviated, time: .shortened)) (\(relative(date)))"
     }
     private func detail(_ pr: PullRequest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("PULL REQUEST #\(pr.number)").font(.caption).foregroundStyle(.secondary)
-            Text(pr.title).font(.title2.bold()).textSelection(.enabled)
-            Text(pr.repo).foregroundStyle(.secondary)
-            Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
-                .buttonStyle(.borderedProminent)
-                .focusedSceneValue(\.selectedPullRequestURL, pr.url)
-            LabeledContent("Author", value: pr.author)
-            LabeledContent("State", value: pr.draft ? "Draft" : "Open")
-            LabeledContent("Review") { StateBadge(value: pr.review) }
-            LabeledContent("Checks") { StateBadge(value: pr.checks) }
-            LabeledContent("Updated", value: age(pr))
-            LabeledContent(
-                "Merge conflicts",
-                value: pr.mergeable == "CONFLICTING"
-                    ? "Conflicts reported" : pr.mergeable == "MERGEABLE" ? "None reported" : "Unknown")
-            LabeledContent(
-                "Reviewers", value: pr.reviewers.isEmpty ? "None known" : pr.reviewers.joined(separator: ", ")
-            )
-            Text("Review and check results are evidence, not merge authorization.").font(.caption)
-                .foregroundStyle(.secondary)
+            Text(pr.title).font(.title3.bold()).textSelection(.enabled)
+            if !pr.labels.isEmpty {
+                Text(pr.labels.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: 32) {
+                facts(pr).frame(minWidth: 240, maxWidth: 360, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    checks(pr)
+                    reviews(pr)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            DisclosureGroup("Changed files (\(pr.files.count) of \(pr.fileCount))") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(pr.files, id: \.self) {
+                        Text($0).font(.callout.monospaced()).textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if !pr.inventoryComplete || !pr.filesComplete || !pr.reviewersComplete || !pr.reviewsComplete {
                 Text(
                     [
@@ -186,16 +318,90 @@ struct PullRequestsBoard: View {
                 )
                 .font(.caption).foregroundStyle(.orange)
             }
-            SectionTitle(title: "Changed files", detail: "\(pr.files.count) / \(pr.fileCount)")
-            ForEach(pr.files, id: \.self) { Text($0).font(.callout.monospaced()).textSelection(.enabled) }
-            SectionTitle(title: "Latest reviews")
-            ForEach(Array(pr.reviews.enumerated()), id: \.offset) { _, review in
-                HStack {
-                    Text(review.author)
-                    Spacer()
-                    StateBadge(value: review.state)
+            Text("Review and check results are evidence, not merge authorization.").font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func facts(_ pr: PullRequest) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                Text("Author").foregroundStyle(.secondary)
+                Text(pr.author)
+            }
+            GridRow {
+                Text("State").foregroundStyle(.secondary)
+                Text(pr.draft ? "Draft" : "Ready for review")
+            }
+            GridRow {
+                Text("Opened").foregroundStyle(.secondary)
+                Text(dated(pr.createdAt))
+            }
+            GridRow {
+                Text("Updated").foregroundStyle(.secondary)
+                Text(dated(pr.updatedAt)).foregroundStyle(idle(pr) ? .orange : .primary)
+            }
+            GridRow {
+                Text("Size").foregroundStyle(.secondary)
+                if let additions = pr.additions, let deletions = pr.deletions {
+                    Text("+\(additions) −\(deletions) in \(pr.fileCount) files").monospacedDigit()
+                } else {
+                    Text("\(pr.fileCount) files")
                 }
             }
+            GridRow {
+                Text("Conflicts").foregroundStyle(.secondary)
+                Text(
+                    pr.mergeable == "CONFLICTING"
+                        ? "Conflicts reported" : pr.mergeable == "MERGEABLE" ? "None reported" : "Unknown"
+                )
+                .foregroundStyle(pr.mergeable == "CONFLICTING" ? .orange : .primary)
+            }
+        }
+        .font(.callout)
+    }
+    @ViewBuilder private func checks(_ pr: PullRequest) -> some View {
+        HStack {
+            Text("Checks").foregroundStyle(.secondary)
+            StateBadge(value: pr.checks)
+        }
+        .font(.callout)
+        ForEach(pr.failingChecks, id: \.self) { name in
+            Label(name, systemImage: "xmark.circle").foregroundStyle(.orange).font(.callout)
+        }
+        if !pr.failingChecksComplete && pr.checks != "SUCCESS" {
+            Text("More checks ran than Bigboard collected.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private func reviews(_ pr: PullRequest) -> some View {
+        HStack {
+            Text("Review").foregroundStyle(.secondary)
+            StateBadge(value: pr.review)
+        }
+        .font(.callout)
+        .padding(.top, 4)
+        ForEach(Array(pr.reviews.enumerated()), id: \.offset) { _, review in
+            HStack {
+                Text(review.author)
+                StateBadge(value: review.state)
+                if let date = review.submittedAt {
+                    Text(relative(date)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
+        }
+        let waiting = pr.reviewers.filter { reviewer in
+            !pr.reviews.contains { $0.author.lowercased() == reviewer.lowercased() }
+        }
+        ForEach(waiting, id: \.self) { reviewer in
+            HStack {
+                Text(reviewer)
+                Text("requested").font(.caption).foregroundStyle(.secondary)
+            }
+            .font(.callout)
+        }
+        if pr.reviews.isEmpty && waiting.isEmpty {
+            Text("No reviews or requests known.").font(.callout).foregroundStyle(.secondary)
         }
     }
     private func facetMenu(_ title: String, options: [(String, String)], values: Binding<Set<String>>)
