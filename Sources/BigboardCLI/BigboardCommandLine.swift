@@ -29,6 +29,7 @@ public enum BigboardCommandLine {
 struct CommandLineEnvironment: Sendable {
     var storage: WorkspaceStorage
     var auth: GitHubCLIAuth
+    var transport: any GitHubTransport = URLSessionGitHubTransport()
     var now: @Sendable () -> Date
     var openApplication: @Sendable () throws -> Void
     var refreshHistory: @Sendable (GitHistory, Repository) async throws -> Repository = {
@@ -76,7 +77,7 @@ struct CommandLineEnvironment: Sendable {
 }
 
 struct CommandLineTool: Sendable {
-    static let commands: Set<String> = ["open", "status", "activity", "refresh", "help", "--help", "-h", "version", "--version"]
+    static let commands: Set<String> = ["open", "status", "activity", "prs", "refresh", "help", "--help", "-h", "version", "--version"]
     var environment: CommandLineEnvironment
 
     func run(_ arguments: [String]) async -> Int32 {
@@ -96,6 +97,14 @@ struct CommandLineTool: Sendable {
             case "activity":
                 return try await activity(
                     try Options(options, flags: ["--json", "--include-bots", "--compare", "--commits"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth", "--path", "--since", "--until"]))
+            case "prs":
+                return try await pullRequests(
+                    try Options(
+                        options, flags: ["--json", "--files"],
+                        values: [
+                            "--repo", "--group", "--mine", "--author", "--review", "--checks", "--state", "--search",
+                            "--sort", "--top",
+                        ]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
                 guard let topic = options.first else {
@@ -137,6 +146,7 @@ struct CommandLineTool: Sendable {
         Commands:
           status      Show the GitHub CLI account, data locations, and collected clones.
           activity    Summarize recorded change: totals, repositories, paths, and people.
+          prs         List open pull requests, with what needs your attention.
           refresh     Fetch each clone's default branch with your Git setup.
           open        Open the Bigboard app.
           help        Show help for a command, for example: bigboard help activity
@@ -146,7 +156,8 @@ struct CommandLineTool: Sendable {
           - Add --json to status and activity for stable output with snake_case keys.
           - status and activity never fetch history. They confirm the GitHub CLI
             account with GitHub, or use the last confirmed account when offline.
-            refresh fetches from each clone's remote.
+            refresh fetches from each clone's remote, and prs asks GitHub for open
+            pull requests.
           - Exit status: 0 success, 2 incomplete evidence, 64 usage error, 1 other error.
           - In activity --json, check evidence and problems before relying on totals.
             unknown_line_commits above 0 means line totals are a lower bound.
@@ -198,6 +209,33 @@ struct CommandLineTool: Sendable {
             fetch times, and history, line-count, and path completeness.
 
             Exit status: 0, or 2 when evidence is incomplete (see problems).
+
+            """,
+        "prs": """
+            Usage: bigboard prs [options]
+
+            List open pull requests, including drafts, in your collected repositories, with
+            review and check state and what needs your attention. Asks GitHub each time;
+            pull requests are not cached.
+
+            Options:
+              --repo OWNER/NAME     Limit to a collected repository (repeatable).
+              --group NAME          Limit to a saved repository group.
+              --mine KIND           attention, authored, requested, or updated (repeatable).
+              --author LOGIN        Limit to an author (repeatable).
+              --review STATE        approved, changes_requested, review_required, or unknown
+                                    (repeatable).
+              --checks STATE        success, failure, error, pending, expected, or unknown
+                                    (repeatable).
+              --state STATE         open (ready for review) or draft (repeatable).
+              --search TEXT         Match repository, title, author, or number.
+              --sort ORDER          updated (default), attention, repository, author, or title.
+              --top N               Pull requests to list (default 25).
+              --files               Include changed file paths in JSON.
+              --json                Print JSON.
+
+            Filters of different kinds combine with AND; repeated values of one kind with OR.
+            Exit status: 0, or 2 when pull-request evidence is incomplete (see problems).
 
             """,
         "refresh": """
@@ -402,6 +440,47 @@ struct CommandLineTool: Sendable {
             repositories: workspace.repositories, top: top, peopleSort: peopleSort, depth: depth,
             previous: previous, scope: scope, pathScope: pathScope, excluded: excluded,
             commitLimit: options.flag("--commits") ? top : nil, evidence: evidence)
+        environment.write(options.flag("--json") ? try Self.json(report) : report.text())
+        return report.problems.isEmpty ? 0 : 2
+    }
+
+    private func pullRequests(_ options: Options) async throws -> Int32 {
+        let workspace = try await workspace(options, requireSources: false)
+        let top = try options.integer("--top") ?? 25
+        guard top > 0 else { throw UsageError("--top must be positive.") }
+        func choices(_ name: String, _ allowed: [String], upper: Bool = false) throws -> Set<String> {
+            Set(
+                try options.values(name).map { value in
+                    let normalized = value.lowercased()
+                    guard allowed.contains(normalized) else {
+                        throw UsageError("\(name) must be \(allowed.joined(separator: ", ")).")
+                    }
+                    return upper ? normalized.uppercased() : normalized
+                })
+        }
+        var filters = PRFilters()
+        filters.mine = try choices("--mine", ["attention", "authored", "requested", "updated"])
+        filters.reviews = try choices(
+            "--review", ["approved", "changes_requested", "review_required", "unknown"], upper: true)
+        filters.checks = try choices(
+            "--checks", ["success", "failure", "error", "pending", "expected", "unknown"], upper: true)
+        filters.states = try choices("--state", ["open", "draft"])
+        filters.authors = Set(options.values("--author"))
+        filters.query = options.value("--search") ?? ""
+        let sort = options.value("--sort") ?? "updated"
+        guard ["updated", "attention", "repository", "author", "title"].contains(sort) else {
+            throw UsageError("--sort must be updated, attention, repository, author, or title.")
+        }
+        filters.sort = sort
+        let auth = environment.auth
+        let github = GitHubService(token: { try await auth.token() }, transport: environment.transport)
+        let result = await github.fetch(
+            workspace.repositories, budget: workspace.configuration.requestBudget, previous: [])
+        if result.authenticationRequired { throw GitHubCLIFailure.rejected }
+        let viewer = workspace.account.login
+        let report = PullRequestReport(
+            viewer: viewer, generatedAt: environment.now(), group: options.value("--group"), filters: filters,
+            result: result, top: top, files: options.flag("--files"))
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
         return report.problems.isEmpty ? 0 : 2
     }
@@ -931,5 +1010,193 @@ private func number(_ value: Int) -> String {
 extension String {
     fileprivate func leftPad(_ width: Int) -> String {
         count >= width ? self : String(repeating: " ", count: width - count) + self
+    }
+}
+
+struct PullRequestReport: Encodable {
+    struct Filters: Encodable {
+        var repositories: [String]
+        var group: String?
+        var mine: [String]
+        var authors: [String]
+        var reviews: [String]
+        var checks: [String]
+        var states: [String]
+        var search: String?
+        var sort: String
+    }
+    struct Counts: Encodable {
+        var open: Int
+        var matching: Int
+        var needsAttention: Int
+    }
+    struct ReviewRow: Encodable {
+        var author: String
+        var state: String
+        var submittedAt: Date?
+    }
+    struct Completeness: Encodable {
+        var inventory: Bool
+        var files: Bool
+        var reviewers: Bool
+        var reviews: Bool
+        var failingChecks: Bool
+    }
+    struct Row: Encodable {
+        var repository: String
+        var number: Int
+        var title: String
+        var author: String
+        var url: String
+        var draft: Bool
+        var createdAt: Date?
+        var updatedAt: Date?
+        var review: String
+        var checks: String
+        var failingChecks: [String]
+        var mergeable: String
+        var additions: Int?
+        var deletions: Int?
+        var changedFiles: Int
+        var files: [String]?
+        var labels: [String]
+        var requestedReviewers: [String]
+        var latestReviews: [ReviewRow]
+        var needsAttention: Bool
+        var attentionReason: String?
+        var authoredByViewer: Bool
+        var reviewRequested: Bool
+        var updatedSinceReview: Bool
+        var complete: Completeness
+    }
+    struct RepositoryEvidence: Encodable {
+        var repository: String
+        var open: Int
+        var inventoryComplete: Bool
+        var filesComplete: Bool
+        var reviewersComplete: Bool
+        var stale: Bool
+    }
+    struct Problem: Encodable {
+        var repository: String?
+        var message: String
+    }
+    var viewer: String
+    var generatedAt: Date
+    var filters: Filters
+    var counts: Counts
+    var pullRequests: [Row]
+    var evidence: [RepositoryEvidence]
+    var problems: [Problem]
+
+    static func reason(_ pr: PullRequest, viewer: String) -> String? {
+        guard Analysis.needsAttention(pr, viewer: viewer) else { return nil }
+        if Analysis.requested(pr, viewer: viewer) { return "your review is requested" }
+        if Analysis.updatedSinceReview(pr, viewer: viewer) { return "updated since your review" }
+        if ["FAILURE", "ERROR"].contains(pr.checks) { return "checks are failing" }
+        if pr.review == "CHANGES_REQUESTED" { return "changes were requested" }
+        return "approved with passing checks"
+    }
+
+    init(
+        viewer: String, generatedAt: Date, group: String?, filters: PRFilters, result: GitHubResult, top: Int,
+        files: Bool
+    ) {
+        self.viewer = viewer
+        self.generatedAt = generatedAt
+        self.filters = Filters(
+            repositories: result.repositories.map(\.id), group: group, mine: filters.mine.sorted(),
+            authors: filters.authors.sorted(), reviews: filters.reviews.map { $0.lowercased() }.sorted(),
+            checks: filters.checks.map { $0.lowercased() }.sorted(), states: filters.states.sorted(),
+            search: filters.query.isEmpty ? nil : filters.query, sort: filters.sort)
+        let matching = Analysis.filterPRs(result.pullRequests, viewer: viewer, filters: filters)
+        counts = Counts(
+            open: result.pullRequests.count, matching: matching.count,
+            needsAttention: result.pullRequests.filter { Analysis.needsAttention($0, viewer: viewer) }.count)
+        pullRequests = matching.prefix(top).map { pr in
+            Row(
+                repository: pr.repo, number: pr.number, title: pr.title, author: pr.author, url: pr.url,
+                draft: pr.draft, createdAt: pr.createdAt, updatedAt: pr.updatedAt, review: pr.review.lowercased(),
+                checks: pr.checks.lowercased(), failingChecks: pr.failingChecks, mergeable: pr.mergeable.lowercased(),
+                additions: pr.additions, deletions: pr.deletions, changedFiles: pr.fileCount,
+                files: files ? pr.files : nil, labels: pr.labels, requestedReviewers: pr.reviewers,
+                latestReviews: pr.reviews.map {
+                    ReviewRow(author: $0.author, state: $0.state.lowercased(), submittedAt: $0.submittedAt)
+                },
+                needsAttention: Analysis.needsAttention(pr, viewer: viewer),
+                attentionReason: Self.reason(pr, viewer: viewer),
+                authoredByViewer: !viewer.isEmpty && pr.author.lowercased() == viewer.lowercased(),
+                reviewRequested: Analysis.requested(pr, viewer: viewer),
+                updatedSinceReview: Analysis.updatedSinceReview(pr, viewer: viewer),
+                complete: Completeness(
+                    inventory: pr.inventoryComplete, files: pr.filesComplete, reviewers: pr.reviewersComplete,
+                    reviews: pr.reviewsComplete, failingChecks: pr.failingChecksComplete))
+        }
+        let byRepository = Dictionary(grouping: result.pullRequests, by: \.repo)
+        evidence = result.repositories.map {
+            RepositoryEvidence(
+                repository: $0.id, open: byRepository[$0.id]?.count ?? 0, inventoryComplete: $0.prInventoryComplete,
+                filesComplete: $0.prFilesComplete, reviewersComplete: $0.prReviewersComplete, stale: $0.prStale)
+        }
+        let known = Set(result.repositories.map(\.id))
+        problems = result.coverage.errors.map { message in
+            let prefix = message.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+            let repository = known.contains(prefix) ? prefix : nil
+            let text =
+                repository == nil
+                ? message : String(message.dropFirst(prefix.count + 1)).trimmingCharacters(in: .whitespaces)
+            return Problem(repository: repository, message: text)
+        }
+        for entry in evidence where !entry.inventoryComplete && !problems.contains(where: { $0.repository == entry.repository }) {
+            problems.append(Problem(repository: entry.repository, message: "Pull-request inventory is incomplete."))
+        }
+    }
+
+    func text() -> String {
+        let attention = counts.needsAttention == 1 ? "1 needs your attention" : "\(counts.needsAttention) need your attention"
+        var lines = [
+            "\(viewer) · \(counts.open) open pull request\(counts.open == 1 ? "" : "s") in \(evidence.count) repositor\(evidence.count == 1 ? "y" : "ies") · \(attention)"
+        ]
+        if counts.matching != counts.open { lines.append("\(counts.matching) match the filters.") }
+        if pullRequests.isEmpty {
+            lines.append("")
+            lines.append(counts.open == 0 ? "No open pull requests." : "No pull requests match the filters.")
+        }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        for pr in pullRequests {
+            lines.append("")
+            lines.append("\(pr.needsAttention ? "!" : " ") \(pr.repository)#\(pr.number)  \(pr.title)")
+            var details = [pr.author, pr.draft ? "draft" : "ready for review"]
+            details.append(
+                [
+                    "approved": "approved", "changes_requested": "changes requested",
+                    "review_required": "needs review",
+                ][pr.review] ?? "review unknown")
+            details.append(
+                [
+                    "success": "checks passing", "failure": "checks failing", "error": "checks erroring",
+                    "pending": "checks pending", "expected": "checks expected",
+                ][pr.checks] ?? "checks unknown")
+            if let additions = pr.additions, let deletions = pr.deletions {
+                details.append("+\(additions) −\(deletions) in \(pr.changedFiles) file\(pr.changedFiles == 1 ? "" : "s")")
+            }
+            if let updated = pr.updatedAt { details.append("updated \(day.string(from: updated))") }
+            lines.append("    " + details.joined(separator: " · "))
+            if let reason = pr.attentionReason { lines.append("    Needs your attention: \(reason)") }
+            if !pr.failingChecks.isEmpty { lines.append("    Failing: \(pr.failingChecks.joined(separator: ", "))") }
+            lines.append("    \(pr.url)")
+        }
+        if counts.matching > pullRequests.count {
+            lines.append("")
+            lines.append("and \(counts.matching - pullRequests.count) more (use --top or --json)")
+        }
+        if !problems.isEmpty {
+            lines.append("")
+            lines.append("Incomplete evidence:")
+            lines += problems.map { "  " + ($0.repository.map { "\($0): " } ?? "") + $0.message }
+        }
+        return lines.joined(separator: "\n") + "\n"
     }
 }

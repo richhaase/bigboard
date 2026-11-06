@@ -15,6 +15,40 @@ private final class Captured: @unchecked Sendable {
     var opens: Int { lock.withLock { opened } }
 }
 
+private struct PullRequestFixture: GitHubTransport {
+    static func node(_ number: Int, author: String, draft: Bool, review: String?, requested: [String], check: String, failing: [String]) -> [String: Any] {
+        [
+            "number": number, "title": number == 7 ? "Add search" : "Draft cleanup", "author": ["login": author],
+            "isDraft": draft, "reviewDecision": review as Any? ?? NSNull(), "mergeable": "MERGEABLE",
+            "createdAt": "2026-10-02T12:00:00Z", "updatedAt": "2026-10-04T12:0\(number):00Z", "additions": 12, "deletions": 3,
+            "headRefOid": "head\(number)", "baseRefOid": "base", "labels": ["nodes": [["name": "bug"]]],
+            "reviewRequests": ["totalCount": requested.count, "pageInfo": ["hasNextPage": false], "nodes": requested.map { ["requestedReviewer": ["login": $0]] }],
+            "latestReviews": ["totalCount": 0, "pageInfo": ["hasNextPage": false], "nodes": [Any]()],
+            "files": ["totalCount": 2, "pageInfo": ["hasNextPage": false], "nodes": [["path": "src/a.swift"], ["path": "src/b.swift"]]],
+            "commits": ["nodes": [["commit": ["statusCheckRollup": [
+                "state": check,
+                "contexts": ["pageInfo": ["hasNextPage": false], "nodes": failing.map { ["__typename": "CheckRun", "name": $0, "conclusion": "FAILURE"] }],
+            ]]]]],
+        ]
+    }
+    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
+        guard request.url?.path == "/graphql" else { throw GitHubFailure.unavailable }
+        let nodes = [
+            Self.node(7, author: "someone", draft: false, review: "REVIEW_REQUIRED", requested: ["fixture"], check: "SUCCESS", failing: []),
+            Self.node(8, author: "fixture", draft: true, review: nil, requested: [], check: "FAILURE", failing: ["test"]),
+        ]
+        let document: [String: Any] = ["data": ["repository": [
+            "nameWithOwner": "owner/repo",
+            "pullRequests": ["totalCount": nodes.count, "pageInfo": ["hasNextPage": false], "nodes": nodes],
+        ]]]
+        return GitHubHTTPResponse(status: 200, headers: [:], data: try JSONSerialization.data(withJSONObject: document))
+    }
+}
+
+private struct UnavailableGitHub: GitHubTransport {
+    func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse { throw GitHubFailure.unavailable }
+}
+
 private struct CLIFixture {
     let history: HistoryFixture
     let root: URL
@@ -33,11 +67,11 @@ private struct CLIFixture {
         configuration.sourceRoots = [cache ? history.sources.path : empty.path]
         try storage.saveConfiguration(configuration)
     }
-    func tool(token: CLITokenSource = CLITokenSource(), openFails: Bool = false) -> CommandLineTool {
+    func tool(token: CLITokenSource = CLITokenSource(), openFails: Bool = false, github: any GitHubTransport = PullRequestFixture()) -> CommandLineTool {
         let captured = captured
         let environment = CommandLineEnvironment(
             storage: storage, auth: cliAuth(storage: storage, token: token, user: CLIUserTransport()),
-            now: { Date(timeIntervalSince1970: 1791201600) },
+            transport: github, now: { Date(timeIntervalSince1970: 1791201600) },
             openApplication: {
                 if openFails { throw BigboardError.message("Bigboard.app was not found next to this command.") }
                 captured.open()
@@ -247,6 +281,47 @@ struct CommandLineTests {
         #expect(ActivityReport.change(5, 0) == "new" && ActivityReport.change(0, 3) == "quiet")
         #expect(ActivityReport.change(3, 2) == "+50%" && ActivityReport.change(1, 2) == "−50%" && ActivityReport.change(2, 2) == "0%")
     }
+    @Test func pullRequestsShowWhatNeedsAttention() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        #expect(await fixture.tool().run(["prs"]) == 0)
+        let text = fixture.captured.output
+        #expect(text.hasPrefix("fixture · 2 open pull requests in 1 repository · 2 need your attention\n"))
+        #expect(text.contains("! owner/repo#7  Add search\n    someone · ready for review · needs review · checks passing · +12 −3 in 2 files · updated 2026-10-04\n    Needs your attention: your review is requested\n"))
+        #expect(text.contains("! owner/repo#8  Draft cleanup\n    fixture · draft · review unknown · checks failing"))
+        #expect(text.contains("    Needs your attention: checks are failing\n    Failing: test\n"))
+        let json = try CLIFixture()
+        defer { json.remove() }
+        #expect(await json.tool().run(["prs", "--mine", "requested", "--json"]) == 0)
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(json.captured.output.utf8)) as? [String: Any])
+        #expect(report["viewer"] as? String == "fixture")
+        let counts = try #require(report["counts"] as? [String: Any])
+        #expect(counts["open"] as? Int == 2 && counts["matching"] as? Int == 1 && counts["needs_attention"] as? Int == 2)
+        #expect((report["filters"] as? [String: Any])?["mine"] as? [String] == ["requested"])
+        let row = try #require((report["pull_requests"] as? [[String: Any]])?.first)
+        #expect(row["number"] as? Int == 7 && row["review_requested"] as? Bool == true && row["review"] as? String == "review_required")
+        #expect(row["labels"] as? [String] == ["bug"] && row["changed_files"] as? Int == 2 && row["files"] == nil)
+        #expect((row["complete"] as? [String: Any])?["inventory"] as? Bool == true)
+        let evidence = try #require((report["evidence"] as? [[String: Any]])?.first)
+        #expect(evidence["repository"] as? String == "owner/repo" && evidence["open"] as? Int == 2 && evidence["inventory_complete"] as? Bool == true)
+        #expect((report["problems"] as? [Any])?.isEmpty == true)
+        let drafts = try CLIFixture()
+        defer { drafts.remove() }
+        #expect(await drafts.tool().run(["prs", "--state", "draft", "--checks", "FAILURE", "--files", "--json"]) == 0)
+        let draft = try #require(try JSONSerialization.jsonObject(with: Data(drafts.captured.output.utf8)) as? [String: Any])
+        let only = try #require((draft["pull_requests"] as? [[String: Any]]))
+        #expect(only.map { $0["number"] as? Int } == [8])
+        #expect(only.first?["files"] as? [String] == ["src/a.swift", "src/b.swift"] && only.first?["failing_checks"] as? [String] == ["test"])
+        #expect(only.first?["attention_reason"] as? String == "checks are failing")
+    }
+    @Test func pullRequestFailuresAreReportedAsIncomplete() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        #expect(await fixture.tool(github: UnavailableGitHub()).run(["prs", "--json"]) == 2)
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(fixture.captured.output.utf8)) as? [String: Any])
+        #expect((report["evidence"] as? [[String: Any]])?.first?["inventory_complete"] as? Bool == false)
+        #expect((report["problems"] as? [[String: Any]])?.first?["repository"] as? String == "owner/repo")
+    }
     @Test func missingHistoryIsReportedAsIncomplete() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
@@ -269,7 +344,8 @@ struct CommandLineTests {
         ["activity", "--people-sort", "size"], ["activity", "--compare", "--days", "0"], ["activity", "--depth", "0"],
         ["activity", "--depth", "11"], ["activity", "--path", "src"], ["activity", "--repo", "owner/repo", "--path", "../x"],
         ["activity", "--days", "3", "--since", "2026-10-01"], ["activity", "--since", "soon"],
-        ["activity", "--since", "2026-10-02", "--until", "2026-10-01"],
+        ["activity", "--since", "2026-10-02", "--until", "2026-10-01"], ["prs", "--mine", "everything"],
+        ["prs", "--sort", "size"], ["prs", "--review", "maybe"], ["prs", "--top", "0"],
     ])
     func invalidUsageExplainsAndExits64(arguments: [String]) async throws {
         let fixture = try CLIFixture(cache: false)
