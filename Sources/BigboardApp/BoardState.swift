@@ -128,6 +128,7 @@ enum DateRange: Hashable {
     var scope = ActivityScope()
     var lens: ActivityLens = .directories
     var heatMetric = "lines"
+    var heatSharedScale = false
     var heatExpanded = false
     var relatedMode = "commits"
     var relatedEvidence: RelatedEvidence?
@@ -553,6 +554,7 @@ enum DateRange: Hashable {
         heat = BoardFilters()
         heatScope = ActivityScope()
         heatMetric = "lines"
+        heatSharedScale = false
         heatExpanded = false
         activityInterval = nil
         activityIncludesStart = false

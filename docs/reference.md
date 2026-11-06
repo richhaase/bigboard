@@ -132,11 +132,14 @@ days, weekly through 180 days, and monthly for longer ranges. Calendar boundarie
 use your local time zone and first weekday. Edge cells may be partial. All time
 includes all loaded history.
 
-Darker blue means more activity. Area rows share one scale, from zero to their
-largest cell count in the current view; the overview strip uses its own scale,
-since it totals every row. Shading follows the square root of each count, so
-quieter areas still show variation next to busy ones. Hover to see the interval
-and actual count. Missing, incomplete, or stale history is marked with
+Darker blue means more activity, in four shades plus empty. By default each area
+row is shaded against its own busiest cell, shown as its peak beside the row's
+total, so a quiet repository still shows its pattern next to a busy one.
+Compare rows by their totals, or turn on **Shared scale** to shade every row
+against the busiest cell in any row; the legend then shows the count where each
+shade starts. The overview strip always uses its own scale, since it totals
+every row. Shades follow the square root of each count. Hover to see the
+interval and actual count. Missing, incomplete, or stale history is marked with
 dashed outlines and known-activity labels; a zero in those cells does not establish
 that no activity occurred.
 

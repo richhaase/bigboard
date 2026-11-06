@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum HeatShade {
+    static let steps = 4
+    static func step(_ value: Int, maximum: Int) -> Int {
+        guard value > 0, maximum > 0 else { return 0 }
+        let fraction = (Double(min(value, maximum)) / Double(maximum)).squareRoot()
+        return min(steps, max(1, Int((fraction * Double(steps)).rounded(.up))))
+    }
+    static func lowerBound(_ step: Int, maximum: Int) -> Int {
+        let fraction = Double(step - 1) / Double(steps)
+        return Int((Double(maximum) * fraction * fraction).rounded(.down)) + 1
+    }
+    static func color(_ step: Int) -> Color {
+        step == 0 ? Color.secondary.opacity(0.1) : Color.blue.opacity(0.2 + Double(step) * 0.2)
+    }
+}
+
 struct HeatBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
@@ -40,6 +56,9 @@ struct HeatBoard: View {
                         Text("People").tag("people")
                     }
                     .frame(width: 160)
+                    Toggle("Shared scale", isOn: $navigation.heatSharedScale)
+                        .toggleStyle(.checkbox)
+                        .help("Shade every row against the busiest row so rows can be compared")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Selected: \(HeatRange.label(range.current))")
@@ -71,25 +90,11 @@ struct HeatBoard: View {
                     Text(axisLabel(range.current.end, range: range))
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Text("0")
-                    ForEach(0..<5) { step in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(
-                                step == 0
-                                    ? Color.secondary.opacity(0.1)
-                                    : Color.blue.opacity(0.2 + Double(step) * 0.2)
-                            )
-                            .frame(width: 18, height: 12)
-                    }
-                    Text("\(maximum.formatted()) \(navigation.heatMetric) per cell in the rows below")
-                    if overallMaximum > maximum {
-                        Text("· \(overallMaximum.formatted()) in the overall strip")
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
+                legend(maximum: navigation.heatSharedScale ? maximum : nil)
                 Text(
-                    "Darker cells mean more activity. The rows below share one scale; the overall strip above has its own. Shading follows the square root of each count, so quieter areas still show variation. Hover for counts; select a cell to explore its activity by directory."
+                    navigation.heatSharedScale
+                        ? "Every row below is shaded against the busiest cell of any row, so rows can be compared. The overall strip above has its own scale. Hover for counts; select a cell to explore it in Activity."
+                        : "Each row below is shaded against its own busiest cell, so quiet areas still show their pattern; compare rows by their totals, or turn on Shared scale. The overall strip above has its own scale. Hover for counts; select a cell to explore it in Activity."
                 )
                 .font(.caption).foregroundStyle(.secondary)
                 Divider()
@@ -116,6 +121,8 @@ struct HeatBoard: View {
                             Spacer()
                             Text(
                                 "\(row.heat.total.formatted()) \(navigation.heatMetric)\(row.heat.incomplete ? " (known)" : "")"
+                                    + (navigation.heatSharedScale || rowMaximum(row) == 0
+                                        ? "" : " · peak \(rowMaximum(row).formatted())")
                             )
                             .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                             Button("View in Activity", systemImage: "arrow.right") {
@@ -125,7 +132,10 @@ struct HeatBoard: View {
                             .labelStyle(.iconOnly).buttonStyle(.borderless)
                             .help("View \(row.label) in Activity")
                         }
-                        HeatStrip(series: row.heat, metric: navigation.heatMetric, maximum: maximum) {
+                        HeatStrip(
+                            series: row.heat, metric: navigation.heatMetric,
+                            maximum: navigation.heatSharedScale ? maximum : rowMaximum(row)
+                        ) {
                             interval, includesStart in
                             navigation.showHeatActivity(
                                 row.scope, interval: interval, includesStart: includesStart)
@@ -143,6 +153,36 @@ struct HeatBoard: View {
             .padding(16)
         }
         .scrollEdgeEffectStyle(.hard, for: .top)
+    }
+    private func rowMaximum(_ row: HeatRow) -> Int {
+        row.heat.series.map(\.value).max() ?? 0
+    }
+    private func legend(maximum: Int?) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            swatch(0, label: "None")
+            ForEach(1...HeatShade.steps, id: \.self) { step in
+                if let maximum, maximum > 0 {
+                    let bound = HeatShade.lowerBound(step, maximum: maximum)
+                    let previous = step == 1 ? 0 : HeatShade.lowerBound(step - 1, maximum: maximum)
+                    swatch(step, label: bound == previous ? "" : "\(compact(bound))+")
+                } else {
+                    swatch(step, label: step == 1 ? "Low" : step == HeatShade.steps ? "Row peak" : "")
+                }
+            }
+            if let maximum, maximum > 0 {
+                Text("up to \(maximum.formatted()) \(navigation.heatMetric) per cell")
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+    }
+    private func swatch(_ step: Int, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(HeatShade.color(step)).frame(width: 18, height: 12)
+            if !label.isEmpty { Text(label).monospacedDigit() }
+        }
+    }
+    private func compact(_ value: Int) -> String {
+        value.formatted(.number.notation(.compactName))
     }
     private func axisLabel(_ date: Date, range: HeatRange) -> String {
         date.formatted(date: .abbreviated, time: range.unit == .hour ? .shortened : .omitted)
@@ -207,7 +247,6 @@ private struct HeatStrip: View {
             + (series.incomplete ? "\nKnown activity only; history is incomplete or stale." : "")
     }
     private func color(_ point: HeatPoint) -> Color {
-        guard point.value > 0, maximum > 0 else { return .secondary.opacity(0.1) }
-        return .blue.opacity(0.2 + 0.8 * (Double(point.value) / Double(maximum)).squareRoot())
+        HeatShade.color(HeatShade.step(point.value, maximum: maximum))
     }
 }
