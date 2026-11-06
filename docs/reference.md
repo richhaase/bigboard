@@ -141,8 +141,8 @@ that no activity occurred.
 Select a repository or directory name to explore it within Heat Maps. Select a
 cell to explore that interval in Activity's **Directories** view. The arrow beside an area
 opens Activity for the whole selected range. Activity labels the interval carried from Heat Maps and offers
-**Back to Heat Maps** and **Use shared date range**. Changing the shared date range
-also clears that interval. Switching boards preserves each board's state.
+**Use shared date range**. Changing the shared date range also clears that interval.
+Switching boards preserves each board's state.
 
 ## Activity
 
@@ -152,7 +152,8 @@ its **Commits**, use **People** to inspect contributors to the current scope, or
 use **Related** to find shared commits or contributor overlap with other areas.
 Open repository PRs to inspect current review and check evidence.
 
-Breadcrumbs and Back move to broader scopes while keeping board filters applied.
+Breadcrumbs and **Go → Enclosing Scope** (Command-Up Arrow) move to broader
+scopes while keeping board filters applied.
 Directory totals include only files in that directory. Additions and removals
 stay separate even when rows are sorted by commits, recency, or name.
 
@@ -165,8 +166,8 @@ ownership or current presence.
 
 **Open path on GitHub** checks the selected path against the scanned revision
 in your clone before opening it. Missing paths report an error. Repository
-PR context opens Pull requests for the selected repository; **Back to Activity**
-restores the previous PR filters and Activity location.
+PR context opens Pull requests for the selected repository with its own filters;
+**Show All Repositories** or Back restores the previous PR filters.
 
 ## Contributors and identities
 
@@ -365,9 +366,20 @@ include those lines. Missing line counts are shown as unknown, not measured zero
 The copy button or Command-Shift-C copies the current view as Markdown without
 fetching data. For JSON, use the `bigboard` command's `--json` reports.
 
+## Navigation history
+
+Back and Forward work like Finder: the toolbar arrows, **Go → Back**
+(Command-[), and **Go → Forward** (Command-]) step through every board switch
+and drill-down, including jumps between boards. Going back restores that
+location's scope, view, selection, and board filters; the date range and
+repository filter stay as they are. Selecting a row does not add a step, and
+navigating somewhere new clears Forward. History lasts for the session, keeps
+the last 50 steps, and drops locations for repositories that are no longer
+collected.
+
 ## Keyboard controls
 
-The Boards menu lists available commands and their shortcuts. Open Keyboard
+The Go and Boards menus list available commands and their shortcuts. Open Keyboard
 Guide from the Help menu. Use Tab to move focus, arrows to move through lists,
 and Space to toggle a focused checkbox.
 
@@ -381,7 +393,8 @@ and Space to toggle a focused checkbox.
 | ⌘⇧D | Open Data Status |
 | ⌘R | Refresh repository evidence |
 | ⌘, | Settings |
-| ⌘[ | Back in Heat Maps or Activity |
+| ⌘[, ⌘] | Back, Forward through boards and drill-downs |
+| ⌘↑ | Up to the enclosing repository, folder, or list |
 | ⌘⇧C | Copy current view as Markdown |
 | ⌘Return | Open selection on GitHub |
 | ⌘⌥1–4 | Activity: Directories, Commits, People, Related |

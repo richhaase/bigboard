@@ -10,7 +10,8 @@ struct KeyboardGuide: View {
         ("⌘⇧D", "Data Status"),
         ("⌘R", "Refresh repository evidence"),
         ("⌘,", "Settings"),
-        ("⌘[", "Back in Heat Maps or Activity"),
+        ("⌘[ / ⌘]", "Back / Forward through boards and drill-downs"),
+        ("⌘↑", "Up to the enclosing repository, folder, or list"),
         ("⌘⇧C", "Copy view as Markdown"),
         ("⌘Return", "Open selection on GitHub"),
         ("⌘⌥1–4", "Activity: Directories, Commits, People, Related"),
@@ -22,7 +23,7 @@ struct KeyboardGuide: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
-                    "The Boards menu lists shortcuts for the current board and a Group submenu. Use Tab to move focus and Space to open a menu or toggle a checkbox."
+                    "The Go menu moves Back, Forward, and up a scope. The Boards menu lists shortcuts for the current board and a Group submenu. Use Tab to move focus and Space to open a menu or toggle a checkbox."
                 )
                 .foregroundStyle(.secondary)
                 ForEach(commands, id: \.0) { key, action in

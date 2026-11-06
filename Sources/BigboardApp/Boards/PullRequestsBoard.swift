@@ -26,9 +26,9 @@ struct PullRequestsBoard: View {
             .padding(.horizontal, 12).padding(.vertical, 10)
             if let context = navigation.contextualRepository {
                 HStack {
-                    Button("Back to Activity", systemImage: "arrow.left") { navigation.returnToActivity() }
-                    Text(context).foregroundStyle(.secondary)
+                    Text("Showing pull requests in \(context)").foregroundStyle(.secondary)
                     Spacer()
+                    Button("Show All Repositories") { navigation.showAllPRs() }
                 }
                 .padding(.horizontal, 12).padding(.bottom, 10)
             }
