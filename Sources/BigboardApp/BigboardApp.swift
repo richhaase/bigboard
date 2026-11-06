@@ -96,19 +96,19 @@ private struct BoardCommands: Commands {
                 .disabled(modalOpen)
             Menu("Group") {
                 Button("All repositories") {
-                    navigation.repositories = []
-                    Task { await workspace.selectGroup("") }
+                    navigation.showGroup(nil, available: workspace.snapshot.repositories)
                 }
                 ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
+                    let members = workspace.configuration.groups[name] ?? []
                     Button(name) {
-                        navigation.repositories = []
-                        Task { await workspace.selectGroup(name) }
+                        navigation.showGroup(members, available: workspace.snapshot.repositories)
                     }
+                    .disabled(!navigation.groupIsAvailable(members, available: workspace.snapshot.repositories))
                 }
                 Divider()
                 Button("Manage Groups…") { navigation.panel = .groups }
             }
-            .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
+            .disabled(modalOpen || !hasData)
             Divider()
             Button("Copy View as Markdown") {
                 BoardMarkdown.copy(

@@ -165,19 +165,29 @@ struct MainView: View {
                     }
                 }
                 .padding(16)
-                Picker("Group", selection: Binding(
-                    get: { workspace.activeGroup },
+                Picker("Show", selection: Binding(
+                    get: {
+                        activeGroup ?? (navigation.repositories.isEmpty ? "" : Self.customSelection)
+                    },
                     set: { name in
-                        navigation.repositories = []
-                        Task { await workspace.selectGroup(name) }
+                        guard name != Self.customSelection else { return }
+                        navigation.showGroup(
+                            name.isEmpty ? nil : workspace.configuration.groups[name],
+                            available: workspace.snapshot.repositories)
                     })
                 ) {
                     Text("All repositories").tag("")
                     ForEach(workspace.configuration.groups.keys.sorted(), id: \.self) { name in
                         Text(name).tag(name)
+                            .disabled(
+                                !navigation.groupIsAvailable(
+                                    workspace.configuration.groups[name] ?? [],
+                                    available: workspace.snapshot.repositories))
+                    }
+                    if activeGroup == nil && !navigation.repositories.isEmpty {
+                        Text("Custom selection").tag(Self.customSelection)
                     }
                 }
-                .disabled(workspace.busy || !workspace.authStatus.signedIn)
                 .padding(.horizontal, 16).padding(.bottom, 12)
                 Divider()
                 RepositoryFilterPanel(
@@ -190,11 +200,12 @@ struct MainView: View {
             .onExitCommand { navigation.repositoryFilterPresented = false }
         }
     }
+    private static let customSelection = "\u{0}custom"
+    private var activeGroup: String? {
+        navigation.activeGroup(workspace.configuration.groups, available: workspace.snapshot.repositories)
+    }
     private var repositoryScopeLabel: String {
-        guard !workspace.activeGroup.isEmpty else { return navigation.repositoryFilterLabel }
-        return navigation.repositories.isEmpty
-            ? workspace.activeGroup
-            : "\(workspace.activeGroup) · \(navigation.repositoryFilterLabel)"
+        activeGroup ?? navigation.repositoryFilterLabel
     }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(

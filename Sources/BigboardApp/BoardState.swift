@@ -272,6 +272,22 @@ enum DateRange: Hashable {
         reconcile()
         return true
     }
+    @discardableResult func showGroup(_ members: [String]?, available: [Repository]) -> Bool {
+        guard let members else {
+            repositories = []
+            reconcile()
+            return true
+        }
+        return setRepositoryFilter(Set(members), available: available)
+    }
+    func activeGroup(_ groups: [String: [String]], available: [Repository]) -> String? {
+        guard !repositories.isEmpty else { return nil }
+        let ids = Set(available.map(\.id))
+        return groups.keys.sorted().first { Set(groups[$0] ?? []).intersection(ids) == repositories }
+    }
+    func groupIsAvailable(_ members: [String], available: [Repository]) -> Bool {
+        !Set(members).isDisjoint(with: available.map(\.id))
+    }
     func visibleRepositories(_ snapshot: Snapshot) -> [Repository] {
         snapshot.repositories.filter { repositories.isEmpty || repositories.contains($0.id) }
     }

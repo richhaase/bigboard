@@ -41,7 +41,6 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     await workspace.refresh()
     #expect(await network.count == 1)
     workspace.discovered = [Repository(id: "private/repo")]
-    workspace.activeGroup = "Old account"
     user.respond(login: "user456", account: "456")
     await network.use(account: "456")
     await workspace.checkConnection()
@@ -50,7 +49,7 @@ private actor DelayedWorkspaceTransport: GitHubTransport {
     #expect(workspace.authStatus.signedIn && workspace.authStatus.accountID == "456")
     #expect(workspace.snapshot.accountID == "456" && workspace.snapshot.viewer == "user456")
     #expect(workspace.snapshot.repositories.isEmpty && workspace.snapshot.commits.isEmpty)
-    #expect(workspace.discovered.isEmpty && workspace.activeGroup.isEmpty)
+    #expect(workspace.discovered.isEmpty)
     #expect(workspace.busy == false)
     #expect(workspace.configuration.sourceRoots == [root.appendingPathComponent("src").path])
     #expect(try storage.loadConfiguration() == workspace.configuration)
@@ -262,36 +261,4 @@ private actor ViewerWorkspaceTransport: GitHubTransport {
     #expect(workspace.snapshot.repositories.isEmpty && workspace.discovered.isEmpty)
     #expect(try Data(contentsOf: storage.configurationFile) == saved)
     #expect(await network.count == 1)
-}
-@Test(arguments: [false, true]) @MainActor func removingActiveGroupRestoresAllRepositories(rename: Bool) async throws {
-    let history = try HistoryFixture(id: "fixture/one")
-    try history.addClone("fixture/two")
-    let root = history.base
-    defer { try? FileManager.default.removeItem(at: root) }
-    let storage = WorkspaceStorage(configRoot: root.appendingPathComponent("support"), cacheRoot: root.appendingPathComponent("cache"))
-    var config = try storage.loadConfiguration()
-    config.repositories = ["fixture/one", "fixture/two"]
-    config.groups = ["Focus": ["fixture/one"]]
-    config.cachedOnly = true
-    config.sourceRoots = [history.sources.path]
-    try storage.saveConfiguration(config)
-    let network = ViewerWorkspaceTransport([])
-    let workspace = WorkspaceModel(storage: storage, authentication: cliAuth(storage: storage), transport: network)
-    await workspace.start()
-    await workspace.selectGroup("Focus")
-    #expect(workspace.snapshot.repositories.map(\.id) == ["fixture/one"])
-    config.groups = rename ? ["Renamed": ["fixture/one"]] : [:]
-    #expect(await workspace.saveConfiguration(config))
-    #expect(workspace.activeGroup.isEmpty)
-    for _ in 0..<100 {
-        if !workspace.busy { break }
-        try await Task.sleep(for: .milliseconds(5))
-    }
-    #expect(!workspace.busy)
-    #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
-    await workspace.selectGroup("Focus")
-    #expect(workspace.activeGroup.isEmpty)
-    #expect(Set(workspace.snapshot.repositories.map(\.id)) == Set(config.repositories))
-    #expect(await network.count == 0)
-    await workspace.shutdown()
 }
