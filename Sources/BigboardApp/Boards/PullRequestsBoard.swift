@@ -18,7 +18,6 @@ struct PRRow: Identifiable {
 struct PullRequestsBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
-    @State private var inspectorShown = true
     var prs: [PullRequest] { navigation.pullRequests(workspace.snapshot) }
     var viewer: String { workspace.snapshot.viewer }
     var rows: [PRRow] {
@@ -120,25 +119,31 @@ struct PullRequestsBoard: View {
                     .disabled(!filtered)
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
-            content
-        }
-        .inspector(isPresented: $inspectorShown) {
-            ScrollView {
+            VSplitView {
+                content.frame(minHeight: 160, idealHeight: 320)
                 if let pr = selected {
-                    detail(pr).padding(18)
-                } else {
-                    Text("Select a pull request to inspect its review, checks, and changes.")
-                        .foregroundStyle(.secondary).padding()
+                    detailPane(pr).frame(minHeight: 280, idealHeight: 400)
                 }
             }
-            .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
         }
-        .toolbar {
-            ToolbarItem(id: "pr-inspector", placement: .primaryAction) {
-                Button("Inspector", systemImage: "sidebar.trailing") { inspectorShown.toggle() }
-                    .help(inspectorShown ? "Hide Inspector" : "Show Inspector")
+    }
+    private func detailPane(_ pr: PullRequest) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(pr.repo) #\(pr.number)").font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Spacer()
+                Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
+                Button("Copy Link", systemImage: "link") { copy(pr.url) }
+                Button("Close", systemImage: "xmark") { navigation.prSelection = nil }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                    .help("Close details")
             }
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
+            ScrollView { detail(pr).padding(.horizontal, 16).padding(.bottom, 14) }
         }
+        .background(.background)
     }
     @ViewBuilder private var content: some View {
         if prs.isEmpty && loading {
@@ -281,89 +286,25 @@ struct PullRequestsBoard: View {
     }
     private func detail(_ pr: PullRequest) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("\(pr.repo) #\(pr.number)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            Text(pr.title).font(.title2.bold()).textSelection(.enabled)
+            Text(pr.title).font(.title3.bold()).textSelection(.enabled)
             if !pr.labels.isEmpty {
                 Text(pr.labels.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
-                    .buttonStyle(.borderedProminent)
-                Button("Copy Link", systemImage: "link") { copy(pr.url) }
+            HStack(alignment: .top, spacing: 32) {
+                facts(pr).frame(minWidth: 240, maxWidth: 360, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    checks(pr)
+                    reviews(pr)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                GridRow {
-                    Text("Author").foregroundStyle(.secondary)
-                    Text(pr.author)
-                }
-                GridRow {
-                    Text("State").foregroundStyle(.secondary)
-                    Text(pr.draft ? "Draft" : "Ready for review")
-                }
-                GridRow {
-                    Text("Opened").foregroundStyle(.secondary)
-                    Text(dated(pr.createdAt))
-                }
-                GridRow {
-                    Text("Updated").foregroundStyle(.secondary)
-                    Text(dated(pr.updatedAt)).foregroundStyle(idle(pr) ? .orange : .primary)
-                }
-                GridRow {
-                    Text("Size").foregroundStyle(.secondary)
-                    if let additions = pr.additions, let deletions = pr.deletions {
-                        Text("+\(additions) −\(deletions) in \(pr.fileCount) files").monospacedDigit()
-                    } else {
-                        Text("\(pr.fileCount) files")
+            DisclosureGroup("Changed files (\(pr.files.count) of \(pr.fileCount))") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(pr.files, id: \.self) {
+                        Text($0).font(.callout.monospaced()).textSelection(.enabled)
                     }
                 }
-                GridRow {
-                    Text("Conflicts").foregroundStyle(.secondary)
-                    Text(
-                        pr.mergeable == "CONFLICTING"
-                            ? "Conflicts reported" : pr.mergeable == "MERGEABLE" ? "None reported" : "Unknown"
-                    )
-                    .foregroundStyle(pr.mergeable == "CONFLICTING" ? .orange : .primary)
-                }
-            }
-            .font(.callout)
-            SectionTitle(title: "Checks")
-            HStack {
-                StateBadge(value: pr.checks)
-                Spacer()
-            }
-            ForEach(pr.failingChecks, id: \.self) { name in
-                Label(name, systemImage: "xmark.circle").foregroundStyle(.orange).font(.callout)
-            }
-            if !pr.failingChecksComplete && pr.checks != "SUCCESS" {
-                Text("More checks ran than Bigboard collected.").font(.caption).foregroundStyle(.secondary)
-            }
-            SectionTitle(title: "Review")
-            HStack {
-                StateBadge(value: pr.review)
-                Spacer()
-            }
-            ForEach(Array(pr.reviews.enumerated()), id: \.offset) { _, review in
-                HStack {
-                    Text(review.author)
-                    Spacer()
-                    if let date = review.submittedAt {
-                        Text(relative(date)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    StateBadge(value: review.state)
-                }
-            }
-            let waiting = pr.reviewers.filter { reviewer in
-                !pr.reviews.contains { $0.author.lowercased() == reviewer.lowercased() }
-            }
-            ForEach(waiting, id: \.self) { reviewer in
-                HStack {
-                    Text(reviewer)
-                    Spacer()
-                    Text("Requested").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if pr.reviews.isEmpty && waiting.isEmpty {
-                Text("No reviews or requests known.").font(.callout).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !pr.inventoryComplete || !pr.filesComplete || !pr.reviewersComplete || !pr.reviewsComplete {
                 Text(
@@ -377,16 +318,90 @@ struct PullRequestsBoard: View {
                 )
                 .font(.caption).foregroundStyle(.orange)
             }
-            DisclosureGroup("Changed files (\(pr.files.count) of \(pr.fileCount))") {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(pr.files, id: \.self) {
-                        Text($0).font(.callout.monospaced()).textSelection(.enabled)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
             Text("Review and check results are evidence, not merge authorization.").font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func facts(_ pr: PullRequest) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                Text("Author").foregroundStyle(.secondary)
+                Text(pr.author)
+            }
+            GridRow {
+                Text("State").foregroundStyle(.secondary)
+                Text(pr.draft ? "Draft" : "Ready for review")
+            }
+            GridRow {
+                Text("Opened").foregroundStyle(.secondary)
+                Text(dated(pr.createdAt))
+            }
+            GridRow {
+                Text("Updated").foregroundStyle(.secondary)
+                Text(dated(pr.updatedAt)).foregroundStyle(idle(pr) ? .orange : .primary)
+            }
+            GridRow {
+                Text("Size").foregroundStyle(.secondary)
+                if let additions = pr.additions, let deletions = pr.deletions {
+                    Text("+\(additions) −\(deletions) in \(pr.fileCount) files").monospacedDigit()
+                } else {
+                    Text("\(pr.fileCount) files")
+                }
+            }
+            GridRow {
+                Text("Conflicts").foregroundStyle(.secondary)
+                Text(
+                    pr.mergeable == "CONFLICTING"
+                        ? "Conflicts reported" : pr.mergeable == "MERGEABLE" ? "None reported" : "Unknown"
+                )
+                .foregroundStyle(pr.mergeable == "CONFLICTING" ? .orange : .primary)
+            }
+        }
+        .font(.callout)
+    }
+    @ViewBuilder private func checks(_ pr: PullRequest) -> some View {
+        HStack {
+            Text("Checks").foregroundStyle(.secondary)
+            StateBadge(value: pr.checks)
+        }
+        .font(.callout)
+        ForEach(pr.failingChecks, id: \.self) { name in
+            Label(name, systemImage: "xmark.circle").foregroundStyle(.orange).font(.callout)
+        }
+        if !pr.failingChecksComplete && pr.checks != "SUCCESS" {
+            Text("More checks ran than Bigboard collected.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private func reviews(_ pr: PullRequest) -> some View {
+        HStack {
+            Text("Review").foregroundStyle(.secondary)
+            StateBadge(value: pr.review)
+        }
+        .font(.callout)
+        .padding(.top, 4)
+        ForEach(Array(pr.reviews.enumerated()), id: \.offset) { _, review in
+            HStack {
+                Text(review.author)
+                StateBadge(value: review.state)
+                if let date = review.submittedAt {
+                    Text(relative(date)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
+        }
+        let waiting = pr.reviewers.filter { reviewer in
+            !pr.reviews.contains { $0.author.lowercased() == reviewer.lowercased() }
+        }
+        ForEach(waiting, id: \.self) { reviewer in
+            HStack {
+                Text(reviewer)
+                Text("requested").font(.caption).foregroundStyle(.secondary)
+            }
+            .font(.callout)
+        }
+        if pr.reviews.isEmpty && waiting.isEmpty {
+            Text("No reviews or requests known.").font(.callout).foregroundStyle(.secondary)
         }
     }
     private func facetMenu(_ title: String, options: [(String, String)], values: Binding<Set<String>>)

@@ -208,9 +208,10 @@ Checks gives failing checks, and an hourglass marks PRs with no updates in 14
 days. Click a column header to sort. Double-click a row, or press
 Command-Return, to open the PR on GitHub; right-click to copy its link.
 
-The inspector shows dates, size, reported merge conflicts, failing checks by
-name, latest reviews with dates, reviewers still requested, and changed files.
-Hide or show it with the toolbar's inspector button. These details are
+Selecting a PR opens a details pane below the table; drag the divider to resize
+it, and close it with its close button or Escape. It shows dates, size, reported
+merge conflicts, failing checks by name, latest reviews with dates, reviewers
+still requested, and changed files. These details are
 evidence, not branch-protection checks or merge authorization.
 
 Author, Review, Checks, State, and Mine facets combine. Values within a facet
