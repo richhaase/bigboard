@@ -295,9 +295,8 @@ unknown counts. Generated, vendored, and bulk-data changes are excluded from
 line totals by default, but their commits remain visible. Advanced settings can
 include those lines. Missing line counts are shown as unknown, not measured zero.
 
-The copy button or Command-Shift-C copies the current view as Markdown. **Export JSON** on
-Contributors opens a native Save dialog and exports all loaded tracked history,
-ignoring viewing filters. Neither export fetches data.
+The copy button or Command-Shift-C copies the current view as Markdown without
+fetching data. For JSON, use the `bigboard` command's `--json` reports.
 
 ## Keyboard controls
 

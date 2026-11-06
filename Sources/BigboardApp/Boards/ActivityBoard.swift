@@ -299,8 +299,7 @@ struct ActivityBoard: View {
                 ForEach(Array(Analysis.people(inspectRecords, canonicalRecords: records).prefix(8))) {
                     person in
                     Button {
-                        navigation.contributorSelection = person.id
-                        navigation.board = .contributors
+                        navigation.showContributor(person.id)
                     } label: {
                         HStack {
                             Text(person.name).lineLimit(1)
@@ -318,6 +317,10 @@ struct ActivityBoard: View {
                 let related = relatedPRs
                 if workspace.snapshot.cachedOnly {
                     Text("PR context is unavailable offline.").font(.caption).foregroundStyle(.secondary)
+                } else if workspace.busy && workspace.snapshot.repositories.contains(where: {
+                    $0.id == inspectScope.repo && $0.prCheckedAt == nil
+                }) {
+                    Text("Loading pull requests…").font(.caption).foregroundStyle(.secondary)
                 } else if workspace.snapshot.repositories.contains(where: {
                     $0.id == inspectScope.repo
                         && (!$0.prInventoryComplete || $0.prStale

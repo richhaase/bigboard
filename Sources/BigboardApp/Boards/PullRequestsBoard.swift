@@ -5,10 +5,17 @@ struct PullRequestsBoard: View {
     @Bindable var navigation: BoardState
     var prs: [PullRequest] { navigation.pullRequests(workspace.snapshot) }
     var selected: PullRequest? { prs.first { $0.id == navigation.prSelection } ?? prs.first }
-    var unknown: Bool {
+    var repositories: [Repository] {
         navigation.visibleRepositories(workspace.snapshot)
             .filter { navigation.contextualRepository == nil || $0.id == navigation.contextualRepository }
-            .contains { !$0.prInventoryComplete || $0.prStale }
+    }
+    var loading: Bool {
+        workspace.busy && !workspace.snapshot.cachedOnly && repositories.contains { $0.prCheckedAt == nil }
+    }
+    var unknown: Bool {
+        repositories.contains {
+            ($0.prCheckedAt != nil || !workspace.busy) && (!$0.prInventoryComplete || $0.prStale)
+        }
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +35,8 @@ struct PullRequestsBoard: View {
             HStack {
                 MetricView(
                     title: "Open in this view",
-                    value: workspace.snapshot.cachedOnly ? "—" : "\(prs.count)\(unknown ? " + ?" : "")")
+                    value: workspace.snapshot.cachedOnly || (loading && prs.isEmpty)
+                        ? "—" : "\(prs.count)\(unknown || loading ? " + ?" : "")")
                 MetricView(title: "Awaiting your review", value: awaitingReview)
                 Picker("Sort", selection: $navigation.prs.sort) {
                     Text("Updated").tag("updated")
@@ -77,7 +85,9 @@ struct PullRequestsBoard: View {
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
             HSplitView {
-                if prs.isEmpty {
+                if prs.isEmpty && loading {
+                    ProgressView("Loading pull requests…").frame(minWidth: 450, maxWidth: .infinity, maxHeight: .infinity)
+                } else if prs.isEmpty {
                     EmptyBoard(
                         title: workspace.snapshot.cachedOnly
                             ? "PR context is unavailable offline"

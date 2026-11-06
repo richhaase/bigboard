@@ -19,7 +19,7 @@ struct WorkspacePanel: View {
             HStack {
                 Text(title).font(.title2.bold())
                 Spacer()
-                if !panel.isSettings && panel != .dateRange {
+                if !panel.isSettings && panel != .dateRange && panel != .identities {
                     Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
                 }
             }
