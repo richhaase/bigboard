@@ -102,8 +102,14 @@ struct CommandLineTests {
         let text = fixture.captured.output
         #expect(text.contains("fixture · last 7 days · 1 active repository"))
         #expect(text.contains("2 commits"))
-        #expect(text.contains("Mapped Author"))
+        #expect(text.contains("People (1)\n  Mapped Author  owner/repo\n"))
+        #expect(text.contains("Excluded: 1 vendored lines (not counted above)"))
         #expect(text.contains("not productivity"))
+        let ranked = try CLIFixture()
+        defer { ranked.remove() }
+        #expect(await ranked.tool().run(["activity", "--days", "7", "--people-sort", "lines"]) == 0)
+        #expect(ranked.captured.output.contains("People by lines\n  Name           Commits"))
+        #expect(!ranked.captured.output.contains("People (1)"))
         let json = try CLIFixture()
         defer { json.remove() }
         #expect(await json.tool().run(["activity", "--days=0", "--json", "--top", "1"]) == 0)
@@ -112,6 +118,8 @@ struct CommandLineTests {
         #expect((decoded["directories"] as? [Any])?.count == 1)
         #expect((decoded["people"] as? [[String: Any]])?.first?["name"] as? String == "Mapped Author")
         #expect((decoded["people"] as? [[String: Any]])?.first?["email"] == nil)
+        #expect(decoded["people_sort"] as? String == "name")
+        #expect((decoded["excluded"] as? [String: Any])?["vendored"] as? Int == 1)
         let empty = try CLIFixture()
         defer { empty.remove() }
         #expect(await empty.tool().run(["activity", "--days", "1"]) == 0)
@@ -127,6 +135,7 @@ struct CommandLineTests {
     @Test(arguments: [
         ["bogus"], ["activity", "--days", "soon"], ["activity", "--days"], ["activity", "--repo", "other/repo"],
         ["activity", "--group", "Missing"], ["status", "--days", "3"], ["activity", "--days", "4000"],
+        ["activity", "--people-sort", "size"],
     ])
     func invalidUsageExplainsAndExits64(arguments: [String]) async throws {
         let fixture = try CLIFixture(cache: false)

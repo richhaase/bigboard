@@ -267,7 +267,7 @@ struct SettingsPanel: View {
     }
     private var advanced: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Toggle("Include generated, vendored, and bulk-data line changes", isOn: $draft.allFiles)
+            Toggle("Include generated, vendored, fixture, and bulk-data line changes", isOn: $draft.allFiles)
             Text("These changes are excluded from line totals by default; commits remain visible.")
                 .font(.caption).foregroundStyle(.secondary)
             LabeledContent("Pull-request request budget") {

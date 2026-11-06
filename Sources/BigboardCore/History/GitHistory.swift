@@ -165,7 +165,7 @@ actor GitHistory {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var hasher = SHA256()
-        hasher.update(data: Data("clone-v1\0\(revision)\0\(version)\0\(repo.partial)\0\(repo.shallow)".utf8))
+        hasher.update(data: Data("clone-v2\0\(revision)\0\(version)\0\(repo.partial)\0\(repo.shallow)".utf8))
         hasher.update(data: try encoder.encode(configuration))
         hasher.update(data: Data("\(attributes.count):".utf8))
         hasher.update(data: attributes)
