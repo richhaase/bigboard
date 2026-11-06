@@ -20,11 +20,11 @@ struct HistoryTests {
     @Test func excludesGeneratedBulkAndRetainsCommitEvidence() throws {
         let attrs = try HistoryRules.attributes("vendor/keep.swift -linguist-generated\n**/generated.swift linguist-generated\n")
         let parser = GitLogParser(repo: "o/r", configuration: WorkspaceConfiguration(), attributes: attrs)
-        try parser.feed(payload(files: ["\n50\t0\tvendor/drop.swift", "2\t0\tvendor/keep.swift", "3\t1\tsrc/generated.swift", "1999\t1\tdata.json", "1\t0\tsource.swift"]))
+        try parser.feed(payload(files: ["\n50\t0\tvendor/drop.swift", "2\t0\tvendor/keep.swift", "3\t1\tsrc/generated.swift", "1999\t1\tdata.json", "1\t0\tsource.swift", "12\t0\ttests/fixtures/user.json", "4\t0\tapp/__snapshots__/view.yaml", "6\t0\tfixtures/helper.swift", "7\t0\tyarn.lock", "5\t0\tconfig/fixtures.json"]))
         let commit = try #require(parser.finish().first)
-        #expect(commit.added == 3 && commit.removed == 0)
-        #expect(commit.files.map(\.excludedReason) == ["path", "", "attribute", "bulk", ""])
-        #expect(Analysis.excludedLines([commit]) == ["path": 50, "attribute": 4, "bulk": 2000])
+        #expect(commit.added == 14 && commit.removed == 0)
+        #expect(commit.files.map(\.excludedReason) == ["vendored", "", "generated", "bulk", "", "fixture", "fixture", "", "generated", ""])
+        #expect(Analysis.excludedLines([commit]) == ["vendored": 50, "generated": 11, "bulk": 2000, "fixture": 16])
         #expect(Analysis.scoped([commit], scope: ActivityScope(repo: "o/r", path: "vendor", isFile: false)).first?.files.count == 1)
     }
     @Test func allFilesOverridesEveryExclusion() throws {
@@ -60,7 +60,7 @@ struct HistoryTests {
         try parser.feed(payload(files: ["\n3\t0\t" + matching, "2\t0\t" + nonmatching]))
         let commit = try #require(parser.finish().first)
         #expect(commit.added == 2)
-        #expect(commit.files.map(\.excludedReason) == ["attribute", ""])
+        #expect(commit.files.map(\.excludedReason) == ["generated", ""])
     }
     @Test func oversizedAttributeMatchingFailsHistoryParsing() throws {
         let pattern = Array(repeating: "**", count: 1024).joined(separator: "/") + "/generated.swift"
@@ -134,7 +134,7 @@ struct HistoryTests {
             let record = try #require(parser.finish().first)
             #expect(record.added == 1)
             #expect(record.files.map { Data($0.path.utf8) } == paths.map { Data($0.utf8) })
-            #expect(record.files.map(\.excludedReason) == paths.map { $0.utf8.elementsEqual(composed.utf8) ? "attribute" : "" })
+            #expect(record.files.map(\.excludedReason) == paths.map { $0.utf8.elementsEqual(composed.utf8) ? "generated" : "" })
         }
     }
     @Test func identityAliasesAndCoauthorAI() throws {
@@ -186,7 +186,7 @@ struct HistoryTests {
         #expect(Set(records.map(\.author)) == ["Mapped Author"])
         #expect(records.contains { $0.ai })
         #expect(records.flatMap(\.files).contains { $0.path == "new\tname\n.swift" && $0.previousPath == "source.swift" })
-        #expect(records.flatMap(\.files).contains { $0.path == "vendor/generated.swift" && $0.excludedReason == "path" })
+        #expect(records.flatMap(\.files).contains { $0.path == "vendor/generated.swift" && $0.excludedReason == "vendored" })
         let second = try await history.scan(repo, configuration: WorkspaceConfiguration())
         #expect(second.0.scannedAt == scanned.scannedAt)
         #expect(second.1 == records)
@@ -319,7 +319,11 @@ struct HistoryTests {
         let history = GitHistory(root: fixture.root, environment: ["HOME": fixture.base.path])
         var repo = try fixture.repository()
         repo.remote = "origin"
+        #expect(await history.fetchedAt(repo.id) == nil)
+        let started = Date()
         let refreshed = try await history.refresh(repo)
+        let fetched = try #require(await history.fetchedAt(repo.id))
+        #expect(fetched >= started.addingTimeInterval(-1) && fetched <= Date().addingTimeInterval(1))
         #expect(refreshed.revision == expected)
         #expect(try fixture.git(["-C", clone.path, "rev-parse", "refs/remotes/origin/main"]) == expected)
         #expect(try state() == before)
@@ -330,7 +334,9 @@ struct HistoryTests {
         _ = try fixture.git(["-C", clone.path, "config", "--unset", "url.file://\(fixture.server.path).insteadOf"])
         _ = try fixture.git(["-C", clone.path, "config", "url.file://\(fixture.base.path)/missing.git.insteadOf", "https://github.com/\(fixture.id).git"])
         let configured = try state()
+        let lastFetch = await history.fetchedAt(repo.id)
         await #expect { try await history.refresh(repo) } throws: { $0 is GitCommandFailure && !$0.localizedDescription.isEmpty }
+        #expect(await history.fetchedAt(repo.id) == lastFetch)
         #expect(try state() == configured)
     }
     private var processFamilyFixture: String {

@@ -5,6 +5,13 @@ import Testing
 @MainActor struct BoardStateTests {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     func commit(_ id: String, repo: String = "acme/app", email: String = "alex@example.test", days: Int = 1, added: Int = 10) -> Commit { Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-Double(days) * 86400), subject: "Change \(id)", added: added, files: [FileChange(path: "Sources/App.swift", added: added)]) }
+    @Test func contributorsSortByRecencyUnlessConfigured() {
+        let state = BoardState()
+        #expect(state.contributors.sort == "recent")
+        var configuration = WorkspaceConfiguration(); configuration.contributorSort = "change"
+        state.resetForAccount(configuration)
+        #expect(state.contributors.sort == "change")
+    }
     @Test func contextualPRNavigationRestoresIndependentState() {
         let state = BoardState()
         state.dateRange = .days(30); state.repositories = ["acme/app"]

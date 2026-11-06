@@ -92,7 +92,7 @@ enum DateRange: Hashable {
     var activityIncludesStart = false
     var activity = BoardFilters()
     var activityPeopleQuery = ""
-    var contributors = BoardFilters()
+    var contributors = BoardFilters(sort: "recent")
     var prs = BoardFilters(sort: "updated")
     var scope = ActivityScope()
     var lens: ActivityLens = .directories

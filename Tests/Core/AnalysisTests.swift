@@ -7,6 +7,13 @@ struct AnalysisTests {
     func commit(_ id: String, repo: String = "o/a", email: String = "a@test", days: Double = 0, added: Int = 10, removed: Int = 2, files: [FileChange] = []) -> Commit {
         Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-days * 86400), subject: id, added: added, removed: removed, files: files)
     }
+    @Test func totalsCountCommitsWithUnknownLineCounts() {
+        var first = commit("first"); first.linesUnknown = true
+        var second = commit("second"); second.linesUnknown = true
+        let totals = Analysis.totals([first, second, commit("known")])
+        #expect(totals.unknownLineCommits == 2 && totals.unknown)
+        #expect(Analysis.totals([commit("known")]).unknownLineCommits == 0)
+    }
     @Test func sharedCommitsPreferCompleteThenLexicalRepo() {
         var unknown = commit("same", repo: "o/a"); unknown.linesUnknown = true
         let known = commit("same", repo: "o/z")
@@ -35,7 +42,7 @@ struct AnalysisTests {
         #expect(rows[0].repos == ["o/a", "o/b", "o/c"])
     }
     @Test func scopeUsesLiteralPathBoundaryAndExcludesGenerated() {
-        let records = [commit("one", files: [FileChange(path: "src/a.swift", added: 3, removed: 1), FileChange(path: "src2/b.swift", added: 90), FileChange(path: "src/out.swift", added: 70, excludedReason: "attribute")])]
+        let records = [commit("one", files: [FileChange(path: "src/a.swift", added: 3, removed: 1), FileChange(path: "src2/b.swift", added: 90), FileChange(path: "src/out.swift", added: 70, excludedReason: "generated")])]
         let scoped = Analysis.scoped(records, scope: ActivityScope(repo: "o/a", path: "src"))
         #expect(scoped.count == 1 && scoped[0].added == 3 && scoped[0].removed == 1)
         #expect(scoped[0].files.map(\.path) == ["src/a.swift"])
@@ -91,7 +98,7 @@ struct AnalysisTests {
             FileChange(path: "src/core/b.swift", added: 7, removed: 2),
             FileChange(path: "src/core/image.bin", binary: true),
             FileChange(path: "src/core/deeper/test.swift", added: 8),
-            FileChange(path: "src/core/generated.swift", added: 900, excludedReason: "attribute"),
+            FileChange(path: "src/core/generated.swift", added: 900, excludedReason: "generated"),
             FileChange(path: "src/core2/neighbor.swift", added: 90),
             FileChange(path: "src/ui/window.swift", added: 10),
             FileChange(path: "src/direct.swift", previousPath: "old/direct.swift", added: 4),

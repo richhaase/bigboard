@@ -80,18 +80,32 @@ struct CommandLineTool: Sendable {
     var environment: CommandLineEnvironment
 
     func run(_ arguments: [String]) async -> Int32 {
-        guard let command = arguments.first else { return open() }
+        guard let command = arguments.first else {
+            environment.write(Self.usage)
+            return 0
+        }
         let options = Array(arguments.dropFirst())
+        if let help = Self.help[command], options.contains(where: { $0 == "--help" || $0 == "-h" }) {
+            environment.write(help)
+            return 0
+        }
         do {
             switch command {
             case "open": return open()
             case "status": return try await status(try Options(options, flags: ["--json"]))
             case "activity":
                 return try await activity(
-                    try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top"]))
+                    try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top", "--people-sort"]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
-                environment.write(Self.usage)
+                guard let topic = options.first else {
+                    environment.write(Self.usage)
+                    return 0
+                }
+                guard options.count == 1, let help = Self.help[topic] else {
+                    throw UsageError("No help for: \(options.joined(separator: " "))")
+                }
+                environment.write(help)
                 return 0
             case "version", "--version":
                 let bundle = CommandLineEnvironment.enclosingApplication().flatMap { Bundle(url: $0) }
@@ -102,7 +116,7 @@ struct CommandLineTool: Sendable {
                 throw UsageError("Unknown command: \(command)")
             }
         } catch let error as UsageError {
-            environment.writeError("bigboard: \(error.message)\n\n" + Self.usage)
+            environment.writeError("bigboard: \(error.message)\n\n" + (Self.help[command] ?? Self.usage))
             return 64
         } catch {
             environment.writeError("bigboard: \(error.localizedDescription)\n")
@@ -110,28 +124,103 @@ struct CommandLineTool: Sendable {
         }
     }
 
+    static let reference = "https://github.com/richhaase/bigboard/blob/main/docs/reference.md#command-line"
     static let usage = """
-        Usage: bigboard [command] [options]
+        bigboard: recorded change across your GitHub clones
 
-        With no command, opens the Bigboard app.
+        Bigboard reads Git history from your own clones, in the source folders chosen
+        in the app, and pull requests through the GitHub CLI. It describes recorded
+        change, not productivity.
+
+        Usage: bigboard <command> [options]
 
         Commands:
-          open                     Open the Bigboard app.
-          status [--json]          Show the GitHub CLI account and collected repositories.
-          activity [options]       Summarize recorded change from cached history.
-              --days N             Days to include (default: the app's range; 0 = all history).
-              --repo OWNER/NAME    Limit to a repository (repeatable).
-              --group NAME         Limit to a saved repository group.
-              --top N              Rows per section (default 10).
-              --include-bots       Include bot accounts.
-              --json               Print JSON.
-          refresh [options]        Fetch the default branch of collected clones with the GitHub CLI token.
-              --repo OWNER/NAME    Limit to a repository (repeatable).
-              --group NAME         Limit to a saved repository group.
-          help                     Show this help.
-          version                  Show the version.
+          status      Show the GitHub CLI account, data locations, and collected clones.
+          activity    Summarize recorded change: totals, repositories, paths, and people.
+          refresh     Fetch each clone's default branch with your Git setup.
+          open        Open the Bigboard app.
+          help        Show help for a command, for example: bigboard help activity
+          version     Show the version.
+
+        For scripts and agents:
+          - Add --json to status and activity for stable output with snake_case keys.
+          - status and activity never fetch history. They confirm the GitHub CLI
+            account with GitHub, or use the last confirmed account when offline.
+            refresh fetches from each clone's remote.
+          - Exit status: 0 success, 2 incomplete evidence, 64 usage error, 1 other error.
+          - In activity --json, check evidence and problems before relying on totals.
+            unknown_line_commits above 0 means line totals are a lower bound.
+          - Reference: \(reference)
 
         """
+    static let help: [String: String] = [
+        "status": """
+            Usage: bigboard status [--json]
+
+            Show the GitHub CLI account, the settings and cache locations, the source
+            folders, and each collected repository with its local clone, if found.
+
+            Options:
+              --json    Print JSON.
+
+            """,
+        "activity": """
+            Usage: bigboard activity [options]
+
+            Summarize recorded change in your clones' default branches: totals, excluded
+            lines, repositories, top paths, and people. Reads cached history and never
+            fetches; run bigboard refresh first for current evidence.
+
+            Options:
+              --days N              Days to include (default: the app's range; 0 = all history).
+              --repo OWNER/NAME     Limit to a collected repository (repeatable).
+              --group NAME          Limit to a saved repository group.
+              --top N               Rows per section (default 10).
+              --people-sort ORDER   name (default), lines, or commits. lines and commits rank
+                                    people with their counts, limited by --top.
+              --include-bots        Include bot accounts.
+              --json                Print JSON.
+
+            JSON keys: totals, excluded, repositories, directories, people, evidence,
+            problems. Each evidence entry gives a repository's scanned revision, scan and
+            fetch times, and history, line-count, and path completeness.
+
+            Exit status: 0, or 2 when evidence is incomplete (see problems).
+
+            """,
+        "refresh": """
+            Usage: bigboard refresh [options]
+
+            Fetch each collected clone's remote-tracking default branch with your own Git
+            setup, then rescan its history. Never prompts and never changes your branches,
+            index, working files, or Git config.
+
+            Options:
+              --repo OWNER/NAME     Limit to a repository (repeatable).
+              --group NAME          Limit to a saved repository group.
+
+            Exit status: 0, or 2 when any repository could not be refreshed.
+
+            """,
+        "open": """
+            Usage: bigboard open
+
+            Open the Bigboard app.
+
+            """,
+        "version": """
+            Usage: bigboard version
+
+            Show the version.
+
+            """,
+        "help": """
+            Usage: bigboard help [command]
+
+            Show general help, or help for one command.
+
+            """,
+    ]
 
     private func open() -> Int32 {
         do {
@@ -225,25 +314,34 @@ struct CommandLineTool: Sendable {
         let days = try options.integer("--days") ?? workspace.configuration.sinceDays
         let top = try options.integer("--top") ?? 10
         guard (0...3650).contains(days), top > 0 else { throw UsageError("--days must be 0–3650 and --top positive.") }
+        guard let peopleSort = ActivityReport.PeopleSort(rawValue: options.value("--people-sort") ?? "name") else {
+            throw UsageError("--people-sort must be name, lines, or commits.")
+        }
         var commits: [Commit] = []
-        var problems: [String] = []
+        var evidence: [ActivityReport.Evidence] = []
         for repo in workspace.repositories {
-            do {
-                let scanned = try await workspace.history.scan(repo, configuration: workspace.configuration)
-                commits += scanned.1
-                if !scanned.0.error.isEmpty { problems.append("\(repo.id): \(scanned.0.error)") }
-            } catch {
-                problems.append("\(repo.id): \(error.localizedDescription)")
+            var entry = ActivityReport.Evidence(repo, fetchedAt: await workspace.history.fetchedAt(repo.id))
+            if repo.path.isEmpty {
+                entry.unavailable("missing", kind: "no_clone", message: "No local clone found in source folders.")
+            } else {
+                do {
+                    let scanned = try await workspace.history.scan(repo, configuration: workspace.configuration)
+                    commits += scanned.1
+                    entry.record(scanned.0)
+                } catch {
+                    entry.unavailable("failed", kind: "scan_failed", message: error.localizedDescription)
+                }
             }
+            evidence.append(entry)
         }
         let now = environment.now()
         let selected = Analysis.select(
             commits, days: days, hideBots: !options.flag("--include-bots"), now: now)
         let report = ActivityReport(
             account: workspace.account.login, generatedAt: now, days: days, commits: selected,
-            repositories: workspace.repositories, top: top, problems: problems)
+            repositories: workspace.repositories, top: top, peopleSort: peopleSort, evidence: evidence)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
-        return problems.isEmpty ? 0 : 2
+        return report.problems.isEmpty ? 0 : 2
     }
 
     private func refresh(_ options: Options) async throws -> Int32 {
@@ -341,18 +439,88 @@ struct StatusReport: Encodable {
 }
 
 struct ActivityReport: Encodable {
+    enum PeopleSort: String, Encodable { case name, lines, commits }
     struct Totals: Encodable {
         var commits: Int
         var added: Int
         var removed: Int
         var people: Int
         var aiAssisted: Int
+        var unknownLineCommits: Int
         init(_ value: ActivityTotals) {
             commits = value.commits
             added = value.added
             removed = value.removed
             people = value.people
             aiAssisted = value.ai
+            unknownLineCommits = value.unknownLineCommits
+        }
+    }
+    struct Problem: Encodable, Equatable {
+        var kind: String
+        var message: String
+    }
+    struct ProblemRow: Encodable {
+        var repository: String
+        var kind: String
+        var message: String
+    }
+    struct Evidence: Encodable {
+        var repository: String
+        var branch: String?
+        var remote: String?
+        var revision: String?
+        var scannedAt: Date?
+        var fetchedAt: Date?
+        var history = "complete"
+        var lineCounts = "complete"
+        var paths = "complete"
+        var problems: [Problem] = []
+        init(_ repo: Repository, fetchedAt: Date?) {
+            repository = repo.id
+            branch = repo.branch.isEmpty ? nil : repo.branch
+            remote = repo.path.isEmpty ? nil : repo.remote
+            self.fetchedAt = fetchedAt
+        }
+        mutating func unavailable(_ state: String, kind: String, message: String) {
+            history = state
+            lineCounts = "unknown"
+            paths = "unknown"
+            problems.append(Problem(kind: kind, message: message))
+        }
+        mutating func record(_ repo: Repository) {
+            revision = repo.revision.isEmpty ? nil : repo.revision
+            scannedAt = repo.scannedAt
+            if repo.shallow {
+                history = "shallow"
+                problems.append(
+                    Problem(kind: "shallow", message: "Shallow clone: earlier history is not available locally."))
+            }
+            if repo.partial {
+                lineCounts = "unknown"
+                paths = "unknown"
+                problems.append(Problem(kind: "partial", message: "Partial clone: line counts and paths are unknown."))
+            }
+            if repo.skippedCommits > 0 {
+                problems.append(
+                    Problem(kind: "skipped_commits", message: GitHistory.skippedCommitsMessage(repo.skippedCommits)))
+            }
+        }
+        enum CodingKeys: String, CodingKey {
+            case repository, branch, remote, revision, scannedAt, fetchedAt, history, lineCounts, paths, problems
+        }
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(repository, forKey: .repository)
+            try container.encode(branch, forKey: .branch)
+            try container.encode(remote, forKey: .remote)
+            try container.encode(revision, forKey: .revision)
+            try container.encode(scannedAt, forKey: .scannedAt)
+            try container.encode(fetchedAt, forKey: .fetchedAt)
+            try container.encode(history, forKey: .history)
+            try container.encode(lineCounts, forKey: .lineCounts)
+            try container.encode(paths, forKey: .paths)
+            try container.encode(problems, forKey: .problems)
         }
     }
     struct RepositoryRow: Encodable {
@@ -378,20 +546,29 @@ struct ActivityReport: Encodable {
     var generatedAt: Date
     var days: Int
     var totals: Totals
+    var excluded: [String: Int]?
     var repositories: [RepositoryRow]
     var directories: [DirectoryRow]
+    var peopleSort: PeopleSort
     var people: [PersonRowReport]
-    var problems: [String]
+    var evidence: [Evidence]
+    var problems: [ProblemRow]
 
     init(
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
-        problems: [String]
+        peopleSort: PeopleSort = .name, evidence: [Evidence]
     ) {
         self.account = account
         self.generatedAt = generatedAt
         self.days = days
-        self.problems = problems
+        self.evidence = evidence
+        problems = evidence.flatMap { entry in
+            entry.problems.map { ProblemRow(repository: entry.repository, kind: $0.kind, message: $0.message) }
+        }
+        self.peopleSort = peopleSort
         totals = Totals(Analysis.totals(commits))
+        let excluded = Analysis.excludedLines(commits).filter { $0.value > 0 }
+        self.excluded = excluded.isEmpty ? nil : excluded
         self.repositories = Analysis.activityRows(commits, repositories: repositories)
             .filter { $0.totals.commits > 0 }
             .sorted { $0.totals.change != $1.totals.change ? $0.totals.change > $1.totals.change : $0.id < $1.id }
@@ -411,13 +588,30 @@ struct ActivityReport: Encodable {
                 return (a.repository, a.path) < (b.repository, b.path)
             }
             .prefix(top))
-        people = Array(
-            Analysis.people(commits).prefix(top)
+        let ranked = Analysis.people(commits)
+        let ordered: [PersonRow] =
+            switch peopleSort {
+            case .lines: Array(ranked.prefix(top))
+            case .commits:
+                Array(
+                    ranked.sorted {
+                        $0.totals.commits != $1.totals.commits
+                            ? $0.totals.commits > $1.totals.commits : Analysis.literalLess($0.name, $1.name)
+                    }
+                    .prefix(top))
+            case .name:
+                ranked.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedSame
+                        ? Analysis.literalLess($0.name, $1.name)
+                        : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                }
+            }
+        people = ordered
                 .map {
                     PersonRowReport(
                         name: $0.name, bot: $0.bot, totals: Totals($0.totals), repositories: $0.repos.sorted(),
                         latest: $0.latest)
-                })
+                }
     }
 
     func text() -> String {
@@ -429,6 +623,16 @@ struct ActivityReport: Encodable {
         lines.append(
             "\(counted(totals.commits, "commit", "commits")) · +\(number(totals.added)) −\(number(totals.removed)) lines · \(counted(totals.people, "person", "people")) · \(ai)% AI-assisted"
         )
+        if totals.unknownLineCommits > 0 {
+            lines.append(
+                "\(counted(totals.unknownLineCommits, "commit has", "commits have")) unknown line counts; line totals are a lower bound."
+            )
+        }
+        if let excluded {
+            let parts = excluded.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                .map { "\(number($0.value)) \($0.key)" }
+            lines.append("Excluded: " + parts.joined(separator: " · ") + " lines (not counted above)")
+        }
         func table(_ title: String, _ rows: [(String, Totals)], people showPeople: Bool = true) {
             guard !rows.isEmpty else { return }
             lines.append("")
@@ -449,12 +653,31 @@ struct ActivityReport: Encodable {
         table(
             "Top paths by lines changed",
             directories.map { ($0.repository + "/" + $0.path + ($0.kind == "directory" ? "/" : ""), $0.totals) })
-        table("People", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals) }, people: false)
+        if peopleSort == .name {
+            if !people.isEmpty {
+                lines.append("")
+                lines.append("People (\(number(people.count)))")
+                let shown = people.prefix(25)
+                let labels = shown.map { $0.name + ($0.bot ? " (bot)" : "") }
+                let width = labels.map(\.count).max() ?? 0
+                for (label, person) in zip(labels, shown) {
+                    let name: String = label.padding(toLength: width, withPad: " ", startingAt: 0)
+                    lines.append("  \(name)  \(person.repositories.joined(separator: ", "))")
+                }
+                if people.count > shown.count {
+                    lines.append("  and \(number(people.count - shown.count)) more (see --json)")
+                }
+            }
+        } else {
+            table(
+                "People by \(peopleSort.rawValue)", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals) },
+                people: false)
+        }
         if totals.commits == 0 { lines.append("\nNo recorded change in this range.") }
         if !problems.isEmpty {
             lines.append("")
             lines.append("Incomplete evidence:")
-            lines += problems.map { "  " + $0 }
+            lines += problems.map { "  \($0.repository): \($0.message)" }
         }
         lines.append("")
         lines.append("Activity describes recorded changes, not productivity.")

@@ -54,8 +54,7 @@ actor GitHistory {
         try safePath(directory)
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let name = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
-        let path = directory.appendingPathComponent(name + ".lock")
+        let path = directory.appendingPathComponent(Self.cacheName(id) + ".lock")
         try safePath(path)
         let descriptor = open(path.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, mode_t(0o600))
         guard descriptor >= 0 else {
@@ -151,12 +150,34 @@ actor GitHistory {
         result.revision = revision
         result.stale = false
         result.error = ""
+        try? recordFetch(repo.id)
         return result
     }
+    private func fetchPath(_ id: String) -> URL {
+        root.appendingPathComponent("fetched").appendingPathComponent(Self.cacheName(id) + ".txt")
+    }
+    private func recordFetch(_ id: String, at date: Date = Date()) throws {
+        let path = fetchPath(id)
+        try safePath(path.deletingLastPathComponent())
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try safePath(path)
+        try Data(String(date.timeIntervalSince1970).utf8).write(to: path, options: .atomic)
+    }
+    func fetchedAt(_ id: String) -> Date? {
+        let path = fetchPath(id)
+        guard (try? safePath(path)) != nil,
+            let data = FileManager.default.contents(atPath: path.path),
+            let seconds = Double(String(decoding: data, as: UTF8.self)), seconds.isFinite
+        else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+    static func cacheName(_ id: String) -> String {
+        SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
     private func scanPath(_ id: String) -> URL {
-        root.appendingPathComponent("scans")
-            .appendingPathComponent(
-                SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() + ".json")
+        root.appendingPathComponent("scans").appendingPathComponent(Self.cacheName(id) + ".json")
     }
     private func fingerprint(
         _ repo: Repository, revision: String, attributes: Data, configuration: WorkspaceConfiguration,
@@ -165,7 +186,7 @@ actor GitHistory {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var hasher = SHA256()
-        hasher.update(data: Data("clone-v1\0\(revision)\0\(version)\0\(repo.partial)\0\(repo.shallow)".utf8))
+        hasher.update(data: Data("clone-v2\0\(revision)\0\(version)\0\(repo.partial)\0\(repo.shallow)".utf8))
         hasher.update(data: try encoder.encode(configuration))
         hasher.update(data: Data("\(attributes.count):".utf8))
         hasher.update(data: attributes)
@@ -214,6 +235,7 @@ actor GitHistory {
             var result = repo
             result.revision = revision
             result.scannedAt = scannedAt
+            result.skippedCommits = skipped
             var notes: [String] = []
             if skipped > 0 { notes.append(Self.skippedCommitsMessage(skipped)) }
             if repo.shallow { notes.append("Shallow clone: earlier history is not available locally.") }

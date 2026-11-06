@@ -63,14 +63,36 @@ struct CommandLineTests {
         #expect(BigboardCommandLine.commandArguments(["/opt/homebrew/bin/bigboard", "activity", "--json"]) == ["activity", "--json"])
         #expect(BigboardCommandLine.commandArguments(["bigboard-dev", "-NSDocumentRevisionsDebugMode"]) == ["-NSDocumentRevisionsDebugMode"])
     }
-    @Test func noCommandOpensTheApplication() async throws {
+    @Test func noCommandPrintsHelpAndOnlyOpenLaunchesTheApplication() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
         #expect(await fixture.tool().run([]) == 0)
+        #expect(fixture.captured.opens == 0)
+        #expect(fixture.captured.output.contains("Usage: bigboard <command> [options]"))
+        #expect(fixture.captured.output.contains("For scripts and agents:"))
         #expect(await fixture.tool().run(["open"]) == 0)
-        #expect(fixture.captured.opens == 2)
-        #expect(await fixture.tool(openFails: true).run([]) == 1)
+        #expect(fixture.captured.opens == 1)
+        #expect(await fixture.tool(openFails: true).run(["open"]) == 1)
         #expect(fixture.captured.error.contains("Bigboard.app was not found"))
+    }
+    @Test func eachCommandHasItsOwnHelp() async throws {
+        let fixture = try CLIFixture(cache: false)
+        defer { fixture.remove() }
+        #expect(await fixture.tool(token: CLITokenSource(nil)).run(["activity", "--help"]) == 0)
+        #expect(fixture.captured.output.hasPrefix("Usage: bigboard activity [options]"))
+        #expect(fixture.captured.output.contains("--people-sort ORDER"))
+        let topic = try CLIFixture(cache: false)
+        defer { topic.remove() }
+        #expect(await topic.tool().run(["help", "refresh"]) == 0)
+        #expect(topic.captured.output.hasPrefix("Usage: bigboard refresh [options]"))
+        #expect(await topic.tool().run(["status", "-h"]) == 0)
+        #expect(topic.captured.output.contains("Usage: bigboard status [--json]"))
+        #expect(await topic.tool().run(["help", "bogus"]) == 64)
+        #expect(topic.captured.error.contains("No help for: bogus"))
+        let usage = try CLIFixture(cache: false)
+        defer { usage.remove() }
+        #expect(await usage.tool().run(["activity", "--days", "soon"]) == 64)
+        #expect(usage.captured.error.contains("Usage: bigboard activity [options]"))
     }
     @Test func statusListsAccountAndCollectedRepositories() async throws {
         let fixture = try CLIFixture()
@@ -102,8 +124,14 @@ struct CommandLineTests {
         let text = fixture.captured.output
         #expect(text.contains("fixture · last 7 days · 1 active repository"))
         #expect(text.contains("2 commits"))
-        #expect(text.contains("Mapped Author"))
+        #expect(text.contains("People (1)\n  Mapped Author  owner/repo\n"))
+        #expect(text.contains("Excluded: 1 vendored lines (not counted above)"))
         #expect(text.contains("not productivity"))
+        let ranked = try CLIFixture()
+        defer { ranked.remove() }
+        #expect(await ranked.tool().run(["activity", "--days", "7", "--people-sort", "lines"]) == 0)
+        #expect(ranked.captured.output.contains("People by lines\n  Name           Commits"))
+        #expect(!ranked.captured.output.contains("People (1)"))
         let json = try CLIFixture()
         defer { json.remove() }
         #expect(await json.tool().run(["activity", "--days=0", "--json", "--top", "1"]) == 0)
@@ -112,21 +140,46 @@ struct CommandLineTests {
         #expect((decoded["directories"] as? [Any])?.count == 1)
         #expect((decoded["people"] as? [[String: Any]])?.first?["name"] as? String == "Mapped Author")
         #expect((decoded["people"] as? [[String: Any]])?.first?["email"] == nil)
+        #expect(decoded["people_sort"] as? String == "name")
+        #expect((decoded["totals"] as? [String: Any])?["unknown_line_commits"] as? Int == 0)
+        let evidence = try #require((decoded["evidence"] as? [[String: Any]])?.first)
+        #expect(evidence["repository"] as? String == "owner/repo" && evidence["branch"] as? String == "main")
+        #expect((evidence["revision"] as? String)?.count == 40 && evidence["scanned_at"] is String)
+        #expect(evidence["fetched_at"] is NSNull && evidence["history"] as? String == "complete")
+        #expect(evidence["line_counts"] as? String == "complete" && evidence["paths"] as? String == "complete")
+        #expect((evidence["problems"] as? [Any])?.isEmpty == true && (decoded["problems"] as? [Any])?.isEmpty == true)
+        #expect((decoded["excluded"] as? [String: Any])?["vendored"] as? Int == 1)
         let empty = try CLIFixture()
         defer { empty.remove() }
         #expect(await empty.tool().run(["activity", "--days", "1"]) == 0)
         #expect(empty.captured.output.contains("No recorded change in this range."))
+        let quiet = try CLIFixture()
+        defer { quiet.remove() }
+        #expect(await quiet.tool().run(["activity", "--days", "1", "--json"]) == 0)
+        let quietReport = try #require(try JSONSerialization.jsonObject(with: Data(quiet.captured.output.utf8)) as? [String: Any])
+        #expect((quietReport["repositories"] as? [Any])?.isEmpty == true)
+        #expect((quietReport["evidence"] as? [[String: Any]])?.map { $0["repository"] as? String } == ["owner/repo"])
     }
     @Test func missingHistoryIsReportedAsIncomplete() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
         #expect(await fixture.tool().run(["activity"]) == 2)
-        #expect(fixture.captured.output.contains("Incomplete evidence:"))
-        #expect(fixture.captured.output.contains("owner/repo:"))
+        #expect(fixture.captured.output.contains("Incomplete evidence:\n  owner/repo: No local clone found in source folders.\n"))
+        let json = try CLIFixture(cache: false)
+        defer { json.remove() }
+        #expect(await json.tool().run(["activity", "--json"]) == 2)
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(json.captured.output.utf8)) as? [String: Any])
+        let entry = try #require((report["evidence"] as? [[String: Any]])?.first)
+        #expect(entry["history"] as? String == "missing" && entry["line_counts"] as? String == "unknown")
+        #expect(entry["revision"] is NSNull && entry["remote"] is NSNull && entry["branch"] is NSNull)
+        #expect((entry["problems"] as? [[String: Any]])?.first?["kind"] as? String == "no_clone")
+        let problem = try #require((report["problems"] as? [[String: Any]])?.first)
+        #expect(problem["repository"] as? String == "owner/repo" && problem["kind"] as? String == "no_clone")
     }
     @Test(arguments: [
         ["bogus"], ["activity", "--days", "soon"], ["activity", "--days"], ["activity", "--repo", "other/repo"],
         ["activity", "--group", "Missing"], ["status", "--days", "3"], ["activity", "--days", "4000"],
+        ["activity", "--people-sort", "size"],
     ])
     func invalidUsageExplainsAndExits64(arguments: [String]) async throws {
         let fixture = try CLIFixture(cache: false)

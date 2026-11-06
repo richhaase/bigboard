@@ -22,7 +22,7 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var aiIdentities: [String] = []
     var botIdentities: [String] = []
     var sinceDays = 14
-    var contributorSort = "change"
+    var contributorSort = "recent"
     var requestBudget = 128
     var cachedOnly = false
     var refreshIntervalMinutes = 15
@@ -87,6 +87,7 @@ struct Repository: Sendable, Identifiable, Equatable {
     var remote = "origin"
     var shallow = false
     var partial = false
+    var skippedCommits = 0
 }
 struct Review: Sendable, Equatable {
     var author: String
