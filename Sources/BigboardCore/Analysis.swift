@@ -389,6 +389,16 @@ enum Analysis {
                 && (["FAILURE", "ERROR"].contains(pr.checks) || pr.review == "CHANGES_REQUESTED"
                     || (!pr.draft && pr.review == "APPROVED" && pr.checks == "SUCCESS")))
     }
+    static func reviewRank(_ pr: PullRequest) -> Int {
+        ["CHANGES_REQUESTED": 0, "REVIEW_REQUIRED": 1, "APPROVED": 2][pr.review] ?? 3
+    }
+    static func checksRank(_ pr: PullRequest) -> Int {
+        ["FAILURE": 0, "ERROR": 0, "PENDING": 1, "EXPECTED": 1, "SUCCESS": 2][pr.checks] ?? 3
+    }
+    static func prSize(_ pr: PullRequest) -> Int {
+        guard let additions = pr.additions, let deletions = pr.deletions else { return -1 }
+        return additions + deletions
+    }
     static func filterPRs(
         _ prs: [PullRequest], viewer: String, filters: PRFilters = PRFilters(), now: Date = Date()
     ) -> [PullRequest] {
@@ -428,6 +438,18 @@ enum Analysis {
                 if priority(a) != priority(b) { return priority(a) < priority(b) }
                 if a.updatedAt != b.updatedAt {
                     return (a.updatedAt ?? .distantFuture) < (b.updatedAt ?? .distantFuture)
+                }
+            } else if filters.sort == "review", reviewRank(a) != reviewRank(b) {
+                return reviewRank(a) < reviewRank(b)
+            } else if filters.sort == "checks", checksRank(a) != checksRank(b) {
+                return checksRank(a) < checksRank(b)
+            } else if filters.sort == "size", prSize(a) != prSize(b) {
+                return prSize(a) > prSize(b)
+            } else if filters.sort == "created", a.createdAt != b.createdAt {
+                return (a.createdAt ?? .distantPast) > (b.createdAt ?? .distantPast)
+            } else if ["review", "checks", "size", "created"].contains(filters.sort) {
+                if a.updatedAt != b.updatedAt {
+                    return (a.updatedAt ?? .distantPast) > (b.updatedAt ?? .distantPast)
                 }
             } else {
                 let lhs =

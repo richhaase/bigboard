@@ -199,9 +199,18 @@ silently overwritten.
 This board lists current open PRs, including drafts, within the active group
 and repository viewing scope. Historical dates do not hide old open PRs,
 including those linked from Activity. Search
-matches repository, title, author, or number. Select a PR to inspect review and
-check states, requested reviewers, changed files, latest reviews, and reported
-merge conflicts. **Open on GitHub** opens the actual PR. These details are
+matches repository, title, author, or number.
+
+The table shows each PR's number, title, labels, repository, author, review and
+check states, size in added and removed lines, when it was opened, and when it
+was last updated. A dot marks PRs that need your attention, a count beside
+Checks gives failing checks, and an hourglass marks PRs with no updates in 14
+days. Click a column header to sort. Double-click a row, or press
+Command-Return, to open the PR on GitHub; right-click to copy its link.
+
+The inspector shows dates, size, reported merge conflicts, failing checks by
+name, latest reviews with dates, reviewers still requested, and changed files.
+Hide or show it with the toolbar's inspector button. These details are
 evidence, not branch-protection checks or merge authorization.
 
 Author, Review, Checks, State, and Mine facets combine. Values within a facet
@@ -215,8 +224,8 @@ match any selected value; different facets combine with AND. Mine offers:
   membership is not inferred.
 - **Updated since my review:** updates after your latest known submitted review.
 
-Missing reviewer or review history can omit matches. A count with `+ ?` is
-incomplete; an empty incomplete inventory is not a verified zero. Cached-history
+Missing reviewer or review history can omit matches. A count marked
+"(incomplete)" may be low; an empty incomplete inventory is not a verified zero. Cached-history
 mode has no live PR context. Use Data Status to inspect coverage.
 
 ## Data status, offline work, and storage
