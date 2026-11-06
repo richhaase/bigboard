@@ -54,6 +54,26 @@ struct StorageTests {
         #expect(throws: (any Error).self) { try storage.saveConfiguration(config) }
         #expect(try Data(contentsOf: path) == Data("{}".utf8))
     }
+    @Test func reloadReportsOnlyOutsideChanges() throws {
+        let storage = try temporary()
+        defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
+        #expect(try storage.reloadConfiguration() == nil)
+        var config = try storage.loadConfiguration()
+        config.repositories = ["owner/repo"]
+        try storage.saveConfiguration(config)
+        #expect(try storage.reloadConfiguration() == nil)
+        let outside = WorkspaceStorage(configRoot: storage.configRoot, cacheRoot: storage.cacheRoot)
+        var edited = try outside.loadConfiguration()
+        edited.sinceDays = 30
+        try outside.saveConfiguration(edited)
+        #expect(try storage.reloadConfiguration() == edited)
+        #expect(try storage.reloadConfiguration() == nil)
+        edited.sinceDays = 60
+        try storage.saveConfiguration(edited)
+        try Data("{".utf8).write(to: storage.configurationFile)
+        #expect(throws: (any Error).self) { try storage.reloadConfiguration() }
+        #expect(throws: (any Error).self) { try storage.saveConfiguration(edited) }
+    }
     @Test func symbolicLinksAreRejectedAndStateIsPrivate() throws {
         let storage = try temporary()
         defer { try? FileManager.default.removeItem(at: storage.configRoot.deletingLastPathComponent()) }
