@@ -149,13 +149,6 @@ struct HeatBoard: View {
     }
     private var scopeBar: some View {
         HStack {
-            Button {
-                navigation.backInHeat()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(navigation.heatScope.repo.isEmpty)
-            .help("Back in Heat Maps")
             Button("All repositories") { navigation.exploreHeat(ActivityScope()) }
                 .buttonStyle(.link)
             if !navigation.heatScope.repo.isEmpty {

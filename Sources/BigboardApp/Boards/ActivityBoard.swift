@@ -21,6 +21,10 @@ struct ActivityBoard: View {
             Analysis.scoped(records, scope: inspectScope, workAreas: workspace.configuration.workAreas),
             canonical: records)
     }
+    private var scopedPersonName: String? {
+        guard let id = navigation.scopedPerson else { return nil }
+        return Analysis.people(scoped, canonicalRecords: records).first { $0.id == id }?.name ?? id
+    }
     private var title: String {
         let scope = navigation.scope
         if !scope.areaName.isEmpty { return scope.areaName }
@@ -40,7 +44,6 @@ struct ActivityBoard: View {
                 HStack {
                     Text("From Heat Maps: \(navigation.activityRangeLabel)")
                     Spacer()
-                    Button("Back to Heat Maps") { navigation.switchBoard(.heat) }
                     Button("Use shared date range") { navigation.activityInterval = nil }
                 }
                 .font(.callout).padding(.horizontal, 12).padding(.bottom, 10)
@@ -60,13 +63,7 @@ struct ActivityBoard: View {
 
     private var scopeBar: some View {
         HStack {
-            Button {
-                navigation.back()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(!navigation.canGoBackInActivity)
-            Button("Repositories") { navigation.explore(ActivityScope()) }.buttonStyle(.link)
+            Button("All repositories") { navigation.explore(ActivityScope()) }.buttonStyle(.link)
             if !navigation.scope.repo.isEmpty {
                 Text("/").foregroundStyle(.tertiary)
                 Button(navigation.scope.repo) {
@@ -80,6 +77,10 @@ struct ActivityBoard: View {
                     navigation.scope.areaName.isEmpty ? navigation.scope.path : navigation.scope.areaName
                 )
                 .lineLimit(1).truncationMode(.middle)
+            }
+            if let name = scopedPersonName {
+                Text("/").foregroundStyle(.tertiary)
+                Text(name).lineLimit(1)
             }
             Spacer()
             if navigation.lens == .directories {
@@ -204,7 +205,6 @@ struct ActivityBoard: View {
     private var scopedPeople: some View {
         VStack(alignment: .leading) {
             if let person = navigation.scopedPerson {
-                Button("Back to people") { navigation.scopedPerson = nil }
                 CommitList(
                     records: navigation.searchCommits(
                         Analysis.people(scoped, canonicalRecords: records).first { $0.id == person }?.records
@@ -219,7 +219,7 @@ struct ActivityBoard: View {
                         }
                 ) { person in
                     Button {
-                        navigation.scopedPerson = person.id
+                        navigation.showPerson(person.id)
                     } label: {
                         HStack {
                             Image(systemName: "person.crop.circle")

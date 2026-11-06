@@ -71,6 +71,17 @@ struct MainView: View {
             .navigationTitle(navigation.board.rawValue)
         }
         .toolbar {
+            ToolbarItem(id: "history", placement: .navigation) {
+                ControlGroup {
+                    Button("Back", systemImage: "chevron.left") { navigation.goBack() }
+                        .disabled(!navigation.canGoBack || navigation.panel != nil)
+                        .help("Back")
+                    Button("Forward", systemImage: "chevron.right") { navigation.goForward() }
+                        .disabled(!navigation.canGoForward || navigation.panel != nil)
+                        .help("Forward")
+                }
+                .controlGroupStyle(.navigation)
+            }
             if navigation.board != .pullRequests {
                 ToolbarItem(id: "date-filter", placement: .primaryAction) {
                     dateFilter

@@ -32,6 +32,37 @@ struct RelatedEvidence: Equatable {
     var mode: String
     var values: Set<String>
 }
+struct NavLocation: Equatable {
+    var board: Board
+    var heat: BoardFilters
+    var heatScope: ActivityScope
+    var heatExpanded: Bool
+    var scope: ActivityScope
+    var lens: ActivityLens
+    var activity: BoardFilters
+    var activityPeopleQuery: String
+    var activityInterval: DateInterval?
+    var activityIncludesStart: Bool
+    var relatedEvidence: RelatedEvidence?
+    var scopedPerson: String?
+    var contributors: BoardFilters
+    var prs: BoardFilters
+    var savedPRFilters: BoardFilters?
+    var contextualRepository: String?
+    var activitySelection: String?
+    var contributorSelection: String?
+    var prSelection: String?
+    var place: NavLocation {
+        var copy = self
+        copy.activitySelection = nil
+        copy.contributorSelection = nil
+        copy.prSelection = nil
+        return copy
+    }
+    var repositoryIDs: Set<String> {
+        Set([heatScope.repo, scope.repo, contextualRepository ?? ""].filter { !$0.isEmpty })
+    }
+}
 struct BoardFilters: Equatable {
     var query = ""
     var sort = "change"
@@ -106,6 +137,79 @@ enum DateRange: Hashable {
     var scopedPerson: String?
     var contextualRepository: String?
     var savedPRFilters: BoardFilters?
+    private(set) var backStack: [NavLocation] = []
+    private(set) var forwardStack: [NavLocation] = []
+    private var navigating = false
+    static let historyLimit = 50
+    var canGoBack: Bool { !backStack.isEmpty }
+    var canGoForward: Bool { !forwardStack.isEmpty }
+    var location: NavLocation {
+        get {
+            NavLocation(
+                board: board, heat: heat, heatScope: heatScope, heatExpanded: heatExpanded, scope: scope,
+                lens: lens, activity: activity, activityPeopleQuery: activityPeopleQuery,
+                activityInterval: activityInterval, activityIncludesStart: activityIncludesStart,
+                relatedEvidence: relatedEvidence, scopedPerson: scopedPerson, contributors: contributors,
+                prs: prs, savedPRFilters: savedPRFilters, contextualRepository: contextualRepository,
+                activitySelection: activitySelection, contributorSelection: contributorSelection,
+                prSelection: prSelection)
+        }
+        set {
+            board = newValue.board
+            heat = newValue.heat
+            heatScope = newValue.heatScope
+            heatExpanded = newValue.heatExpanded
+            scope = newValue.scope
+            lens = newValue.lens
+            activity = newValue.activity
+            activityPeopleQuery = newValue.activityPeopleQuery
+            activityInterval = newValue.activityInterval
+            activityIncludesStart = newValue.activityIncludesStart
+            relatedEvidence = newValue.relatedEvidence
+            scopedPerson = newValue.scopedPerson
+            contributors = newValue.contributors
+            prs = newValue.prs
+            savedPRFilters = newValue.savedPRFilters
+            contextualRepository = newValue.contextualRepository
+            activitySelection = newValue.activitySelection
+            contributorSelection = newValue.contributorSelection
+            prSelection = newValue.prSelection
+        }
+    }
+    func navigate(_ change: () -> Void) {
+        guard !navigating else {
+            change()
+            return
+        }
+        navigating = true
+        defer { navigating = false }
+        let before = location
+        change()
+        repositoryFilterPresented = false
+        guard location.place != before.place else { return }
+        backStack.append(before)
+        if backStack.count > Self.historyLimit { backStack.removeFirst(backStack.count - Self.historyLimit) }
+        forwardStack = []
+    }
+    func goBack() {
+        guard let previous = backStack.popLast() else { return }
+        forwardStack.append(location)
+        restore(previous)
+    }
+    func goForward() {
+        guard let next = forwardStack.popLast() else { return }
+        backStack.append(location)
+        restore(next)
+    }
+    private func restore(_ value: NavLocation) {
+        repositoryFilterPresented = false
+        location = value
+        reconcile()
+    }
+    func clearHistory() {
+        backStack = []
+        forwardStack = []
+    }
     var repositoryFilterPresented = false {
         didSet { if repositoryFilterPresented { panel = nil } }
     }
@@ -211,23 +315,18 @@ enum DateRange: Hashable {
             includesStart: interval != nil && activityIncludesStart)
     }
     func exploreHeat(_ scope: ActivityScope) {
-        heatScope = scope
-        heatExpanded = false
-    }
-    func backInHeat() {
-        if !heatScope.path.isEmpty {
-            heatScope.path = heatScope.path.split(separator: "/").dropLast().joined(separator: "/")
-        } else if !heatScope.areaName.isEmpty {
-            heatScope.areaName = ""
-        } else {
-            heatScope = ActivityScope()
+        navigate {
+            heatScope = scope
+            heatExpanded = false
         }
-        heatExpanded = false
     }
     func showHeatActivity(
         _ scope: ActivityScope, interval: DateInterval?,
         includesStart: Bool = false
     ) {
+        navigate { showHeatActivityNow(scope, interval: interval, includesStart: includesStart) }
+    }
+    private func showHeatActivityNow(_ scope: ActivityScope, interval: DateInterval?, includesStart: Bool) {
         explore(scope)
         lens = scope.isFile ? .commits : .directories
         activity.query = ""
@@ -239,6 +338,9 @@ enum DateRange: Hashable {
         switchBoard(.activity)
     }
     func showContributor(_ id: String) {
+        navigate { showContributorNow(id) }
+    }
+    private func showContributorNow(_ id: String) {
         contributors.query = ""
         if !contributors.people.isEmpty && !contributors.people.contains(id) { contributors.people = [] }
         contributorSelection = id
@@ -250,6 +352,9 @@ enum DateRange: Hashable {
         contributors.hideBots = false
     }
     func showActivity(_ scope: ActivityScope, person: String) {
+        navigate { showActivityNow(scope, person: person) }
+    }
+    private func showActivityNow(_ scope: ActivityScope, person: String) {
         explore(scope)
         activityInterval = nil
         activityIncludesStart = false
@@ -326,24 +431,52 @@ enum DateRange: Hashable {
         scopedPerson = nil
     }
     func exploreRelated(_ row: RelatedRow) {
-        let mode = relatedMode
-        explore(row.scope)
-        lens = mode == "people" ? .people : .commits
-        relatedEvidence = RelatedEvidence(mode: mode, values: Set(row.evidence))
+        navigate {
+            let mode = relatedMode
+            explore(row.scope)
+            lens = mode == "people" ? .people : .commits
+            relatedEvidence = RelatedEvidence(mode: mode, values: Set(row.evidence))
+        }
     }
     func explore(_ scope: ActivityScope) {
-        self.scope = scope
-        relatedEvidence = nil
-        activitySelection = nil
-        scopedPerson = nil
-        if scope.isFile { lens = .commits }
-    }
-    var canGoBackInActivity: Bool { !scope.repo.isEmpty || lens != .directories }
-    func back() {
-        if contextualRepository != nil {
-            returnToActivity()
-            return
+        navigate {
+            self.scope = scope
+            relatedEvidence = nil
+            activitySelection = nil
+            scopedPerson = nil
+            if scope.isFile { lens = .commits }
         }
+    }
+    func showPerson(_ id: String?) {
+        navigate { scopedPerson = id }
+    }
+    var canGoUp: Bool {
+        switch board {
+        case .heat: !heatScope.repo.isEmpty
+        case .activity: !scope.repo.isEmpty || lens != .directories || scopedPerson != nil
+        case .contributors, .pullRequests: false
+        }
+    }
+    func goUp() {
+        navigate {
+            switch board {
+            case .heat: heatUp()
+            case .activity: activityUp()
+            case .contributors, .pullRequests: break
+            }
+        }
+    }
+    private func heatUp() {
+        if !heatScope.path.isEmpty {
+            heatScope.path = heatScope.path.split(separator: "/").dropLast().joined(separator: "/")
+        } else if !heatScope.areaName.isEmpty {
+            heatScope.areaName = ""
+        } else {
+            heatScope = ActivityScope()
+        }
+        heatExpanded = false
+    }
+    private func activityUp() {
         if scopedPerson != nil {
             scopedPerson = nil
             return
@@ -367,15 +500,16 @@ enum DateRange: Hashable {
         activitySelection = nil
     }
     func showPRs(repo: String, selected: String? = nil) {
-        if contextualRepository == nil { savedPRFilters = prs }
-        prs = BoardFilters(sort: "updated")
-        contextualRepository = repo
-        prSelection = selected
-        board = .pullRequests
+        navigate {
+            if contextualRepository == nil { savedPRFilters = prs }
+            prs = BoardFilters(sort: "updated")
+            contextualRepository = repo
+            prSelection = selected
+            board = .pullRequests
+        }
     }
-    func returnToActivity() {
-        restorePRFilters()
-        board = .activity
+    func showAllPRs() {
+        navigate { restorePRFilters() }
     }
     func restorePRFilters() {
         if let savedPRFilters { prs = savedPRFilters }
@@ -383,9 +517,10 @@ enum DateRange: Hashable {
         contextualRepository = nil
     }
     func switchBoard(_ value: Board) {
-        repositoryFilterPresented = false
-        restorePRFilters()
-        board = value
+        navigate {
+            restorePRFilters()
+            board = value
+        }
     }
     func togglePRMine(_ value: String) {
         guard board == .pullRequests else { return }
@@ -418,13 +553,15 @@ enum DateRange: Hashable {
         relatedEvidence = nil
         contextualRepository = nil
         savedPRFilters = nil
+        clearHistory()
         preferencesApplied = true
     }
     func reconcile(_ snapshot: Snapshot) {
         let available = Set(snapshot.repositories.map(\.id))
         repositories.formIntersection(available)
         if !heatScope.repo.isEmpty && !available.contains(heatScope.repo) {
-            exploreHeat(ActivityScope())
+            heatScope = ActivityScope()
+            heatExpanded = false
         }
         if !scope.repo.isEmpty && !available.contains(scope.repo) {
             scope = ActivityScope()
@@ -435,11 +572,14 @@ enum DateRange: Hashable {
             lens = .directories
         }
         if let contextualRepository, !available.contains(contextualRepository) { restorePRFilters() }
+        backStack.removeAll { !$0.repositoryIDs.isSubset(of: available) }
+        forwardStack.removeAll { !$0.repositoryIDs.isSubset(of: available) }
         reconcile()
     }
     func reconcile() {
         if !heatScope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(heatScope.repo) {
-            exploreHeat(ActivityScope())
+            heatScope = ActivityScope()
+            heatExpanded = false
         }
         if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) {
             scope = ActivityScope()

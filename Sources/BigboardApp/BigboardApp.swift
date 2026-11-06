@@ -59,6 +59,17 @@ private struct BoardCommands: Commands {
                 .keyboardShortcut(",")
                 .disabled(modalOpen)
         }
+        CommandMenu("Go") {
+            Button("Back") { navigation.goBack() }
+                .keyboardShortcut("[")
+                .disabled(modalOpen || !hasData || !navigation.canGoBack)
+            Button("Forward") { navigation.goForward() }
+                .keyboardShortcut("]")
+                .disabled(modalOpen || !hasData || !navigation.canGoForward)
+            Button("Enclosing Scope") { navigation.goUp() }
+                .keyboardShortcut(.upArrow)
+                .disabled(modalOpen || !hasData || !navigation.canGoUp)
+        }
         CommandMenu("Boards") {
             ForEach(Array(Board.allCases.enumerated()), id: \.element) { index, board in
                 Button(board.rawValue) { navigation.switchBoard(board) }
@@ -99,14 +110,6 @@ private struct BoardCommands: Commands {
             }
             .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
             Divider()
-            Button(navigation.board == .heat ? "Back in Heat Maps" : "Back in Activity") {
-                if navigation.board == .heat { navigation.backInHeat() } else { navigation.back() }
-            }
-                .keyboardShortcut("[")
-                .disabled(
-                    modalOpen || !hasData
-                        || (navigation.board == .heat ? navigation.heatScope.repo.isEmpty
-                            : navigation.board != .activity || !navigation.canGoBackInActivity))
             Button("Copy View as Markdown") {
                 BoardMarkdown.copy(
                     snapshot: workspace.snapshot, configuration: workspace.configuration,

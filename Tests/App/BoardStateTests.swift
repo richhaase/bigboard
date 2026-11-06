@@ -14,6 +14,7 @@ import Testing
     }
     @Test func contextualPRNavigationRestoresIndependentState() {
         let state = BoardState()
+        state.switchBoard(.activity)
         state.dateRange = .days(30); state.repositories = ["acme/app"]
         state.activity.query = "source"; state.contributors.query = "alex"
         state.prs.query = "release"; state.prs.authors = ["alex"]
@@ -24,7 +25,7 @@ import Testing
         #expect(state.prs.query.isEmpty)
         #expect(state.contextualRepository == "acme/app")
         state.prs.checks = ["FAILURE"]
-        state.returnToActivity()
+        state.goBack()
         #expect(state.board == .activity)
         #expect(state.scope.path == "Sources")
         #expect(state.lens == .people)
@@ -55,7 +56,7 @@ import Testing
         let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(markdown.contains("Range: Current open work") && !markdown.contains("Last hour"))
         #expect(markdown.contains("Waiting"))
-        state.returnToActivity()
+        state.goBack()
         #expect(state.dateRange == .hours(1) && state.activityInterval != nil)
     }
     @Test func searchesStayWithTheirContentInsteadOfFilteringDirectoryBrowsing() {
@@ -185,14 +186,15 @@ import Testing
     }
     @Test func fileDrillReturnsToParentAndAreaBoundaryRemains() {
         let state = BoardState()
+        state.switchBoard(.activity)
         state.explore(ActivityScope(repo: "acme/app", path: "Sources/UI/View.swift", isFile: true, areaName: "Interface"))
         #expect(state.lens == .commits)
-        state.back()
+        state.goUp()
         #expect(state.scope.path == "Sources/UI")
         #expect(!state.scope.isFile)
         #expect(state.scope.areaName == "Interface")
         #expect(state.lens == .directories)
-        state.back()
+        state.goUp()
         #expect(state.scope.path == "Sources")
         #expect(state.scope.areaName == "Interface")
     }
