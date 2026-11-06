@@ -38,6 +38,10 @@ struct ExportTests {
         #expect(ActivityExport.authors([a,b,b2], configuration: config).map(\.name) == ["B", "A"])
         config.contributorSort = "ai"
         #expect(ActivityExport.authors([a,b,b2], configuration: config).map(\.name) == ["A", "B"])
+        var late = commit("four", author: "C", email: "c@test", added: 1)
+        late.date = a.date.addingTimeInterval(3600)
+        #expect(WorkspaceConfiguration().contributorSort == "recent")
+        #expect(ActivityExport.authors([a, b, b2, late], configuration: WorkspaceConfiguration()).first?.name == "C")
     }
     @Test func emptyIDsStayIndependentAcrossContributors() {
         let rows = ActivityExport.authors([commit("", author: "A"), commit("", repo: "z/repo", author: "B", email: "b@test")])

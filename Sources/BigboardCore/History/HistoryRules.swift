@@ -18,6 +18,9 @@ enum HistoryRules {
         "*.min.js", "*.min.css", "*.map", "*.snap", "*.lock", "*.pb.go", "*_pb2.py", "package-lock.json",
         "yarn.lock", "pnpm-lock.yaml", "go.sum", "Cargo.lock", "composer.lock", "Gemfile.lock", "poetry.lock",
     ]
+    static let fixtureDirectories: Set<String> = [
+        "fixture", "fixtures", "__fixtures__", "testdata", "test_data", "snapshots", "__snapshots__",
+    ]
     static let bulkExtensions: Set<String> = [
         "json", "ndjson", "jsonl", "yaml", "yml", "csv", "tsv", "xml", "po", "pot", "svg",
     ]
@@ -125,18 +128,14 @@ enum HistoryRules {
     }
     static func exclusion(_ file: FileChange, allFiles: Bool, attribute: AttributeDecision) -> String {
         if allFiles { return "" }
-        if attribute == .generated { return "attribute" }
+        if attribute == .generated { return "generated" }
         if attribute == .included { return "" }
-        if file.path.split(separator: "/").contains(where: { ignoredDirectories.contains(String($0)) })
-            || ignoredGlobs.contains(where: { glob($0, String(file.path.split(separator: "/").last ?? "")) })
-        {
-            return "path"
-        }
-        if !file.binary && file.added + file.removed >= 2000
-            && bulkExtensions.contains((file.path as NSString).pathExtension.lowercased())
-        {
-            return "bulk"
-        }
+        let components = file.path.split(separator: "/").map(String.init)
+        if components.contains(where: ignoredDirectories.contains) { return "vendored" }
+        if ignoredGlobs.contains(where: { glob($0, components.last ?? "") }) { return "generated" }
+        let data = bulkExtensions.contains((file.path as NSString).pathExtension.lowercased())
+        if data, components.dropLast().contains(where: fixtureDirectories.contains) { return "fixture" }
+        if data, !file.binary, file.added + file.removed >= 2000 { return "bulk" }
         return ""
     }
     static func normalizedEmail(_ raw: String) -> String {

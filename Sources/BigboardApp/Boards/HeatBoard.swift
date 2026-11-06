@@ -25,7 +25,8 @@ struct HeatBoard: View {
             records, repositories: repositories, scope: scope,
             workAreas: workspace.configuration.workAreas, metric: navigation.heatMetric, range: range
         )
-        let maximum = ([current] + rows.map(\.heat)).flatMap(\.series).map(\.value).max() ?? 0
+        let overallMaximum = current.series.map(\.value).max() ?? 0
+        let maximum = rows.flatMap(\.heat.series).map(\.value).max() ?? 0
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 scopeBar
@@ -57,7 +58,7 @@ struct HeatBoard: View {
                     Text("\(current.future) future-dated commits are outside the selected range.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                HeatStrip(series: current, metric: navigation.heatMetric, maximum: maximum) {
+                HeatStrip(series: current, metric: navigation.heatMetric, maximum: overallMaximum) {
                     interval, includesStart in
                     navigation.showHeatActivity(
                         scope, interval: interval, includesStart: includesStart)
@@ -81,11 +82,14 @@ struct HeatBoard: View {
                             )
                             .frame(width: 18, height: 12)
                     }
-                    Text("\(maximum.formatted()) \(navigation.heatMetric) per cell")
+                    Text("\(maximum.formatted()) \(navigation.heatMetric) per cell in the rows below")
+                    if overallMaximum > maximum {
+                        Text("· \(overallMaximum.formatted()) in the overall strip")
+                    }
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 Text(
-                    "Darker cells mean more activity. All rows use the same scale. Hover for counts; select a cell to explore its activity by directory."
+                    "Darker cells mean more activity. The rows below share one scale; the overall strip above has its own. Shading follows the square root of each count, so quieter areas still show variation. Hover for counts; select a cell to explore its activity by directory."
                 )
                 .font(.caption).foregroundStyle(.secondary)
                 Divider()
@@ -211,6 +215,6 @@ private struct HeatStrip: View {
     }
     private func color(_ point: HeatPoint) -> Color {
         guard point.value > 0, maximum > 0 else { return .secondary.opacity(0.1) }
-        return .blue.opacity(0.2 + 0.8 * Double(point.value) / Double(maximum))
+        return .blue.opacity(0.2 + 0.8 * (Double(point.value) / Double(maximum)).squareRoot())
     }
 }

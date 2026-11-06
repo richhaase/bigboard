@@ -155,7 +155,7 @@ struct ActivityBoard: View {
             let excluded = Analysis.excludedLines(scoped)
             if !excluded.isEmpty {
                 Text(
-                    "\(excluded.values.reduce(0, +).formatted()) generated, vendored, or bulk-data lines excluded."
+                    "\(excluded.values.reduce(0, +).formatted()) generated, vendored, fixture, or bulk-data lines excluded."
                 )
                 .font(.caption).foregroundStyle(.secondary)
             }

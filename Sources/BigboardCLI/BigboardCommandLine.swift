@@ -88,7 +88,7 @@ struct CommandLineTool: Sendable {
             case "status": return try await status(try Options(options, flags: ["--json"]))
             case "activity":
                 return try await activity(
-                    try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top"]))
+                    try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top", "--people-sort"]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
                 environment.write(Self.usage)
@@ -123,9 +123,11 @@ struct CommandLineTool: Sendable {
               --repo OWNER/NAME    Limit to a repository (repeatable).
               --group NAME         Limit to a saved repository group.
               --top N              Rows per section (default 10).
+              --people-sort ORDER  name (default), lines, or commits. lines and commits rank
+                                   people with their counts, limited by --top.
               --include-bots       Include bot accounts.
               --json               Print JSON.
-          refresh [options]        Fetch the default branch of collected clones with the GitHub CLI token.
+          refresh [options]        Fetch the default branch of collected clones with your Git setup.
               --repo OWNER/NAME    Limit to a repository (repeatable).
               --group NAME         Limit to a saved repository group.
           help                     Show this help.
@@ -225,6 +227,9 @@ struct CommandLineTool: Sendable {
         let days = try options.integer("--days") ?? workspace.configuration.sinceDays
         let top = try options.integer("--top") ?? 10
         guard (0...3650).contains(days), top > 0 else { throw UsageError("--days must be 0–3650 and --top positive.") }
+        guard let peopleSort = ActivityReport.PeopleSort(rawValue: options.value("--people-sort") ?? "name") else {
+            throw UsageError("--people-sort must be name, lines, or commits.")
+        }
         var commits: [Commit] = []
         var problems: [String] = []
         for repo in workspace.repositories {
@@ -241,7 +246,7 @@ struct CommandLineTool: Sendable {
             commits, days: days, hideBots: !options.flag("--include-bots"), now: now)
         let report = ActivityReport(
             account: workspace.account.login, generatedAt: now, days: days, commits: selected,
-            repositories: workspace.repositories, top: top, problems: problems)
+            repositories: workspace.repositories, top: top, peopleSort: peopleSort, problems: problems)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
         return problems.isEmpty ? 0 : 2
     }
@@ -341,6 +346,7 @@ struct StatusReport: Encodable {
 }
 
 struct ActivityReport: Encodable {
+    enum PeopleSort: String, Encodable { case name, lines, commits }
     struct Totals: Encodable {
         var commits: Int
         var added: Int
@@ -378,20 +384,25 @@ struct ActivityReport: Encodable {
     var generatedAt: Date
     var days: Int
     var totals: Totals
+    var excluded: [String: Int]?
     var repositories: [RepositoryRow]
     var directories: [DirectoryRow]
+    var peopleSort: PeopleSort
     var people: [PersonRowReport]
     var problems: [String]
 
     init(
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
-        problems: [String]
+        peopleSort: PeopleSort = .name, problems: [String]
     ) {
         self.account = account
         self.generatedAt = generatedAt
         self.days = days
         self.problems = problems
+        self.peopleSort = peopleSort
         totals = Totals(Analysis.totals(commits))
+        let excluded = Analysis.excludedLines(commits).filter { $0.value > 0 }
+        self.excluded = excluded.isEmpty ? nil : excluded
         self.repositories = Analysis.activityRows(commits, repositories: repositories)
             .filter { $0.totals.commits > 0 }
             .sorted { $0.totals.change != $1.totals.change ? $0.totals.change > $1.totals.change : $0.id < $1.id }
@@ -411,13 +422,30 @@ struct ActivityReport: Encodable {
                 return (a.repository, a.path) < (b.repository, b.path)
             }
             .prefix(top))
-        people = Array(
-            Analysis.people(commits).prefix(top)
+        let ranked = Analysis.people(commits)
+        let ordered: [PersonRow] =
+            switch peopleSort {
+            case .lines: Array(ranked.prefix(top))
+            case .commits:
+                Array(
+                    ranked.sorted {
+                        $0.totals.commits != $1.totals.commits
+                            ? $0.totals.commits > $1.totals.commits : Analysis.literalLess($0.name, $1.name)
+                    }
+                    .prefix(top))
+            case .name:
+                ranked.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedSame
+                        ? Analysis.literalLess($0.name, $1.name)
+                        : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                }
+            }
+        people = ordered
                 .map {
                     PersonRowReport(
                         name: $0.name, bot: $0.bot, totals: Totals($0.totals), repositories: $0.repos.sorted(),
                         latest: $0.latest)
-                })
+                }
     }
 
     func text() -> String {
@@ -429,6 +457,11 @@ struct ActivityReport: Encodable {
         lines.append(
             "\(counted(totals.commits, "commit", "commits")) · +\(number(totals.added)) −\(number(totals.removed)) lines · \(counted(totals.people, "person", "people")) · \(ai)% AI-assisted"
         )
+        if let excluded {
+            let parts = excluded.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                .map { "\(number($0.value)) \($0.key)" }
+            lines.append("Excluded: " + parts.joined(separator: " · ") + " lines (not counted above)")
+        }
         func table(_ title: String, _ rows: [(String, Totals)], people showPeople: Bool = true) {
             guard !rows.isEmpty else { return }
             lines.append("")
@@ -449,7 +482,26 @@ struct ActivityReport: Encodable {
         table(
             "Top paths by lines changed",
             directories.map { ($0.repository + "/" + $0.path + ($0.kind == "directory" ? "/" : ""), $0.totals) })
-        table("People", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals) }, people: false)
+        if peopleSort == .name {
+            if !people.isEmpty {
+                lines.append("")
+                lines.append("People (\(number(people.count)))")
+                let shown = people.prefix(25)
+                let labels = shown.map { $0.name + ($0.bot ? " (bot)" : "") }
+                let width = labels.map(\.count).max() ?? 0
+                for (label, person) in zip(labels, shown) {
+                    let name: String = label.padding(toLength: width, withPad: " ", startingAt: 0)
+                    lines.append("  \(name)  \(person.repositories.joined(separator: ", "))")
+                }
+                if people.count > shown.count {
+                    lines.append("  and \(number(people.count - shown.count)) more (see --json)")
+                }
+            }
+        } else {
+            table(
+                "People by \(peopleSort.rawValue)", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals) },
+                people: false)
+        }
         if totals.commits == 0 { lines.append("\nNo recorded change in this range.") }
         if !problems.isEmpty {
             lines.append("")

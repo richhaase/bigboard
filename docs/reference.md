@@ -130,9 +130,11 @@ days, weekly through 180 days, and monthly for longer ranges. Calendar boundarie
 use your local time zone and first weekday. Edge cells may be partial. All time
 includes all loaded history.
 
-Darker blue means more activity. The overview and area rows use the same linear
-scale, from zero to the largest cell count in the current view. Hover to see the
-interval and actual count. Missing, incomplete, or stale history is marked with
+Darker blue means more activity. Area rows share one scale, from zero to their
+largest cell count in the current view; the overview strip uses its own scale,
+since it totals every row. Shading follows the square root of each count, so
+quieter areas still show variation next to busy ones. Hover to see the interval
+and actual count. Missing, incomplete, or stale history is marked with
 dashed outlines and known-activity labels; a zero in those cells does not establish
 that no activity occurred.
 
@@ -169,8 +171,10 @@ restores the previous PR filters and Activity location.
 ## Contributors and identities
 
 Select a contributor to inspect totals, contribution rhythm, the daily calendar,
-repository distribution, and recent commits. Sorting includes line changes,
-commits, additions, removals, net lines, AI share, name, and recency. Bot and
+repository distribution, and recent commits. Contributors are sorted by most
+recent contribution unless you choose another default under **Settings →
+General**. Sorting includes recency, line changes, commits, additions, removals,
+net lines, AI share, and name. Bot and
 people filters are independent of Activity's filters.
 Select a repository under **Where work happened** to continue exploring in Activity.
 
@@ -265,9 +269,16 @@ app is open.
 - `--repo OWNER/NAME`: limit to a collected repository; repeat for several.
 - `--group NAME`: limit to a saved repository group.
 - `--top N`: rows per section (default 10).
+- `--people-sort name|lines|commits`: order of the people section. The default,
+  `name`, lists everyone active with the repositories they changed, without
+  counts. `lines` and `commits` rank people with their counts, limited by `--top`.
 - `--include-bots`: include bot accounts, which are hidden by default.
 - `--json`: print JSON with snake_case keys. People are identified by name only;
   email addresses are omitted.
+
+Totals are followed by the lines excluded from them, by reason: `generated`,
+`vendored`, `fixture`, and `bulk` (`excluded` in JSON, omitted when nothing was
+excluded).
 
 `activity` reads your clones and makes no network requests. Run `refresh` first,
 or let the app refresh, for current evidence. Repositories without a local clone,
@@ -291,8 +302,11 @@ Usage errors exit with status 64.
 
 Commits shared across repositories are deduplicated by object ID while keeping
 their repository associations. Complete line counts take precedence over
-unknown counts. Generated, vendored, and bulk-data changes are excluded from
-line totals by default, but their commits remain visible. Advanced settings can
+unknown counts. Generated, vendored, fixture, and bulk-data changes are excluded
+from line totals by default, but their commits remain visible. Fixture changes
+are data files (such as JSON, YAML, or CSV) inside folders named `fixtures`,
+`fixture`, `__fixtures__`, `testdata`, `test_data`, `snapshots`, or
+`__snapshots__`. Bulk data is a single data file with 2,000 or more changed lines. Advanced settings can
 include those lines. Missing line counts are shown as unknown, not measured zero.
 
 The copy button or Command-Shift-C copies the current view as Markdown. **Export JSON** on

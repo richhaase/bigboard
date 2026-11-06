@@ -119,6 +119,10 @@ enum ActivityExport {
                 default: row.totalChange
                 }
             }
+            if configuration.contributorSort == "recent", a.lastCommit != b.lastCommit {
+                return (formatter.date(from: a.lastCommit) ?? .distantPast)
+                    > (formatter.date(from: b.lastCommit) ?? .distantPast)
+            }
             if configuration.contributorSort == "ai" {
                 let lhs = UInt64(max(0, a.aiCommits)).multipliedFullWidth(by: UInt64(max(1, b.commits)))
                 let rhs = UInt64(max(0, b.aiCommits)).multipliedFullWidth(by: UInt64(max(1, a.commits)))
