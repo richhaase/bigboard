@@ -298,8 +298,23 @@ final class WorkspaceModel {
         snapshot.viewer = state.login
         return true
     }
+    @discardableResult
+    private func stopRefresh() async -> Bool {
+        guard busy, !shuttingDown else { return false }
+        generation += 1
+        let refresh = refreshTask, discovery = discoveryTask
+        refreshTask = nil
+        discoveryTask = nil
+        refresh?.cancel()
+        discovery?.cancel()
+        await refresh?.value
+        await discovery?.value
+        busy = false
+        return true
+    }
     func discover(roots: [String]? = nil) async {
-        guard !busy, !account.isEmpty else { return }
+        guard !account.isEmpty, !shuttingDown else { return }
+        let interrupted = await stopRefresh()
         busy = true
         error = ""
         let operation = generation
@@ -314,14 +329,16 @@ final class WorkspaceModel {
         if operation == generation {
             discoveryTask = nil
             busy = false
+            if interrupted { _ = beginRefresh() }
         }
     }
     @discardableResult
     func addSourceFolders(_ folders: [String]) async -> Bool {
-        guard !busy, !account.isEmpty, authStatus.signedIn else { return false }
+        guard !account.isEmpty, authStatus.signedIn, !shuttingDown else { return false }
         var config = configuration
         for folder in folders where !config.sourceRoots.contains(folder) { config.sourceRoots.append(folder) }
         guard config.sourceRoots != configuration.sourceRoots else { return true }
+        await stopRefresh()
         let operation = generation
         do {
             try storage.saveConfiguration(config)
@@ -338,13 +355,11 @@ final class WorkspaceModel {
     }
     @discardableResult
     func saveConfiguration(_ config: WorkspaceConfiguration) async -> Bool {
-        guard !busy, !account.isEmpty, authStatus.signedIn else {
-            error =
-                busy
-                ? "Wait for the current operation to finish before applying settings."
-                : "Connect GitHub CLI before applying settings."
+        guard !account.isEmpty, authStatus.signedIn, !shuttingDown else {
+            error = "Connect GitHub CLI before applying settings."
             return false
         }
+        await stopRefresh()
         let operation = generation
         do {
             try storage.validate(config)
@@ -376,7 +391,8 @@ final class WorkspaceModel {
         }
     }
     func saveIdentities(_ rules: [String: IdentityRule]) async {
-        guard !busy, let history else { return }
+        guard let history, !shuttingDown else { return }
+        let interrupted = await stopRefresh()
         do {
             var next = configuration
             next.identities = rules
@@ -398,6 +414,7 @@ final class WorkspaceModel {
                 self.snapshot.coverage.errors = errors
                 self.refreshTask = nil
                 self.busy = false
+                if interrupted { _ = self.beginRefresh() }
             }
             refreshTask = task
             await task.value

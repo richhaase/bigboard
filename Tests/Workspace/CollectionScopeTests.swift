@@ -4,6 +4,40 @@ import Testing
 @testable import Bigboard
 
 @MainActor struct CollectionScopeTests {
+    @Test func applyingSettingsStopsARunningRefreshAndStartsANewOne() async throws {
+        let ids = ["owner/chosen", "owner/other"]
+        let gate = RefreshGate()
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), cloned: ids, refreshHistory: { _, repo in
+            try await gate.pass(repo.id)
+            return repo
+        })
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let startup = Task { await fixture.workspace.start() }
+        var attempts = 0
+        while await gate.waiting == 0, attempts < 500 {
+            try await Task.sleep(for: .milliseconds(10))
+            attempts += 1
+        }
+        let waiting = await gate.waiting
+        #expect(fixture.workspace.busy && waiting > 0)
+        var draft = fixture.workspace.configuration
+        draft.repositories = [ids[0]]
+        #expect(await fixture.workspace.saveConfiguration(draft))
+        #expect(fixture.workspace.error.isEmpty)
+        #expect(try fixture.storage.loadConfiguration().repositories == [ids[0]])
+        await startup.value
+        await gate.open()
+        attempts = 0
+        while fixture.workspace.busy, attempts < 500 {
+            try await Task.sleep(for: .milliseconds(10))
+            attempts += 1
+        }
+        #expect(!fixture.workspace.busy)
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[0]])
+        let passed = await gate.passed
+        #expect(passed == [ids[0]])
+    }
+
     @Test func cachedStartupOnlyCollectsSavedRepositories() async throws {
         let ids = ["owner/chosen", "owner/unchecked", "owner/new-private"]
         var config = WorkspaceConfiguration(repositories: [ids[0]])
@@ -208,6 +242,19 @@ import Testing
     func scanExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("scans/" + hash(id) + ".json").path) }
     func lockExists(_ id: String) -> Bool { FileManager.default.fileExists(atPath: repositoryRoot.appendingPathComponent("locks/" + hash(id) + ".lock").path) }
     private func hash(_ id: String) -> String { SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() }
+}
+
+private actor RefreshGate {
+    private var opened = false
+    private(set) var waiting = 0
+    private(set) var passed: [String] = []
+    func open() { opened = true }
+    func pass(_ id: String) async throws {
+        waiting += 1
+        defer { waiting -= 1 }
+        while !opened { try await Task.sleep(for: .milliseconds(5)) }
+        passed.append(id)
+    }
 }
 
 private actor CollectionTransport: GitHubTransport {
