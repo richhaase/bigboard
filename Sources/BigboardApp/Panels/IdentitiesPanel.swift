@@ -4,6 +4,7 @@ struct IdentitiesPanel: View {
     @Bindable var workspace: WorkspaceModel
     @Environment(\.dismiss) private var dismiss
     @State private var rules: [String: IdentityRule] = [:]
+    @State private var opened: [String: IdentityRule] = [:]
     @State private var selected: Set<String> = []
     @State private var primary = ""
     @State private var name = ""
@@ -13,7 +14,7 @@ struct IdentitiesPanel: View {
     @State private var confirmingDiscard = false
     private var pending: Bool { !selected.isEmpty || !custom.isEmpty || editing != nil }
     private var canStage: Bool { !primary.isEmpty && selected.contains(primary) }
-    private var changed: Bool { rules != workspace.configuration.identities }
+    private var changed: Bool { rules != opened }
     var emails: [String] {
         Set(
             workspace.snapshot.commits.map(\.email).filter { !$0.isEmpty } + rules.keys
@@ -82,7 +83,7 @@ struct IdentitiesPanel: View {
                 Button("Save identities") {
                     if canStage { stage() }
                     Task {
-                        await workspace.saveIdentities(rules)
+                        await workspace.saveIdentities(rules, basedOn: opened)
                         if workspace.configuration.identities == rules { dismiss() }
                     }
                 }
@@ -96,7 +97,16 @@ struct IdentitiesPanel: View {
             Button("Discard Changes", role: .destructive) { dismiss() }
             Button("Keep Editing", role: .cancel) {}
         }
-        .onAppear { rules = workspace.configuration.identities }
+        .onAppear {
+            opened = workspace.configuration.identities
+            rules = opened
+        }
+        .onChange(of: workspace.configuration.identities) { _, value in
+            if !changed, !pending {
+                opened = value
+                rules = value
+            }
+        }
     }
     private func stage() {
         IdentityStaging.stage(

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Observation
 
 @MainActor @Observable
@@ -27,6 +28,7 @@ final class WorkspaceModel {
     private var refreshTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var started = false
+    private var configurationWatch: (any DispatchSourceFileSystemObject)?
     init(
         storage: WorkspaceStorage = .system(), authentication: GitHubCLIAuth? = nil,
         transport: any GitHubTransport = URLSessionGitHubTransport(),
@@ -68,6 +70,7 @@ final class WorkspaceModel {
         account = authStatus.accountID
         lastRefreshFinished = nil
         configuration = try storage.loadConfiguration()
+        watchConfiguration()
         discovered = []
         history = GitHistory(root: storage.historyRoot)
         let manager = auth
@@ -76,6 +79,38 @@ final class WorkspaceModel {
     }
     func refresh() async {
         await beginRefresh()?.value
+    }
+    private func watchConfiguration() {
+        guard configurationWatch == nil, let directory = try? storage.prepareConfigurationDirectory() else { return }
+        let descriptor = Darwin.open(directory.path, O_EVTONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .rename, .delete, .extend, .attrib], queue: .main)
+        source.setEventHandler { [weak self] in
+            Task { @MainActor in await self?.reloadConfiguration() }
+        }
+        source.setCancelHandler { Darwin.close(descriptor) }
+        source.resume()
+        configurationWatch = source
+    }
+    func reloadConfiguration() async {
+        guard !account.isEmpty, authStatus.signedIn, !shuttingDown else { return }
+        let next: WorkspaceConfiguration
+        do {
+            guard let value = try storage.reloadConfiguration() else { return }
+            next = value
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        guard next != configuration else { return }
+        let previous = configuration
+        await stopRefresh()
+        guard configuration == previous, !shuttingDown else { return }
+        configuration = next
+        error = ""
+        restrictSnapshot()
+        _ = beginRefresh()
     }
     func nextAutomaticRefresh(visible: Bool, modalOpen: Bool) -> Date? {
         guard visible, !modalOpen, !shuttingDown, !checkingSignIn, !busy,
@@ -354,9 +389,13 @@ final class WorkspaceModel {
         return true
     }
     @discardableResult
-    func saveConfiguration(_ config: WorkspaceConfiguration) async -> Bool {
+    func saveConfiguration(_ config: WorkspaceConfiguration, basedOn base: WorkspaceConfiguration? = nil) async -> Bool {
         guard !account.isEmpty, authStatus.signedIn, !shuttingDown else {
             error = "Connect GitHub CLI before applying settings."
+            return false
+        }
+        guard base == nil || base == configuration else {
+            error = Self.changedOnDisk
             return false
         }
         await stopRefresh()
@@ -379,6 +418,7 @@ final class WorkspaceModel {
                     )
                 }
             }
+            guard base == nil || base == configuration else { throw BigboardError.message(Self.changedOnDisk) }
             try storage.saveConfiguration(config)
             configuration = config
             error = ""
@@ -390,8 +430,13 @@ final class WorkspaceModel {
             return false
         }
     }
-    func saveIdentities(_ rules: [String: IdentityRule]) async {
+    static let changedOnDisk = "Settings changed in config.json while this was open. Cancel and reopen to see them."
+    func saveIdentities(_ rules: [String: IdentityRule], basedOn base: [String: IdentityRule]? = nil) async {
         guard let history, !shuttingDown else { return }
+        guard base == nil || base == configuration.identities else {
+            error = Self.changedOnDisk
+            return
+        }
         let interrupted = await stopRefresh()
         do {
             var next = configuration
@@ -484,6 +529,8 @@ final class WorkspaceModel {
         guard !shuttingDown else { return }
         shuttingDown = true
         generation += 1
+        configurationWatch?.cancel()
+        configurationWatch = nil
         let refresh = refreshTask, discovery = discoveryTask
         refresh?.cancel()
         discovery?.cancel()

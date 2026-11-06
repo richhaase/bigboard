@@ -215,6 +215,53 @@ import Testing
         #expect(Set(fixture.workspace.discovered.map(\.id)) == Set(ids))
         #expect(await fixture.network.graphRepositories.isEmpty)
     }
+
+    @Test func externalSettingsChangesAreReloadedAndRefreshed() async throws {
+        let ids = ["owner/chosen", "owner/other"]
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), cloned: ids)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        #expect(fixture.workspace.snapshot.repositories.map(\.id).sorted() == ids)
+        let outside = WorkspaceStorage(configRoot: fixture.storage.configRoot, cacheRoot: fixture.storage.cacheRoot)
+        var edited = try outside.loadConfiguration()
+        edited.repositories = [ids[1]]
+        edited.refreshIntervalMinutes = 60
+        try outside.saveConfiguration(edited)
+        var attempts = 0
+        while fixture.workspace.configuration != edited || fixture.workspace.busy, attempts < 500 {
+            try await Task.sleep(for: .milliseconds(10))
+            attempts += 1
+        }
+        #expect(fixture.workspace.configuration == edited)
+        #expect(fixture.workspace.snapshot.repositories.map(\.id) == [ids[1]])
+        #expect(fixture.workspace.error.isEmpty)
+        var next = fixture.workspace.configuration
+        next.sinceDays = 30
+        #expect(await fixture.workspace.saveConfiguration(next))
+        #expect(try outside.loadConfiguration() == next)
+    }
+
+    @Test func staleSettingsAreNotAppliedOverExternalChanges() async throws {
+        let ids = ["owner/chosen", "owner/other"]
+        let fixture = try CollectionFixture(config: WorkspaceConfiguration(repositories: ids), cloned: ids)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        await fixture.workspace.start()
+        let opened = fixture.workspace.configuration
+        let outside = WorkspaceStorage(configRoot: fixture.storage.configRoot, cacheRoot: fixture.storage.cacheRoot)
+        var edited = try outside.loadConfiguration()
+        edited.groups = ["Team": [ids[0]]]
+        edited.identities = ["b@example.com": IdentityRule(name: "B")]
+        try outside.saveConfiguration(edited)
+        await fixture.workspace.reloadConfiguration()
+        #expect(fixture.workspace.configuration.groups == edited.groups)
+        var draft = opened
+        draft.sinceDays = 30
+        #expect(!(await fixture.workspace.saveConfiguration(draft, basedOn: opened)))
+        #expect(fixture.workspace.error == WorkspaceModel.changedOnDisk)
+        await fixture.workspace.saveIdentities(["a@example.com": IdentityRule(name: "A")], basedOn: opened.identities)
+        #expect(try outside.loadConfiguration() == edited)
+        #expect(await fixture.workspace.saveConfiguration(draft, basedOn: fixture.workspace.configuration))
+    }
 }
 
 @MainActor private struct CollectionFixture {

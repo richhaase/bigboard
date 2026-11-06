@@ -18,6 +18,7 @@ struct SettingsPanel: View {
     @State private var groupEditor = SettingsGroupEditor()
     @State private var areaEditor = SettingsWorkAreaEditor()
     @State private var baseline = WorkspaceConfiguration()
+    @State private var opened = WorkspaceConfiguration()
     @State private var confirmingDiscard = false
     private var hasChanges: Bool {
         preparedConfiguration() != baseline || groupEditor.hasPendingInput || areaEditor.hasPendingInput
@@ -74,7 +75,7 @@ struct SettingsPanel: View {
                         let candidate = preparedConfiguration()
                         applying = true
                         Task {
-                            let saved = await workspace.saveConfiguration(candidate)
+                            let saved = await workspace.saveConfiguration(candidate, basedOn: opened)
                             applying = false
                             if saved { dismiss() }
                         }
@@ -95,10 +96,17 @@ struct SettingsPanel: View {
             guard !initialized else { return }
             initialized = true
             section = showGroups ? .organization : .repositories
-            draft = workspace.configuration
-            selected = Set(draft.repositories)
-            baseline = preparedConfiguration()
+            load()
         }
+        .onChange(of: workspace.configuration) { _, _ in
+            if !applying, !hasChanges { load() }
+        }
+    }
+    private func load() {
+        opened = workspace.configuration
+        draft = opened
+        selected = Set(draft.repositories)
+        baseline = preparedConfiguration()
     }
     private var repositories: some View {
         VStack(alignment: .leading, spacing: 14) {
