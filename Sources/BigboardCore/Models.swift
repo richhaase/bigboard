@@ -22,7 +22,7 @@ struct WorkspaceConfiguration: Codable, Sendable, Equatable {
     var aiIdentities: [String] = []
     var botIdentities: [String] = []
     var sinceDays = 14
-    var contributorSort = "change"
+    var contributorSort = "recent"
     var requestBudget = 128
     var cachedOnly = false
     var refreshIntervalMinutes = 15

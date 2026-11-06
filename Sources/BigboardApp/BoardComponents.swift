@@ -66,13 +66,39 @@ struct DeltaView: View {
     var added: Int
     var removed: Int
     var unknown = false
+    var font: Font = .system(.callout, design: .monospaced)
     var body: some View {
         HStack(spacing: 5) {
             Text("+\(added.formatted())").foregroundStyle(.green)
             Text("−\(removed.formatted())").foregroundStyle(.red)
             if unknown { Text("?").help("Some line counts are unavailable") }
         }
-        .font(.system(.callout, design: .monospaced)).monospacedDigit()
+        .font(font).monospacedDigit()
+    }
+}
+struct ImpactBar: View {
+    var added: Int
+    var removed: Int
+    var maximum: Int
+    var body: some View {
+        GeometryReader { geometry in
+            let total = added + removed
+            let width =
+                total > 0 && maximum > 0
+                ? max(3, geometry.size.width * min(1, Double(total) / Double(maximum))) : 0
+            let addedWidth = total > 0 ? width * Double(added) / Double(total) : 0
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                HStack(spacing: 0) {
+                    Rectangle().fill(.green.opacity(0.75)).frame(width: addedWidth)
+                    Rectangle().fill(.red.opacity(0.75)).frame(width: width - addedWidth)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 2))
+            }
+        }
+        .frame(height: 6)
+        .accessibilityElement()
+        .accessibilityLabel("\(added.formatted()) lines added, \(removed.formatted()) removed")
     }
 }
 struct StateBadge: View {

@@ -171,8 +171,10 @@ restores the previous PR filters and Activity location.
 ## Contributors and identities
 
 Select a contributor to inspect totals, contribution rhythm, the daily calendar,
-repository distribution, and recent commits. Sorting includes line changes,
-commits, additions, removals, net lines, AI share, name, and recency. Bot and
+repository distribution, and recent commits. Contributors are sorted by most
+recent contribution unless you choose another default under **Settings →
+General**. Sorting includes recency, line changes, commits, additions, removals,
+net lines, AI share, and name. Bot and
 people filters are independent of Activity's filters.
 Select a repository under **Where work happened** to continue exploring in Activity.
 

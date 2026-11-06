@@ -40,17 +40,31 @@ struct ContributorsBoard: View {
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
             HSplitView {
+                let largest = people.map(\.totals.change).max() ?? 0
                 List(people, selection: $navigation.contributorSelection) { person in
-                    HStack {
+                    HStack(alignment: .top) {
                         Image(systemName: person.bot ? "gearshape.2" : "person.crop.circle.fill")
                             .font(.title2).foregroundStyle(.tint)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(person.name).fontWeight(.medium)
-                            Text("\(person.totals.commits) commits · \(person.repos.count) repositories")
-                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(person.name).fontWeight(.medium).lineLimit(1)
+                                Spacer()
+                                DeltaView(
+                                    added: person.totals.added, removed: person.totals.removed,
+                                    unknown: person.totals.unknown, font: .system(.caption, design: .monospaced))
+                            }
+                            HStack {
+                                Text(
+                                    "\(person.totals.commits.formatted()) \(person.totals.commits == 1 ? "commit" : "commits") · \(person.repos.count) \(person.repos.count == 1 ? "repository" : "repositories")"
+                                )
+                                Spacer()
+                                Text("net \(person.totals.net.formatted(.number.sign(strategy: .always())))")
+                                    .monospacedDigit()
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
+                            ImpactBar(
+                                added: person.totals.added, removed: person.totals.removed, maximum: largest)
                         }
-                        Spacer()
-                        Text(person.totals.change.formatted()).monospacedDigit()
                     }
                     .padding(.vertical, 6).tag(person.id)
                 }
