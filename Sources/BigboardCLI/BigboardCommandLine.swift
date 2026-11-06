@@ -80,8 +80,15 @@ struct CommandLineTool: Sendable {
     var environment: CommandLineEnvironment
 
     func run(_ arguments: [String]) async -> Int32 {
-        guard let command = arguments.first else { return open() }
+        guard let command = arguments.first else {
+            environment.write(Self.usage)
+            return 0
+        }
         let options = Array(arguments.dropFirst())
+        if let help = Self.help[command], options.contains(where: { $0 == "--help" || $0 == "-h" }) {
+            environment.write(help)
+            return 0
+        }
         do {
             switch command {
             case "open": return open()
@@ -91,7 +98,14 @@ struct CommandLineTool: Sendable {
                     try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top", "--people-sort"]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
-                environment.write(Self.usage)
+                guard let topic = options.first else {
+                    environment.write(Self.usage)
+                    return 0
+                }
+                guard options.count == 1, let help = Self.help[topic] else {
+                    throw UsageError("No help for: \(options.joined(separator: " "))")
+                }
+                environment.write(help)
                 return 0
             case "version", "--version":
                 let bundle = CommandLineEnvironment.enclosingApplication().flatMap { Bundle(url: $0) }
@@ -102,7 +116,7 @@ struct CommandLineTool: Sendable {
                 throw UsageError("Unknown command: \(command)")
             }
         } catch let error as UsageError {
-            environment.writeError("bigboard: \(error.message)\n\n" + Self.usage)
+            environment.writeError("bigboard: \(error.message)\n\n" + (Self.help[command] ?? Self.usage))
             return 64
         } catch {
             environment.writeError("bigboard: \(error.localizedDescription)\n")
@@ -110,30 +124,103 @@ struct CommandLineTool: Sendable {
         }
     }
 
+    static let reference = "https://github.com/richhaase/bigboard/blob/main/docs/reference.md#command-line"
     static let usage = """
-        Usage: bigboard [command] [options]
+        bigboard: recorded change across your GitHub clones
 
-        With no command, opens the Bigboard app.
+        Bigboard reads Git history from your own clones, in the source folders chosen
+        in the app, and pull requests through the GitHub CLI. It describes recorded
+        change, not productivity.
+
+        Usage: bigboard <command> [options]
 
         Commands:
-          open                     Open the Bigboard app.
-          status [--json]          Show the GitHub CLI account and collected repositories.
-          activity [options]       Summarize recorded change from cached history.
-              --days N             Days to include (default: the app's range; 0 = all history).
-              --repo OWNER/NAME    Limit to a repository (repeatable).
-              --group NAME         Limit to a saved repository group.
-              --top N              Rows per section (default 10).
-              --people-sort ORDER  name (default), lines, or commits. lines and commits rank
-                                   people with their counts, limited by --top.
-              --include-bots       Include bot accounts.
-              --json               Print JSON.
-          refresh [options]        Fetch the default branch of collected clones with your Git setup.
-              --repo OWNER/NAME    Limit to a repository (repeatable).
-              --group NAME         Limit to a saved repository group.
-          help                     Show this help.
-          version                  Show the version.
+          status      Show the GitHub CLI account, data locations, and collected clones.
+          activity    Summarize recorded change: totals, repositories, paths, and people.
+          refresh     Fetch each clone's default branch with your Git setup.
+          open        Open the Bigboard app.
+          help        Show help for a command, for example: bigboard help activity
+          version     Show the version.
+
+        For scripts and agents:
+          - Add --json to status and activity for stable output with snake_case keys.
+          - status and activity never fetch history. They confirm the GitHub CLI
+            account with GitHub, or use the last confirmed account when offline.
+            refresh fetches from each clone's remote.
+          - Exit status: 0 success, 2 incomplete evidence, 64 usage error, 1 other error.
+          - In activity --json, check evidence and problems before relying on totals.
+            unknown_line_commits above 0 means line totals are a lower bound.
+          - Reference: \(reference)
 
         """
+    static let help: [String: String] = [
+        "status": """
+            Usage: bigboard status [--json]
+
+            Show the GitHub CLI account, the settings and cache locations, the source
+            folders, and each collected repository with its local clone, if found.
+
+            Options:
+              --json    Print JSON.
+
+            """,
+        "activity": """
+            Usage: bigboard activity [options]
+
+            Summarize recorded change in your clones' default branches: totals, excluded
+            lines, repositories, top paths, and people. Reads cached history and never
+            fetches; run bigboard refresh first for current evidence.
+
+            Options:
+              --days N              Days to include (default: the app's range; 0 = all history).
+              --repo OWNER/NAME     Limit to a collected repository (repeatable).
+              --group NAME          Limit to a saved repository group.
+              --top N               Rows per section (default 10).
+              --people-sort ORDER   name (default), lines, or commits. lines and commits rank
+                                    people with their counts, limited by --top.
+              --include-bots        Include bot accounts.
+              --json                Print JSON.
+
+            JSON keys: totals, excluded, repositories, directories, people, evidence,
+            problems. Each evidence entry gives a repository's scanned revision, scan and
+            fetch times, and history, line-count, and path completeness.
+
+            Exit status: 0, or 2 when evidence is incomplete (see problems).
+
+            """,
+        "refresh": """
+            Usage: bigboard refresh [options]
+
+            Fetch each collected clone's remote-tracking default branch with your own Git
+            setup, then rescan its history. Never prompts and never changes your branches,
+            index, working files, or Git config.
+
+            Options:
+              --repo OWNER/NAME     Limit to a repository (repeatable).
+              --group NAME          Limit to a saved repository group.
+
+            Exit status: 0, or 2 when any repository could not be refreshed.
+
+            """,
+        "open": """
+            Usage: bigboard open
+
+            Open the Bigboard app.
+
+            """,
+        "version": """
+            Usage: bigboard version
+
+            Show the version.
+
+            """,
+        "help": """
+            Usage: bigboard help [command]
+
+            Show general help, or help for one command.
+
+            """,
+    ]
 
     private func open() -> Int32 {
         do {

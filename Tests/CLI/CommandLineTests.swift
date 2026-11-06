@@ -63,14 +63,36 @@ struct CommandLineTests {
         #expect(BigboardCommandLine.commandArguments(["/opt/homebrew/bin/bigboard", "activity", "--json"]) == ["activity", "--json"])
         #expect(BigboardCommandLine.commandArguments(["bigboard-dev", "-NSDocumentRevisionsDebugMode"]) == ["-NSDocumentRevisionsDebugMode"])
     }
-    @Test func noCommandOpensTheApplication() async throws {
+    @Test func noCommandPrintsHelpAndOnlyOpenLaunchesTheApplication() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
         #expect(await fixture.tool().run([]) == 0)
+        #expect(fixture.captured.opens == 0)
+        #expect(fixture.captured.output.contains("Usage: bigboard <command> [options]"))
+        #expect(fixture.captured.output.contains("For scripts and agents:"))
         #expect(await fixture.tool().run(["open"]) == 0)
-        #expect(fixture.captured.opens == 2)
-        #expect(await fixture.tool(openFails: true).run([]) == 1)
+        #expect(fixture.captured.opens == 1)
+        #expect(await fixture.tool(openFails: true).run(["open"]) == 1)
         #expect(fixture.captured.error.contains("Bigboard.app was not found"))
+    }
+    @Test func eachCommandHasItsOwnHelp() async throws {
+        let fixture = try CLIFixture(cache: false)
+        defer { fixture.remove() }
+        #expect(await fixture.tool(token: CLITokenSource(nil)).run(["activity", "--help"]) == 0)
+        #expect(fixture.captured.output.hasPrefix("Usage: bigboard activity [options]"))
+        #expect(fixture.captured.output.contains("--people-sort ORDER"))
+        let topic = try CLIFixture(cache: false)
+        defer { topic.remove() }
+        #expect(await topic.tool().run(["help", "refresh"]) == 0)
+        #expect(topic.captured.output.hasPrefix("Usage: bigboard refresh [options]"))
+        #expect(await topic.tool().run(["status", "-h"]) == 0)
+        #expect(topic.captured.output.contains("Usage: bigboard status [--json]"))
+        #expect(await topic.tool().run(["help", "bogus"]) == 64)
+        #expect(topic.captured.error.contains("No help for: bogus"))
+        let usage = try CLIFixture(cache: false)
+        defer { usage.remove() }
+        #expect(await usage.tool().run(["activity", "--days", "soon"]) == 64)
+        #expect(usage.captured.error.contains("Usage: bigboard activity [options]"))
     }
     @Test func statusListsAccountAndCollectedRepositories() async throws {
         let fixture = try CLIFixture()
