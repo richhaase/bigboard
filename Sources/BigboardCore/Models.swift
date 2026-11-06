@@ -101,6 +101,12 @@ struct PullRequest: Sendable, Identifiable, Equatable {
     var author: String
     var url: String
     var updatedAt: Date?
+    var createdAt: Date? = nil
+    var additions: Int? = nil
+    var deletions: Int? = nil
+    var labels: [String] = []
+    var failingChecks: [String] = []
+    var failingChecksComplete = false
     var draft = false
     var review = "UNKNOWN"
     var checks = "UNKNOWN"
