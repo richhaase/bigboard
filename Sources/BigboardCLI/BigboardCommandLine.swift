@@ -95,7 +95,7 @@ struct CommandLineTool: Sendable {
             case "status": return try await status(try Options(options, flags: ["--json"]))
             case "activity":
                 return try await activity(
-                    try Options(options, flags: ["--json", "--include-bots", "--compare"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth"]))
+                    try Options(options, flags: ["--json", "--include-bots", "--compare", "--commits"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth", "--path", "--since", "--until"]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
                 guard let topic = options.first else {
@@ -176,17 +176,24 @@ struct CommandLineTool: Sendable {
               --repo OWNER/NAME     Limit to a collected repository (repeatable).
               --group NAME          Limit to a saved repository group.
               --top N               Rows per section (default 10).
+              --path PATH           Narrow to a file or folder in one repository (needs exactly one
+                                    --repo). Paths below it are grouped from there.
+              --since TIME          Only changes after this time. A date (2026-10-01, local
+                                    midnight) or ISO 8601 time. Use instead of --days.
+              --until TIME          Only changes up to and including this time.
+              --commits             List the supporting commits, newest first, limited by --top.
               --depth N             Group paths N folders deep (1–10, default 1), so a monorepo's
                                     packages/ splits into packages/<name>/ at depth 2.
               --compare             Also measure the previous window of the same length, with
-                                    previous values and a change column (needs --days above 0).
+                                    previous values and a change column (needs --days or --since).
               --people-sort ORDER   name (default), lines, or commits. lines and commits rank
                                     people with their counts, limited by --top.
               --include-bots        Include bot accounts.
               --json                Print JSON.
 
-            JSON keys: depth, totals, comparison, excluded, repositories, directories,
-            people, evidence, problems. With --compare, comparison holds the previous
+            JSON keys: days, scope, depth, totals, comparison, excluded, repositories,
+            directories, people, commits, evidence, problems. scope echoes the repositories,
+            path, interval, and bot policy the numbers cover. With --compare, comparison holds the previous
             window's start, end, and totals, and each repository and path row has previous. Each evidence entry gives a repository's scanned revision, scan and
             fetch times, and history, line-count, and path completeness.
 
@@ -315,8 +322,20 @@ struct CommandLineTool: Sendable {
     }
 
     private func activity(_ options: Options) async throws -> Int32 {
+        let explicitSince = try options.date("--since"), explicitUntil = try options.date("--until")
+        let explicit = explicitSince != nil || explicitUntil != nil
+        guard !explicit || options.value("--days") == nil else {
+            throw UsageError("Use --days or --since/--until, not both.")
+        }
+        if let explicitSince, let explicitUntil, explicitSince >= explicitUntil {
+            throw UsageError("--since must be before --until.")
+        }
+        let path = try options.value("--path").map(Self.repositoryPath)
+        if path != nil, options.values("--repo").count != 1 {
+            throw UsageError("--path needs exactly one --repo.")
+        }
         let workspace = try await workspace(options)
-        let days = try options.integer("--days") ?? workspace.configuration.sinceDays
+        let days = explicit ? 0 : try options.integer("--days") ?? workspace.configuration.sinceDays
         let top = try options.integer("--top") ?? 10
         guard (0...3650).contains(days), top > 0 else { throw UsageError("--days must be 0–3650 and --top positive.") }
         guard let peopleSort = ActivityReport.PeopleSort(rawValue: options.value("--people-sort") ?? "name") else {
@@ -325,7 +344,9 @@ struct CommandLineTool: Sendable {
         let depth = try options.integer("--depth") ?? 1
         guard (1...10).contains(depth) else { throw UsageError("--depth must be 1–10.") }
         let compare = options.flag("--compare")
-        guard !compare || days > 0 else { throw UsageError("--compare needs --days greater than 0.") }
+        guard !compare || days > 0 || explicitSince != nil else {
+            throw UsageError("--compare needs --days greater than 0 or --since.")
+        }
         var commits: [Commit] = []
         var evidence: [ActivityReport.Evidence] = []
         for repo in workspace.repositories {
@@ -345,22 +366,54 @@ struct CommandLineTool: Sendable {
         }
         let now = environment.now()
         let hideBots = !options.flag("--include-bots")
-        let selected = Analysis.select(commits, days: days, hideBots: hideBots, now: now)
-        let previous: ActivityReport.Window? =
-            compare
-            ? {
-                let end = now.addingTimeInterval(-Double(days) * 86_400)
-                let start = end.addingTimeInterval(-Double(days) * 86_400)
-                return ActivityReport.Window(
-                    start: start, end: end,
-                    commits: Analysis.select(commits, since: start, until: end, hideBots: hideBots, now: now))
-            }() : nil
+        let since = explicit ? explicitSince : days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil
+        let until = explicitUntil
+        let pathScope = path.map { value in
+            let repo = workspace.repositories.first?.id ?? ""
+            let isFile = commits.contains { $0.repo == repo && $0.files.contains { $0.path == value } }
+            return ActivityScope(repo: repo, path: value, isFile: isFile)
+        }
+        func window(_ start: Date?, _ end: Date?) -> [Commit] {
+            let selected = Analysis.select(commits, since: start, until: end, hideBots: hideBots, now: now)
+            return pathScope.map { Analysis.scoped(selected, scope: $0) } ?? selected
+        }
+        let selected = Analysis.select(commits, since: since, until: until, hideBots: hideBots, now: now)
+        let excluded = pathScope.map { scope in
+            var result: [String: Int] = [:]
+            for commit in Analysis.unique(selected) where commit.repo == scope.repo && !commit.pathsUnknown {
+                for file in commit.files where !file.excludedReason.isEmpty && scope.contains(file.path) {
+                    result[file.excludedReason, default: 0] += file.added + file.removed
+                }
+            }
+            return result
+        }
+        let previous: ActivityReport.Window? = since.flatMap { start in
+            guard compare else { return nil }
+            let length = (until ?? now).timeIntervalSince(start)
+            let before = start.addingTimeInterval(-length)
+            return ActivityReport.Window(start: before, end: start, commits: window(before, start))
+        }
+        let scope = ActivityReport.Scope(
+            repositories: workspace.repositories.map(\.id), group: options.value("--group"), path: path,
+            kind: pathScope.map { $0.isFile ? "file" : "directory" }, since: since, until: until,
+            includeBots: !hideBots)
         let report = ActivityReport(
-            account: workspace.account.login, generatedAt: now, days: days, commits: selected,
+            account: workspace.account.login, generatedAt: now, days: days, commits: window(since, until),
             repositories: workspace.repositories, top: top, peopleSort: peopleSort, depth: depth,
-            previous: previous, evidence: evidence)
+            previous: previous, scope: scope, pathScope: pathScope, excluded: excluded,
+            commitLimit: options.flag("--commits") ? top : nil, evidence: evidence)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
         return report.problems.isEmpty ? 0 : 2
+    }
+
+    static func repositoryPath(_ value: String) throws -> String {
+        var path = value
+        while path.hasSuffix("/") { path.removeLast() }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0"),
+            parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+        else { throw UsageError("--path must be a path inside the repository, such as src/ui.") }
+        return path
     }
 
     private func refresh(_ options: Options) async throws -> Int32 {
@@ -437,6 +490,18 @@ struct Options {
         guard let value = value(name) else { return nil }
         guard let number = Int(value) else { throw UsageError("\(name) must be a whole number.") }
         return number
+    }
+    func date(_ name: String) throws -> Date? {
+        guard let value = value(name) else { return nil }
+        let full = ISO8601DateFormatter()
+        if let date = full.date(from: value) { return date }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.calendar = Calendar(identifier: .gregorian)
+        day.timeZone = .current
+        day.dateFormat = "yyyy-MM-dd"
+        if let date = day.date(from: value), day.string(from: date) == value { return date }
+        throw UsageError("\(name) must be a date (2026-10-01) or ISO 8601 time (2026-10-01T12:00:00Z).")
     }
 }
 
@@ -566,6 +631,37 @@ struct ActivityReport: Encodable {
         var end: Date
         var commits: [Commit]
     }
+    struct Scope: Encodable {
+        var repositories: [String]
+        var group: String?
+        var path: String?
+        var kind: String?
+        var since: Date?
+        var until: Date?
+        var includeBots: Bool
+        enum CodingKeys: String, CodingKey { case repositories, group, path, kind, since, until, includeBots }
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(repositories, forKey: .repositories)
+            try container.encode(group, forKey: .group)
+            try container.encode(path, forKey: .path)
+            try container.encode(kind, forKey: .kind)
+            try container.encode(since, forKey: .since)
+            try container.encode(until, forKey: .until)
+            try container.encode(includeBots, forKey: .includeBots)
+        }
+    }
+    struct CommitRow: Encodable {
+        var repository: String
+        var sha: String
+        var url: String
+        var date: Date
+        var author: String
+        var subject: String
+        var added: Int
+        var removed: Int
+        var linesUnknown: Bool
+    }
     struct PersonRowReport: Encodable {
         var name: String
         var bot: Bool
@@ -576,6 +672,7 @@ struct ActivityReport: Encodable {
     var account: String
     var generatedAt: Date
     var days: Int
+    var scope: Scope?
     var depth: Int
     var totals: Totals
     var comparison: Comparison?
@@ -584,17 +681,33 @@ struct ActivityReport: Encodable {
     var directories: [DirectoryRow]
     var peopleSort: PeopleSort
     var people: [PersonRowReport]
+    var commits: [CommitRow]?
     var evidence: [Evidence]
     var problems: [ProblemRow]
 
     init(
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
-        peopleSort: PeopleSort = .name, depth: Int = 1, previous: Window? = nil, evidence: [Evidence]
+        peopleSort: PeopleSort = .name, depth: Int = 1, previous: Window? = nil, scope: Scope? = nil,
+        pathScope: ActivityScope? = nil, excluded: [String: Int]? = nil, commitLimit: Int? = nil,
+        evidence: [Evidence]
     ) {
         self.account = account
         self.generatedAt = generatedAt
         self.days = days
+        self.scope = scope
         self.depth = depth
+        self.commits = commitLimit.map { limit in
+            Array(
+                Analysis.unique(commits)
+                    .sorted { $0.date != $1.date ? $0.date > $1.date : Analysis.literalLess($0.id, $1.id) }
+                    .prefix(limit)
+                    .map {
+                        CommitRow(
+                            repository: $0.repo, sha: $0.id, url: "https://github.com/\($0.repo)/commit/\($0.id)",
+                            date: $0.date, author: $0.author, subject: $0.subject, added: $0.added,
+                            removed: $0.removed, linesUnknown: $0.linesUnknown)
+                    })
+        }
         comparison = previous.map {
             Comparison(start: $0.start, end: $0.end, totals: Totals(Analysis.totals($0.commits)))
         }
@@ -604,8 +717,8 @@ struct ActivityReport: Encodable {
         }
         self.peopleSort = peopleSort
         totals = Totals(Analysis.totals(commits))
-        let excluded = Analysis.excludedLines(commits).filter { $0.value > 0 }
-        self.excluded = excluded.isEmpty ? nil : excluded
+        let counted = (excluded ?? Analysis.excludedLines(commits)).filter { $0.value > 0 }
+        self.excluded = counted.isEmpty ? nil : counted
         let current = Dictionary(
             Analysis.activityRows(commits, repositories: repositories).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first })
@@ -632,13 +745,13 @@ struct ActivityReport: Encodable {
         let priorPaths = previous.map { window in
             Dictionary(
                 repositories.flatMap { repo in
-                    Self.pathRows(window.commits, repositories, ActivityScope(repo: repo.id), depth: depth)
+                    Self.pathRows(window.commits, repositories, pathScope ?? ActivityScope(repo: repo.id), depth: depth)
                         .map { (key(repo.id, $0), Totals($0.totals)) }
                 }, uniquingKeysWith: { first, _ in first })
         }
         directories = Array(
             repositories.flatMap { repo in
-                Self.pathRows(commits, repositories, ActivityScope(repo: repo.id), depth: depth)
+                Self.pathRows(commits, repositories, pathScope ?? ActivityScope(repo: repo.id), depth: depth)
                     .map { row in
                         DirectoryRow(
                             repository: repo.id, path: row.scope.path, kind: row.kind, totals: Totals(row.totals),
@@ -695,18 +808,30 @@ struct ActivityReport: Encodable {
         return percent > 0 ? "+\(percent)%" : percent < 0 ? "−\(-percent)%" : "0%"
     }
 
+    static func timestamp(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
     func text() -> String {
-        let range = days == 0 ? "all history" : "last \(days) day" + (days == 1 ? "" : "s")
-        var lines = [
-            "\(account) · \(range) · \(counted(repositories.filter { $0.totals.commits > 0 }.count, "active repository", "active repositories"))"
-        ]
+        let explicit = days == 0 && (scope?.since != nil || scope?.until != nil)
+        let range =
+            explicit
+            ? "after \(scope?.since.map(Self.timestamp) ?? "the start of history") through \(scope?.until.map(Self.timestamp) ?? "now")"
+            : days == 0 ? "all history" : "last \(days) day" + (days == 1 ? "" : "s")
+        var header = [account]
+        if let path = scope?.path, let repository = scope?.repositories.first {
+            header.append(repository + "/" + path + (scope?.kind == "directory" ? "/" : ""))
+        }
+        header.append(range)
+        header.append(counted(repositories.filter { $0.totals.commits > 0 }.count, "active repository", "active repositories"))
+        var lines = [header.joined(separator: " · ")]
         let ai = totals.commits == 0 ? 0 : totals.aiAssisted * 100 / totals.commits
         lines.append(
             "\(counted(totals.commits, "commit", "commits")) · +\(number(totals.added)) −\(number(totals.removed)) lines · \(counted(totals.people, "person", "people")) · \(ai)% AI-assisted"
         )
         if let comparison {
             lines.append(
-                "Previous \(days) day\(days == 1 ? "" : "s"): \(counted(comparison.totals.commits, "commit", "commits")) · +\(number(comparison.totals.added)) −\(number(comparison.totals.removed)) lines · \(Self.change(totals.commits, comparison.totals.commits)) commits"
+                (days > 0 ? "Previous \(days) day\(days == 1 ? "" : "s")" : "Previous period (after \(Self.timestamp(comparison.start)))") + ": \(counted(comparison.totals.commits, "commit", "commits")) · +\(number(comparison.totals.added)) −\(number(comparison.totals.removed)) lines · \(Self.change(totals.commits, comparison.totals.commits)) commits"
             )
         }
         if totals.unknownLineCommits > 0 {
@@ -749,6 +874,16 @@ struct ActivityReport: Encodable {
             directories.map {
                 ($0.repository + "/" + $0.path + ($0.kind == "directory" ? "/" : ""), $0.totals, $0.previous)
             })
+        if let commits, !commits.isEmpty {
+            lines.append("")
+            lines.append("Commits (newest first)")
+            for commit in commits {
+                let change = "+\(number(commit.added)) −\(number(commit.removed))" + (commit.linesUnknown ? " ?" : "")
+                let repository = scope?.repositories.count == 1 ? "" : "  [\(commit.repository)]"
+                lines.append(
+                    "  \(Self.timestamp(commit.date))  \(commit.sha.prefix(12))  \(change.leftPad(16))  \(commit.author): \(commit.subject)\(repository)")
+            }
+        }
         if peopleSort == .name {
             if !people.isEmpty {
                 lines.append("")

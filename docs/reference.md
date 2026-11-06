@@ -271,6 +271,21 @@ the same settings and caches as the app, so they can run while the app is open.
 - `--repo OWNER/NAME`: limit to a collected repository; repeat for several.
 - `--group NAME`: limit to a saved repository group.
 - `--top N`: rows per section (default 10).
+- `--path PATH`: narrow everything to one file or folder in a single repository
+  (requires exactly one `--repo`). Totals, excluded lines, people, and commits
+  count only changes inside it, and the path section lists what is below it.
+  Commits with unknown paths (partial clones) cannot be placed and are left out.
+- `--since TIME`, `--until TIME`: an explicit interval instead of `--days`. Each
+  takes a date (`2026-10-01`, local midnight) or an ISO 8601 time
+  (`2026-10-01T12:00:00Z`). The interval starts just after `--since` and
+  includes `--until`, matching Activity and Heat Maps cells, so a Heat Maps cell
+  for Oct 1 maps to `--since 2026-10-01 --until 2026-10-02`. Without `--since`,
+  it starts at the beginning of history; without `--until`, it runs through now
+  and includes future-dated commits.
+- `--commits`: list the commits behind the numbers, newest first and limited by
+  `--top`, with lines added and removed within the selected path. JSON entries
+  include the full `sha`, a GitHub `url`, `date`, `author` (name only), `subject`,
+  `added`, `removed`, and `lines_unknown`.
 - `--depth N`: group the path section `N` folders deep (1–10, default 1). At
   depth 2, a monorepo's `packages/` row becomes one row per `packages/<name>/`.
   Files shallower than `N` stay as file rows. Counts match Activity's
@@ -280,7 +295,8 @@ the same settings and caches as the app, so they can run while the app is open.
   days" line and, for repositories and paths, previous commits and a change
   column: `new` (no earlier activity), `quiet` (no current activity), or a
   percentage of commits. Repositories active only in the previous window are
-  still listed. People are not compared. Requires `--days` above 0. In JSON,
+  still listed. People are not compared. Requires `--days` above 0 or `--since`;
+  with `--since`, the previous window has the same length and ends at `--since`. In JSON,
   `comparison` holds the previous window's `start`, `end`, and `totals`, and each
   repository and path row has `previous` totals.
 - `--people-sort name|lines|commits`: order of the people section. The default,
@@ -318,7 +334,10 @@ line totals are a lower bound. The JSON also has:
   `message`. Kinds are `no_clone`, `scan_failed`, `shallow`, `partial`, and
   `skipped_commits`.
 
-`generated_at` is when the report ran, not when the history was fetched.
+`scope` echoes what the numbers cover: `repositories`, `group`, `path` and its
+`kind` (`file` or `directory`), the effective `since` and `until` (`null` when
+open), and `include_bots`. `generated_at` is when the report ran, not when the
+history was fetched.
 
 ## Troubleshooting
 

@@ -186,6 +186,54 @@ struct CommandLineTests {
         #expect(current["comparison"] == nil)
         #expect((current["repositories"] as? [[String: Any]])?.first?["previous"] == nil)
     }
+    @Test func pathScopeNarrowsTotalsAndListsSupportingCommits() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        #expect(await fixture.tool().run(["activity", "--days", "0", "--repo", "owner/repo", "--path", ".mailmap", "--commits", "--json"]) == 0)
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(fixture.captured.output.utf8)) as? [String: Any])
+        let scope = try #require(report["scope"] as? [String: Any])
+        #expect(scope["path"] as? String == ".mailmap" && scope["kind"] as? String == "file")
+        #expect(scope["since"] is NSNull && scope["until"] is NSNull && scope["include_bots"] as? Bool == false)
+        #expect((report["totals"] as? [String: Any])?["commits"] as? Int == 1)
+        let commit = try #require((report["commits"] as? [[String: Any]])?.first)
+        #expect((commit["sha"] as? String)?.count == 40 && (commit["url"] as? String)?.contains("github.com/owner/repo/commit/") == true)
+        #expect(commit["author"] as? String == "Mapped Author" && commit["added"] as? Int == 1 && commit["email"] == nil)
+        let folder = try CLIFixture()
+        defer { folder.remove() }
+        #expect(await folder.tool().run(["activity", "--days", "0", "--repo", "owner/repo", "--path", "vendor/"]) == 0)
+        #expect(folder.captured.output.contains("fixture · owner/repo/vendor/ · all history · 0 active repositories"))
+        #expect(folder.captured.output.contains("Excluded: 1 vendored lines"))
+        let text = try CLIFixture()
+        defer { text.remove() }
+        #expect(await text.tool().run(["activity", "--days", "0", "--commits"]) == 0)
+        #expect(text.captured.output.contains("Commits (newest first)\n  2026-10-01T12:00:00Z  "))
+    }
+    @Test func explicitIntervalExcludesItsStartAndIncludesItsEnd() async throws {
+        let instant = "2026-10-01T12:00:00Z"
+        let after = try CLIFixture()
+        defer { after.remove() }
+        #expect(await after.tool().run(["activity", "--since", instant, "--json"]) == 0)
+        let excluded = try #require(try JSONSerialization.jsonObject(with: Data(after.captured.output.utf8)) as? [String: Any])
+        #expect((excluded["totals"] as? [String: Any])?["commits"] as? Int == 0)
+        #expect((excluded["scope"] as? [String: Any])?["since"] as? String == instant)
+        let through = try CLIFixture()
+        defer { through.remove() }
+        #expect(await through.tool().run(["activity", "--until", instant, "--json"]) == 0)
+        let included = try #require(try JSONSerialization.jsonObject(with: Data(through.captured.output.utf8)) as? [String: Any])
+        #expect((included["totals"] as? [String: Any])?["commits"] as? Int == 2)
+        #expect((included["scope"] as? [String: Any])?["since"] is NSNull)
+        let window = try CLIFixture()
+        defer { window.remove() }
+        #expect(await window.tool().run(["activity", "--since", "2026-10-01T00:00:00Z", "--until", "2026-10-02T00:00:00Z", "--compare"]) == 0)
+        #expect(window.captured.output.contains("after 2026-10-01T00:00:00Z through 2026-10-02T00:00:00Z"))
+        #expect(window.captured.output.contains("Previous period (after 2026-09-30T00:00:00Z): 0 commits"))
+    }
+    @Test func pathsMustStayInsideTheRepository() throws {
+        #expect(try CommandLineTool.repositoryPath("src/ui/") == "src/ui")
+        for invalid in ["", "/src", "src/../ui", "./src", "src//ui"] {
+            #expect(throws: UsageError.self) { try CommandLineTool.repositoryPath(invalid) }
+        }
+    }
     @Test func depthGroupsPathsDeeperAndKeepsShallowFiles() {
         let files = [FileChange(path: "packages/a/x.swift", added: 5), FileChange(path: "packages/b/y.swift", added: 3), FileChange(path: "README.md", added: 1)]
         let commits = [Commit(id: String(repeating: "a", count: 40), repo: "o/r", author: "A", email: "a@test", date: Date(timeIntervalSince1970: 1_791_200_000), subject: "Change", added: 9, files: files)]
@@ -219,7 +267,9 @@ struct CommandLineTests {
         ["bogus"], ["activity", "--days", "soon"], ["activity", "--days"], ["activity", "--repo", "other/repo"],
         ["activity", "--group", "Missing"], ["status", "--days", "3"], ["activity", "--days", "4000"],
         ["activity", "--people-sort", "size"], ["activity", "--compare", "--days", "0"], ["activity", "--depth", "0"],
-        ["activity", "--depth", "11"],
+        ["activity", "--depth", "11"], ["activity", "--path", "src"], ["activity", "--repo", "owner/repo", "--path", "../x"],
+        ["activity", "--days", "3", "--since", "2026-10-01"], ["activity", "--since", "soon"],
+        ["activity", "--since", "2026-10-02", "--until", "2026-10-01"],
     ])
     func invalidUsageExplainsAndExits64(arguments: [String]) async throws {
         let fixture = try CLIFixture(cache: false)
