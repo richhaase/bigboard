@@ -231,24 +231,30 @@ struct CommandLineTool: Sendable {
             throw UsageError("--people-sort must be name, lines, or commits.")
         }
         var commits: [Commit] = []
-        var problems: [String] = []
+        var evidence: [ActivityReport.Evidence] = []
         for repo in workspace.repositories {
-            do {
-                let scanned = try await workspace.history.scan(repo, configuration: workspace.configuration)
-                commits += scanned.1
-                if !scanned.0.error.isEmpty { problems.append("\(repo.id): \(scanned.0.error)") }
-            } catch {
-                problems.append("\(repo.id): \(error.localizedDescription)")
+            var entry = ActivityReport.Evidence(repo, fetchedAt: await workspace.history.fetchedAt(repo.id))
+            if repo.path.isEmpty {
+                entry.unavailable("missing", kind: "no_clone", message: "No local clone found in source folders.")
+            } else {
+                do {
+                    let scanned = try await workspace.history.scan(repo, configuration: workspace.configuration)
+                    commits += scanned.1
+                    entry.record(scanned.0)
+                } catch {
+                    entry.unavailable("failed", kind: "scan_failed", message: error.localizedDescription)
+                }
             }
+            evidence.append(entry)
         }
         let now = environment.now()
         let selected = Analysis.select(
             commits, days: days, hideBots: !options.flag("--include-bots"), now: now)
         let report = ActivityReport(
             account: workspace.account.login, generatedAt: now, days: days, commits: selected,
-            repositories: workspace.repositories, top: top, peopleSort: peopleSort, problems: problems)
+            repositories: workspace.repositories, top: top, peopleSort: peopleSort, evidence: evidence)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
-        return problems.isEmpty ? 0 : 2
+        return report.problems.isEmpty ? 0 : 2
     }
 
     private func refresh(_ options: Options) async throws -> Int32 {
@@ -353,12 +359,81 @@ struct ActivityReport: Encodable {
         var removed: Int
         var people: Int
         var aiAssisted: Int
+        var unknownLineCommits: Int
         init(_ value: ActivityTotals) {
             commits = value.commits
             added = value.added
             removed = value.removed
             people = value.people
             aiAssisted = value.ai
+            unknownLineCommits = value.unknownLineCommits
+        }
+    }
+    struct Problem: Encodable, Equatable {
+        var kind: String
+        var message: String
+    }
+    struct ProblemRow: Encodable {
+        var repository: String
+        var kind: String
+        var message: String
+    }
+    struct Evidence: Encodable {
+        var repository: String
+        var branch: String?
+        var remote: String?
+        var revision: String?
+        var scannedAt: Date?
+        var fetchedAt: Date?
+        var history = "complete"
+        var lineCounts = "complete"
+        var paths = "complete"
+        var problems: [Problem] = []
+        init(_ repo: Repository, fetchedAt: Date?) {
+            repository = repo.id
+            branch = repo.branch.isEmpty ? nil : repo.branch
+            remote = repo.path.isEmpty ? nil : repo.remote
+            self.fetchedAt = fetchedAt
+        }
+        mutating func unavailable(_ state: String, kind: String, message: String) {
+            history = state
+            lineCounts = "unknown"
+            paths = "unknown"
+            problems.append(Problem(kind: kind, message: message))
+        }
+        mutating func record(_ repo: Repository) {
+            revision = repo.revision.isEmpty ? nil : repo.revision
+            scannedAt = repo.scannedAt
+            if repo.shallow {
+                history = "shallow"
+                problems.append(
+                    Problem(kind: "shallow", message: "Shallow clone: earlier history is not available locally."))
+            }
+            if repo.partial {
+                lineCounts = "unknown"
+                paths = "unknown"
+                problems.append(Problem(kind: "partial", message: "Partial clone: line counts and paths are unknown."))
+            }
+            if repo.skippedCommits > 0 {
+                problems.append(
+                    Problem(kind: "skipped_commits", message: GitHistory.skippedCommitsMessage(repo.skippedCommits)))
+            }
+        }
+        enum CodingKeys: String, CodingKey {
+            case repository, branch, remote, revision, scannedAt, fetchedAt, history, lineCounts, paths, problems
+        }
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(repository, forKey: .repository)
+            try container.encode(branch, forKey: .branch)
+            try container.encode(remote, forKey: .remote)
+            try container.encode(revision, forKey: .revision)
+            try container.encode(scannedAt, forKey: .scannedAt)
+            try container.encode(fetchedAt, forKey: .fetchedAt)
+            try container.encode(history, forKey: .history)
+            try container.encode(lineCounts, forKey: .lineCounts)
+            try container.encode(paths, forKey: .paths)
+            try container.encode(problems, forKey: .problems)
         }
     }
     struct RepositoryRow: Encodable {
@@ -389,16 +464,20 @@ struct ActivityReport: Encodable {
     var directories: [DirectoryRow]
     var peopleSort: PeopleSort
     var people: [PersonRowReport]
-    var problems: [String]
+    var evidence: [Evidence]
+    var problems: [ProblemRow]
 
     init(
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
-        peopleSort: PeopleSort = .name, problems: [String]
+        peopleSort: PeopleSort = .name, evidence: [Evidence]
     ) {
         self.account = account
         self.generatedAt = generatedAt
         self.days = days
-        self.problems = problems
+        self.evidence = evidence
+        problems = evidence.flatMap { entry in
+            entry.problems.map { ProblemRow(repository: entry.repository, kind: $0.kind, message: $0.message) }
+        }
         self.peopleSort = peopleSort
         totals = Totals(Analysis.totals(commits))
         let excluded = Analysis.excludedLines(commits).filter { $0.value > 0 }
@@ -457,6 +536,11 @@ struct ActivityReport: Encodable {
         lines.append(
             "\(counted(totals.commits, "commit", "commits")) · +\(number(totals.added)) −\(number(totals.removed)) lines · \(counted(totals.people, "person", "people")) · \(ai)% AI-assisted"
         )
+        if totals.unknownLineCommits > 0 {
+            lines.append(
+                "\(counted(totals.unknownLineCommits, "commit has", "commits have")) unknown line counts; line totals are a lower bound."
+            )
+        }
         if let excluded {
             let parts = excluded.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
                 .map { "\(number($0.value)) \($0.key)" }
@@ -506,7 +590,7 @@ struct ActivityReport: Encodable {
         if !problems.isEmpty {
             lines.append("")
             lines.append("Incomplete evidence:")
-            lines += problems.map { "  " + $0 }
+            lines += problems.map { "  \($0.repository): \($0.message)" }
         }
         lines.append("")
         lines.append("Activity describes recorded changes, not productivity.")

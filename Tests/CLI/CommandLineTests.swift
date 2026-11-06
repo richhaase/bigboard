@@ -119,18 +119,40 @@ struct CommandLineTests {
         #expect((decoded["people"] as? [[String: Any]])?.first?["name"] as? String == "Mapped Author")
         #expect((decoded["people"] as? [[String: Any]])?.first?["email"] == nil)
         #expect(decoded["people_sort"] as? String == "name")
+        #expect((decoded["totals"] as? [String: Any])?["unknown_line_commits"] as? Int == 0)
+        let evidence = try #require((decoded["evidence"] as? [[String: Any]])?.first)
+        #expect(evidence["repository"] as? String == "owner/repo" && evidence["branch"] as? String == "main")
+        #expect((evidence["revision"] as? String)?.count == 40 && evidence["scanned_at"] is String)
+        #expect(evidence["fetched_at"] is NSNull && evidence["history"] as? String == "complete")
+        #expect(evidence["line_counts"] as? String == "complete" && evidence["paths"] as? String == "complete")
+        #expect((evidence["problems"] as? [Any])?.isEmpty == true && (decoded["problems"] as? [Any])?.isEmpty == true)
         #expect((decoded["excluded"] as? [String: Any])?["vendored"] as? Int == 1)
         let empty = try CLIFixture()
         defer { empty.remove() }
         #expect(await empty.tool().run(["activity", "--days", "1"]) == 0)
         #expect(empty.captured.output.contains("No recorded change in this range."))
+        let quiet = try CLIFixture()
+        defer { quiet.remove() }
+        #expect(await quiet.tool().run(["activity", "--days", "1", "--json"]) == 0)
+        let quietReport = try #require(try JSONSerialization.jsonObject(with: Data(quiet.captured.output.utf8)) as? [String: Any])
+        #expect((quietReport["repositories"] as? [Any])?.isEmpty == true)
+        #expect((quietReport["evidence"] as? [[String: Any]])?.map { $0["repository"] as? String } == ["owner/repo"])
     }
     @Test func missingHistoryIsReportedAsIncomplete() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
         #expect(await fixture.tool().run(["activity"]) == 2)
-        #expect(fixture.captured.output.contains("Incomplete evidence:"))
-        #expect(fixture.captured.output.contains("owner/repo:"))
+        #expect(fixture.captured.output.contains("Incomplete evidence:\n  owner/repo: No local clone found in source folders.\n"))
+        let json = try CLIFixture(cache: false)
+        defer { json.remove() }
+        #expect(await json.tool().run(["activity", "--json"]) == 2)
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(json.captured.output.utf8)) as? [String: Any])
+        let entry = try #require((report["evidence"] as? [[String: Any]])?.first)
+        #expect(entry["history"] as? String == "missing" && entry["line_counts"] as? String == "unknown")
+        #expect(entry["revision"] is NSNull && entry["remote"] is NSNull && entry["branch"] is NSNull)
+        #expect((entry["problems"] as? [[String: Any]])?.first?["kind"] as? String == "no_clone")
+        let problem = try #require((report["problems"] as? [[String: Any]])?.first)
+        #expect(problem["repository"] as? String == "owner/repo" && problem["kind"] as? String == "no_clone")
     }
     @Test(arguments: [
         ["bogus"], ["activity", "--days", "soon"], ["activity", "--days"], ["activity", "--repo", "other/repo"],

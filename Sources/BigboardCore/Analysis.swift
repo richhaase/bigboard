@@ -6,7 +6,8 @@ struct ActivityTotals: Sendable, Equatable {
     var removed = 0
     var people = 0
     var ai = 0
-    var unknown = false
+    var unknownLineCommits = 0
+    var unknown: Bool { unknownLineCommits > 0 }
     var change: Int { added + removed }
     var net: Int { added - removed }
     var aiPercent: Double { commits == 0 ? 0 : Double(ai) * 100 / Double(commits) }
@@ -108,7 +109,7 @@ enum Analysis {
             commits: selected.count, added: selected.reduce(0) { $0 + ($1.linesUnknown ? 0 : $1.added) },
             removed: selected.reduce(0) { $0 + ($1.linesUnknown ? 0 : $1.removed) },
             people: Set(selected.map(\.identity)).count, ai: selected.filter(\.ai).count,
-            unknown: selected.contains(where: \.linesUnknown))
+            unknownLineCommits: selected.filter(\.linesUnknown).count)
     }
     static func excludedLines(_ commits: [Commit]) -> [String: Int] {
         var result: [String: Int] = [:]

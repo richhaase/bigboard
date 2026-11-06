@@ -319,7 +319,11 @@ struct HistoryTests {
         let history = GitHistory(root: fixture.root, environment: ["HOME": fixture.base.path])
         var repo = try fixture.repository()
         repo.remote = "origin"
+        #expect(await history.fetchedAt(repo.id) == nil)
+        let started = Date()
         let refreshed = try await history.refresh(repo)
+        let fetched = try #require(await history.fetchedAt(repo.id))
+        #expect(fetched >= started.addingTimeInterval(-1) && fetched <= Date().addingTimeInterval(1))
         #expect(refreshed.revision == expected)
         #expect(try fixture.git(["-C", clone.path, "rev-parse", "refs/remotes/origin/main"]) == expected)
         #expect(try state() == before)
@@ -330,7 +334,9 @@ struct HistoryTests {
         _ = try fixture.git(["-C", clone.path, "config", "--unset", "url.file://\(fixture.server.path).insteadOf"])
         _ = try fixture.git(["-C", clone.path, "config", "url.file://\(fixture.base.path)/missing.git.insteadOf", "https://github.com/\(fixture.id).git"])
         let configured = try state()
+        let lastFetch = await history.fetchedAt(repo.id)
         await #expect { try await history.refresh(repo) } throws: { $0 is GitCommandFailure && !$0.localizedDescription.isEmpty }
+        #expect(await history.fetchedAt(repo.id) == lastFetch)
         #expect(try state() == configured)
     }
     private var processFamilyFixture: String {
