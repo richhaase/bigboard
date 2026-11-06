@@ -160,6 +160,45 @@ struct CommandLineTests {
         #expect((quietReport["repositories"] as? [Any])?.isEmpty == true)
         #expect((quietReport["evidence"] as? [[String: Any]])?.map { $0["repository"] as? String } == ["owner/repo"])
     }
+    @Test func compareReportsThePreviousWindowWithAnInclusiveEnd() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        #expect(await fixture.tool().run(["activity", "--days", "4", "--compare"]) == 0)
+        let text = fixture.captured.output
+        #expect(text.contains("fixture · last 4 days · 0 active repositories"))
+        #expect(text.contains("Previous 4 days: 2 commits"))
+        #expect(text.contains("Previous  Change\n  owner/repo") && text.contains("quiet\n"))
+        let json = try CLIFixture()
+        defer { json.remove() }
+        #expect(await json.tool().run(["activity", "--days", "4", "--compare", "--json"]) == 0)
+        let decoded = try #require(try JSONSerialization.jsonObject(with: Data(json.captured.output.utf8)) as? [String: Any])
+        #expect(decoded["depth"] as? Int == 1)
+        let comparison = try #require(decoded["comparison"] as? [String: Any])
+        #expect((comparison["totals"] as? [String: Any])?["commits"] as? Int == 2)
+        #expect(comparison["start"] is String && comparison["end"] is String)
+        let row = try #require((decoded["repositories"] as? [[String: Any]])?.first)
+        #expect((row["totals"] as? [String: Any])?["commits"] as? Int == 0)
+        #expect((row["previous"] as? [String: Any])?["commits"] as? Int == 2)
+        let plain = try CLIFixture()
+        defer { plain.remove() }
+        #expect(await plain.tool().run(["activity", "--days", "7", "--json"]) == 0)
+        let current = try #require(try JSONSerialization.jsonObject(with: Data(plain.captured.output.utf8)) as? [String: Any])
+        #expect(current["comparison"] == nil)
+        #expect((current["repositories"] as? [[String: Any]])?.first?["previous"] == nil)
+    }
+    @Test func depthGroupsPathsDeeperAndKeepsShallowFiles() {
+        let files = [FileChange(path: "packages/a/x.swift", added: 5), FileChange(path: "packages/b/y.swift", added: 3), FileChange(path: "README.md", added: 1)]
+        let commits = [Commit(id: String(repeating: "a", count: 40), repo: "o/r", author: "A", email: "a@test", date: Date(timeIntervalSince1970: 1_791_200_000), subject: "Change", added: 9, files: files)]
+        let repos = [Repository(id: "o/r")]
+        let shallow = ActivityReport(account: "me", generatedAt: Date(), days: 0, commits: commits, repositories: repos, top: 10, evidence: [])
+        #expect(shallow.directories.map(\.path) == ["packages", "README.md"])
+        let deep = ActivityReport(account: "me", generatedAt: Date(), days: 0, commits: commits, repositories: repos, top: 10, depth: 2, evidence: [])
+        #expect(deep.directories.map(\.path) == ["packages/a", "packages/b", "README.md"])
+        #expect(deep.directories.map(\.kind) == ["directory", "directory", "file"])
+        #expect(deep.text().contains("Top paths by lines changed (2 levels deep)"))
+        #expect(ActivityReport.change(5, 0) == "new" && ActivityReport.change(0, 3) == "quiet")
+        #expect(ActivityReport.change(3, 2) == "+50%" && ActivityReport.change(1, 2) == "−50%" && ActivityReport.change(2, 2) == "0%")
+    }
     @Test func missingHistoryIsReportedAsIncomplete() async throws {
         let fixture = try CLIFixture(cache: false)
         defer { fixture.remove() }
@@ -179,7 +218,8 @@ struct CommandLineTests {
     @Test(arguments: [
         ["bogus"], ["activity", "--days", "soon"], ["activity", "--days"], ["activity", "--repo", "other/repo"],
         ["activity", "--group", "Missing"], ["status", "--days", "3"], ["activity", "--days", "4000"],
-        ["activity", "--people-sort", "size"],
+        ["activity", "--people-sort", "size"], ["activity", "--compare", "--days", "0"], ["activity", "--depth", "0"],
+        ["activity", "--depth", "11"],
     ])
     func invalidUsageExplainsAndExits64(arguments: [String]) async throws {
         let fixture = try CLIFixture(cache: false)

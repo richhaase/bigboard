@@ -95,7 +95,7 @@ struct CommandLineTool: Sendable {
             case "status": return try await status(try Options(options, flags: ["--json"]))
             case "activity":
                 return try await activity(
-                    try Options(options, flags: ["--json", "--include-bots"], values: ["--days", "--repo", "--group", "--top", "--people-sort"]))
+                    try Options(options, flags: ["--json", "--include-bots", "--compare"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth"]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
             case "help", "--help", "-h":
                 guard let topic = options.first else {
@@ -176,13 +176,18 @@ struct CommandLineTool: Sendable {
               --repo OWNER/NAME     Limit to a collected repository (repeatable).
               --group NAME          Limit to a saved repository group.
               --top N               Rows per section (default 10).
+              --depth N             Group paths N folders deep (1–10, default 1), so a monorepo's
+                                    packages/ splits into packages/<name>/ at depth 2.
+              --compare             Also measure the previous window of the same length, with
+                                    previous values and a change column (needs --days above 0).
               --people-sort ORDER   name (default), lines, or commits. lines and commits rank
                                     people with their counts, limited by --top.
               --include-bots        Include bot accounts.
               --json                Print JSON.
 
-            JSON keys: totals, excluded, repositories, directories, people, evidence,
-            problems. Each evidence entry gives a repository's scanned revision, scan and
+            JSON keys: depth, totals, comparison, excluded, repositories, directories,
+            people, evidence, problems. With --compare, comparison holds the previous
+            window's start, end, and totals, and each repository and path row has previous. Each evidence entry gives a repository's scanned revision, scan and
             fetch times, and history, line-count, and path completeness.
 
             Exit status: 0, or 2 when evidence is incomplete (see problems).
@@ -317,6 +322,10 @@ struct CommandLineTool: Sendable {
         guard let peopleSort = ActivityReport.PeopleSort(rawValue: options.value("--people-sort") ?? "name") else {
             throw UsageError("--people-sort must be name, lines, or commits.")
         }
+        let depth = try options.integer("--depth") ?? 1
+        guard (1...10).contains(depth) else { throw UsageError("--depth must be 1–10.") }
+        let compare = options.flag("--compare")
+        guard !compare || days > 0 else { throw UsageError("--compare needs --days greater than 0.") }
         var commits: [Commit] = []
         var evidence: [ActivityReport.Evidence] = []
         for repo in workspace.repositories {
@@ -335,11 +344,21 @@ struct CommandLineTool: Sendable {
             evidence.append(entry)
         }
         let now = environment.now()
-        let selected = Analysis.select(
-            commits, days: days, hideBots: !options.flag("--include-bots"), now: now)
+        let hideBots = !options.flag("--include-bots")
+        let selected = Analysis.select(commits, days: days, hideBots: hideBots, now: now)
+        let previous: ActivityReport.Window? =
+            compare
+            ? {
+                let end = now.addingTimeInterval(-Double(days) * 86_400)
+                let start = end.addingTimeInterval(-Double(days) * 86_400)
+                return ActivityReport.Window(
+                    start: start, end: end,
+                    commits: Analysis.select(commits, since: start, until: end, hideBots: hideBots, now: now))
+            }() : nil
         let report = ActivityReport(
             account: workspace.account.login, generatedAt: now, days: days, commits: selected,
-            repositories: workspace.repositories, top: top, peopleSort: peopleSort, evidence: evidence)
+            repositories: workspace.repositories, top: top, peopleSort: peopleSort, depth: depth,
+            previous: previous, evidence: evidence)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
         return report.problems.isEmpty ? 0 : 2
     }
@@ -527,6 +546,7 @@ struct ActivityReport: Encodable {
         var id: String
         var totals: Totals
         var latest: Date?
+        var previous: Totals?
     }
     struct DirectoryRow: Encodable {
         var repository: String
@@ -534,6 +554,17 @@ struct ActivityReport: Encodable {
         var kind: String
         var totals: Totals
         var latest: Date?
+        var previous: Totals?
+    }
+    struct Comparison: Encodable {
+        var start: Date
+        var end: Date
+        var totals: Totals
+    }
+    struct Window {
+        var start: Date
+        var end: Date
+        var commits: [Commit]
     }
     struct PersonRowReport: Encodable {
         var name: String
@@ -545,7 +576,9 @@ struct ActivityReport: Encodable {
     var account: String
     var generatedAt: Date
     var days: Int
+    var depth: Int
     var totals: Totals
+    var comparison: Comparison?
     var excluded: [String: Int]?
     var repositories: [RepositoryRow]
     var directories: [DirectoryRow]
@@ -556,11 +589,15 @@ struct ActivityReport: Encodable {
 
     init(
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
-        peopleSort: PeopleSort = .name, evidence: [Evidence]
+        peopleSort: PeopleSort = .name, depth: Int = 1, previous: Window? = nil, evidence: [Evidence]
     ) {
         self.account = account
         self.generatedAt = generatedAt
         self.days = days
+        self.depth = depth
+        comparison = previous.map {
+            Comparison(start: $0.start, end: $0.end, totals: Totals(Analysis.totals($0.commits)))
+        }
         self.evidence = evidence
         problems = evidence.flatMap { entry in
             entry.problems.map { ProblemRow(repository: entry.repository, kind: $0.kind, message: $0.message) }
@@ -569,17 +606,43 @@ struct ActivityReport: Encodable {
         totals = Totals(Analysis.totals(commits))
         let excluded = Analysis.excludedLines(commits).filter { $0.value > 0 }
         self.excluded = excluded.isEmpty ? nil : excluded
-        self.repositories = Analysis.activityRows(commits, repositories: repositories)
-            .filter { $0.totals.commits > 0 }
-            .sorted { $0.totals.change != $1.totals.change ? $0.totals.change > $1.totals.change : $0.id < $1.id }
-            .map { RepositoryRow(id: $0.id, totals: Totals($0.totals), latest: $0.latest) }
+        let current = Dictionary(
+            Analysis.activityRows(commits, repositories: repositories).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        let prior = previous.map { window in
+            Dictionary(
+                Analysis.activityRows(window.commits, repositories: repositories).map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first })
+        }
+        let none = Totals(ActivityTotals())
+        self.repositories = repositories.compactMap { repo -> RepositoryRow? in
+            let now = current[repo.id], before = prior?[repo.id]
+            guard (now?.totals.commits ?? 0) > 0 || (before?.totals.commits ?? 0) > 0 else { return nil }
+            return RepositoryRow(
+                id: repo.id, totals: now.map { Totals($0.totals) } ?? none, latest: now?.latest,
+                previous: prior == nil ? nil : before.map { Totals($0.totals) } ?? none)
+        }
+        .sorted {
+            let left = $0.totals.added + $0.totals.removed, right = $1.totals.added + $1.totals.removed
+            return left != right ? left > right : $0.id < $1.id
+        }
+        func key(_ repository: String, _ row: ActivityRow) -> String {
+            repository + "\u{0}" + row.kind + "\u{0}" + row.scope.path
+        }
+        let priorPaths = previous.map { window in
+            Dictionary(
+                repositories.flatMap { repo in
+                    Self.pathRows(window.commits, repositories, ActivityScope(repo: repo.id), depth: depth)
+                        .map { (key(repo.id, $0), Totals($0.totals)) }
+                }, uniquingKeysWith: { first, _ in first })
+        }
         directories = Array(
             repositories.flatMap { repo in
-                Analysis.activityRows(commits, repositories: repositories, scope: ActivityScope(repo: repo.id))
-                    .map {
+                Self.pathRows(commits, repositories, ActivityScope(repo: repo.id), depth: depth)
+                    .map { row in
                         DirectoryRow(
-                            repository: repo.id, path: $0.scope.path, kind: $0.kind, totals: Totals($0.totals),
-                            latest: $0.latest)
+                            repository: repo.id, path: row.scope.path, kind: row.kind, totals: Totals(row.totals),
+                            latest: row.latest, previous: priorPaths.map { $0[key(repo.id, row)] ?? none })
                     }
             }
             .sorted { (a: DirectoryRow, b: DirectoryRow) -> Bool in
@@ -614,15 +677,38 @@ struct ActivityReport: Encodable {
                 }
     }
 
+    static func pathRows(
+        _ commits: [Commit], _ repositories: [Repository], _ scope: ActivityScope, depth: Int
+    ) -> [ActivityRow] {
+        let rows = Analysis.activityRows(commits, repositories: repositories, scope: scope)
+        guard depth > 1 else { return rows }
+        return rows.flatMap { row -> [ActivityRow] in
+            guard row.kind == "directory" else { return [row] }
+            let children = pathRows(commits, repositories, row.scope, depth: depth - 1)
+            return children.isEmpty ? [row] : children
+        }
+    }
+    static func change(_ current: Int, _ previous: Int) -> String {
+        if previous == 0 { return current == 0 ? "—" : "new" }
+        if current == 0 { return "quiet" }
+        let percent = Int(((Double(current - previous) / Double(previous)) * 100).rounded())
+        return percent > 0 ? "+\(percent)%" : percent < 0 ? "−\(-percent)%" : "0%"
+    }
+
     func text() -> String {
         let range = days == 0 ? "all history" : "last \(days) day" + (days == 1 ? "" : "s")
         var lines = [
-            "\(account) · \(range) · \(counted(repositories.count, "active repository", "active repositories"))"
+            "\(account) · \(range) · \(counted(repositories.filter { $0.totals.commits > 0 }.count, "active repository", "active repositories"))"
         ]
         let ai = totals.commits == 0 ? 0 : totals.aiAssisted * 100 / totals.commits
         lines.append(
             "\(counted(totals.commits, "commit", "commits")) · +\(number(totals.added)) −\(number(totals.removed)) lines · \(counted(totals.people, "person", "people")) · \(ai)% AI-assisted"
         )
+        if let comparison {
+            lines.append(
+                "Previous \(days) day\(days == 1 ? "" : "s"): \(counted(comparison.totals.commits, "commit", "commits")) · +\(number(comparison.totals.added)) −\(number(comparison.totals.removed)) lines · \(Self.change(totals.commits, comparison.totals.commits)) commits"
+            )
+        }
         if totals.unknownLineCommits > 0 {
             lines.append(
                 "\(counted(totals.unknownLineCommits, "commit has", "commits have")) unknown line counts; line totals are a lower bound."
@@ -633,26 +719,36 @@ struct ActivityReport: Encodable {
                 .map { "\(number($0.value)) \($0.key)" }
             lines.append("Excluded: " + parts.joined(separator: " · ") + " lines (not counted above)")
         }
-        func table(_ title: String, _ rows: [(String, Totals)], people showPeople: Bool = true) {
+        func table(_ title: String, _ rows: [(String, Totals, Totals?)], people showPeople: Bool = true) {
             guard !rows.isEmpty else { return }
+            let comparing = comparison != nil && showPeople
             lines.append("")
             lines.append(title)
             let width = max(rows.map(\.0.count).max() ?? 0, 4)
             let heading: String = "Name".padding(toLength: width, withPad: " ", startingAt: 0)
-            lines.append("  \(heading)  Commits      Added    Removed" + (showPeople ? "  People" : ""))
-            for (label, value) in rows {
+            lines.append(
+                "  \(heading)  Commits      Added    Removed" + (showPeople ? "  People" : "")
+                    + (comparing ? "  Previous  Change" : ""))
+            for (label, value, previous) in rows {
                 let name: String = label.padding(toLength: width, withPad: " ", startingAt: 0)
                 let commits: String = number(value.commits).leftPad(7)
                 let added: String = ("+" + number(value.added)).leftPad(10)
                 let removed: String = ("−" + number(value.removed)).leftPad(10)
                 let people: String = showPeople ? "  " + number(value.people).leftPad(6) : ""
-                lines.append("  \(name)  \(commits) \(added) \(removed)\(people)")
+                var row = "  \(name)  \(commits) \(added) \(removed)\(people)"
+                if comparing {
+                    let before = previous?.commits ?? 0
+                    row += "  " + number(before).leftPad(8) + "  " + Self.change(value.commits, before).leftPad(6)
+                }
+                lines.append(row)
             }
         }
-        table("Repositories", repositories.map { ($0.id, $0.totals) })
+        table("Repositories", repositories.map { ($0.id, $0.totals, $0.previous) })
         table(
-            "Top paths by lines changed",
-            directories.map { ($0.repository + "/" + $0.path + ($0.kind == "directory" ? "/" : ""), $0.totals) })
+            depth == 1 ? "Top paths by lines changed" : "Top paths by lines changed (\(depth) levels deep)",
+            directories.map {
+                ($0.repository + "/" + $0.path + ($0.kind == "directory" ? "/" : ""), $0.totals, $0.previous)
+            })
         if peopleSort == .name {
             if !people.isEmpty {
                 lines.append("")
@@ -670,7 +766,7 @@ struct ActivityReport: Encodable {
             }
         } else {
             table(
-                "People by \(peopleSort.rawValue)", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals) },
+                "People by \(peopleSort.rawValue)", people.map { ($0.name + ($0.bot ? " (bot)" : ""), $0.totals, nil) },
                 people: false)
         }
         if totals.commits == 0 { lines.append("\nNo recorded change in this range.") }

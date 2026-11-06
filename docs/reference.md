@@ -271,6 +271,18 @@ the same settings and caches as the app, so they can run while the app is open.
 - `--repo OWNER/NAME`: limit to a collected repository; repeat for several.
 - `--group NAME`: limit to a saved repository group.
 - `--top N`: rows per section (default 10).
+- `--depth N`: group the path section `N` folders deep (1–10, default 1). At
+  depth 2, a monorepo's `packages/` row becomes one row per `packages/<name>/`.
+  Files shallower than `N` stay as file rows. Counts match Activity's
+  Directories view.
+- `--compare`: also measure the previous window of the same length, from `2N`
+  days ago (exclusive) to `N` days ago (inclusive). The text adds a "Previous N
+  days" line and, for repositories and paths, previous commits and a change
+  column: `new` (no earlier activity), `quiet` (no current activity), or a
+  percentage of commits. Repositories active only in the previous window are
+  still listed. People are not compared. Requires `--days` above 0. In JSON,
+  `comparison` holds the previous window's `start`, `end`, and `totals`, and each
+  repository and path row has `previous` totals.
 - `--people-sort name|lines|commits`: order of the people section. The default,
   `name`, lists everyone active with the repositories they changed, without
   counts. `lines` and `commits` rank people with their counts, limited by `--top`.

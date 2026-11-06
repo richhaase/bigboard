@@ -87,11 +87,12 @@ enum Analysis {
         return date.map { $0 > now.addingTimeInterval(-Double(days) * 86_400) } ?? false
     }
     static func select(
-        _ commits: [Commit], days: Int = 0, since: Date? = nil, repos: Set<String> = [],
+        _ commits: [Commit], days: Int = 0, since: Date? = nil, until: Date? = nil, repos: Set<String> = [],
         hideBots: Bool = false, people: Set<String> = [], now: Date = Date()
     ) -> [Commit] {
-        let selected = commits.filter {
-            (repos.isEmpty || repos.contains($0.repo)) && inRange($0.date, days: days, since: since, now: now)
+        let selected = commits.filter { commit in
+            (repos.isEmpty || repos.contains(commit.repo)) && inRange(commit.date, days: days, since: since, now: now)
+                && until.map { commit.date <= $0 } != false
         }
         let preferred = unique(selected)
         let canonical = Dictionary(
