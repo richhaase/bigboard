@@ -177,7 +177,7 @@ struct MainView: View {
                         Text(name).tag(name)
                     }
                 }
-                .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                .disabled(!workspace.authStatus.signedIn)
                 .padding(.horizontal, 16).padding(.bottom, 12)
                 Divider()
                 RepositoryFilterPanel(

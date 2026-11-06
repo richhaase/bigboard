@@ -108,7 +108,7 @@ private struct BoardCommands: Commands {
                 Divider()
                 Button("Manage Groups…") { navigation.panel = .groups }
             }
-            .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
+            .disabled(modalOpen || !workspace.authStatus.signedIn)
             Divider()
             Button("Copy View as Markdown") {
                 BoardMarkdown.copy(
