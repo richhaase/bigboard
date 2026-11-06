@@ -251,17 +251,19 @@ lives in `~/.cache/bigboard/` (or under `$XDG_CACHE_HOME`). Bigboard Dev uses
 ## Command line
 
 `bigboard` is the app's own executable, installed on your PATH by the Homebrew
-cask. With no arguments it opens Bigboard. Commands use the active GitHub CLI
-account and the same settings and caches as the app, so they can run while the
-app is open.
+cask. With no arguments it prints help, including notes for scripts and agents;
+`bigboard open` opens the app. `bigboard help COMMAND` or `bigboard COMMAND
+--help` shows a command's options. Commands use the active GitHub CLI account and
+the same settings and caches as the app, so they can run while the app is open.
 
 | Command | Result |
 | --- | --- |
-| `bigboard` or `bigboard open` | Open the app. |
+| `bigboard`, `bigboard help [COMMAND]` | Show general or command help. |
+| `bigboard open` | Open the app. |
 | `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
 | `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
 | `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. |
-| `bigboard help`, `bigboard version` | Show usage or the version. |
+| `bigboard version` | Show the version. |
 
 `activity` options:
 
@@ -280,7 +282,9 @@ Totals are followed by the lines excluded from them, by reason: `generated`,
 `vendored`, `fixture`, and `bulk` (`excluded` in JSON, omitted when nothing was
 excluded).
 
-`activity` reads your clones and makes no network requests. Run `refresh` first,
+`activity` reads your clones and never fetches. Like `status`, it confirms the
+GitHub CLI account with GitHub, or uses the last confirmed account when offline.
+Run `refresh` first,
 or let the app refresh, for current evidence. Repositories without a local clone,
 with shallow or partial history, or whose scan failed are listed under incomplete
 evidence and the command exits with status 2. `status` lists each collected

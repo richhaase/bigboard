@@ -59,10 +59,11 @@ Activity describes recorded changes, not productivity.
 
 ## Command line
 
-The Homebrew cask also installs `bigboard`. Run it with no arguments to open the
-app, or use a command:
+The Homebrew cask also installs `bigboard`. Run it with no arguments for help,
+including notes for scripts and agents, or use a command:
 
 ```sh
+bigboard open              # open the app
 bigboard status            # GitHub CLI account and collected repositories
 bigboard activity          # recorded change in your clones' default branches
 bigboard activity --days 30 --json

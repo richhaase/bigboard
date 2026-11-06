@@ -35,7 +35,7 @@ cask "bigboard" do
     Run \`gh auth login\` before opening Bigboard; it uses the active GitHub CLI account.
     It reads history from GitHub clones in folders you choose and only fetches
     their remote-tracking default branch.
-    Run \`bigboard\` to open the app, or \`bigboard help\` for terminal commands.
+    Run \`bigboard open\` to open the app, or \`bigboard\` for terminal commands.
   EOS
 
   zap trash: [
