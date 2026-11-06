@@ -97,7 +97,7 @@ private struct BoardCommands: Commands {
                 Divider()
                 Button("Manage Groups…") { navigation.panel = .groups }
             }
-            .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
+            .disabled(modalOpen || !workspace.authStatus.signedIn)
             Divider()
             Button(navigation.board == .heat ? "Back in Heat Maps" : "Back in Activity") {
                 if navigation.board == .heat { navigation.backInHeat() } else { navigation.back() }

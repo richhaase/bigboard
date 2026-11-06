@@ -88,7 +88,7 @@ struct IdentitiesPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(workspace.busy || (pending && !canStage) || (!changed && !pending))
+                .disabled((pending && !canStage) || (!changed && !pending))
             }
             .padding()
         }

@@ -54,7 +54,12 @@ struct SettingsPanel: View {
             .disabled(applying)
             Divider()
             HStack {
-                if applying { ProgressView("Applying settings…").controlSize(.small) }
+                if applying {
+                    ProgressView("Applying settings…").controlSize(.small)
+                } else if workspace.busy {
+                    Text("Applying stops the current refresh and starts a new one.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") {
                     if hasChanges { confirmingDiscard = true } else { dismiss() }
@@ -76,7 +81,7 @@ struct SettingsPanel: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(
-                        applying || workspace.busy || !workspace.authStatus.signedIn || selected.isEmpty)
+                        applying || !workspace.authStatus.signedIn || selected.isEmpty)
                 }
             }
             .padding()
@@ -119,7 +124,7 @@ struct SettingsPanel: View {
                 Button("Refresh repository list", systemImage: "arrow.clockwise") {
                     Task { await workspace.discover(roots: draft.sourceRoots) }
                 }
-                .disabled(workspace.busy || !workspace.authStatus.signedIn || draft.sourceRoots.isEmpty)
+                .disabled(applying || !workspace.authStatus.signedIn || draft.sourceRoots.isEmpty)
                 Text("\(selected.count) selected").foregroundStyle(.secondary)
                 Spacer()
                 Button(query.isEmpty ? "Select all" : "Select visible") {
