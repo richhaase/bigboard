@@ -414,9 +414,23 @@ actor GitHubService {
             ? raw.reviewDecision! : "UNKNOWN"
         row.mergeable =
             ["MERGEABLE", "CONFLICTING", "UNKNOWN"].contains(raw.mergeable ?? "") ? raw.mergeable! : "UNKNOWN"
-        let check = raw.commits?.nodes?.first??.commit?.statusCheckRollup?.state ?? "UNKNOWN"
+        let rollup = raw.commits?.nodes?.first??.commit?.statusCheckRollup
+        let check = rollup?.state ?? "UNKNOWN"
         row.checks =
             ["SUCCESS", "FAILURE", "ERROR", "PENDING", "EXPECTED"].contains(check) ? check : "UNKNOWN"
+        row.createdAt = githubDate(raw.createdAt)
+        row.additions = raw.additions.flatMap { $0 >= 0 ? $0 : nil }
+        row.deletions = raw.deletions.flatMap { $0 >= 0 ? $0 : nil }
+        row.labels = Array(
+            Set(raw.labels?.nodes?.prefix(20).compactMap { $0?.name }.filter { !$0.isEmpty } ?? [])
+        ).sorted()
+        let contexts = rollup?.contexts
+        row.failingChecks = Array(
+            Set(contexts?.nodes?.prefix(50).compactMap { $0?.failingName } ?? [])
+        ).sorted()
+        row.failingChecksComplete =
+            row.checks == "SUCCESS"
+            || (contexts?.nodes != nil && contexts?.pageInfo?.hasNextPage == false)
         row.headOID = raw.headRefOid ?? ""
         row.baseOID = raw.baseRefOid ?? ""
         row.fileCount = raw.files?.totalCount ?? 0
@@ -464,11 +478,12 @@ actor GitHubService {
             nameWithOwner
             pullRequests(first:50,after:$cursor,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}) {
               totalCount pageInfo { hasNextPage endCursor }
-              nodes { number title author { login } isDraft reviewDecision mergeable updatedAt headRefOid baseRefOid
+              nodes { number title author { login } isDraft reviewDecision mergeable createdAt updatedAt additions deletions headRefOid baseRefOid
+                labels(first:20) { nodes { name } }
                 reviewRequests(first:50) { totalCount pageInfo { hasNextPage endCursor } nodes { requestedReviewer { __typename ... on User { login } ... on Mannequin { login } ... on Team { slug organization { login } } } } }
                 latestReviews(first:50) { totalCount pageInfo { hasNextPage endCursor } nodes { author { login } state submittedAt } }
                 files(first:100) { totalCount pageInfo { hasNextPage endCursor } nodes { path } }
-                commits(last:1) { nodes { commit { statusCheckRollup { state } } } }
+                commits(last:1) { nodes { commit { statusCheckRollup { state contexts(first:50) { pageInfo { hasNextPage endCursor } nodes { __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
               }
             }
           }
@@ -526,9 +541,28 @@ private struct RawReviewRequest: Decodable {
     }
     var requestedReviewer: Reviewer?
 }
+private struct RawLabel: Decodable { var name: String? }
+private struct RawCheckContext: Decodable {
+    var name: String?
+    var conclusion: String?
+    var context: String?
+    var state: String?
+    var failingName: String? {
+        if let name, !name.isEmpty,
+            ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].contains(conclusion ?? "")
+        {
+            return name
+        }
+        if let context, !context.isEmpty, ["FAILURE", "ERROR"].contains(state ?? "") { return context }
+        return nil
+    }
+}
 private struct RawCommit: Decodable {
     struct CommitStatus: Decodable {
-        struct Rollup: Decodable { var state: String? }
+        struct Rollup: Decodable {
+            var state: String?
+            var contexts: Connection<RawCheckContext>?
+        }
         var statusCheckRollup: Rollup?
     }
     var commit: CommitStatus?
@@ -540,7 +574,11 @@ private struct RawPR: Decodable {
     var isDraft: Bool?
     var reviewDecision: String?
     var mergeable: String?
+    var createdAt: String?
     var updatedAt: String?
+    var additions: Int?
+    var deletions: Int?
+    var labels: Connection<RawLabel>?
     var headRefOid: String?
     var baseRefOid: String?
     var files: Connection<RawFile>?
@@ -568,7 +606,10 @@ private struct GraphError: Decodable {
             case .field("pullRequests") = path[1], case .field("nodes") = path[2], case .index = path[3],
             case .field(let field) = path[4]
         else { return false }
-        return ["files", "reviewRequests", "latestReviews", "commits", "reviewDecision", "mergeable"]
+        return [
+            "files", "reviewRequests", "latestReviews", "commits", "reviewDecision", "mergeable", "labels",
+            "additions", "deletions", "createdAt",
+        ]
             .contains(field)
     }
 }

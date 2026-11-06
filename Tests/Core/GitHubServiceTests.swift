@@ -237,3 +237,40 @@ func changingPullRequestRevisionCannotCombineFilePages(changedField: String) asy
     #expect(result.repositories.map(\.id) == ["owner/one", "owner/two"] && result.repositories.filter { !$0.prStale }.isEmpty)
     #expect(await network.count == 1)
 }
+@Test func pullRequestDetailsIncludeAgeSizeLabelsAndFailingChecks() async throws {
+    let detailed = try alteredPR {
+        $0["createdAt"] = "2026-10-01T12:00:00Z"
+        $0["additions"] = 120
+        $0["deletions"] = 30
+        $0["labels"] = ["nodes": [["name": "bug"], ["name": "ui"], ["name": "bug"]]]
+        $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": [
+            "state": "FAILURE",
+            "contexts": [
+                "pageInfo": ["hasNextPage": false],
+                "nodes": [
+                    ["__typename": "CheckRun", "name": "test", "conclusion": "FAILURE"],
+                    ["__typename": "CheckRun", "name": "lint", "conclusion": "SUCCESS"],
+                    ["__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"],
+                    ["__typename": "CheckRun", "name": "deploy", "conclusion": "TIMED_OUT"],
+                ],
+            ],
+        ]]]]]
+    }
+    let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([detailed]), now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
+    let pr = try #require(result.pullRequests.first)
+    #expect(pr.createdAt == githubDate("2026-10-01T12:00:00Z"))
+    #expect(pr.additions == 120 && pr.deletions == 30)
+    #expect(pr.labels == ["bug", "ui"])
+    #expect(pr.checks == "FAILURE")
+    #expect(pr.failingChecks == ["ci/legacy", "deploy", "test"])
+    #expect(pr.failingChecksComplete)
+}
+@Test func missingPullRequestDetailsStayUnknown() async throws {
+    let service = GitHubService(token: { "token" }, transport: ScriptedGitHub([reply(onePR)]), now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 128, previous: [])
+    let pr = try #require(result.pullRequests.first)
+    #expect(pr.createdAt == nil && pr.additions == nil && pr.deletions == nil)
+    #expect(pr.labels.isEmpty && pr.failingChecks.isEmpty)
+    #expect(pr.failingChecksComplete)
+}
