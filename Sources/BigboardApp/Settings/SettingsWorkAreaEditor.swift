@@ -12,6 +12,9 @@ struct SettingsWorkAreaEditor {
     private(set) var error = ""
     private var originalPaths: [String]?
     var isEditing: Bool { original != nil }
+    var hasPendingInput: Bool {
+        isEditing || !destination.repository.isEmpty || !destination.name.isEmpty || !parsedPaths.isEmpty
+    }
     var canSave: Bool { !destination.repository.isEmpty && !destination.name.isEmpty && !parsedPaths.isEmpty }
     private var destination: Identity {
         Identity(

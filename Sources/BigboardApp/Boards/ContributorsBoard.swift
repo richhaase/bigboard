@@ -1,13 +1,18 @@
 import SwiftUI
-import AppKit
-import UniformTypeIdentifiers
 
 struct ContributorsBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     var records: [Commit] { navigation.filteredCommits(workspace.snapshot, for: .contributors) }
     var people: [PersonRow] { navigation.peopleRows(workspace.snapshot) }
-    var selected: PersonRow? { people.first { $0.id == navigation.contributorSelection } ?? people.first }
+    var selected: PersonRow? {
+        guard let id = navigation.contributorSelection else { return people.first }
+        return people.first { $0.id == id }
+    }
+    var hiddenName: String? {
+        guard let id = navigation.contributorSelection, selected == nil else { return nil }
+        return Analysis.people(workspace.snapshot.commits).first { $0.id == id }?.name ?? id
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -36,7 +41,6 @@ struct ContributorsBoard: View {
                 Button("Identities…", systemImage: "person.crop.circle.badge.checkmark") {
                     navigation.panel = .identities
                 }
-                Button("Export JSON…", systemImage: "square.and.arrow.up") { export() }
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
             HSplitView {
@@ -72,6 +76,8 @@ struct ContributorsBoard: View {
                 ScrollView {
                     if let person = selected {
                         detail(person).padding(20)
+                    } else if let name = hiddenName {
+                        hidden(name)
                     } else {
                         EmptyBoard(
                             title: "No contributors match",
@@ -126,8 +132,7 @@ struct ContributorsBoard: View {
                 .filter { $0.totals.commits > 0 }
             ) { row in
                 Button {
-                    navigation.explore(row.scope)
-                    navigation.board = .activity
+                    navigation.showActivity(row.scope, person: person.id)
                 } label: {
                     HStack {
                         Text(row.label)
@@ -142,14 +147,20 @@ struct ContributorsBoard: View {
             CommitList(records: person.records)
         }
     }
-    private func export() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "bigboard-contributors.json"
-        panel.title = "Export contributor statistics"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try workspace.exportJSON().write(to: url, options: .atomic) } catch {
-            workspace.error = error.localizedDescription
+    private func hidden(_ name: String) -> some View {
+        let filtered =
+            !navigation.contributors.query.isEmpty || !navigation.contributors.people.isEmpty
+            || navigation.contributors.hideBots
+        return ContentUnavailableView {
+            Label("\(name) is not shown", systemImage: "person.crop.circle.badge.questionmark")
+        } description: {
+            Text(
+                filtered
+                    ? "The current search or people filters hide this contributor."
+                    : "This contributor has no commits in \(navigation.rangeLabel.lowercased()) for the selected repositories."
+            )
+        } actions: {
+            if filtered { Button("Show \(name)") { navigation.revealContributor() } }
         }
     }
 }

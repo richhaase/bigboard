@@ -6,6 +6,7 @@ struct SettingsGroupEditor {
     private(set) var original: String?
     private(set) var error = ""
     var isEditing: Bool { original != nil }
+    var hasPendingInput: Bool { isEditing || !destination.isEmpty || !parsedRepositories.isEmpty }
     var canSave: Bool { !destination.isEmpty && !parsedRepositories.isEmpty }
     private var destination: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var parsedRepositories: [String] {

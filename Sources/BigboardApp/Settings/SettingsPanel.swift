@@ -17,6 +17,11 @@ struct SettingsPanel: View {
     @State private var query = ""
     @State private var groupEditor = SettingsGroupEditor()
     @State private var areaEditor = SettingsWorkAreaEditor()
+    @State private var baseline = WorkspaceConfiguration()
+    @State private var confirmingDiscard = false
+    private var hasChanges: Bool {
+        preparedConfiguration() != baseline || groupEditor.hasPendingInput || areaEditor.hasPendingInput
+    }
     private var repositoryRows: [Repository] {
         SettingsRepositories.rows(
             available: workspace.discovered, saved: Array(Set(draft.repositories).union(selected)),
@@ -51,9 +56,16 @@ struct SettingsPanel: View {
             HStack {
                 if applying { ProgressView("Applying settings…").controlSize(.small) }
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(applying)
+                Button("Cancel") {
+                    if hasChanges { confirmingDiscard = true } else { dismiss() }
+                }
+                .keyboardShortcut(.cancelAction).disabled(applying)
                 if section != .storage {
                     Button("Apply") {
+                        guard commitPendingEditors() else {
+                            section = .organization
+                            return
+                        }
                         let candidate = preparedConfiguration()
                         applying = true
                         Task {
@@ -70,12 +82,17 @@ struct SettingsPanel: View {
             .padding()
         }
         .interactiveDismissDisabled(applying)
+        .confirmationDialog("Discard settings changes?", isPresented: $confirmingDiscard) {
+            Button("Discard Changes", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) {}
+        }
         .onAppear {
             guard !initialized else { return }
             initialized = true
             section = showGroups ? .organization : .repositories
             draft = workspace.configuration
             selected = Set(draft.repositories)
+            baseline = preparedConfiguration()
         }
     }
     private var repositories: some View {
@@ -283,6 +300,11 @@ struct SettingsPanel: View {
             )
             .font(.caption).foregroundStyle(.secondary)
         }
+    }
+    private func commitPendingEditors() -> Bool {
+        if groupEditor.hasPendingInput, !groupEditor.save(to: &draft.groups) { return false }
+        if areaEditor.hasPendingInput, !areaEditor.save(to: &draft.workAreas) { return false }
+        return true
     }
     private func preparedConfiguration() -> WorkspaceConfiguration {
         var candidate = draft

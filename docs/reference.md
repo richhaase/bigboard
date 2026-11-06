@@ -362,9 +362,8 @@ are data files (such as JSON, YAML, or CSV) inside folders named `fixtures`,
 `__snapshots__`. Bulk data is a single data file with 2,000 or more changed lines. Advanced settings can
 include those lines. Missing line counts are shown as unknown, not measured zero.
 
-The copy button or Command-Shift-C copies the current view as Markdown. **Export JSON** on
-Contributors opens a native Save dialog and exports all loaded tracked history,
-ignoring viewing filters. Neither export fetches data.
+The copy button or Command-Shift-C copies the current view as Markdown without
+fetching data. For JSON, use the `bigboard` command's `--json` reports.
 
 ## Keyboard controls
 

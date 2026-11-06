@@ -237,7 +237,14 @@ final class WorkspaceModel {
                 return values
             }
             for outcome in outcomes.sorted(by: { $0.repository.id < $1.repository.id }) {
-                let repo = outcome.repository
+                var repo = outcome.repository
+                if let prior = previous.repositories.first(where: { $0.id == repo.id }) {
+                    repo.prCheckedAt = prior.prCheckedAt
+                    repo.prInventoryComplete = prior.prInventoryComplete
+                    repo.prFilesComplete = prior.prFilesComplete
+                    repo.prReviewersComplete = prior.prReviewersComplete
+                    repo.prStale = prior.prStale
+                }
                 result.repositories.append(repo)
                 result.commits += outcome.commits
                 if !repo.error.isEmpty { result.coverage.errors.append("\(repo.id): \(repo.error)") }
@@ -478,11 +485,5 @@ final class WorkspaceModel {
         discovery?.cancel()
         await refresh?.value
         await discovery?.value
-    }
-    func exportJSON() throws -> Data {
-        guard !snapshot.repositories.isEmpty else {
-            throw BigboardError.message("Load repository history before exporting.")
-        }
-        return try ActivityExport.json(snapshot.commits, configuration: configuration)
     }
 }

@@ -238,6 +238,29 @@ enum DateRange: Hashable {
         activityIncludesStart = includesStart
         switchBoard(.activity)
     }
+    func showContributor(_ id: String) {
+        contributors.query = ""
+        if !contributors.people.isEmpty && !contributors.people.contains(id) { contributors.people = [] }
+        contributorSelection = id
+        switchBoard(.contributors)
+    }
+    func revealContributor() {
+        contributors.query = ""
+        contributors.people = []
+        contributors.hideBots = false
+    }
+    func showActivity(_ scope: ActivityScope, person: String) {
+        explore(scope)
+        activityInterval = nil
+        activityIncludesStart = false
+        activity.query = ""
+        activityPeopleQuery = ""
+        activity.hideBots = contributors.hideBots
+        if !activity.people.isEmpty && !activity.people.contains(person) { activity.people = [] }
+        lens = .people
+        scopedPerson = person
+        switchBoard(.activity)
+    }
     func searchCommits(_ records: [Commit]) -> [Commit] {
         records.filter {
             activity.query.isEmpty
