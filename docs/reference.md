@@ -263,6 +263,7 @@ the same settings and caches as the app, so they can run while the app is open.
 | `bigboard open` | Open the app. |
 | `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
 | `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
+| `bigboard prs [options]` | List open pull requests with review and check state and what needs your attention. |
 | `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. |
 | `bigboard version` | Show the version. |
 
@@ -339,6 +340,32 @@ line totals are a lower bound. The JSON also has:
 `kind` (`file` or `directory`), the effective `since` and `until` (`null` when
 open), and `include_bots`. `generated_at` is when the report ran, not when the
 history was fetched.
+
+`prs` lists open pull requests, including drafts, in your collected repositories,
+using the same facets, sort orders, and attention rules as the Pull requests
+board. Pull requests are not cached, so it asks GitHub each time, within the
+request budget in Settings → Advanced. Options:
+
+- `--repo OWNER/NAME`, `--group NAME`: limit the repositories.
+- `--mine attention|authored|requested|updated`, `--author LOGIN`,
+  `--review approved|changes_requested|review_required|unknown`,
+  `--checks success|failure|error|pending|expected|unknown`, `--state open|draft`:
+  facets. Repeat an option to match any of its values; different options combine
+  with AND.
+- `--search TEXT`: match repository, title, author, or number.
+- `--sort updated|attention|repository|author|title`: order (default `updated`).
+- `--top N`: pull requests to list (default 25).
+- `--files`: include changed file paths in JSON.
+- `--json`: print JSON.
+
+Text output marks pull requests that need your attention with `!` and says why.
+The JSON has `viewer`, `filters`, `counts` (`open`, `matching`,
+`needs_attention`), and `pull_requests`. Each entry has its review, checks
+(with `failing_checks`), mergeability, size, labels, requested reviewers, latest
+reviews, attention flags with an `attention_reason`, and `complete` flags. The
+JSON also has `evidence` per repository (`open`, `inventory_complete`,
+`files_complete`, `reviewers_complete`, `stale`) and `problems`. Incomplete
+evidence exits with status 2; a rejected GitHub CLI token exits with status 1.
 
 ## Troubleshooting
 
