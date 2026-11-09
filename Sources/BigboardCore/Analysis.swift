@@ -205,10 +205,12 @@ enum Analysis {
         }
     }
     static func relatedPRs(
-        _ pullRequests: [PullRequest], scope: ActivityScope, workAreas: [String: [WorkArea]] = [:]
+        _ pullRequests: [PullRequest], scope: ActivityScope, workAreas: [String: [WorkArea]] = [:],
+        openedBy: Date? = nil
     ) -> [PullRequest] {
         pullRequests.filter { pr in
             guard pr.repo == scope.repo else { return false }
+            if let openedBy, let created = pr.createdAt, created > openedBy { return false }
             if scope.path.isEmpty && scope.areaName.isEmpty { return true }
             return pr.files.contains {
                 scope.contains($0)

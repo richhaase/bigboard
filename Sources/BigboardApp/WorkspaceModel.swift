@@ -516,6 +516,32 @@ final class WorkspaceModel {
             authStatus = state
         }
     }
+    private(set) var pathPresence: [String: Bool] = [:]
+    private func presenceKey(_ repo: Repository, _ path: String) -> String {
+        "\(repo.id)@\(repo.revision):\(path)"
+    }
+    func pathExists(_ scope: ActivityScope) -> Bool? {
+        guard !scope.repo.isEmpty, !scope.path.isEmpty, scope.areaName.isEmpty,
+            let repo = snapshot.repositories.first(where: { $0.id == scope.repo })
+        else { return nil }
+        return pathPresence[presenceKey(repo, scope.path)]
+    }
+    func checkPaths(_ scopes: [ActivityScope]) async {
+        guard let history else { return }
+        let byRepo = Dictionary(
+            grouping: scopes.filter { !$0.repo.isEmpty && !$0.path.isEmpty && $0.areaName.isEmpty }, by: \.repo)
+        for (id, scopes) in byRepo {
+            guard let repo = snapshot.repositories.first(where: { $0.id == id }), !repo.revision.isEmpty else {
+                continue
+            }
+            let unknown = scopes.map(\.path).filter { pathPresence[presenceKey(repo, $0)] == nil }
+            guard !unknown.isEmpty,
+                let present = try? await history.presentPaths(repo: repo, paths: unknown),
+                !Task.isCancelled
+            else { continue }
+            for path in unknown { pathPresence[presenceKey(repo, path)] = present.contains(path) }
+        }
+    }
     func openPath(_ scope: ActivityScope) async throws -> URL {
         guard let history, let repo = snapshot.repositories.first(where: { $0.id == scope.repo }) else {
             throw BigboardError.message("Select a loaded repository.")

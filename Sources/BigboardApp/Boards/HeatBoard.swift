@@ -131,6 +131,7 @@ struct HeatBoard: View {
                                 Divider()
                                 ScopeLinkItems(scope: row.scope, workspace: workspace)
                             }
+                            if workspace.pathExists(row.scope) == false { RemovedBadge() }
                             Spacer()
                             Text(
                                 "\(row.heat.total.formatted()) \(navigation.heatMetric)\(row.heat.incomplete ? " (known)" : "")"
@@ -166,6 +167,7 @@ struct HeatBoard: View {
             .padding(16)
         }
         .scrollEdgeEffectStyle(.hard, for: .top)
+        .task(id: rows.map(\.id)) { await workspace.checkPaths(rows.map(\.scope)) }
     }
     private func rowMaximum(_ row: HeatRow) -> Int {
         row.heat.series.map(\.value).max() ?? 0

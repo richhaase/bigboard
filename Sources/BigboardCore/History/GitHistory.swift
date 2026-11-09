@@ -286,6 +286,42 @@ actor GitHistory {
         default: "Skipped \(count) commits with unreadable author dates."
         }
     }
+    func presentPaths(repo: Repository, paths: [String]) async throws -> Set<String> {
+        let wanted = Array(Set(paths.filter { Self.validPath($0) })).sorted()
+        guard !wanted.isEmpty else { return [] }
+        let lock = try await acquire(repo.id)
+        defer { lock.release() }
+        let directory = try gitDirectory(repo)
+        guard Self.validOID(repo.revision) else {
+            throw BigboardError.message("The retained scan revision is unavailable. Refresh and try again.")
+        }
+        var listed: [Substring] = []
+        for start in stride(from: 0, to: wanted.count, by: 200) {
+            try Task.checkCancellation()
+            let batch = wanted[start..<min(start + 200, wanted.count)]
+            let output = try await GitProcess.run(
+                ["--git-dir=" + directory.path, "ls-tree", "--full-tree", "--name-only", "-z", "--end-of-options",
+                 repo.revision + "^{commit}", "--"] + batch.map { ":(literal)" + $0 })
+            listed += String(decoding: output, as: UTF8.self).split(separator: "\0")
+        }
+        return Self.present(wanted, listed: listed.map(String.init))
+    }
+    static func present(_ wanted: [String], listed: [String]) -> Set<String> {
+        var prefixes = Set(listed)
+        for path in listed {
+            var parts = path.split(separator: "/").dropLast()
+            while !parts.isEmpty {
+                prefixes.insert(parts.joined(separator: "/"))
+                parts = parts.dropLast()
+            }
+        }
+        return Set(wanted.filter { prefixes.contains($0) })
+    }
+    static func validPath(_ literal: String) -> Bool {
+        !literal.isEmpty
+            && literal.split(separator: "/", omittingEmptySubsequences: false)
+                .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\0") })
+    }
     func pathURL(repo: Repository, path literal: String) async throws -> URL {
         let lock = try await acquire(repo.id)
         defer { lock.release() }

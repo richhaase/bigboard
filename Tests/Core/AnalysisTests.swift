@@ -347,3 +347,21 @@ struct AnalysisTests {
         #expect(Analysis.timelineUnit(since: nil, now: now) == .month)
     }
 }
+
+struct InspectorEvidenceTests {
+    @Test func relatedPullRequestsCanBeLimitedToThoseOpenedByARangeEnd() {
+        let end = Date(timeIntervalSince1970: 1_000_000)
+        let early = PullRequest(repo: "acme/app", number: 1, title: "Early", author: "a", url: "", createdAt: end.addingTimeInterval(-60))
+        let late = PullRequest(repo: "acme/app", number: 2, title: "Late", author: "a", url: "", createdAt: end.addingTimeInterval(60))
+        let unknown = PullRequest(repo: "acme/app", number: 3, title: "Unknown", author: "a", url: "")
+        let scope = ActivityScope(repo: "acme/app")
+        #expect(Analysis.relatedPRs([early, late, unknown], scope: scope).map(\.number) == [1, 2, 3])
+        #expect(Analysis.relatedPRs([early, late, unknown], scope: scope, openedBy: end).map(\.number) == [1, 3])
+    }
+    @Test func presentPathsMatchEntriesAndTheirParents() {
+        let present = GitHistory.present(
+            ["Sources", "Sources/App", "Sources/App/main.swift", "desktop", "Sources/Gone"],
+            listed: ["Sources/App/main.swift", "Sources/App/Other.swift"])
+        #expect(present == ["Sources", "Sources/App", "Sources/App/main.swift"])
+    }
+}

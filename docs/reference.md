@@ -182,9 +182,17 @@ Activity, open it on GitHub, or copy its link or path. Double-click or press
 Return on a directory row to explore it. Right-click a contributor to show their
 work in Activity or copy their name or email.
 
-**Open path on GitHub** checks the selected path against the scanned revision
-in your clone before opening it. Missing paths report an error. Repository
-PR context opens Pull requests for the selected repository with its own filters;
+Paths that are not in the repository at the latest scan, such as deleted
+directories, are marked **Removed** on Activity and Heat Maps and offer only
+Copy Path, because GitHub has nothing to show for them. **Open path on GitHub**
+checks the selected path against the scanned revision in your clone before
+opening it. Directory rows omit the contributor count when only one person
+contributed in view.
+
+The selection panel lists open pull requests for the selected repository or
+path. With a custom date range, such as a Heat Maps drill-down, it lists only
+those opened before the range ended; merged and closed pull requests are not
+collected. Repository PR context opens Pull requests for the selected repository with its own filters;
 **Show All Repositories** or Back restores the previous PR filters.
 
 ## Contributors and identities

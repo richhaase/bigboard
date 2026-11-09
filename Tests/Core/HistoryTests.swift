@@ -196,6 +196,9 @@ struct HistoryTests {
         let url = try await history.pathURL(repo: scanned, path: "new\tname\n.swift")
         #expect(url.absoluteString.contains(scanned.revision))
         #expect(url.absoluteString.contains("%09") && url.absoluteString.contains("%0A"))
+        let present = try await history.presentPaths(
+            repo: scanned, paths: ["new\tname\n.swift", "source.swift", "vendor", "vendor/generated.swift", "missing/dir", "*"])
+        #expect(present == ["new\tname\n.swift", "vendor", "vendor/generated.swift"])
     }
     @Test func separateHistoryInstancesCoordinateSharedCache() async throws {
         let fixture = try HistoryFixture()
