@@ -168,11 +168,19 @@ Directory totals include only files in that directory. Additions and removals
 stay separate even when rows are sorted by commits, recency, or name.
 
 **Commits** shows commit subjects, authors, dates, and measured line changes.
-Commit links open GitHub. Lists show an initial batch and offer more as needed.
+Commit subjects marked with an arrow open GitHub. Right-click a commit to copy
+its link, SHA, or subject, or to show its author in Contributors. Lists show an
+initial batch and offer more as needed.
 **People** shows contributors to the current scope and their commits.
 **Related** compares shared commits or historical contributor overlap with
 other areas. Open a related result to inspect the evidence; overlap is not
 ownership or current presence.
+
+Right-click a directory, file, or repository row on Activity or Heat Maps, or an
+area under a contributor's **Where work happened**, to explore it, view it in
+Activity, open it on GitHub, or copy its link or path. Double-click or press
+Return on a directory row to explore it. Right-click a contributor to show their
+work in Activity or copy their name or email.
 
 **Open path on GitHub** checks the selected path against the scanned revision
 in your clone before opening it. Missing paths report an error. Repository
@@ -327,6 +335,17 @@ the same settings and caches as the app, so they can run while the app is open.
 - `--people-sort name|lines|commits`: order of the people section. The default,
   `name`, lists everyone active with the repositories they changed, without
   counts. `lines` and `commits` rank people with their counts, limited by `--top`.
+- `--person WHO`: narrow everything to one person, as Contributors' person
+  filter does. Give an email address (any of their aliases works) or their exact
+  name, ignoring case; repeat for several people. A name shared by more than one
+  person is refused with their emails so you can choose. Their bot activity is
+  included. `scope.people` lists who the numbers cover.
+- `--timeline`: add commits and lines added and removed per hour for ranges up
+  to 2 days, per day up to 30 days, per week up to 180 days, and per month
+  beyond that or for all history, the same buckets as the Activity board. Text
+  shows a bar for each bucket's lines; JSON has `timeline` with a `unit`
+  (`hour`, `day`, `week`, or `month`)
+  and `points` with each bucket's `start`, `commits`, `added`, and `removed`.
 - `--include-bots`: include bot accounts, which are hidden by default.
 - `--json`: print JSON with snake_case keys. People are identified by name only;
   email addresses are omitted.
@@ -477,6 +496,7 @@ and Space to toggle a focused checkbox.
 | ⌘↑ | Up to the enclosing repository, folder, or list |
 | ⌘⇧C | Copy current view as Markdown |
 | ⌘Return | Open selection on GitHub |
+| ⌘⌥C | Copy GitHub link to the selection |
 | ⌘⌥1–4 | Activity: Directories, Commits, People, Related |
 | ⌘⌥M, ⌘⌥A, ⌘⌥R | PRs: needs my attention, authored by me, review requested |
 | Return or right arrow | Explore the selected directory row |

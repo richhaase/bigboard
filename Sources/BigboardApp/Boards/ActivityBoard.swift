@@ -51,6 +51,7 @@ struct ActivityBoard: View {
                 inspector.frame(minWidth: 260, idealWidth: 310, maxWidth: 390)
             }
         }
+        .focusedSceneValue(\.selectedGitHubTarget, inspectScope.repo.isEmpty ? nil : .scope(inspectScope))
     }
 
     private var scopeBar: some View {
@@ -100,7 +101,9 @@ struct ActivityBoard: View {
                     activitySummary.padding(16)
                     if navigation.scope.isFile {
                         ScrollView {
-                            CommitList(records: navigation.searchCommits(scoped), showFiles: true).padding(16)
+                            CommitList(
+                                records: navigation.searchCommits(scoped), showFiles: true,
+                                showAuthor: { navigation.showContributor($0) }).padding(16)
                         }
                     } else {
                         directoryList
@@ -113,7 +116,8 @@ struct ActivityBoard: View {
                         switch navigation.lens {
                         case .commits:
                             CommitList(
-                                records: navigation.searchCommits(scoped), showFiles: navigation.scope.isFile)
+                                records: navigation.searchCommits(scoped), showFiles: navigation.scope.isFile,
+                                showAuthor: { navigation.showContributor($0) })
                         case .people: scopedPeople
                         case .related: relatedList
                         case .directories: EmptyView()
@@ -182,7 +186,17 @@ struct ActivityBoard: View {
                         .buttonStyle(.borderless).help("Explore \(row.label)")
                     }
                     .padding(.vertical, 8).contentShape(Rectangle()).tag(row.id)
-                    .onTapGesture(count: 2) { navigation.explore(row.scope) }
+                }
+                .contextMenu(forSelectionType: String.self) { ids in
+                    if ids.count == 1, let row = rows.first(where: { ids.contains($0.id) }) {
+                        Button("Explore \(row.label)", systemImage: "chevron.right") { navigation.explore(row.scope) }
+                        Divider()
+                        ScopeLinkItems(scope: row.scope, workspace: workspace)
+                    }
+                } primaryAction: { ids in
+                    if ids.count == 1, let row = rows.first(where: { ids.contains($0.id) }) {
+                        navigation.explore(row.scope)
+                    }
                 }
                 .onKeyPress(.rightArrow) { exploreSelected() }
                 .onKeyPress(.return) { exploreSelected() }
@@ -200,7 +214,8 @@ struct ActivityBoard: View {
                 CommitList(
                     records: navigation.searchCommits(
                         Analysis.people(scoped, canonicalRecords: records).first { $0.id == person }?.records
-                            ?? []))
+                            ?? []),
+                    showAuthor: { navigation.showContributor($0) })
             } else {
                 ForEach(
                     Analysis.people(scoped, canonicalRecords: records)
@@ -226,6 +241,12 @@ struct ActivityBoard: View {
                         .padding(.vertical, 8)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Show Commits") { navigation.showPerson(person.id) }
+                        Button("Show in Contributors") { navigation.showContributor(person.id) }
+                        Divider()
+                        PersonCopyItems(name: person.name, email: person.email)
+                    }
                     Divider()
                 }
             }
@@ -254,7 +275,7 @@ struct ActivityBoard: View {
                     if navigation.relatedMode == "people" {
                         ForEach(Analysis.people(row.records), id: \.id) { Text($0.name).font(.callout) }
                     } else {
-                        CommitList(records: row.records)
+                        CommitList(records: row.records, showAuthor: { navigation.showContributor($0) })
                     }
                     Button("Explore matching work") { navigation.exploreRelated(row) }
                 } label: {
@@ -300,6 +321,11 @@ struct ActivityBoard: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Show in Contributors") { navigation.showContributor(person.id) }
+                        Divider()
+                        PersonCopyItems(name: person.name, email: person.email)
+                    }
                 }
                 SectionTitle(title: "Recent activity")
                 ActivityTimeline(
@@ -329,6 +355,11 @@ struct ActivityBoard: View {
                         Text("#\(pr.number) \(pr.title)").multilineTextAlignment(.leading)
                     }
                     .buttonStyle(.link)
+                    .contextMenu {
+                        Button("Show in Pull Requests") { navigation.showPRs(repo: pr.repo, selected: pr.id) }
+                        Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
+                        Button("Copy Link") { copyToPasteboard(pr.url) }
+                    }
                 }
                 if !inspectScope.repo.isEmpty {
                     Button("View repository PRs") { navigation.showPRs(repo: inspectScope.repo) }
@@ -337,7 +368,6 @@ struct ActivityBoard: View {
                         scope.path.isEmpty ? "Open repository on GitHub" : "Open path on GitHub",
                         systemImage: "arrow.up.right"
                     ) { openGitHub(scope, workspace: workspace) }
-                    .focusedSceneValue(\.selectedActivityScope, scope)
                 }
             }
             .padding(16)

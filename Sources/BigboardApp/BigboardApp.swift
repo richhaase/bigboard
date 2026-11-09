@@ -39,16 +39,14 @@ public struct BigboardApplication: App {
 
 extension FocusedValues {
     @Entry var boardSearch: FocusState<Bool>.Binding?
-    @Entry var selectedActivityScope: ActivityScope?
-    @Entry var selectedPullRequestURL: String?
+    @Entry var selectedGitHubTarget: GitHubTarget?
 }
 
 private struct BoardCommands: Commands {
     let workspace: WorkspaceModel
     let navigation: BoardState
     @FocusedValue(\.boardSearch) private var boardSearch
-    @FocusedValue(\.selectedActivityScope) private var selectedActivityScope
-    @FocusedValue(\.selectedPullRequestURL) private var selectedPullRequestURL
+    @FocusedValue(\.selectedGitHubTarget) private var selectedGitHubTarget
 
     private var modalOpen: Bool { navigation.panel != nil }
     private var hasData: Bool { workspace.authStatus.signedIn && !workspace.snapshot.repositories.isEmpty }
@@ -118,14 +116,15 @@ private struct BoardCommands: Commands {
             .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(modalOpen || !hasData)
             Button("Open Selection on GitHub") {
-                if let scope = selectedActivityScope {
-                    openGitHub(scope, workspace: workspace)
-                } else if let url = selectedPullRequestURL {
-                    openGitHub(url)
-                }
+                if let target = selectedGitHubTarget { openGitHub(target, workspace: workspace) }
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(modalOpen || (selectedActivityScope == nil && selectedPullRequestURL == nil))
+            .disabled(modalOpen || selectedGitHubTarget == nil)
+            Button("Copy Link to Selection") {
+                if let target = selectedGitHubTarget { copyGitHubLink(target, workspace: workspace) }
+            }
+            .keyboardShortcut("c", modifiers: [.command, .option])
+            .disabled(modalOpen || selectedGitHubTarget == nil)
             Menu("Activity View") {
                 ForEach(Array(ActivityLens.allCases.enumerated()), id: \.element) { index, lens in
                     Button(lens.rawValue) { navigation.setLens(lens) }

@@ -72,6 +72,15 @@ struct ContributorsBoard: View {
                     }
                     .padding(.vertical, 6).tag(person.id)
                 }
+                .contextMenu(forSelectionType: String.self) { ids in
+                    if ids.count == 1, let person = people.first(where: { ids.contains($0.id) }) {
+                        Button("Show Work in Activity", systemImage: "arrow.right") {
+                            navigation.showActivity(ActivityScope(), person: person.id)
+                        }
+                        Divider()
+                        PersonCopyItems(name: person.name, email: person.email)
+                    }
+                }
                 .frame(minWidth: 280, idealWidth: 380)
                 ScrollView {
                     if let person = selected {
@@ -142,6 +151,13 @@ struct ContributorsBoard: View {
                     .padding(.vertical, 5)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Show in Activity", systemImage: "arrow.right") {
+                        navigation.showActivity(row.scope, person: person.id)
+                    }
+                    Divider()
+                    ScopeLinkItems(scope: row.scope, workspace: workspace)
+                }
             }
             SectionTitle(title: "Recent commits")
             CommitList(records: person.records)

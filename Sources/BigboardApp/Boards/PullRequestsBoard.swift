@@ -134,7 +134,7 @@ struct PullRequestsBoard: View {
                     .textSelection(.enabled)
                 Spacer()
                 Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
-                Button("Copy Link", systemImage: "link") { copy(pr.url) }
+                Button("Copy Link", systemImage: "link") { copyToPasteboard(pr.url) }
                 Button("Close", systemImage: "xmark") { navigation.prSelection = nil }
                     .labelStyle(.iconOnly).buttonStyle(.borderless)
                     .keyboardShortcut(.cancelAction)
@@ -240,13 +240,13 @@ struct PullRequestsBoard: View {
         .contextMenu(forSelectionType: String.self) { ids in
             if let pr = prs.first(where: { ids.contains($0.id) }), ids.count == 1 {
                 Button("Open on GitHub") { openGitHub(pr.url) }
-                Button("Copy Link") { copy(pr.url) }
-                Button("Copy Title and Number") { copy("\(pr.repo)#\(pr.number) \(pr.title)") }
+                Button("Copy Link") { copyToPasteboard(pr.url) }
+                Button("Copy Title and Number") { copyToPasteboard("\(pr.repo)#\(pr.number) \(pr.title)") }
             }
         } primaryAction: { ids in
             for pr in prs where ids.contains(pr.id) { openGitHub(pr.url) }
         }
-        .focusedSceneValue(\.selectedPullRequestURL, selected?.url)
+        .focusedSceneValue(\.selectedGitHubTarget, selected.map { .url($0.url) })
     }
     private var filtered: Bool {
         let filters = navigation.prs
@@ -275,10 +275,6 @@ struct PullRequestsBoard: View {
     private func idle(_ pr: PullRequest) -> Bool {
         guard let date = pr.updatedAt else { return false }
         return workspace.snapshot.generatedAt.timeIntervalSince(date) >= 14 * 86400
-    }
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
     private func dated(_ date: Date?) -> String {
         guard let date else { return "Unknown" }

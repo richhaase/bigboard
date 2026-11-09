@@ -118,6 +118,19 @@ struct HeatBoard: View {
                                 .lineLimit(1)
                             }
                             .buttonStyle(.link)
+                            .contextMenu {
+                                if !row.scope.isFile {
+                                    Button("Explore \(row.label)", systemImage: "chevron.right") {
+                                        navigation.exploreHeat(row.scope)
+                                    }
+                                }
+                                Button("View in Activity", systemImage: "arrow.right") {
+                                    navigation.showHeatActivity(
+                                        row.scope, interval: range.current, includesStart: range.includesStart)
+                                }
+                                Divider()
+                                ScopeLinkItems(scope: row.scope, workspace: workspace)
+                            }
                             Spacer()
                             Text(
                                 "\(row.heat.total.formatted()) \(navigation.heatMetric)\(row.heat.incomplete ? " (known)" : "")"

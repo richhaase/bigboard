@@ -96,7 +96,7 @@ struct CommandLineTool: Sendable {
             case "status": return try await status(try Options(options, flags: ["--json"]))
             case "activity":
                 return try await activity(
-                    try Options(options, flags: ["--json", "--include-bots", "--compare", "--commits"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth", "--path", "--since", "--until"]))
+                    try Options(options, flags: ["--json", "--include-bots", "--compare", "--commits", "--timeline"], values: ["--days", "--repo", "--group", "--top", "--people-sort", "--depth", "--path", "--since", "--until", "--person"]))
             case "prs":
                 return try await pullRequests(
                     try Options(
@@ -247,12 +247,17 @@ struct CommandLineTool: Sendable {
                                     previous values and a change column (needs --days or --since).
               --people-sort ORDER   name (default), lines, or commits. lines and commits rank
                                     people with their counts, limited by --top.
+              --person WHO          Narrow to one person, by email, alias, or exact name
+                                    (repeatable). Their bot activity is included.
+              --timeline            Add commits and lines per day (ranges up to 30 days), week
+                                    (up to 180), or month, as the Activity board does.
               --include-bots        Include bot accounts.
               --json                Print JSON.
 
             JSON keys: days, scope, depth, totals, comparison, excluded, repositories,
-            directories, people, commits, evidence, problems. scope echoes the repositories,
-            path, interval, and bot policy the numbers cover. With --compare, comparison holds the previous
+            directories, people, commits, timeline, evidence, problems. scope echoes the
+            repositories, path, interval, people, and bot policy the numbers cover. timeline
+            has a unit (hour, day, week, or month) and points with each bucket's start. With --compare, comparison holds the previous
             window's start, end, and totals, and each repository and path row has previous. Each evidence entry gives a repository's scanned revision, scan and
             fetch times, and history, line-count, and path completeness.
 
@@ -451,7 +456,11 @@ struct CommandLineTool: Sendable {
             evidence.append(entry)
         }
         let now = environment.now()
-        let hideBots = !options.flag("--include-bots")
+        let persons = try Self.resolvePeople(
+            options.values("--person"), in: Analysis.select(commits, now: now),
+            identities: workspace.configuration.identities)
+        let people = Set(persons.map(\.id))
+        let hideBots = !options.flag("--include-bots") && persons.isEmpty
         let since = explicit ? explicitSince : days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil
         let until = explicitUntil
         let pathScope = path.map { value in
@@ -460,10 +469,12 @@ struct CommandLineTool: Sendable {
             return ActivityScope(repo: repo, path: value, isFile: isFile)
         }
         func window(_ start: Date?, _ end: Date?) -> [Commit] {
-            let selected = Analysis.select(commits, since: start, until: end, hideBots: hideBots, now: now)
+            let selected = Analysis.select(
+                commits, since: start, until: end, hideBots: hideBots, people: people, now: now)
             return pathScope.map { Analysis.scoped(selected, scope: $0) } ?? selected
         }
-        let selected = Analysis.select(commits, since: since, until: until, hideBots: hideBots, now: now)
+        let selected = Analysis.select(
+            commits, since: since, until: until, hideBots: hideBots, people: people, now: now)
         let excluded = pathScope.map { scope in
             var result: [String: Int] = [:]
             for commit in Analysis.unique(selected) where commit.repo == scope.repo && !commit.pathsUnknown {
@@ -482,14 +493,57 @@ struct CommandLineTool: Sendable {
         let scope = ActivityReport.Scope(
             repositories: workspace.repositories.map(\.id), group: options.value("--group"), path: path,
             kind: pathScope.map { $0.isFile ? "file" : "directory" }, since: since, until: until,
-            includeBots: !hideBots)
+            includeBots: !hideBots,
+            people: persons.map(\.name))
+        let current = window(since, until)
+        let timeline = options.flag("--timeline")
+            ? ActivityReport.Timeline(
+                unit: Analysis.timelineUnit(since: since, now: until ?? now),
+                points: Analysis.timeline(current, days: 0, since: since, now: until ?? now).map {
+                    ActivityReport.Timeline.Point(start: $0.date, commits: $0.commits, added: $0.added, removed: $0.removed)
+                })
+            : nil
         let report = ActivityReport(
-            account: workspace.account.login, generatedAt: now, days: days, commits: window(since, until),
+            account: workspace.account.login, generatedAt: now, days: days, commits: current,
             repositories: workspace.repositories, top: top, peopleSort: peopleSort, depth: depth,
             previous: previous, scope: scope, pathScope: pathScope, excluded: excluded,
-            commitLimit: options.flag("--commits") ? top : nil, evidence: evidence)
+            commitLimit: options.flag("--commits") ? top : nil, timeline: timeline, evidence: evidence)
         environment.write(options.flag("--json") ? try Self.json(report) : report.text())
         return report.problems.isEmpty ? 0 : 2
+    }
+
+    static func resolvePeople(
+        _ wanted: [String], in commits: [Commit], identities: [String: IdentityRule] = [:]
+    ) throws -> [PersonRow] {
+        guard !wanted.isEmpty else { return [] }
+        let everyone = Analysis.people(commits)
+        var primary: [String: String] = [:]
+        for (email, rule) in identities {
+            for alias in [email] + rule.aliases {
+                primary[alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] =
+                    email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+        }
+        var chosen: [PersonRow] = []
+        for raw in wanted {
+            let typed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = primary[typed] ?? typed
+            let byEmail = everyone.filter { person in
+                person.id.lowercased() == value || person.email.lowercased() == value
+                    || person.records.contains { $0.email.lowercased() == value }
+            }
+            let matches = byEmail.isEmpty ? everyone.filter { $0.name.lowercased() == value } : byEmail
+            guard !matches.isEmpty else {
+                throw BigboardError.message(
+                    "No one in the collected history matches \(raw). Use an email or a name listed by bigboard activity --days 0.")
+            }
+            guard matches.count == 1 else {
+                let names = matches.map { "\($0.name) <\($0.email)>" }.joined(separator: ", ")
+                throw BigboardError.message("\(raw) matches several people: \(names). Use an email.")
+            }
+            if !chosen.contains(where: { $0.id == matches[0].id }) { chosen.append(matches[0]) }
+        }
+        return chosen
     }
 
     private func pullRequests(_ options: Options) async throws -> Int32 {
@@ -766,7 +820,8 @@ struct ActivityReport: Encodable {
         var since: Date?
         var until: Date?
         var includeBots: Bool
-        enum CodingKeys: String, CodingKey { case repositories, group, path, kind, since, until, includeBots }
+        var people: [String] = []
+        enum CodingKeys: String, CodingKey { case repositories, group, path, kind, since, until, includeBots, people }
         func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(repositories, forKey: .repositories)
@@ -776,6 +831,7 @@ struct ActivityReport: Encodable {
             try container.encode(since, forKey: .since)
             try container.encode(until, forKey: .until)
             try container.encode(includeBots, forKey: .includeBots)
+            try container.encode(people, forKey: .people)
         }
     }
     struct CommitRow: Encodable {
@@ -788,6 +844,16 @@ struct ActivityReport: Encodable {
         var added: Int
         var removed: Int
         var linesUnknown: Bool
+    }
+    struct Timeline: Encodable {
+        struct Point: Encodable {
+            var start: Date
+            var commits: Int
+            var added: Int
+            var removed: Int
+        }
+        var unit: TimelineUnit
+        var points: [Point]
     }
     struct PersonRowReport: Encodable {
         var name: String
@@ -809,6 +875,7 @@ struct ActivityReport: Encodable {
     var peopleSort: PeopleSort
     var people: [PersonRowReport]
     var commits: [CommitRow]?
+    var timeline: Timeline?
     var evidence: [Evidence]
     var problems: [ProblemRow]
 
@@ -816,9 +883,10 @@ struct ActivityReport: Encodable {
         account: String, generatedAt: Date, days: Int, commits: [Commit], repositories: [Repository], top: Int,
         peopleSort: PeopleSort = .name, depth: Int = 1, previous: Window? = nil, scope: Scope? = nil,
         pathScope: ActivityScope? = nil, excluded: [String: Int]? = nil, commitLimit: Int? = nil,
-        evidence: [Evidence]
+        timeline: Timeline? = nil, evidence: [Evidence]
     ) {
         self.account = account
+        self.timeline = timeline
         self.generatedAt = generatedAt
         self.days = days
         self.scope = scope
@@ -946,6 +1014,7 @@ struct ActivityReport: Encodable {
             ? "after \(scope?.since.map(Self.timestamp) ?? "the start of history") through \(scope?.until.map(Self.timestamp) ?? "now")"
             : days == 0 ? "all history" : "last \(days) day" + (days == 1 ? "" : "s")
         var header = [account]
+        if let chosen = scope?.people, !chosen.isEmpty { header.append(chosen.joined(separator: ", ")) }
         if let path = scope?.path, let repository = scope?.repositories.first {
             header.append(repository + "/" + path + (scope?.kind == "directory" ? "/" : ""))
         }
@@ -993,6 +1062,23 @@ struct ActivityReport: Encodable {
                     row += "  " + number(before).leftPad(8) + "  " + Self.change(value.commits, before).leftPad(6)
                 }
                 lines.append(row)
+            }
+        }
+        if let timeline, !timeline.points.isEmpty {
+            lines.append("")
+            lines.append("Timeline (by \(timeline.unit.rawValue))")
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat =
+                timeline.unit == .month ? "yyyy-MM" : timeline.unit == .hour ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd"
+            let peak = timeline.points.map { $0.added + $0.removed }.max() ?? 0
+            for point in timeline.points {
+                let change = point.added + point.removed
+                let width = peak == 0 || change == 0 ? 0 : max(1, change * 24 / peak)
+                lines.append(
+                    "  \(formatter.string(from: point.start).padding(toLength: 10, withPad: " ", startingAt: 0))  "
+                        + number(point.commits).leftPad(7) + ("+" + number(point.added)).leftPad(10)
+                        + ("−" + number(point.removed)).leftPad(10) + "  " + String(repeating: "█", count: width))
             }
         }
         table("Repositories", repositories.map { ($0.id, $0.totals, $0.previous) })

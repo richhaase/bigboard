@@ -67,6 +67,7 @@ bigboard open              # open the app
 bigboard status            # GitHub CLI account and collected repositories
 bigboard activity          # recorded change in your clones' default branches
 bigboard activity --days 30 --json
+bigboard activity --person you@example.com --timeline  # one person over time
 bigboard prs --mine attention  # open pull requests that need you
 bigboard refresh           # fetch each clone's remote-tracking default branch
 bigboard config set since-days 30  # change settings; the app reloads them
