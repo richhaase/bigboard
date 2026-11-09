@@ -118,7 +118,9 @@ Xcode assembles the bundle and processes its Info.plist and icon catalog.
 
 Bigboard follows the XDG base directories, like `gh` and Git. Settings are one
 versioned JSON file, `$XDG_CONFIG_HOME/<name>/config.json` (default
-`~/.config/<name>/config.json`), shared by every GitHub CLI account. Parsed
+`~/.config/<name>/config.json`), shared by every GitHub CLI account. The app watches its directory and reloads
+the file when another process changes it; saves are refused if the file
+changed since it was last read. Parsed
 scans and repository locks live under `$XDG_CACHE_HOME/<name>/history/`
 (default `~/.cache/<name>/history/`), next to `gh-identity.json`, the last
 verified GitHub login and numeric ID that lets cached history open offline.

@@ -203,7 +203,7 @@ private actor ConfigurationWorkspaceTransport: GitHubTransport {
     #expect(await workspace.saveConfiguration(draft) == false)
     #expect(workspace.configuration == original)
     #expect(draft.repositories == ["owner/repo"])
-    #expect(workspace.error.contains("changed outside"))
+    #expect(workspace.error.contains("changed in \(settingsURL.path)"))
     #expect(workspace.busy == false)
     #expect(await network.count == 1)
 }

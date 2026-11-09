@@ -45,12 +45,21 @@ final class WorkspaceStorage: @unchecked Sendable {
         expected = data
         return value
     }
+    func reloadConfiguration() throws -> WorkspaceConfiguration? {
+        lock.lock()
+        let unchanged = (try? read(configurationFile)) == expected
+        lock.unlock()
+        return unchanged ? nil : try loadConfiguration()
+    }
+    func prepareConfigurationDirectory() throws -> URL {
+        try checkedParent(configurationFile, create: true)
+    }
     func saveConfiguration(_ value: WorkspaceConfiguration) throws {
         lock.lock()
         defer { lock.unlock() }
         try validate(value)
         guard try read(configurationFile) == expected else {
-            throw BigboardError.message("Bigboard settings changed outside Bigboard. Restart before saving.")
+            throw BigboardError.message("Bigboard settings changed in \(configurationFile.path). Reopen to see them before saving.")
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

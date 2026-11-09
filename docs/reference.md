@@ -260,7 +260,9 @@ account requires live verification. If a fetch fails, the repository is marked
 stale with Git's message and its local history is still shown.
 
 Settings live in `~/.config/bigboard/config.json` (or under `$XDG_CONFIG_HOME`)
-and can be edited by hand while Bigboard is closed. Rebuildable parsed history
+and can be edited by hand at any time. A running Bigboard notices the change,
+reloads it, and refreshes. If Settings or Identities is open with unsaved
+edits, applying them is refused until you reopen it. Rebuildable parsed history
 lives in `~/.cache/bigboard/` (or under `$XDG_CACHE_HOME`). Bigboard Dev uses
 `bigboard-dev` for both. Git history itself stays in your clones.
 
