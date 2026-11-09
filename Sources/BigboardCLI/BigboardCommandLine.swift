@@ -249,8 +249,9 @@ struct CommandLineTool: Sendable {
                                     people with their counts, limited by --top.
               --person WHO          Narrow to one person, by email, alias, or exact name
                                     (repeatable). Their bot activity is included.
-              --timeline            Add commits and lines per day (ranges up to 30 days), week
-                                    (up to 180), or month, as the Activity board does.
+              --timeline            Add commits and lines per hour (ranges up to 2 days), day
+                                    (up to 30), week (up to 180), or month, as the Activity
+                                    board does.
               --include-bots        Include bot accounts.
               --json                Print JSON.
 
