@@ -17,7 +17,7 @@ import AppKit
         var lines = [
             "# Bigboard · \(navigation.board.rawValue)", "",
             "Snapshot: \(snapshot.generatedAt.formatted(.iso8601))",
-            "Range: \(navigation.board == .pullRequests ? "Current open work" : navigation.board == .activity ? navigation.activityRangeLabel : navigation.rangeLabel)",
+            "Range: \(navigation.board == .pullRequests ? "Current open work" : navigation.rangeLabel)",
             "Repositories: \(navigation.repositories.isEmpty ? "All tracked" : navigation.repositories.sorted().joined(separator: ", "))",
         ]
         if navigation.searchPrompt != nil && !navigation.searchQuery.isEmpty {

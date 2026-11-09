@@ -41,8 +41,7 @@ struct NavLocation: Equatable {
     var lens: ActivityLens
     var activity: BoardFilters
     var activityPeopleQuery: String
-    var activityInterval: DateInterval?
-    var activityIncludesStart: Bool
+    var dateRange: DateRange
     var relatedEvidence: RelatedEvidence?
     var scopedPerson: String?
     var contributors: BoardFilters
@@ -90,6 +89,7 @@ struct RepositoryChecklist {
 enum DateRange: Hashable {
     case hours(Int)
     case days(Int)
+    case between(DateInterval, includesStart: Bool = false)
 
     static let presets: [DateRange] = [
         .hours(1), .hours(4), .hours(12), .days(1),
@@ -103,24 +103,45 @@ enum DateRange: Hashable {
         case .days(0): "All time"
         case .days(1): "Last 24 hours"
         case .days(let count): "Last \(count) days"
+        case .between(let interval, _): Self.label(interval)
         }
+    }
+    var isCustomInterval: Bool {
+        if case .between = self { return true }
+        return false
+    }
+    var includesStart: Bool {
+        if case .between(_, let includesStart) = self { return includesStart }
+        return false
+    }
+    func end(relativeTo date: Date) -> Date {
+        if case .between(let interval, _) = self { return interval.end }
+        return date
+    }
+    static func label(_ interval: DateInterval, calendar: Calendar = .current) -> String {
+        let day = Date.FormatStyle(date: .abbreviated, time: .omitted)
+        guard calendar.startOfDay(for: interval.start) == interval.start,
+            calendar.startOfDay(for: interval.end) == interval.end, interval.duration > 0,
+            let last = calendar.date(byAdding: .day, value: -1, to: interval.end)
+        else { return HeatRange.label(interval) }
+        if last <= interval.start { return interval.start.formatted(day) }
+        return "\(interval.start.formatted(day)) – \(last.formatted(day))"
     }
     func start(relativeTo date: Date) -> Date? {
         switch self {
         case .hours(let count): date.addingTimeInterval(-Double(count) * 3600)
         case .days(0): nil
         case .days(let count): date.addingTimeInterval(-Double(count) * 86400)
+        case .between(let interval, _): interval.start
         }
     }
 }
 @MainActor @Observable final class BoardState {
     var board: Board = .heat
-    var dateRange = DateRange.days(14) { didSet { if dateRange != oldValue { activityInterval = nil } } }
+    var dateRange = DateRange.days(14)
     var repositories: Set<String> = []
     var heat = BoardFilters()
     var heatScope = ActivityScope()
-    var activityInterval: DateInterval?
-    var activityIncludesStart = false
     var activity = BoardFilters()
     var activityPeopleQuery = ""
     var contributors = BoardFilters(sort: "recent")
@@ -149,7 +170,7 @@ enum DateRange: Hashable {
             NavLocation(
                 board: board, heat: heat, heatScope: heatScope, heatExpanded: heatExpanded, scope: scope,
                 lens: lens, activity: activity, activityPeopleQuery: activityPeopleQuery,
-                activityInterval: activityInterval, activityIncludesStart: activityIncludesStart,
+                dateRange: dateRange,
                 relatedEvidence: relatedEvidence, scopedPerson: scopedPerson, contributors: contributors,
                 prs: prs, savedPRFilters: savedPRFilters, contextualRepository: contextualRepository,
                 activitySelection: activitySelection, contributorSelection: contributorSelection,
@@ -164,8 +185,7 @@ enum DateRange: Hashable {
             lens = newValue.lens
             activity = newValue.activity
             activityPeopleQuery = newValue.activityPeopleQuery
-            activityInterval = newValue.activityInterval
-            activityIncludesStart = newValue.activityIncludesStart
+            dateRange = newValue.dateRange
             relatedEvidence = newValue.relatedEvidence
             scopedPerson = newValue.scopedPerson
             contributors = newValue.contributors
@@ -292,13 +312,10 @@ enum DateRange: Hashable {
     func visibleRepositories(_ snapshot: Snapshot) -> [Repository] {
         snapshot.repositories.filter { repositories.isEmpty || repositories.contains($0.id) }
     }
-    var activityRangeLabel: String {
-        activityInterval.map { HeatRange.label($0) } ?? rangeLabel
-    }
     func heatRange(_ snapshot: Snapshot, calendar: Calendar = .current) -> HeatRange {
         HeatRange(
             days: 0, since: dateRange.start(relativeTo: snapshot.generatedAt),
-            now: snapshot.generatedAt,
+            now: dateRange.end(relativeTo: snapshot.generatedAt), includesStart: dateRange.includesStart,
             records: snapshot.commits.filter {
                 repositories.isEmpty || repositories.contains($0.repo)
             }, calendar: calendar)
@@ -311,25 +328,22 @@ enum DateRange: Hashable {
     func filteredCommits(_ snapshot: Snapshot, for board: Board? = nil) -> [Commit] {
         let selectedBoard = board ?? self.board
         let filters = selectedBoard == .heat ? heat : selectedBoard == .contributors ? contributors : activity
-        let interval = selectedBoard == .activity ? activityInterval : nil
+        let since = dateRange.start(relativeTo: snapshot.generatedAt)
+        let includesStart = dateRange.includesStart
         return Analysis.select(
-            snapshot.commits,
-            since: interval == nil ? dateRange.start(relativeTo: snapshot.generatedAt) : nil,
+            snapshot.commits, since: includesStart ? nil : since,
+            until: dateRange.isCustomInterval ? dateRange.end(relativeTo: snapshot.generatedAt) : nil,
             repos: repositories, hideBots: filters.hideBots, people: filters.people,
-            now: interval?.end ?? snapshot.generatedAt
+            now: snapshot.generatedAt
         ).filter { commit in
-            guard let interval else { return true }
-            return
-                (commit.date > interval.start || (activityIncludesStart && commit.date == interval.start))
-                && commit.date <= interval.end
+            guard includesStart, let since else { return true }
+            return commit.date >= since
         }
     }
     func timelinePoints(_ records: [Commit], snapshot: Snapshot) -> [TimelinePoint] {
-        let interval = board == .activity ? activityInterval : nil
-        return Analysis.timeline(
-            records, days: 0, since: interval?.start ?? dateRange.start(relativeTo: snapshot.generatedAt),
-            now: interval?.end ?? snapshot.generatedAt,
-            includesStart: interval != nil && activityIncludesStart)
+        Analysis.timeline(
+            records, days: 0, since: dateRange.start(relativeTo: snapshot.generatedAt),
+            now: dateRange.end(relativeTo: snapshot.generatedAt), includesStart: dateRange.includesStart)
     }
     func exploreHeat(_ scope: ActivityScope) {
         navigate {
@@ -350,8 +364,7 @@ enum DateRange: Hashable {
         activityPeopleQuery = ""
         activity.hideBots = heat.hideBots
         activity.people = heat.people
-        activityInterval = interval
-        activityIncludesStart = includesStart
+        if let interval { dateRange = .between(interval, includesStart: includesStart) }
         switchBoard(.activity)
     }
     func showContributor(_ id: String) {
@@ -373,8 +386,6 @@ enum DateRange: Hashable {
     }
     private func showActivityNow(_ scope: ActivityScope, person: String) {
         explore(scope)
-        activityInterval = nil
-        activityIncludesStart = false
         activity.query = ""
         activityPeopleQuery = ""
         activity.hideBots = contributors.hideBots
@@ -556,8 +567,6 @@ enum DateRange: Hashable {
         heatMetric = "lines"
         heatSharedScale = false
         heatExpanded = false
-        activityInterval = nil
-        activityIncludesStart = false
         activity = BoardFilters()
         activityPeopleQuery = ""
         contributors = BoardFilters(sort: configuration.contributorSort)
@@ -583,7 +592,6 @@ enum DateRange: Hashable {
         }
         if !scope.repo.isEmpty && !available.contains(scope.repo) {
             scope = ActivityScope()
-            activityInterval = nil
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil
@@ -601,7 +609,6 @@ enum DateRange: Hashable {
         }
         if !scope.repo.isEmpty && !repositories.isEmpty && !repositories.contains(scope.repo) {
             scope = ActivityScope()
-            activityInterval = nil
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil

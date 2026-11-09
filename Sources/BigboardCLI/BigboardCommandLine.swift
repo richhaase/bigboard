@@ -257,7 +257,7 @@ struct CommandLineTool: Sendable {
             JSON keys: days, scope, depth, totals, comparison, excluded, repositories,
             directories, people, commits, timeline, evidence, problems. scope echoes the
             repositories, path, interval, people, and bot policy the numbers cover. timeline
-            has a unit (day, week, or month) and points with each bucket's start. With --compare, comparison holds the previous
+            has a unit (hour, day, week, or month) and points with each bucket's start. With --compare, comparison holds the previous
             window's start, end, and totals, and each repository and path row has previous. Each evidence entry gives a repository's scanned revision, scan and
             fetch times, and history, line-count, and path completeness.
 
@@ -1069,7 +1069,8 @@ struct ActivityReport: Encodable {
             lines.append("Timeline (by \(timeline.unit.rawValue))")
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = timeline.unit == .month ? "yyyy-MM" : "yyyy-MM-dd"
+            formatter.dateFormat =
+                timeline.unit == .month ? "yyyy-MM" : timeline.unit == .hour ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd"
             let peak = timeline.points.map { $0.added + $0.removed }.max() ?? 0
             for point in timeline.points {
                 let change = point.added + point.removed

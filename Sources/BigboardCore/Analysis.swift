@@ -32,7 +32,7 @@ struct ActivityRow: Identifiable, Sendable {
     var latest: Date?
 }
 enum TimelineUnit: String, Sendable, Encodable {
-    case day, week, month
+    case hour, day, week, month
 }
 struct TimelinePoint: Identifiable, Sendable {
     var date: Date
@@ -344,23 +344,25 @@ enum Analysis {
         let records = unique(commits)
         let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
         let unit = timelineUnit(since: cutoff, now: now)
-        let daily = unit == .day, weekly = unit == .week
+        let hourly = unit == .hour, daily = unit == .day, weekly = unit == .week
         func bucket(_ date: Date) -> Date {
+            if hourly { return calendar.dateInterval(of: .hour, for: date)?.start ?? date }
             if daily { return calendar.startOfDay(for: date) }
             if weekly { return weekStart(date, calendar: calendar) }
             return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
         }
         let start = cutoff.map(bucket) ?? bucket(records.reduce(now) { min($0, $1.date) })
-        let component: Calendar.Component = daily ? .day : weekly ? .weekOfYear : .month
+        let component: Calendar.Component = hourly ? .hour : daily ? .day : weekly ? .weekOfYear : .month
         var rows: [Date: TimelinePoint] = [:]
         var date = start
-        while date <= now {
+        while date < now || date == start {
             rows[date] = TimelinePoint(date: date)
             date = calendar.date(byAdding: component, value: 1, to: date)!
         }
         for c in records {
             if let cutoff, c.date < cutoff || (!includesStart && c.date == cutoff) { continue }
-            let key = bucket(c.date)
+            var key = bucket(c.date)
+            if rows[key] == nil, c.date == now, let last = rows.keys.max() { key = last }
             guard rows[key] != nil || c.date > now else { continue }
             var row = rows[key] ?? TimelinePoint(date: key)
             row.commits += 1
@@ -373,7 +375,7 @@ enum Analysis {
     static func timelineUnit(since: Date?, now: Date) -> TimelineUnit {
         guard let since else { return .month }
         let span = max(0, now.timeIntervalSince(since) / 86_400)
-        return span <= 30 ? .day : span <= 180 ? .week : .month
+        return span <= 2 ? .hour : span <= 30 ? .day : span <= 180 ? .week : .month
     }
     private static func weekStart(_ date: Date, calendar: Calendar) -> Date {
         calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)

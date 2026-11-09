@@ -103,8 +103,11 @@ collected. Groups with no collected repositories are unavailable. The
 
 The date menu offers the last 1, 4, 12, or 24 hours, 7, 14, 30, 90, and 365 days,
 All time, and **Custom range…**. The default is 14 days unless
-changed in Settings. Custom days accepts 0 for all time, up to 3650 days.
-The custom-range sheet changes only the date range when you choose Apply.
+changed in Settings. The custom-range sheet offers **Recent days** (0 for all
+time, up to 3650 days) or **Between dates**, which covers both chosen days. It
+changes only the date range when you choose Apply. A custom range is shown in
+the date menu by its dates and checked there; choosing a preset replaces it.
+Custom ranges stay fixed when data refreshes.
 Heat Maps, Activity, and Contributors share that range. Pull requests shows
 current open work regardless of age and does not display the date control.
 
@@ -114,7 +117,7 @@ Search appears for commits, people, and PRs. Heat Maps, directory browsing,
 and Related use drill-down instead of text search. Commit and people searches
 within Activity are independent.
 
-Ranges roll forward with the displayed snapshot when data refreshes. Refreshing
+Recent ranges roll forward with the displayed snapshot when data refreshes. Refreshing
 keeps the selected duration. Each session starts with the configured default range.
 
 Historical boards use Git author dates. Date filtering is relative to the
@@ -144,9 +147,11 @@ dashed outlines and known-activity labels; a zero in those cells does not establ
 that no activity occurred.
 
 Select a repository or directory name to explore it within Heat Maps. Select a
-cell to explore that interval in Activity's **Directories** view. The arrow beside an area
-opens Activity for the whole selected range. Activity labels the interval carried from Heat Maps and offers
-**Use shared date range**. Changing the shared date range also clears that interval.
+cell to explore that interval in Activity's **Directories** view: the cell's
+interval becomes the custom date range shown in the toolbar for every
+historical board, and Back returns to the previous range. Choose another range
+in the date menu to widen it again. The arrow beside an area opens Activity for
+the whole selected range.
 Switching boards preserves each board's state.
 
 ## Activity
@@ -335,10 +340,11 @@ the same settings and caches as the app, so they can run while the app is open.
   name, ignoring case; repeat for several people. A name shared by more than one
   person is refused with their emails so you can choose. Their bot activity is
   included. `scope.people` lists who the numbers cover.
-- `--timeline`: add commits and lines added and removed per day for ranges up to
-  30 days, per week up to 180 days, and per month beyond that or for all
-  history, the same buckets as the Activity board. Text shows a bar for each
-  bucket's lines; JSON has `timeline` with a `unit` (`day`, `week`, or `month`)
+- `--timeline`: add commits and lines added and removed per hour for ranges up
+  to 2 days, per day up to 30 days, per week up to 180 days, and per month
+  beyond that or for all history, the same buckets as the Activity board. Text
+  shows a bar for each bucket's lines; JSON has `timeline` with a `unit`
+  (`hour`, `day`, `week`, or `month`)
   and `points` with each bucket's `start`, `commits`, `added`, and `removed`.
 - `--include-bots`: include bot accounts, which are hidden by default.
 - `--json`: print JSON with snake_case keys. People are identified by name only;
@@ -464,8 +470,8 @@ fetching data. For JSON, use the `bigboard` command's `--json` reports.
 Back and Forward work like Finder: the toolbar arrows, **Go → Back**
 (Command-[), and **Go → Forward** (Command-]) step through every board switch
 and drill-down, including jumps between boards. Going back restores that
-location's scope, view, selection, and board filters; the date range and
-repository filter stay as they are. Selecting a row does not add a step, and
+location's scope, view, selection, board filters, and date range; the
+repository filter stays as it is. Selecting a row does not add a step, and
 navigating somewhere new clears Forward. History lasts for the session, keeps
 the last 50 steps, and drops locations for repositories that are no longer
 collected.

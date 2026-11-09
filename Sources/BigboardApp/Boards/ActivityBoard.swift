@@ -40,14 +40,6 @@ struct ActivityBoard: View {
                 PeopleFilter(records: workspace.snapshot.commits, filters: $navigation.activity)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
-            if navigation.activityInterval != nil {
-                HStack {
-                    Text("From Heat Maps: \(navigation.activityRangeLabel)")
-                    Spacer()
-                    Button("Use shared date range") { navigation.activityInterval = nil }
-                }
-                .font(.callout).padding(.horizontal, 12).padding(.bottom, 10)
-            }
             scopeBar
             Picker(
                 "Activity lens",
@@ -311,7 +303,7 @@ struct ActivityBoard: View {
                             ? inspectScope.repo.isEmpty ? "Selection" : inspectScope.repo : inspectScope.path
                 )
                 .font(.title3.bold()).textSelection(.enabled)
-                Text(navigation.activityRangeLabel)
+                Text(navigation.rangeLabel)
                     .font(.caption).foregroundStyle(.secondary)
                 let total = Analysis.totals(inspectRecords)
                 DeltaView(added: total.added, removed: total.removed, unknown: total.unknown)
