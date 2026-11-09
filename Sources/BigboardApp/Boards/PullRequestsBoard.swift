@@ -102,7 +102,7 @@ struct PullRequestsBoard: View {
                     "Review",
                     options: [
                         ("APPROVED", "Approved"), ("CHANGES_REQUESTED", "Changes requested"),
-                        ("REVIEW_REQUIRED", "Needs review"), ("UNKNOWN", "Unknown"),
+                        ("REVIEW_REQUIRED", "Needs review"), ("UNKNOWN", ReviewLabel.notRequired),
                     ], values: $navigation.prs.reviews)
                 facetMenu(
                     "Checks",
@@ -133,7 +133,7 @@ struct PullRequestsBoard: View {
     private func detailPane(_ pr: PullRequest) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(pr.repo) #\(pr.number)").font(.caption).foregroundStyle(.secondary)
+                Text(verbatim: "\(pr.repo) #\(pr.number)").font(.caption).foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 Spacer()
                 Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(pr.url) }
@@ -178,7 +178,7 @@ struct PullRequestsBoard: View {
             TableColumn("Pull Request", sortUsing: KeyPathComparator(\PRRow.title)) { row in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("#\(row.pr.number)").foregroundStyle(.secondary).monospacedDigit()
+                        Text(verbatim: "#\(row.pr.number)").foregroundStyle(.secondary).monospacedDigit()
                         Text(row.pr.title).lineLimit(1)
                         if row.pr.draft { StateBadge(value: "DRAFT") }
                     }
@@ -199,7 +199,7 @@ struct PullRequestsBoard: View {
             }
             .width(min: 70, ideal: 100)
             TableColumn("Review", sortUsing: KeyPathComparator(\PRRow.reviewRank)) { row in
-                StateBadge(value: row.pr.review)
+                StateBadge(value: row.pr.review, label: ReviewLabel.text(row.pr.review))
             }
             .width(min: 80, ideal: 120)
             TableColumn("Checks", sortUsing: KeyPathComparator(\PRRow.checksRank)) { row in
@@ -382,7 +382,7 @@ struct PullRequestsBoard: View {
     @ViewBuilder private func reviews(_ pr: PullRequest) -> some View {
         HStack {
             Text("Review").foregroundStyle(.secondary)
-            StateBadge(value: pr.review)
+            StateBadge(value: pr.review, label: ReviewLabel.text(pr.review))
         }
         .font(.callout)
         .padding(.top, 4)

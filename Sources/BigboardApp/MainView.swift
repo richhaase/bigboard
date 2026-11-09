@@ -74,15 +74,21 @@ struct MainView: View {
                 .controlGroupStyle(.navigation)
             }
             ToolbarItem(id: "refresh", placement: .primaryAction) {
-                if workspace.canStopRefresh {
+                Group {
+                    if workspace.canStopRefresh {
                     Button("Stop", systemImage: "xmark") { Task { await workspace.stop() } }
                         .help("Stop refreshing and keep the previous data (⌘.)")
                 } else {
                     Button("Refresh", systemImage: "arrow.clockwise") { Task { await workspace.refresh() } }
                         .disabled(workspace.busy || !workspace.authStatus.signedIn || navigation.panel != nil)
                         .help("Refresh history and pull requests (⌘R)")
+                    }
                 }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
             }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.fixed, placement: .primaryAction)
             if navigation.board != .pullRequests {
                 ToolbarItem(id: "date-filter", placement: .primaryAction) {

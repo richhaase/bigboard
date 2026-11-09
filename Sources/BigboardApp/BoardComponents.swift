@@ -103,15 +103,22 @@ struct ImpactBar: View {
 }
 struct StateBadge: View {
     var value: String
+    var label: String?
     var color: Color {
         ["SUCCESS", "APPROVED", "MERGEABLE"].contains(value)
             ? .green
             : ["FAILURE", "ERROR", "CHANGES_REQUESTED", "CONFLICTING"].contains(value) ? .orange : .secondary
     }
     var body: some View {
-        Text(value.replacingOccurrences(of: "_", with: " ").localizedCapitalized).font(.caption)
+        Text(label ?? value.replacingOccurrences(of: "_", with: " ").localizedCapitalized).font(.caption)
             .foregroundStyle(color).padding(.horizontal, 7).padding(.vertical, 3)
             .background(color.opacity(0.1), in: Capsule())
+    }
+}
+enum ReviewLabel {
+    static let notRequired = "Not required"
+    static func text(_ review: String) -> String? {
+        review == "UNKNOWN" ? notRequired : nil
     }
 }
 struct EmptyBoard: View {

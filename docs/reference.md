@@ -257,6 +257,9 @@ still requested, and changed files, with **Open on GitHub** and **Copy Link**
 buttons. These details are
 evidence, not branch-protection checks or merge authorization.
 
+Review shows **Not required** when GitHub reports no review decision, which
+usually means the repository doesn't require reviews.
+
 Author, Review, Checks, State, and Mine facets combine. Values within a facet
 match any selected value; different facets combine with AND. Mine offers:
 
@@ -438,7 +441,9 @@ request budget in Settings → Advanced. Options:
 - `--mine attention|authored|requested|updated`, `--author LOGIN`,
   `--review approved|changes_requested|review_required|unknown`,
   `--checks success|failure|error|pending|expected|unknown`, `--state open|draft`:
-  facets. Repeat an option to match any of its values; different options combine
+  facets. Review `unknown` means GitHub reports no review decision, usually
+  because the repository doesn't require reviews; the text output says "no
+  review required". Repeat an option to match any of its values; different options combine
   with AND.
 - `--search TEXT`: match repository, title, author, or number.
 - `--sort updated|attention|repository|author|title`: order (default `updated`).

@@ -1308,7 +1308,7 @@ struct PullRequestReport: Encodable {
                 [
                     "approved": "approved", "changes_requested": "changes requested",
                     "review_required": "needs review",
-                ][pr.review] ?? "review unknown")
+                ][pr.review] ?? "no review required")
             details.append(
                 [
                     "success": "checks passing", "failure": "checks failing", "error": "checks erroring",

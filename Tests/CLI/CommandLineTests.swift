@@ -385,7 +385,7 @@ struct CommandLineTests {
         let text = fixture.captured.output
         #expect(text.hasPrefix("fixture · 2 open pull requests in 1 repository · 2 need your attention\n"))
         #expect(text.contains("! owner/repo#7  Add search\n    someone · ready for review · needs review · checks passing · +12 −3 in 2 files · updated 2026-10-04\n    Needs your attention: your review is requested\n"))
-        #expect(text.contains("! owner/repo#8  Draft cleanup\n    fixture · draft · review unknown · checks failing"))
+        #expect(text.contains("! owner/repo#8  Draft cleanup\n    fixture · draft · no review required · checks failing"))
         #expect(text.contains("    Needs your attention: checks are failing\n    Failing: test\n"))
         let json = try CLIFixture()
         defer { json.remove() }
