@@ -214,6 +214,40 @@ struct CommandLineTests {
         #expect(await missing.tool().run(["status"]) == 0)
         #expect(missing.captured.output.contains("owner/repo    no local clone found in source folders"))
     }
+    @Test func personAndTimelineNarrowAndSeriesActivity() async throws {
+        let fixture = try CLIFixture()
+        defer { fixture.remove() }
+        #expect(await fixture.tool().run(["activity", "--days", "0", "--person", "MAPPED@example.test", "--timeline"]) == 0)
+        #expect(fixture.captured.output.contains("fixture · Mapped Author · all history"))
+        #expect(fixture.captured.output.contains("Timeline (by month)\n"))
+        let named = try CLIFixture()
+        defer { named.remove() }
+        #expect(await named.tool().run(["activity", "--days", "7", "--person", "mapped author", "--timeline", "--json"]) == 0)
+        let decoded = try #require(try JSONSerialization.jsonObject(with: Data(named.captured.output.utf8)) as? [String: Any])
+        #expect((decoded["scope"] as? [String: Any])?["people"] as? [String] == ["Mapped Author"])
+        let timeline = try #require(decoded["timeline"] as? [String: Any])
+        #expect(timeline["unit"] as? String == "day")
+        let points = try #require(timeline["points"] as? [[String: Any]])
+        #expect(points.reduce(0) { $0 + ($1["commits"] as? Int ?? 0) } == 2)
+        #expect(points.first?["start"] is String)
+        let plain = try CLIFixture()
+        defer { plain.remove() }
+        #expect(await plain.tool().run(["activity", "--json"]) == 0)
+        let unscoped = try #require(try JSONSerialization.jsonObject(with: Data(plain.captured.output.utf8)) as? [String: Any])
+        #expect((unscoped["scope"] as? [String: Any])?["people"] as? [String] == [])
+        #expect(unscoped["timeline"] == nil)
+        let alias = try CLIFixture()
+        defer { alias.remove() }
+        var config = try alias.storage.loadConfiguration()
+        config.identities = ["mapped@example.test": IdentityRule(aliases: ["me@elsewhere.test"], name: "")]
+        try alias.storage.saveConfiguration(config)
+        #expect(await alias.tool().run(["activity", "--days", "0", "--person", "me@elsewhere.test"]) == 0)
+        #expect(alias.captured.output.contains("fixture · Mapped Author · all history"))
+        let missing = try CLIFixture()
+        defer { missing.remove() }
+        #expect(await missing.tool().run(["activity", "--person", "nobody@example.test"]) == 1)
+        #expect(missing.captured.error.contains("No one in the collected history matches nobody@example.test"))
+    }
     @Test func activitySummarizesCachedHistory() async throws {
         let fixture = try CLIFixture()
         defer { fixture.remove() }

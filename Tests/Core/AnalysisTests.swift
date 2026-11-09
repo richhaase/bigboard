@@ -336,4 +336,12 @@ struct AnalysisTests {
         filters.states = []; filters.query = "parser"; filters.sort = "author"; filters.reverse = true
         #expect(Analysis.filterPRs([a,b,c], viewer: "me", filters: filters).map(\.number) == [2,1])
     }
+    @Test func timelineUnitsFollowTheRangeLength() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(Analysis.timelineUnit(since: now.addingTimeInterval(-30 * 86_400), now: now) == .day)
+        #expect(Analysis.timelineUnit(since: now.addingTimeInterval(-31 * 86_400), now: now) == .week)
+        #expect(Analysis.timelineUnit(since: now.addingTimeInterval(-180 * 86_400), now: now) == .week)
+        #expect(Analysis.timelineUnit(since: now.addingTimeInterval(-181 * 86_400), now: now) == .month)
+        #expect(Analysis.timelineUnit(since: nil, now: now) == .month)
+    }
 }

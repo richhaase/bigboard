@@ -31,6 +31,9 @@ struct ActivityRow: Identifiable, Sendable {
     var totals: ActivityTotals
     var latest: Date?
 }
+enum TimelineUnit: String, Sendable, Encodable {
+    case day, week, month
+}
 struct TimelinePoint: Identifiable, Sendable {
     var date: Date
     var commits = 0
@@ -340,8 +343,8 @@ enum Analysis {
     ) -> [TimelinePoint] {
         let records = unique(commits)
         let cutoff = since ?? (days > 0 ? now.addingTimeInterval(-Double(days) * 86_400) : nil)
-        let span = cutoff.map { max(0, now.timeIntervalSince($0) / 86_400) }
-        let daily = span.map { $0 <= 30 } ?? false, weekly = span.map { $0 > 30 && $0 <= 180 } ?? false
+        let unit = timelineUnit(since: cutoff, now: now)
+        let daily = unit == .day, weekly = unit == .week
         func bucket(_ date: Date) -> Date {
             if daily { return calendar.startOfDay(for: date) }
             if weekly { return weekStart(date, calendar: calendar) }
@@ -366,6 +369,11 @@ enum Analysis {
             rows[key] = row
         }
         return rows.values.sorted { $0.date < $1.date }
+    }
+    static func timelineUnit(since: Date?, now: Date) -> TimelineUnit {
+        guard let since else { return .month }
+        let span = max(0, now.timeIntervalSince(since) / 86_400)
+        return span <= 30 ? .day : span <= 180 ? .week : .month
     }
     private static func weekStart(_ date: Date, calendar: Calendar) -> Date {
         calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
