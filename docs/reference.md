@@ -282,6 +282,7 @@ the same settings and caches as the app, so they can run while the app is open.
 | `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
 | `bigboard prs [options]` | List open pull requests with review and check state and what needs your attention. |
 | `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. |
+| `bigboard config [get\|set\|add\|remove\|unset ...]` | Show or change settings, checked like Settings in the app. |
 | `bigboard version` | Show the version. |
 
 `activity` options:
@@ -383,6 +384,36 @@ reviews, attention flags with an `attention_reason`, and `complete` flags. The
 JSON also has `evidence` per repository (`open`, `inventory_complete`,
 `files_complete`, `reviewers_complete`, `stale`) and `problems`. Incomplete
 evidence exits with status 2; a rejected GitHub CLI token exits with status 1.
+
+`config` shows or changes the settings file, so everything in Settings can be
+scripted. It does not need GitHub. With no action it lists every setting;
+`config get SETTING` prints one value per line. Changes are checked like
+Settings: the file must still validate, repositories need a local clone in a
+source folder, and at least one repository stays collected. A running app
+reloads the change and refreshes.
+
+- Lists: `sources` (folders that hold your clones; `~` and relative paths are
+  expanded), `repositories`, `exclude`, `ai-identities`, `bot-identities`.
+  `set` replaces, `add` and `remove` change entries, and `unset` clears.
+- Named entries: `group NAME REPOSITORY...`, `work-area REPOSITORY NAME PATH...`,
+  and `identity EMAIL NAME [ALIAS...]`. `add` and `remove` change a group's
+  repositories, a work area's paths, or an identity's aliases; `unset` removes
+  the entry. Identities that share an email are merged, as in the app.
+- Values: `since-days`, `contributor-sort`, `refresh-interval`,
+  `request-budget`, `cached-only`, `all-files`. `unset` restores the default.
+
+```sh
+bigboard config add sources ~/src
+bigboard config add repositories owner/name
+bigboard config set group Team owner/one owner/two
+bigboard config set identity me@example.com "My Name" me@old.example
+bigboard config set refresh-interval 30
+```
+
+`--json` prints the setting (or every setting) as JSON. Groups, work areas, and
+identities are arrays of objects (`name`, `repositories`; `repository`, `name`,
+`paths`; `email`, `name`, `aliases`). Rejected changes exit with status 1 and
+leave the file unchanged.
 
 ## Troubleshooting
 

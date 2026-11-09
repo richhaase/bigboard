@@ -77,7 +77,7 @@ struct CommandLineEnvironment: Sendable {
 }
 
 struct CommandLineTool: Sendable {
-    static let commands: Set<String> = ["open", "status", "activity", "prs", "refresh", "help", "--help", "-h", "version", "--version"]
+    static let commands: Set<String> = ["open", "status", "activity", "prs", "refresh", "config", "help", "--help", "-h", "version", "--version"]
     var environment: CommandLineEnvironment
 
     func run(_ arguments: [String]) async -> Int32 {
@@ -106,6 +106,7 @@ struct CommandLineTool: Sendable {
                             "--sort", "--top",
                         ]))
             case "refresh": return try await refresh(try Options(options, values: ["--repo", "--group"]))
+            case "config": return try await config(options)
             case "help", "--help", "-h":
                 guard let topic = options.first else {
                     environment.write(Self.usage)
@@ -148,16 +149,20 @@ struct CommandLineTool: Sendable {
           activity    Summarize recorded change: totals, repositories, paths, and people.
           prs         List open pull requests, with what needs your attention.
           refresh     Fetch each clone's default branch with your Git setup.
+          config      Show or change settings: sources, repositories, groups, and more.
           open        Open the Bigboard app.
           help        Show help for a command, for example: bigboard help activity
           version     Show the version.
 
         For scripts and agents:
-          - Add --json to status and activity for stable output with snake_case keys.
+          - Add --json to status, activity, prs, and config for stable output with
+            snake_case keys.
           - status and activity never fetch history. They confirm the GitHub CLI
             account with GitHub, or use the last confirmed account when offline.
             refresh fetches from each clone's remote, and prs asks GitHub for open
             pull requests.
+          - config changes are checked like Settings in the app, and a running app
+            reloads them.
           - Exit status: 0 success, 2 incomplete evidence, 64 usage error, 1 other error.
           - In activity --json, check evidence and problems before relying on totals.
             unknown_line_commits above 0 means line totals are a lower bound.
@@ -165,6 +170,49 @@ struct CommandLineTool: Sendable {
 
         """
     static let help: [String: String] = [
+        "config": """
+            Usage: bigboard config [get [SETTING [NAME]]] [--json]
+                   bigboard config set|add|remove|unset SETTING [VALUE...]
+
+            Show or change the settings the app uses. Changes are checked like Settings
+            in the app: repositories need a local clone in a source folder, and the
+            running app reloads them.
+
+            Lists (set replaces, add and remove change entries, unset clears):
+              sources          Folders that hold your clones. ~ and relative paths are
+                               expanded.
+              repositories     Collected repositories, as owner/name.
+              exclude          Repository glob patterns to leave out.
+              ai-identities    Extra AI author emails or @domains.
+              bot-identities   Extra bot emails, @domains, or exact names.
+
+            Named entries:
+              group NAME REPOSITORY...              A repository group.
+              work-area REPOSITORY NAME PATH...     Paths that make up a work area.
+              identity EMAIL NAME [ALIAS...]        One person's name and other emails.
+                                                    add and remove change aliases.
+              unset removes the named entry. get takes the leading names to show one.
+
+            Values (set, or unset for the default):
+              since-days          Startup date range in days; 0 for all time (14).
+              contributor-sort    recent, change, commits, name, added, removed, net,
+                                  or ai (recent).
+              refresh-interval    Automatic refresh minutes: 0, 5, 15, 30, or 60 (15).
+              request-budget      Pull-request API requests per refresh (128).
+              cached-only         true to read cached history without GitHub (false).
+              all-files           true to count generated, vendored, fixture, and
+                                  bulk-data lines (false).
+
+            Options:
+              --json    Print JSON.
+
+            Examples:
+              bigboard config
+              bigboard config add sources ~/src
+              bigboard config add repositories owner/name
+              bigboard config set group Team owner/one owner/two
+              bigboard config set since-days 30
+            """,
         "status": """
             Usage: bigboard status [--json]
 

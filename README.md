@@ -69,6 +69,7 @@ bigboard activity          # recorded change in your clones' default branches
 bigboard activity --days 30 --json
 bigboard prs --mine attention  # open pull requests that need you
 bigboard refresh           # fetch each clone's remote-tracking default branch
+bigboard config set since-days 30  # change settings; the app reloads them
 ```
 
 Commands use the same account, settings, and caches as the app. See the
