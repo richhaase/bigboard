@@ -152,3 +152,26 @@ func membership(_ value: String, _ values: Binding<Set<String>>) -> Binding<Bool
         get: { values.wrappedValue.contains(value) },
         set: { if $0 { values.wrappedValue.insert(value) } else { values.wrappedValue.remove(value) } })
 }
+
+struct ScopeLinkItems: View {
+    let scope: ActivityScope
+    let workspace: WorkspaceModel
+    var body: some View {
+        if !scope.repo.isEmpty && scope.areaName.isEmpty {
+            Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(scope, workspace: workspace) }
+            Button("Copy Link") { copyGitHubLink(scope, workspace: workspace) }
+            Button(scope.path.isEmpty ? "Copy Repository Name" : "Copy Path") {
+                copyToPasteboard(scope.path.isEmpty ? scope.repo : scope.path)
+            }
+        }
+    }
+}
+
+struct PersonCopyItems: View {
+    let name: String
+    let email: String
+    var body: some View {
+        Button("Copy Name") { copyToPasteboard(name) }
+        if !email.isEmpty { Button("Copy Email") { copyToPasteboard(email) } }
+    }
+}
