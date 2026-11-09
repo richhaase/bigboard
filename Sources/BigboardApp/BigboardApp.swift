@@ -104,6 +104,9 @@ private struct BoardCommands: Commands {
             Button("Refresh") { Task { await workspace.refresh() } }
                 .keyboardShortcut("r")
                 .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
+            Button("Stop Refresh") { Task { await workspace.stop() } }
+                .keyboardShortcut(".")
+                .disabled(modalOpen || !workspace.canStopRefresh)
             Button("Contributor Identities…") { navigation.panel = .identities }
                 .disabled(modalOpen)
             Menu("Group") {

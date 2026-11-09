@@ -123,6 +123,23 @@ struct EmptyBoard: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+struct IncompleteBadge: View {
+    var text: String
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button {
+            openWindow(id: WindowID.dataStatus)
+        } label: {
+            Label(text, systemImage: "exclamationmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.leading)
+        }
+        .buttonStyle(.plain)
+        .help("Open Data Status for details")
+        .accessibilityHint("Opens Data Status")
+    }
+}
 struct SectionTitle: View {
     var title: String
     var detail = ""

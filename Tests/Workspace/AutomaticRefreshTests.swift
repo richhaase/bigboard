@@ -67,7 +67,7 @@ struct AutomaticRefreshTests {
         fixture.clock.advance(by: 900)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
         #expect(workspace.snapshot.coverage.phase == "partial")
-        #expect(!workspace.error.isEmpty)
+        #expect(workspace.error.isEmpty && !workspace.snapshot.coverage.errors.isEmpty)
         #expect(await fixture.network.requests == 2)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
         #expect(await fixture.network.requests == 2)
@@ -76,7 +76,7 @@ struct AutomaticRefreshTests {
         fixture.clock.advance(by: 900)
         await workspace.refreshAutomatically(visible: true, modalOpen: false)
         #expect(await fixture.network.requests == 3)
-        #expect(workspace.snapshot.coverage.phase == "ready" && workspace.error.isEmpty)
+        #expect(workspace.snapshot.coverage.phase == "ready" && workspace.snapshot.coverage.errors.isEmpty)
     }
 
     @Test func intervalChangesRescheduleAndShutdownStopsAutomaticRefresh() async throws {

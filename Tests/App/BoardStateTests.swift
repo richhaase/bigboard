@@ -288,6 +288,27 @@ import Testing
         #expect(refreshing.loading && refreshing.label == snapshot.coverage.message)
         snapshot.coverage.message = ""
         #expect(DataStatusPresentation(snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "").label == "Refreshing repository evidence")
+        let counting = DataStatusPresentation(
+            snapshot: snapshot, busy: true, checkingSignIn: false, signedIn: true, error: "",
+            progress: WorkspaceModel.RefreshProgress(completed: 3, total: 8))
+        #expect(counting.loading && counting.label == "Updating history · 3 of 8 repositories")
+        var stopped = snapshot
+        stopped.coverage.phase = "stopped"
+        let halted = DataStatusPresentation(snapshot: stopped, busy: false, checkingSignIn: false, signedIn: true, error: "")
+        #expect(halted.warning && halted.label == "Refresh stopped; showing earlier data")
+    }
+    @Test func footerFreshnessUsesLastUpdateOrOldestHistory() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var snapshot = Snapshot(generatedAt: now, repositories: [
+            Repository(id: "acme/app", scannedAt: now.addingTimeInterval(-7200)),
+            Repository(id: "acme/api", scannedAt: now.addingTimeInterval(-600)),
+        ])
+        #expect(DataFreshness.label(snapshot: snapshot, lastUpdated: now.addingTimeInterval(-10), now: now) == "Updated just now")
+        #expect(DataFreshness.label(snapshot: snapshot, lastUpdated: now.addingTimeInterval(-300), now: now).hasPrefix("Updated 5 minutes"))
+        #expect(DataFreshness.label(snapshot: snapshot, lastUpdated: nil, now: now).hasPrefix("History from 2 hours"))
+        snapshot.cachedOnly = true
+        #expect(DataFreshness.label(snapshot: snapshot, lastUpdated: nil, now: now).hasPrefix("Cached history from 2 hours"))
+        #expect(DataFreshness.label(snapshot: Snapshot(), lastUpdated: nil, now: now) == "Not updated yet")
     }
     @Test func reverseSortIsStableForEqualMetrics() {
         let snapshot = Snapshot(generatedAt: now, repositories: [Repository(id: "acme/app")], commits: [commit("a", email: "a@example.test"), commit("b", email: "b@example.test"), commit("c", email: "c@example.test")])

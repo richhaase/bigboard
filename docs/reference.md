@@ -254,8 +254,9 @@ match any selected value; different facets combine with AND. Mine offers:
   membership is not inferred.
 - **Updated since my review:** updates after your latest known submitted review.
 
-Missing reviewer or review history can omit matches. A count marked
-"(incomplete)" may be low; an empty incomplete inventory is not a verified zero. Cached-history
+Missing reviewer or review history can omit matches. When the board shows an
+orange **Incomplete** badge, counts may be low; an empty incomplete inventory is
+not a verified zero. Click the badge to open Data Status. Cached-history
 mode has no live PR context. Use Data Status to inspect coverage.
 
 ## Data status, offline work, and storage
@@ -266,14 +267,27 @@ The interval starts when the previous refresh finishes, including a manual
 refresh. Automatic refresh pauses while Bigboard is out of view or the custom
 date range or Identities sheet is open, then refreshes if overdue when you
 return. Cached-history mode disables
-automatic refresh. Command-R and **Boards → Refresh** still refresh immediately.
+automatic refresh. Command-R, the toolbar **Refresh** button, and
+**Boards → Refresh** still refresh immediately.
 
-Click the status and timestamp at the bottom right to open Data Status. During
-refresh, this control shows the spinner and the current collection step. The
-Boards menu and Command-Shift-D also open Data Status, which is its own window
-and stays open beside the boards.
+While a refresh runs, the toolbar button becomes **Stop**. Stop, Command-period,
+or **Boards → Stop Refresh** cancels the refresh and keeps the data you had
+before it started; Data Status then shows "Refresh stopped".
 
-It shows refresh phase, snapshot time, request counts,
+The status at the bottom right shows how long ago the last refresh succeeded,
+for example "Updated 5 minutes ago". Before the first successful refresh in a
+session it shows the age of the oldest loaded history instead, and in
+cached-history mode it shows "Cached history". During refresh it shows a
+spinner and the current step, with a count such as "3 of 12 repositories" while
+history updates. A failed refresh doesn't reset the age. Click the status to
+open Data Status. The Boards menu and Command-Shift-D also open Data Status,
+which is its own window and stays open beside the boards.
+
+When a refresh fails or some evidence couldn't be collected, one orange banner
+appears above the board with **Details** (opens Data Status) and **Retry**.
+Orange **Incomplete** badges on boards also open Data Status.
+
+It shows refresh phase, last successful update, snapshot time, request counts,
 per-repository timestamps and coverage, errors, and
 storage locations. History, PR inventory, changed files, and reviewer evidence
 have separate completeness signals. Explicit refresh preserves usable data on
@@ -505,6 +519,7 @@ and Space to toggle a focused checkbox.
 | ⌘⇧I | Open the Repository Filter popover |
 | ⌘⇧D | Open Data Status |
 | ⌘R | Refresh repository evidence |
+| ⌘. | Stop refreshing and keep the previous data |
 | ⌘, | Settings |
 | ⌘[, ⌘] | Back, Forward through boards and drill-downs |
 | ⌘↑ | Up to the enclosing repository, folder, or list |

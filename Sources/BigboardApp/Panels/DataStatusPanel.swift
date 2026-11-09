@@ -2,15 +2,38 @@ import SwiftUI
 
 struct DataStatusPanel: View {
     @Bindable var workspace: WorkspaceModel
+    private var phaseTitle: String {
+        switch workspace.snapshot.coverage.phase {
+        case "signin": "Sign-in needed"
+        case "setup": "Setup needed"
+        case "refreshing": "Refreshing"
+        case "ready": "Up to date"
+        case "partial": "Partly up to date"
+        case "stopped": "Refresh stopped"
+        default: "Waiting for data"
+        }
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text(workspace.snapshot.coverage.phase.capitalized).font(.title2.bold())
+                    Text(phaseTitle).font(.title2.bold())
                     Spacer()
-                    Button("Refresh") { Task { await workspace.refresh() } }.disabled(workspace.busy)
+                    if workspace.canStopRefresh {
+                        Button("Stop") { Task { await workspace.stop() } }
+                    } else {
+                        Button("Refresh") { Task { await workspace.refresh() } }
+                            .disabled(workspace.busy || !workspace.authStatus.signedIn)
+                    }
                 }
                 Text(workspace.snapshot.coverage.message)
+                if let progress = workspace.progress, progress.total > 0 {
+                    ProgressView(value: Double(progress.completed), total: Double(progress.total)) {
+                        Text("Updating history · \(progress.completed) of \(progress.total) repositories")
+                            .font(.caption)
+                    }
+                }
+                LabeledContent("Last updated", value: workspace.lastUpdated?.formatted() ?? "Not this session")
                 LabeledContent("Snapshot", value: workspace.snapshot.generatedAt.formatted())
                 LabeledContent(
                     "Requests",
