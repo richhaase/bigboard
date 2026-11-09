@@ -7,8 +7,8 @@ struct HeatRange: Sendable {
     var calendar: Calendar
 
     init(
-        days: Int = 14, since: Date? = nil, now: Date = Date(), records: [Commit] = [],
-        calendar: Calendar = .current
+        days: Int = 14, since: Date? = nil, now: Date = Date(), includesStart: Bool = false,
+        records: [Commit] = [], calendar: Calendar = .current
     ) {
         self.calendar = calendar
         let start: Date
@@ -20,7 +20,7 @@ struct HeatRange: Sendable {
             start = calendar.startOfDay(for: records.filter { $0.date <= now }.map(\.date).min() ?? now)
         }
         current = DateInterval(start: start, end: now)
-        includesStart = since == nil && days == 0
+        self.includesStart = includesStart || (since == nil && days == 0)
         unit =
             current.duration <= 86_400
             ? .hour

@@ -57,7 +57,7 @@ import Testing
         #expect(markdown.contains("Range: Current open work") && !markdown.contains("Last hour"))
         #expect(markdown.contains("Waiting"))
         state.goBack()
-        #expect(state.dateRange == .hours(1) && state.activityInterval != nil)
+        #expect(state.dateRange.isCustomInterval)
     }
     @Test func searchesStayWithTheirContentInsteadOfFilteringDirectoryBrowsing() {
         let state = BoardState()
@@ -179,7 +179,7 @@ import Testing
         #expect(state.dateRange == .hours(1) && state.rangeLabel == "Last hour")
         state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: DateInterval(start: now, duration: 60))
         state.dateRange = .days(1)
-        #expect(state.activityInterval == nil && state.rangeLabel == "Last 24 hours")
+        #expect(state.rangeLabel == "Last 24 hours")
         #expect(state.filteredCommits(snapshot).count == 1)
         state.dateRange = .days(0)
         #expect(state.filteredCommits(snapshot).count == 1 && state.rangeLabel == "All time")

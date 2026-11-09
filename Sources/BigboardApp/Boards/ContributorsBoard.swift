@@ -157,7 +157,7 @@ struct ContributorsBoard: View {
             Text(
                 filtered
                     ? "The current search or people filters hide this contributor."
-                    : "This contributor has no commits in \(navigation.rangeLabel.lowercased()) for the selected repositories."
+                    : "This contributor has no commits \(navigation.dateRange.isCustomInterval ? "from \(navigation.rangeLabel)" : "in \(navigation.rangeLabel.lowercased())") for the selected repositories."
             )
         } actions: {
             if filtered { Button("Show \(name)") { navigation.revealContributor() } }

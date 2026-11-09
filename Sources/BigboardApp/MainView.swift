@@ -133,6 +133,9 @@ struct MainView: View {
                 )
             }
             Divider()
+            if navigation.dateRange.isCustomInterval {
+                Toggle(navigation.rangeLabel, isOn: .constant(true))
+            }
             Button("Custom range…") { navigation.panel = .dateRange }
         } label: {
             Label(navigation.rangeLabel, systemImage: "calendar")

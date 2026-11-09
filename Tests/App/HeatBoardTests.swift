@@ -26,7 +26,7 @@ import Testing
         let interval = DateInterval(start: Date(timeIntervalSince1970: 100), duration: 3600)
         state.showHeatActivity(state.heatScope, interval: interval)
         #expect(state.board == .activity && state.lens == .directories)
-        #expect(state.scope == state.heatScope && state.activityInterval == interval)
+        #expect(state.scope == state.heatScope && state.dateRange == .between(interval))
         #expect(state.activity.people == state.heat.people && state.activity.hideBots)
         #expect(state.activity.query.isEmpty && state.activitySelection == nil)
         state.switchBoard(.heat)
@@ -35,7 +35,7 @@ import Testing
         state.switchBoard(.activity)
         #expect(state.lens == .directories && state.scope == state.heatScope)
         state.dateRange = .days(90)
-        #expect(state.activityInterval == nil)
+        #expect(state.rangeLabel == "Last 90 days")
     }
     @Test func heatBackPreservesWorkAreaAndActivityScope() {
         let state = BoardState()
@@ -51,7 +51,7 @@ import Testing
         #expect(state.heatScope.repo.isEmpty)
         #expect(state.scope == ActivityScope(repo: "acme/other", path: "Tests"))
     }
-    @Test func cellDrillDownFiltersExactIntervalAndPreservesTheSharedRange() {
+    @Test func cellDrillDownSetsAnExactCustomRange() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let interval = DateInterval(start: now.addingTimeInterval(-20 * 86_400), duration: 3600)
         func commit(_ id: String, date: Date) -> Commit {
@@ -70,13 +70,16 @@ import Testing
         let state = BoardState()
         state.dateRange = .days(14)
         state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: interval)
-        #expect(state.dateRange == .days(14) && state.lens == .directories)
+        #expect(state.dateRange == .between(interval) && state.lens == .directories)
         #expect(state.filteredCommits(snapshot).map(\.id) == ["inside", "end"])
         #expect(
             state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot).reduce(0) {
                 $0 + $1.commits
             } == 2)
-        #expect(state.filteredCommits(snapshot, for: .contributors).map(\.id) == ["now"])
+        #expect(state.filteredCommits(snapshot, for: .contributors).map(\.id) == ["inside", "end"])
+        state.goBack()
+        #expect(state.dateRange == .days(14))
+        state.goForward()
         let output = BoardMarkdown.render(
             snapshot: snapshot, configuration: WorkspaceConfiguration(), navigation: state)
         #expect(output.contains("Range: \(HeatRange.label(interval))"))
@@ -150,9 +153,42 @@ import Testing
         #expect(state.heatScope.repo.isEmpty)
         state.heat.people = ["alex@example.test"]
         state.heatMetric = "people"
-        state.activityInterval = DateInterval(start: .distantPast, end: Date())
+        state.dateRange = .between(DateInterval(start: .distantPast, end: Date()))
         state.resetForAccount(WorkspaceConfiguration())
         #expect(state.heat.people.isEmpty && state.heatMetric == "lines")
-        #expect(state.activityInterval == nil)
+        #expect(state.dateRange == .days(WorkspaceConfiguration().sinceDays))
+    }
+}
+
+@MainActor struct CustomDateRangeTests {
+    let calendar = Calendar.current
+    @Test func heatDrillBecomesTheSharedCustomRange() {
+        let day = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_800_000_000))
+        let end = calendar.date(byAdding: .day, value: 1, to: day)!
+        var inside = Commit(id: "in", repo: "acme/app", author: "A", email: "a@x.test", date: day.addingTimeInterval(3600), subject: "")
+        inside.added = 1
+        let before = Commit(id: "before", repo: "acme/app", author: "A", email: "a@x.test", date: day.addingTimeInterval(-60), subject: "")
+        let after = Commit(id: "after", repo: "acme/app", author: "A", email: "a@x.test", date: end.addingTimeInterval(60), subject: "")
+        let snapshot = Snapshot(generatedAt: end.addingTimeInterval(86_400 * 5), repositories: [Repository(id: "acme/app")], commits: [inside, before, after])
+        let state = BoardState()
+        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: DateInterval(start: day, end: end))
+        #expect(state.board == .activity)
+        #expect(state.rangeLabel == day.formatted(date: .abbreviated, time: .omitted))
+        #expect(state.filteredCommits(snapshot).map(\.id) == ["in"])
+        #expect(state.filteredCommits(snapshot, for: .contributors).map(\.id) == ["in"])
+        let points = state.timelinePoints(state.filteredCommits(snapshot), snapshot: snapshot)
+        #expect(points.count == 24)
+        #expect(points.first { $0.commits > 0 }?.date == day.addingTimeInterval(3600))
+        state.dateRange = .days(5)
+        #expect(state.filteredCommits(snapshot).map(\.id) == ["after"])
+    }
+    @Test func wholeDayRangesLabelTheirLastDay() {
+        let start = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_800_000_000))
+        let end = calendar.date(byAdding: .day, value: 7, to: start)!
+        let last = calendar.date(byAdding: .day, value: 6, to: start)!
+        let format = Date.FormatStyle(date: .abbreviated, time: .omitted)
+        #expect(DateRange.label(DateInterval(start: start, end: end)) == "\(start.formatted(format)) – \(last.formatted(format))")
+        let partial = DateInterval(start: start.addingTimeInterval(3600), duration: 3600)
+        #expect(DateRange.label(partial) == HeatRange.label(partial))
     }
 }

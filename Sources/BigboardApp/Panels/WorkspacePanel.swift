@@ -40,6 +40,6 @@ struct WorkspacePanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: panel == .dateRange ? 420 : 780, height: panel == .dateRange ? 230 : 700)
+        .frame(width: panel == .dateRange ? 420 : 780, height: panel == .dateRange ? 260 : 700)
     }
 }

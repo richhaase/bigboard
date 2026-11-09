@@ -27,8 +27,6 @@ import Testing
     }
     @Test func activityJumpScopesPersonAndClearsStaleState() {
         let state = BoardState()
-        state.activityInterval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 3600)
-        state.activityIncludesStart = true
         state.activity.query = "old"
         state.activity.people = ["sam@example.test"]
         state.activityPeopleQuery = "sam"
@@ -38,7 +36,6 @@ import Testing
         state.showActivity(ActivityScope(repo: "acme/app", path: "Sources"), person: "alex@example.test")
         #expect(state.board == .activity)
         #expect(state.scope == ActivityScope(repo: "acme/app", path: "Sources"))
-        #expect(state.activityInterval == nil && !state.activityIncludesStart)
         #expect(state.activity.query.isEmpty && state.activityPeopleQuery.isEmpty)
         #expect(state.activity.people.isEmpty)
         #expect(state.activity.hideBots)
