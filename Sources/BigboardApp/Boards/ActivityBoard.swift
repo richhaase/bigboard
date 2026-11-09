@@ -367,7 +367,7 @@ struct ActivityBoard: View {
                     Button {
                         navigation.showPRs(repo: pr.repo, selected: pr.id)
                     } label: {
-                        Text("#\(pr.number) \(pr.title)").multilineTextAlignment(.leading)
+                        Text(verbatim: "#\(pr.number) \(pr.title)").multilineTextAlignment(.leading)
                     }
                     .buttonStyle(.link)
                     .contextMenu {
