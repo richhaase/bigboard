@@ -322,6 +322,16 @@ the same settings and caches as the app, so they can run while the app is open.
 - `--people-sort name|lines|commits`: order of the people section. The default,
   `name`, lists everyone active with the repositories they changed, without
   counts. `lines` and `commits` rank people with their counts, limited by `--top`.
+- `--person WHO`: narrow everything to one person, as Contributors' person
+  filter does. Give an email address (any of their aliases works) or their exact
+  name, ignoring case; repeat for several people. A name shared by more than one
+  person is refused with their emails so you can choose. Their bot activity is
+  included. `scope.people` lists who the numbers cover.
+- `--timeline`: add commits and lines added and removed per day for ranges up to
+  30 days, per week up to 180 days, and per month beyond that or for all
+  history, the same buckets as the Activity board. Text shows a bar for each
+  bucket's lines; JSON has `timeline` with a `unit` (`day`, `week`, or `month`)
+  and `points` with each bucket's `start`, `commits`, `added`, and `removed`.
 - `--include-bots`: include bot accounts, which are hidden by default.
 - `--json`: print JSON with snake_case keys. People are identified by name only;
   email addresses are omitted.
