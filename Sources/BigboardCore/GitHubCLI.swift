@@ -18,6 +18,27 @@ enum GitHubCLIFailure: LocalizedError, Sendable, Equatable {
             "GitHub rejected the GitHub CLI token. Run `gh auth refresh` or `gh auth login` in Terminal, then check again."
         }
     }
+    var title: String {
+        switch self {
+        case .missing: "Install the GitHub CLI"
+        case .signedOut: "Sign in to the GitHub CLI"
+        case .rejected: "Sign in to GitHub again"
+        }
+    }
+    var explanation: String {
+        switch self {
+        case .missing: "Bigboard reads GitHub through the GitHub CLI, which isn't installed on this Mac."
+        case .signedOut: "The GitHub CLI is installed but isn't signed in."
+        case .rejected: "GitHub rejected the GitHub CLI's sign-in. Refresh it, or sign in again with gh auth login."
+        }
+    }
+    var command: String {
+        switch self {
+        case .missing: "brew install gh"
+        case .signedOut: "gh auth login"
+        case .rejected: "gh auth refresh"
+        }
+    }
 }
 enum GitHubCLIRunner {
     static func environment(_ inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String:
@@ -90,6 +111,7 @@ actor GitHubCLIAuth {
             _ = try await token()
         } catch {
             result.error = error.localizedDescription
+            result.failure = error as? GitHubCLIFailure
             return result
         }
         do {
@@ -101,6 +123,7 @@ actor GitHubCLIAuth {
         } catch let failure as GitHubFailure where failure == .auth {
             invalidate()
             result.error = GitHubCLIFailure.rejected.localizedDescription
+            result.failure = .rejected
             return result
         } catch {
             if identity == nil, let saved = try? storage?.loadIdentity() { identity = saved }

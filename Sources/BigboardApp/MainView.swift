@@ -278,14 +278,24 @@ struct MainView: View {
             if workspace.checkingSignIn {
                 ProgressView("Checking GitHub CLI…")
             } else {
-                Button("Check again") { Task { await workspace.checkConnection() } }
+                if let failure = workspace.authStatus.failure {
+                    SignInFix(failure: failure)
+                } else if !workspace.authStatus.error.isEmpty {
+                    Text(workspace.authStatus.error.replacingOccurrences(of: "`", with: ""))
+                        .foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled)
+                        .frame(maxWidth: 460)
+                }
+                Button("Check Again") { Task { await workspace.checkConnection() } }
                     .buttonStyle(.borderedProminent)
-            }
-            if !workspace.authStatus.error.isEmpty {
-                Text(workspace.authStatus.error).foregroundStyle(.orange).textSelection(.enabled)
+                Text("Bigboard checks again when you switch back to it.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard !workspace.authStatus.signedIn, !workspace.checkingSignIn else { return }
+            Task { await workspace.checkConnection() }
+        }
     }
     private var chooseSources: some View {
         VStack(spacing: 18) {
@@ -391,5 +401,41 @@ enum DataFreshness {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return prefix + formatter.localizedString(for: date, relativeTo: now)
+    }
+}
+struct SignInFix: View {
+    var failure: GitHubCLIFailure
+    @State private var copied = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(failure.title).font(.headline)
+            Text(failure.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Run this in Terminal:").foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(failure.command)
+                    .font(.body.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary, in: .rect(cornerRadius: 6))
+                    .accessibilityLabel("Command")
+                    .accessibilityValue(failure.command)
+                Button(copied ? "Copied" : "Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(failure.command, forType: .string)
+                    copied = true
+                }
+                .help("Copy the command")
+                Button("Open Terminal") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
+                        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 520)
+        .background(.background.secondary, in: .rect(cornerRadius: 10))
+        .onChange(of: failure) { copied = false }
     }
 }

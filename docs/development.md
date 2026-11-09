@@ -102,11 +102,11 @@ Paths in this table are relative to the repository root.
 | `Sources/BigboardApp/WorkspaceModel.swift` | Refresh orchestration, account state, settings, clone discovery, and native actions. |
 | `Sources/BigboardApp/BoardState.swift` | Shared viewing scope and independent board state. |
 | `Sources/BigboardApp/Boards/` | Board views, charts, and commit lists. |
-| `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, and settings editors. |
+| `Sources/BigboardApp/Panels/`, `Sources/BigboardApp/Settings/` | Sheets, popovers, the Data Status and Keyboard Guide windows, and the Settings window. |
 | `Sources/BigboardCore/GitHubCLI.swift`, `Sources/BigboardCore/ApplicationIdentity.swift` | GitHub CLI token and identity, and build identities. |
 | `Sources/BigboardCore/GitHub.swift` | GitHub viewer check, PR evidence, pagination, and request budgets. |
 | `Sources/BigboardCore/History/` | Git processes, clone discovery, fetch-only refresh, history parsing, and counting rules. |
-| `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
+| `Sources/BigboardCore/Analysis.swift`, `Sources/BigboardCore/HeatAnalysis.swift`, `Sources/BigboardCore/Models.swift` | Data models, scoped totals, Heat, contributor analysis, and PR attention. |
 | `Sources/BigboardCore/Storage.swift` | XDG config and cache paths, atomic writes, and conflict detection. |
 | `Tests/App/`, `Tests/CLI/`, `Tests/Core/`, `Tests/Workspace/`, `Tests/Support/` | UI state, command line, core logic, workspace integration, and shared fixtures. |
 

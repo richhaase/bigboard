@@ -5,8 +5,11 @@
 ## Setup and settings
 
 Bigboard uses the active [GitHub CLI](https://cli.github.com) account on
-github.com. Run `gh auth login` before opening Bigboard; if the CLI is missing or
-signed out, Bigboard explains what to run and offers **Check again**.
+github.com. Run `gh auth login` before opening Bigboard. If the CLI is missing,
+signed out, or its sign-in was rejected, Bigboard shows the command to run
+(`brew install gh`, `gh auth login`, or `gh auth refresh`) with **Copy** and
+**Open Terminal** buttons. It checks again when you switch back to Bigboard, or
+choose **Check Again**.
 Bigboard has no default source folders. On first launch it asks you to choose
 the folders that hold your Git clones; change them at any time with **Add
 folder…** and the remove buttons in **Settings → Repositories**, which lists the
@@ -31,24 +34,26 @@ GitHub's SSO prompt). History collection requires Git,
 available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
-Select repositories individually or use **Select all**. The list supports
+Select repositories individually or use **Select all** (**Select visible**
+while searching) and **Clear selection**. The list supports
 search and sorting by latest commit or name. Each row shows the date of the
 latest commit on the clone's remote-tracking default branch, the clone's path,
 and whether it is shallow or partial. Newly available repositories remain
-unchecked until you select them.
+unchecked until you select them. A saved repository whose clone can't be found
+shows "No local clone found".
 Repository exclusion patterns in Advanced can further narrow the saved selection.
 
 Open Settings from the app menu or with Command-comma; it is a separate window,
 so the boards stay usable while it is open. Changes save on their own a moment
 after you stop editing, and each save starts a refresh; the bottom of the window
 shows when a save is pending or running and any validation error. Nothing is
-saved while no repository is selected. Closing the window saves pending changes,
+saved while no repository is selected or the GitHub CLI is not connected. Closing the window saves pending changes,
 including a complete group or area typed but not yet added. Its tabs are:
 
 | Section | Purpose |
 | --- | --- |
 | Repositories | GitHub CLI account, source folders, the clones found in them, and saved collection choices. |
-| Groups & areas | Named repository groups and named sets of paths within a repository. |
+| Groups & Areas | Named repository groups and named sets of paths within a repository. |
 | General | Startup date range, contributor sorting, automatic refresh interval, and cached-history mode. |
 | Advanced | Generated-file counting, PR request budget, repository exclusion patterns, and extra AI/bot identities. |
 | Storage | Show where settings and parsed history are stored. |
@@ -62,18 +67,18 @@ Paths containing `.` components, repeated slashes, or conflicting prefixes are
 rejected when saving.
 
 To rename a repository group, choose **Edit**, change its name, then **Update
-group**. This replaces the original group in the draft. An existing group name
+group**. This replaces the original group, and the change saves automatically. An existing group name
 is rejected without overwriting either group. **Cancel edit** discards the
 edit.
 
 To rename or move a work area, choose **Edit**, change its name or repository,
-then **Update area**. This replaces the original entry in the draft; an existing
+then **Update area**. This replaces the original entry, and the change saves automatically; an existing
 destination area is preserved and reported as a conflict. **Cancel edit** leaves
 the saved areas unchanged.
 
 Bigboard stores no credentials. It reads the GitHub CLI token when it needs one
 and keeps it only in memory. To switch accounts, run `gh auth switch` and choose
-**Check again**; settings and caches are shared across accounts. To disconnect,
+**Check Again** in **Settings → Repositories**; settings and caches are shared across accounts. To disconnect,
 run `gh auth logout`.
 
 ## Navigation and scope
@@ -82,7 +87,7 @@ The sidebar contains **Heat Maps**, **Activity**, **Contributors**, and **Pull r
 The toolbar's **Repositories** control combines group selection and repository
 filtering. Its label shows the group whose repositories are checked, or how many
 repositories are checked when the selection matches no group.
-**Manage Groups…** inside that popover opens Groups & areas in Settings.
+**Manage Groups…** inside that popover opens **Groups & Areas** in Settings.
 Groups are also available in **Boards → Group**.
 The toolbar contains repository viewing scope and, on historical boards, the
 date range. Data Status opens from the status and timestamp at the bottom right.
@@ -147,14 +152,16 @@ shade starts. The overview strip always uses its own scale, since it totals
 every row. Shades follow the square root of each count. Hover to see the
 interval and actual count. Missing, incomplete, or stale history is marked with
 dashed outlines and known-activity labels; a zero in those cells does not establish
-that no activity occurred.
+that no activity occurred. The first 25 area rows are shown; **Show N more areas**
+lists the rest.
 
 Select a repository or directory name to explore it within Heat Maps. Select a
 cell to explore that interval in Activity's **Directories** view: the cell's
 interval becomes the custom date range shown in the toolbar for every
 historical board, and Back returns to the previous range. Choose another range
 in the date menu to widen it again. The arrow beside an area opens Activity for
-the whole selected range.
+the whole selected range. Drilling in carries Heat Maps' People and Hide bots
+filters to Activity and clears Activity's searches.
 Switching boards preserves each board's state.
 
 ## Activity
@@ -163,7 +170,7 @@ Activity opens with **Directories** for additions and removals in the selected
 range. You can start here directly or arrive from Heat Maps. Select a file to see
 its **Commits**, use **People** to inspect contributors to the current scope, or
 use **Related** to find shared commits or contributor overlap with other areas.
-Open repository PRs to inspect current review and check evidence.
+Choose **View repository PRs** to inspect current review and check evidence.
 
 Breadcrumbs and **Go → Enclosing Scope** (Command-Up Arrow) move to broader
 scopes while keeping board filters applied.
@@ -192,8 +199,10 @@ checks the selected path against the scanned revision in your clone before
 opening it. Directory rows omit the contributor count when only one person
 contributed in view.
 
-The selection panel lists open pull requests for the selected repository or
-path. With a custom date range, such as a Heat Maps drill-down, it lists only
+The selection panel shows the top contributors, a **Recent activity** chart
+that uses the same hour, day, week, or month buckets as the date range, links
+to open the repository or path on GitHub, and the open pull requests for the
+selected repository or path. With a custom date range, such as a Heat Maps drill-down, it lists only
 those opened before the range ended; merged and closed pull requests are not
 collected. Repository PR context opens Pull requests for the selected repository with its own filters;
 **Show All Repositories** or Back restores the previous PR filters.
@@ -208,16 +217,18 @@ net lines, AI share, and name. Bot and
 people filters are independent of Activity's filters.
 Select a repository under **Where work happened** to continue exploring in Activity.
 
-Contribution rhythm uses daily, weekly, or monthly buckets according to the
-range. The calendar shows daily activity in the selected range through the
+Contribution rhythm uses hourly buckets for ranges up to 2 days, daily up to 30
+days, weekly up to 180 days, and monthly beyond that. The calendar shows daily activity in the selected range through the
 snapshot date. All time starts with the earliest contribution in view. Weekly
 buckets and the calendar grid use local time and your first weekday.
 Hover over a calendar day to see its date and commit count.
 The charts and totals describe recorded changes, not productivity.
 
-**Identities** links email addresses belonging to the same person. Choose the
-emails, a primary email, and an optional display name; **Stage identity**, then
-**Review changes** and **Save identities**. Existing rules can be edited or
+**Identities** links email addresses belonging to the same person. Open it with
+**Identities…** on Contributors or **Boards → Contributor Identities…**. Check
+the emails, choose a **Primary email** and an optional **Display name**, then
+choose **Add identity** (**Update identity** when editing); when you're done,
+choose **Save identities**. **Cancel** asks before discarding unsaved changes. Existing rules can be edited or
 unlinked. Names alone never merge people. Repository `.mailmap` rules apply
 before saved aliases. Saving identities updates settings and rescans cached
 history without fetching. Conflicting external edits are rejected rather than
@@ -235,12 +246,15 @@ check states, size in added and removed lines, when it was opened, and when it
 was last updated. A dot marks PRs that need your attention, a count beside
 Checks gives failing checks, and an hourglass marks PRs with no updates in 14
 days. Click a column header to sort. Double-click a row, or press
-Command-Return, to open the PR on GitHub; right-click to copy its link.
+Command-Return, to open the PR on GitHub. Right-click a row to open it, copy its
+link, or copy its repository, number, and title. **Clear Filters** resets every
+facet and the search.
 
 Selecting a PR opens a details pane below the table; drag the divider to resize
 it, and close it with its close button or Escape. It shows dates, size, reported
 merge conflicts, failing checks by name, latest reviews with dates, reviewers
-still requested, and changed files. These details are
+still requested, and changed files, with **Open on GitHub** and **Copy Link**
+buttons. These details are
 evidence, not branch-protection checks or merge authorization.
 
 Author, Review, Checks, State, and Mine facets combine. Values within a facet
@@ -261,8 +275,9 @@ mode has no live PR context. Use Data Status to inspect coverage.
 
 ## Data status, offline work, and storage
 
-Bigboard refreshes automatically every 15 minutes while visible. Choose Manual,
-5, 15, 30, or 60 minutes under **Settings → General → Automatically refresh**.
+Bigboard refreshes automatically every 15 minutes while visible. Choose
+**Manually** or every 5, 15, 30, or 60 minutes under **Settings → General →
+Automatically refresh**.
 The interval starts when the previous refresh finishes, including a manual
 refresh. Automatic refresh pauses while Bigboard is out of view or the custom
 date range or Identities sheet is open, then refreshes if overdue when you
@@ -277,17 +292,20 @@ before it started; Data Status then shows "Refresh stopped".
 The status at the bottom right shows how long ago the last refresh succeeded,
 for example "Updated 5 minutes ago". Before the first successful refresh in a
 session it shows the age of the oldest loaded history instead, and in
-cached-history mode it shows "Cached history". During refresh it shows a
+cached-history mode it shows that history's age, for example "Cached history from
+3 hours ago". During refresh it shows a
 spinner and the current step, with a count such as "3 of 12 repositories" while
 history updates. A failed refresh doesn't reset the age. Click the status to
 open Data Status. The Boards menu and Command-Shift-D also open Data Status,
 which is its own window and stays open beside the boards.
 
 When a refresh fails or some evidence couldn't be collected, one orange banner
-appears above the board with **Details** (opens Data Status) and **Retry**.
+appears above the board with **Details** (opens Data Status) and **Retry**, plus
+**Dismiss** when it shows an error message.
 Orange **Incomplete** badges on boards also open Data Status.
 
-It shows refresh phase, last successful update, snapshot time, request counts,
+Data Status has its own **Refresh** button, which becomes **Stop** while a
+refresh runs. It shows refresh phase, last successful update, snapshot time, request counts,
 per-repository timestamps and coverage, errors, and
 storage locations. History, PR inventory, changed files, and reviewer evidence
 have separate completeness signals. Explicit refresh preserves usable data on
@@ -322,7 +340,7 @@ the same settings and caches as the app, so they can run while the app is open.
 | `bigboard status [--json]` | Show the GitHub CLI account, data locations, and collected repositories. |
 | `bigboard activity [options]` | Summarize recorded change in your clones: totals, repositories, top paths, and people. |
 | `bigboard prs [options]` | List open pull requests with review and check state and what needs your attention. |
-| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. |
+| `bigboard refresh [--repo OWNER/NAME] [--group NAME]` | Fetch each collected clone's remote-tracking default branch with your Git setup. Exits with status 2 if any repository could not be refreshed. |
 | `bigboard config [get\|set\|add\|remove\|unset ...]` | Show or change settings, checked like Settings in the app. |
 | `bigboard version` | Show the version. |
 
@@ -345,7 +363,7 @@ the same settings and caches as the app, so they can run while the app is open.
   and includes future-dated commits.
 - `--commits`: list the commits behind the numbers, newest first and limited by
   `--top`, with lines added and removed within the selected path. JSON entries
-  include the full `sha`, a GitHub `url`, `date`, `author` (name only), `subject`,
+  include the `repository`, full `sha`, a GitHub `url`, `date`, `author` (name only), `subject`,
   `added`, `removed`, and `lines_unknown`.
 - `--depth N`: group the path section `N` folders deep (1–10, default 1). At
   depth 2, a monorepo's `packages/` row becomes one row per `packages/<name>/`.
@@ -354,8 +372,8 @@ the same settings and caches as the app, so they can run while the app is open.
 - `--compare`: also measure the previous window of the same length, from `2N`
   days ago (exclusive) to `N` days ago (inclusive). The text adds a "Previous N
   days" line and, for repositories and paths, previous commits and a change
-  column: `new` (no earlier activity), `quiet` (no current activity), or a
-  percentage of commits. Repositories active only in the previous window are
+  column: `new` (no earlier activity), `quiet` (no current activity), `—` (no
+  activity in either window), or a percentage of commits. Repositories active only in the previous window are
   still listed. People are not compared. Requires `--days` above 0 or `--since`;
   with `--since`, the previous window has the same length and ends at `--since`. In JSON,
   `comparison` holds the previous window's `start`, `end`, and `totals`, and each
@@ -408,7 +426,7 @@ line totals are a lower bound. The JSON also has:
 
 `scope` echoes what the numbers cover: `repositories`, `group`, `path` and its
 `kind` (`file` or `directory`), the effective `since` and `until` (`null` when
-open), and `include_bots`. `generated_at` is when the report ran, not when the
+open), `people`, and `include_bots`. `generated_at` is when the report ran, not when the
 history was fetched.
 
 `prs` lists open pull requests, including drafts, in your collected repositories,
@@ -490,8 +508,8 @@ are data files (such as JSON, YAML, or CSV) inside folders named `fixtures`,
 `__snapshots__`. Bulk data is a single data file with 2,000 or more changed lines. Advanced settings can
 include those lines. Missing line counts are shown as unknown, not measured zero.
 
-The copy button or Command-Shift-C copies the current view as Markdown without
-fetching data. For JSON, use the `bigboard` command's `--json` reports.
+**Boards → Copy View as Markdown** (Command-Shift-C) copies the current view as
+Markdown without fetching data. For JSON, use the `bigboard` command's `--json` reports.
 
 ## Navigation history
 

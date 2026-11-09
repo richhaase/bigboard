@@ -154,6 +154,7 @@ struct AuthStatus: Sendable {
     var login = ""
     var accountID = ""
     var error = ""
+    var failure: GitHubCLIFailure?
 }
 enum BigboardError: LocalizedError, Sendable {
     case message(String)

@@ -157,7 +157,7 @@ struct PullRequestsBoard: View {
                     ? "PR context is unavailable offline"
                     : unknown ? "PR evidence is incomplete" : "No pull requests match",
                 message: workspace.snapshot.cachedOnly
-                    ? "Turn off Cached history in Settings to load open PRs."
+                    ? "Turn off Use cached history only in Settings → General to load open PRs."
                     : "Adjust filters or refresh. Data status explains any missing evidence.",
                 symbol: "arrow.triangle.pull"
             )
