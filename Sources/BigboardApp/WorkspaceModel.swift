@@ -430,7 +430,7 @@ final class WorkspaceModel {
             return false
         }
     }
-    static let changedOnDisk = "Settings changed in config.json while this was open. Cancel and reopen to see them."
+    static let changedOnDisk = "Settings changed in config.json while this was open. Close and reopen it to see them."
     func saveIdentities(_ rules: [String: IdentityRule], basedOn base: [String: IdentityRule]? = nil) async {
         guard let history, !shuttingDown else { return }
         guard base == nil || base == configuration.identities else {

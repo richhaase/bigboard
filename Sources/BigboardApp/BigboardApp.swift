@@ -34,7 +34,25 @@ public struct BigboardApplication: App {
         .commands {
             BoardCommands(workspace: workspace, navigation: navigation)
         }
+        Settings {
+            SettingsView(workspace: workspace, navigation: navigation)
+        }
+        Window("Data Status", id: WindowID.dataStatus) {
+            DataStatusPanel(workspace: workspace)
+                .frame(minWidth: 520, minHeight: 420)
+        }
+        .defaultSize(width: 640, height: 640)
+        Window("Keyboard Guide", id: WindowID.keyboardGuide) {
+            KeyboardGuide()
+                .frame(minWidth: 520, minHeight: 420)
+        }
+        .defaultSize(width: 640, height: 620)
     }
+}
+
+enum WindowID {
+    static let dataStatus = "data-status"
+    static let keyboardGuide = "keyboard-guide"
 }
 
 extension FocusedValues {
@@ -47,16 +65,13 @@ private struct BoardCommands: Commands {
     let navigation: BoardState
     @FocusedValue(\.boardSearch) private var boardSearch
     @FocusedValue(\.selectedGitHubTarget) private var selectedGitHubTarget
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     private var modalOpen: Bool { navigation.panel != nil }
     private var hasData: Bool { workspace.authStatus.signedIn && !workspace.snapshot.repositories.isEmpty }
 
     var body: some Commands {
-        CommandGroup(replacing: .appSettings) {
-            Button("Settings…") { navigation.panel = .settings }
-                .keyboardShortcut(",")
-                .disabled(modalOpen)
-        }
         CommandMenu("Go") {
             Button("Back") { navigation.goBack() }
                 .keyboardShortcut("[")
@@ -84,9 +99,8 @@ private struct BoardCommands: Commands {
             Button("Repository Filter…") { navigation.repositoryFilterPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(modalOpen)
-            Button("Data Status…") { navigation.panel = .status }
+            Button("Data Status") { openWindow(id: WindowID.dataStatus) }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                .disabled(modalOpen)
             Button("Refresh") { Task { await workspace.refresh() } }
                 .keyboardShortcut("r")
                 .disabled(modalOpen || workspace.busy || !workspace.authStatus.signedIn)
@@ -104,7 +118,10 @@ private struct BoardCommands: Commands {
                     .disabled(!navigation.groupIsAvailable(members, available: workspace.snapshot.repositories))
                 }
                 Divider()
-                Button("Manage Groups…") { navigation.panel = .groups }
+                Button("Manage Groups…") {
+                    navigation.settingsTab = .organization
+                    openSettings()
+                }
             }
             .disabled(modalOpen || !hasData)
             Divider()
@@ -144,7 +161,7 @@ private struct BoardCommands: Commands {
             .disabled(modalOpen || !hasData || navigation.board != .pullRequests)
         }
         CommandGroup(replacing: .help) {
-            Button("Keyboard Guide") { navigation.panel = .help }.disabled(modalOpen)
+            Button("Keyboard Guide") { openWindow(id: WindowID.keyboardGuide) }
         }
     }
 }

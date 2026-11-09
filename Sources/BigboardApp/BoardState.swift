@@ -24,9 +24,11 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum Panel: String, Identifiable {
-    case settings, groups, dateRange, status, help, identities
+    case dateRange, identities
     var id: String { rawValue }
-    var isSettings: Bool { self == .settings || self == .groups }
+}
+enum SettingsTab: Hashable {
+    case repositories, organization, general, advanced, storage
 }
 struct RelatedEvidence: Equatable {
     var mode: String
@@ -234,6 +236,7 @@ enum DateRange: Hashable {
     var repositoryFilterPresented = false {
         didSet { if repositoryFilterPresented { panel = nil } }
     }
+    var settingsTab = SettingsTab.repositories
     var panel: Panel? { didSet { if panel != nil { repositoryFilterPresented = false } } }
     var preferencesApplied = false
     var rangeLabel: String {

@@ -31,16 +31,19 @@ GitHub's SSO prompt). History collection requires Git,
 available through Homebrew or Xcode Command Line Tools.
 Bigboard discovers the Git executable from PATH and standard Homebrew/system locations.
 
-Select repositories individually or use **Select all**, then **Apply**. The
-list supports search and sorting by latest commit or name. Each row shows the
-date of the latest commit on the clone's remote-tracking default branch, the
-clone's path, and whether it is shallow or partial. Apply saves the workspace and closes Settings; collection continues in
-the main window. Errors keep the draft open. Cancel discards the draft. Newly
-available repositories remain unchecked until you select and apply them.
+Select repositories individually or use **Select all**. The list supports
+search and sorting by latest commit or name. Each row shows the date of the
+latest commit on the clone's remote-tracking default branch, the clone's path,
+and whether it is shallow or partial. Newly available repositories remain
+unchecked until you select them.
 Repository exclusion patterns in Advanced can further narrow the saved selection.
 
-Open Settings from the app menu or with Command-comma. Escape cancels the draft.
-Its sections are:
+Open Settings from the app menu or with Command-comma; it is a separate window,
+so the boards stay usable while it is open. Changes save on their own a moment
+after you stop editing, and each save starts a refresh; the bottom of the window
+shows when a save is pending or running and any validation error. Nothing is
+saved while no repository is selected. Closing the window saves pending changes,
+including a complete group or area typed but not yet added. Its tabs are:
 
 | Section | Purpose |
 | --- | --- |
@@ -60,13 +63,13 @@ rejected when saving.
 
 To rename a repository group, choose **Edit**, change its name, then **Update
 group**. This replaces the original group in the draft. An existing group name
-is rejected without overwriting either group. **Cancel edit** discards the edit;
-**Apply** saves the settings draft.
+is rejected without overwriting either group. **Cancel edit** discards the
+edit.
 
 To rename or move a work area, choose **Edit**, change its name or repository,
 then **Update area**. This replaces the original entry in the draft; an existing
 destination area is preserved and reported as a conflict. **Cancel edit** leaves
-the draft unchanged. **Apply** saves the complete settings draft.
+the saved areas unchanged.
 
 Bigboard stores no credentials. It reads the GitHub CLI token when it needs one
 and keeps it only in memory. To switch accounts, run `gh auth switch` and choose
@@ -260,15 +263,17 @@ mode has no live PR context. Use Data Status to inspect coverage.
 Bigboard refreshes automatically every 15 minutes while visible. Choose Manual,
 5, 15, 30, or 60 minutes under **Settings → General → Automatically refresh**.
 The interval starts when the previous refresh finishes, including a manual
-refresh. Automatic refresh pauses while Bigboard is out of view or a sheet is
-open, then refreshes if overdue when you return. Cached-history mode disables
+refresh. Automatic refresh pauses while Bigboard is out of view or the custom
+date range or Identities sheet is open, then refreshes if overdue when you
+return. Cached-history mode disables
 automatic refresh. Command-R and **Boards → Refresh** still refresh immediately.
 
 Click the status and timestamp at the bottom right to open Data Status. During
 refresh, this control shows the spinner and the current collection step. The
-Boards menu and Command-Shift-D also open Data Status.
+Boards menu and Command-Shift-D also open Data Status, which is its own window
+and stays open beside the boards.
 
-The sheet shows refresh phase, snapshot time, request counts,
+It shows refresh phase, snapshot time, request counts,
 per-repository timestamps and coverage, errors, and
 storage locations. History, PR inventory, changed files, and reviewer evidence
 have separate completeness signals. Explicit refresh preserves usable data on
@@ -282,8 +287,9 @@ stale with Git's message and its local history is still shown.
 
 Settings live in `~/.config/bigboard/config.json` (or under `$XDG_CONFIG_HOME`)
 and can be edited by hand at any time. A running Bigboard notices the change,
-reloads it, and refreshes. If Settings or Identities is open with unsaved
-edits, applying them is refused until you reopen it. Rebuildable parsed history
+reloads it, and refreshes; an open Settings window shows the new values. If
+Settings has an unsaved edit or Identities is open with unsaved changes when the
+file changes, saving them is refused until you reopen the window. Rebuildable parsed history
 lives in `~/.cache/bigboard/` (or under `$XDG_CACHE_HOME`). Bigboard Dev uses
 `bigboard-dev` for both. Git history itself stays in your clones.
 
@@ -457,7 +463,7 @@ leave the file unchanged.
 | A view is empty or a count includes `+ ?` | Check the date range and board filters, then open Data Status. Incomplete coverage does not establish that no activity exists. |
 | Data stays stale | Check **Use cached history only** in Settings → General. Data Status identifies access errors, request limits, and unfinished collection. |
 | Git is unavailable | Install Git through Homebrew or Xcode Command Line Tools, then reopen Bigboard. |
-| Settings will not save | Resolve the validation error shown in the sheet. If settings changed externally, cancel and reopen before editing again. |
+| Settings will not save | Resolve the validation error shown at the bottom of the Settings window. If settings changed externally, close and reopen Settings before editing again. |
 
 ## Counting and export
 

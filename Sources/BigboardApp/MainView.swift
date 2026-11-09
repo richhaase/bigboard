@@ -5,6 +5,8 @@ struct MainView: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
     @State private var appVisible = false
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     private var automaticRefreshDate: Date? {
         workspace.nextAutomaticRefresh(visible: appVisible, modalOpen: navigation.panel != nil)
     }
@@ -29,7 +31,7 @@ struct MainView: View {
                 }
                 if !workspace.snapshot.coverage.errors.isEmpty {
                     Button {
-                        navigation.panel = .status
+                        openWindow(id: WindowID.dataStatus)
                     } label: {
                         HStack {
                             Image(systemName: "exclamationmark.circle")
@@ -164,7 +166,8 @@ struct MainView: View {
                     Spacer()
                     Button("Manage Groups…") {
                         navigation.repositoryFilterPresented = false
-                        navigation.panel = .groups
+                        navigation.settingsTab = .organization
+                        openSettings()
                     }
                 }
                 .padding(16)
@@ -219,7 +222,7 @@ struct MainView: View {
             ? "Cached history"
             : "Updated \(workspace.snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))"
         return Button {
-            navigation.panel = .status
+            openWindow(id: WindowID.dataStatus)
         } label: {
             HStack(spacing: 6) {
                 Text(status.loading ? status.label : updated)
@@ -273,7 +276,10 @@ struct MainView: View {
                 let folders = SettingsRepositories.chooseFolders()
                 guard !folders.isEmpty else { return }
                 Task {
-                    if await workspace.addSourceFolders(folders) { navigation.panel = .settings }
+                    if await workspace.addSourceFolders(folders) {
+                        navigation.settingsTab = .repositories
+                        openSettings()
+                    }
                 }
             }
             .buttonStyle(.borderedProminent).disabled(workspace.busy)
@@ -287,7 +293,11 @@ struct MainView: View {
                 message: workspace.snapshot.coverage.message.isEmpty
                     ? "Choose the repositories to track in Settings."
                     : workspace.snapshot.coverage.message, symbol: "shippingbox")
-            Button("Open Settings") { navigation.panel = .settings }.buttonStyle(.borderedProminent)
+            Button("Open Settings") {
+                navigation.settingsTab = .repositories
+                openSettings()
+            }
+            .buttonStyle(.borderedProminent)
                 .padding(.bottom, 50)
         }
     }

@@ -1,28 +1,20 @@
 import SwiftUI
 
-struct SettingsPanel: View {
-    private enum Section {
-        case repositories, organization, general, advanced, storage
-    }
-
+struct SettingsView: View {
     @Bindable var workspace: WorkspaceModel
-    var showGroups = false
-    @Environment(\.dismiss) private var dismiss
+    @Bindable var navigation: BoardState
     @State private var draft = WorkspaceConfiguration()
     @State private var selected: Set<String> = []
-    @State private var applying = false
+    @State private var saving = false
     @State private var initialized = false
     @State private var repositorySort = SettingsRepositorySort.recent
-    @State private var section = Section.repositories
     @State private var query = ""
     @State private var groupEditor = SettingsGroupEditor()
     @State private var areaEditor = SettingsWorkAreaEditor()
     @State private var baseline = WorkspaceConfiguration()
     @State private var opened = WorkspaceConfiguration()
-    @State private var confirmingDiscard = false
-    private var hasChanges: Bool {
-        preparedConfiguration() != baseline || groupEditor.hasPendingInput || areaEditor.hasPendingInput
-    }
+    @State private var saveError = ""
+    private var hasChanges: Bool { preparedConfiguration() != baseline }
     private var repositoryRows: [Repository] {
         SettingsRepositories.rows(
             available: workspace.discovered, saved: Array(Set(draft.repositories).union(selected)),
@@ -31,75 +23,88 @@ struct SettingsPanel: View {
     private var availableIDs: Set<String> { Set(workspace.discovered.map(\.id)) }
     private var selectableVisibleIDs: Set<String> { Set(repositoryRows.map(\.id)).intersection(availableIDs) }
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Settings section", selection: $section) {
-                Text("Repositories").tag(Section.repositories)
-                Text("Groups & areas").tag(Section.organization)
-                Text("General").tag(Section.general)
-                Text("Advanced").tag(Section.advanced)
-                Text("Storage").tag(Section.storage)
+        TabView(selection: $navigation.settingsTab) {
+            Tab("Repositories", systemImage: "shippingbox", value: SettingsTab.repositories) {
+                pane { repositories }
             }
-            .pickerStyle(.segmented).padding()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    switch section {
-                    case .repositories: repositories
-                    case .organization: organization
-                    case .general: general
-                    case .advanced: advanced
-                    case .storage: StorageSettingsPanel(workspace: workspace)
-                    }
-                }
-                .padding(20)
+            Tab("Groups & Areas", systemImage: "square.grid.2x2", value: SettingsTab.organization) {
+                pane { organization }
             }
-            .disabled(applying)
-            Divider()
-            HStack {
-                if applying {
-                    ProgressView("Applying settings…").controlSize(.small)
-                } else if workspace.busy {
-                    Text("Applying stops the current refresh and starts a new one.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Cancel") {
-                    if hasChanges { confirmingDiscard = true } else { dismiss() }
-                }
-                .keyboardShortcut(.cancelAction).disabled(applying)
-                if section != .storage {
-                    Button("Apply") {
-                        guard commitPendingEditors() else {
-                            section = .organization
-                            return
-                        }
-                        let candidate = preparedConfiguration()
-                        applying = true
-                        Task {
-                            let saved = await workspace.saveConfiguration(candidate, basedOn: opened)
-                            applying = false
-                            if saved { dismiss() }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        applying || !workspace.authStatus.signedIn || selected.isEmpty)
-                }
+            Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
+                pane { general }
             }
-            .padding()
+            Tab("Advanced", systemImage: "slider.horizontal.3", value: SettingsTab.advanced) {
+                pane { advanced }
+            }
+            Tab("Storage", systemImage: "internaldrive", value: SettingsTab.storage) {
+                pane { StorageSettingsPanel(workspace: workspace) }
+            }
         }
-        .interactiveDismissDisabled(applying)
-        .confirmationDialog("Discard settings changes?", isPresented: $confirmingDiscard) {
-            Button("Discard Changes", role: .destructive) { dismiss() }
-            Button("Keep Editing", role: .cancel) {}
+        .frame(width: 720, height: 580)
+        .task(id: preparedConfiguration()) {
+            guard initialized, hasChanges else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await save()
         }
         .onAppear {
-            guard !initialized else { return }
+            if !initialized || !hasChanges || workspace.configuration != opened { load() }
             initialized = true
-            section = showGroups ? .organization : .repositories
-            load()
+        }
+        .onDisappear {
+            _ = commitPendingEditors()
+            if hasChanges { Task { await save() } }
         }
         .onChange(of: workspace.configuration) { _, _ in
-            if !applying, !hasChanges { load() }
+            if !saving, !hasChanges { load() }
+        }
+    }
+    private func pane(@ViewBuilder _ content: () -> some View) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) { content() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+            }
+            Divider()
+            status.padding(.horizontal, 20).padding(.vertical, 10)
+        }
+    }
+    private var status: some View {
+        HStack(spacing: 8) {
+            if saving {
+                ProgressView().controlSize(.small)
+                Text("Saving and refreshing…")
+            } else if !saveError.isEmpty {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text(saveError).textSelection(.enabled)
+            } else if !workspace.authStatus.signedIn {
+                Text("Connect the GitHub CLI to save changes.")
+            } else if selected.isEmpty {
+                Text("Select at least one repository to save changes.")
+            } else if hasChanges {
+                Text("Saving shortly…")
+            } else {
+                Text("Changes save automatically and start a refresh.")
+            }
+            Spacer()
+        }
+        .font(.callout).foregroundStyle(.secondary)
+    }
+    private func save() async {
+        while saving { try? await Task.sleep(for: .milliseconds(200)) }
+        let candidate = preparedConfiguration()
+        guard candidate != opened, workspace.authStatus.signedIn, !candidate.repositories.isEmpty else { return }
+        saving = true
+        let saved = await workspace.saveConfiguration(candidate, basedOn: opened)
+        saving = false
+        if saved {
+            opened = candidate
+            baseline = candidate
+            saveError = ""
+        } else {
+            saveError = workspace.error
+            workspace.error = ""
         }
     }
     private func load() {
@@ -132,7 +137,7 @@ struct SettingsPanel: View {
                 Button("Refresh repository list", systemImage: "arrow.clockwise") {
                     Task { await workspace.discover(roots: draft.sourceRoots) }
                 }
-                .disabled(applying || !workspace.authStatus.signedIn || draft.sourceRoots.isEmpty)
+                .disabled(saving || !workspace.authStatus.signedIn || draft.sourceRoots.isEmpty)
                 Text("\(selected.count) selected").foregroundStyle(.secondary)
                 Spacer()
                 Button(query.isEmpty ? "Select all" : "Select visible") {

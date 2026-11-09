@@ -261,9 +261,9 @@ import Testing
     @Test func repositoryPopoverYieldsToOtherNavigation() {
         let state = BoardState()
         state.repositoryFilterPresented.toggle()
-        state.panel = .status
+        state.panel = .identities
         #expect(!state.repositoryFilterPresented)
-        #expect(state.panel == .status)
+        #expect(state.panel == .identities)
         state.repositoryFilterPresented.toggle()
         #expect(state.panel == nil)
         state.switchBoard(.contributors)
