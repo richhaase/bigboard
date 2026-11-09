@@ -163,11 +163,19 @@ Directory totals include only files in that directory. Additions and removals
 stay separate even when rows are sorted by commits, recency, or name.
 
 **Commits** shows commit subjects, authors, dates, and measured line changes.
-Commit links open GitHub. Lists show an initial batch and offer more as needed.
+Commit subjects marked with an arrow open GitHub. Right-click a commit to copy
+its link, SHA, or subject, or to show its author in Contributors. Lists show an
+initial batch and offer more as needed.
 **People** shows contributors to the current scope and their commits.
 **Related** compares shared commits or historical contributor overlap with
 other areas. Open a related result to inspect the evidence; overlap is not
 ownership or current presence.
+
+Right-click a directory, file, or repository row on Activity or Heat Maps, or an
+area under a contributor's **Where work happened**, to explore it, view it in
+Activity, open it on GitHub, or copy its link or path. Double-click or press
+Return on a directory row to explore it. Right-click a contributor to show their
+work in Activity or copy their name or email.
 
 **Open path on GitHub** checks the selected path against the scanned revision
 in your clone before opening it. Missing paths report an error. Repository
@@ -472,6 +480,7 @@ and Space to toggle a focused checkbox.
 | ⌘↑ | Up to the enclosing repository, folder, or list |
 | ⌘⇧C | Copy current view as Markdown |
 | ⌘Return | Open selection on GitHub |
+| ⌘⌥C | Copy GitHub link to the selection |
 | ⌘⌥1–4 | Activity: Directories, Commits, People, Related |
 | ⌘⌥M, ⌘⌥A, ⌘⌥R | PRs: needs my attention, authored by me, review requested |
 | Return or right arrow | Explore the selected directory row |
