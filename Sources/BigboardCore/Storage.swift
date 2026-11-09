@@ -67,7 +67,11 @@ final class WorkspaceStorage: @unchecked Sendable {
         try write(data, to: configurationFile)
         expected = data
     }
+    static let contributorSorts = ["recent", "change", "commits", "name", "added", "removed", "net", "ai"]
     func validate(_ config: WorkspaceConfiguration) throws {
+        guard Self.contributorSorts.contains(config.contributorSort) else {
+            throw BigboardError.message("Choose a supported contributor sort.")
+        }
         guard config.requestBudget > 0, (0...3650).contains(config.sinceDays) else {
             throw BigboardError.message("Invalid request budget or startup range.")
         }
