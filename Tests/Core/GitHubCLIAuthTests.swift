@@ -47,6 +47,9 @@ struct GitHubCLIAuthTests {
         let missing = await cliAuth(token: missingSource).status()
         #expect(!missing.signedIn)
         #expect(missing.error.contains("brew install gh"))
+        #expect(signedOut.failure == .signedOut && missing.failure == .missing)
+        #expect(missing.failure?.command == "brew install gh")
+        #expect(signedOut.failure?.command == "gh auth login")
         do {
             _ = try await cliAuth(token: CLITokenSource("bad token\n")).token()
             Issue.record("Accepted a malformed token")
@@ -57,6 +60,7 @@ struct GitHubCLIAuthTests {
         let state = await cliAuth(user: user).status()
         #expect(!state.signedIn)
         #expect(state.error.contains("gh auth refresh"))
+        #expect(state.failure == .rejected && state.failure?.command == "gh auth refresh")
     }
     @Test func offlineStartupUsesLastVerifiedIdentity() async throws {
         let (storage, root) = storage()

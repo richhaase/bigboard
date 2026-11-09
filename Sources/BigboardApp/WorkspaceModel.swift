@@ -328,6 +328,7 @@ final class WorkspaceModel {
         authStatus.signedIn = false
         authStatus.login = ""
         authStatus.accountID = ""
+        authStatus.failure = .rejected
         error = GitHubFailure.auth.localizedDescription
         await auth.invalidate()
         guard invalidation == generation else { return }

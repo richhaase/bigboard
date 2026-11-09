@@ -129,7 +129,7 @@ struct SettingsView: View {
                 if workspace.checkingSignIn {
                     ProgressView("Checking GitHub CLI…").controlSize(.small)
                 } else {
-                    Button("Check again") { Task { await workspace.checkConnection() } }
+                    Button("Check Again") { Task { await workspace.checkConnection() } }
                 }
             }
             sourceFolders

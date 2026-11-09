@@ -30,8 +30,8 @@ brew upgrade --cask richhaase/tap/bigboard
 2. Open Bigboard. It uses the active GitHub CLI account.
 3. Choose the folders that hold your Git clones. You can change them later in
    **Settings → Repositories**.
-4. In **Settings → Repositories**, select the repositories to collect, and
-   click **Apply**.
+4. In **Settings → Repositories**, check the repositories to collect. Changes
+   save automatically and start a refresh.
 
 Bigboard reads Git history from your own clones in the source folders you
 choose and loads pull request evidence from GitHub with the GitHub CLI token.
