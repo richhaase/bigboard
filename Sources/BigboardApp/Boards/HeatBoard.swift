@@ -68,10 +68,10 @@ struct HeatBoard: View {
                 Text("\(current.total.formatted()) \(navigation.heatMetric) in this range")
                     .font(.title3.monospacedDigit())
                 if current.incomplete || rows.contains(where: { $0.heat.incomplete }) {
-                    Text(
-                        "Some history is unavailable, incomplete, or stale. Affected cells and totals show known activity only."
+                    IncompleteBadge(
+                        text:
+                            "Some history is unavailable, incomplete, or stale. Affected cells and totals show known activity only."
                     )
-                    .font(.callout).foregroundStyle(.secondary)
                 }
                 if current.future > 0 {
                     Text("\(current.future) future-dated commits are outside the selected range.")

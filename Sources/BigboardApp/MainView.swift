@@ -20,30 +20,19 @@ struct MainView: View {
             .navigationTitle("Bigboard").navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
         } detail: {
             VStack(spacing: 0) {
-                if !workspace.error.isEmpty {
+                if workspace.authStatus.signedIn, let message = bannerMessage {
                     HStack {
-                        Image(systemName: "exclamationmark.triangle")
-                        Text(workspace.error).textSelection(.enabled)
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(message).textSelection(.enabled).lineLimit(2)
                         Spacer()
-                        Button("Dismiss") { workspace.error = "" }
-                    }
-                    .padding(10).background(.orange.opacity(0.12))
-                }
-                if !workspace.snapshot.coverage.errors.isEmpty {
-                    Button {
-                        openWindow(id: WindowID.dataStatus)
-                    } label: {
-                        HStack {
-                            Image(systemName: "exclamationmark.circle")
-                            Text(
-                                "\(workspace.snapshot.coverage.errors.count) data issues · Some results may be incomplete"
-                            )
-                            Spacer()
-                            Image(systemName: "chevron.right")
+                        Button("Details") { openWindow(id: WindowID.dataStatus) }
+                        Button("Retry") { Task { await workspace.refresh() } }
+                            .disabled(workspace.busy)
+                        if !workspace.error.isEmpty {
+                            Button("Dismiss") { workspace.error = "" }
                         }
-                        .padding(10)
                     }
-                    .buttonStyle(.plain).foregroundStyle(.orange)
+                    .padding(.horizontal, 12).padding(.vertical, 8).background(.orange.opacity(0.12))
                 }
                 if !workspace.authStatus.signedIn {
                     signedOut
@@ -84,6 +73,17 @@ struct MainView: View {
                 }
                 .controlGroupStyle(.navigation)
             }
+            ToolbarItem(id: "refresh", placement: .primaryAction) {
+                if workspace.canStopRefresh {
+                    Button("Stop", systemImage: "xmark") { Task { await workspace.stop() } }
+                        .help("Stop refreshing and keep the previous data (⌘.)")
+                } else {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await workspace.refresh() } }
+                        .disabled(workspace.busy || !workspace.authStatus.signedIn || navigation.panel != nil)
+                        .help("Refresh history and pull requests (⌘R)")
+                }
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
             if navigation.board != .pullRequests {
                 ToolbarItem(id: "date-filter", placement: .primaryAction) {
                     dateFilter
@@ -213,22 +213,41 @@ struct MainView: View {
     private var repositoryScopeLabel: String {
         activeGroup ?? navigation.repositoryFilterLabel
     }
+    private var bannerMessage: String? {
+        if !workspace.error.isEmpty { return workspace.error }
+        let issues = workspace.snapshot.coverage.errors.count
+        guard issues > 0, !workspace.busy else { return nil }
+        if workspace.snapshot.coverage.phase == "partial",
+            workspace.snapshot.repositories.allSatisfy(\.stale)
+        {
+            return "Refresh could not finish. Showing the last loaded data, which may be stale."
+        }
+        return issues == 1
+            ? "1 data issue. Some results may be incomplete."
+            : "\(issues) data issues. Some results may be incomplete."
+    }
     private var footerDataStatus: some View {
         let status = DataStatusPresentation(
             snapshot: workspace.snapshot, busy: workspace.busy, checkingSignIn: workspace.checkingSignIn,
-            signedIn: workspace.authStatus.signedIn, error: workspace.error)
-        let updated =
-            workspace.snapshot.cachedOnly
-            ? "Cached history"
-            : "Updated \(workspace.snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))"
+            signedIn: workspace.authStatus.signedIn, error: workspace.error, progress: workspace.progress)
         return Button {
             openWindow(id: WindowID.dataStatus)
         } label: {
             HStack(spacing: 6) {
-                Text(status.loading ? status.label : updated)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(
+                        status.loading
+                            ? status.label
+                            : DataFreshness.label(
+                                snapshot: workspace.snapshot, lastUpdated: workspace.lastUpdated, now: context.date)
+                    )
                     .lineLimit(1)
+                }
                 Group {
-                    if status.loading {
+                    if let progress = workspace.progress, progress.total > 0 {
+                        ProgressView(value: Double(progress.completed), total: Double(progress.total))
+                            .progressViewStyle(.circular).controlSize(.mini)
+                    } else if status.loading {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: status.symbol)
@@ -241,7 +260,11 @@ struct MainView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Data status")
-        .accessibilityValue(status.loading ? status.label : "\(updated). \(status.label)")
+        .accessibilityValue(
+            status.loading
+                ? status.label
+                : "\(DataFreshness.label(snapshot: workspace.snapshot, lastUpdated: workspace.lastUpdated, now: .now)). \(status.label)"
+        )
         .help("\(status.label). Click for collection and coverage details.")
     }
     private var signedOut: some View {
@@ -307,15 +330,26 @@ struct DataStatusPresentation: Equatable {
     var symbol: String
     var loading = false
     var warning = false
-    init(snapshot: Snapshot, busy: Bool, checkingSignIn: Bool, signedIn: Bool, error: String) {
+    init(
+        snapshot: Snapshot, busy: Bool, checkingSignIn: Bool, signedIn: Bool, error: String,
+        progress: WorkspaceModel.RefreshProgress? = nil
+    ) {
         if checkingSignIn {
             label = "Checking GitHub CLI"
+            symbol = "arrow.triangle.2.circlepath"
+            loading = true
+        } else if busy, let progress, progress.total > 0 {
+            label = "Updating history · \(progress.completed) of \(progress.total) repositories"
             symbol = "arrow.triangle.2.circlepath"
             loading = true
         } else if busy {
             label = snapshot.coverage.message.isEmpty ? "Refreshing repository evidence" : snapshot.coverage.message
             symbol = "arrow.triangle.2.circlepath"
             loading = true
+        } else if snapshot.coverage.phase == "stopped" {
+            label = "Refresh stopped; showing earlier data"
+            symbol = "stop.circle"
+            warning = true
         } else if !error.isEmpty || !snapshot.coverage.errors.isEmpty || snapshot.coverage.phase == "partial"
             || snapshot.repositories.contains(where: {
                 $0.stale || $0.prStale
@@ -339,5 +373,23 @@ struct DataStatusPresentation: Equatable {
             label = "Repository evidence loaded"
             symbol = "checkmark.circle"
         }
+    }
+}
+enum DataFreshness {
+    static func label(snapshot: Snapshot, lastUpdated: Date?, now: Date) -> String {
+        if snapshot.cachedOnly { return "Cached history" + age(oldest(snapshot), now: now, prefix: " from ") }
+        if let lastUpdated { return "Updated" + age(lastUpdated, now: now, prefix: " ") }
+        if let oldest = oldest(snapshot) { return "History from" + age(oldest, now: now, prefix: " ") }
+        return "Not updated yet"
+    }
+    private static func oldest(_ snapshot: Snapshot) -> Date? {
+        snapshot.repositories.compactMap(\.scannedAt).min()
+    }
+    private static func age(_ date: Date?, now: Date, prefix: String) -> String {
+        guard let date else { return "" }
+        if now.timeIntervalSince(date) < 60 { return prefix + "just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return prefix + formatter.localizedString(for: date, relativeTo: now)
     }
 }

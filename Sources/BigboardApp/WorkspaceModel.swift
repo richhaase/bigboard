@@ -11,6 +11,13 @@ final class WorkspaceModel {
     var busy = false
     var error = ""
     var discovered: [Repository] = []
+    struct RefreshProgress: Equatable {
+        var completed: Int
+        var total: Int
+    }
+    private(set) var progress: RefreshProgress?
+    private(set) var lastUpdated: Date?
+    var canStopRefresh: Bool { refreshTask != nil && !shuttingDown }
     var storageDescription: String {
         "Settings: \(storage.configurationFile.path)\nHistory: \(storage.cacheRoot.path)"
     }
@@ -26,6 +33,7 @@ final class WorkspaceModel {
     private var account = ""
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
+    private var beforeRefresh: Snapshot?
     private var discoveryTask: Task<Void, Never>?
     private var started = false
     private var configurationWatch: (any DispatchSourceFileSystemObject)?
@@ -127,6 +135,7 @@ final class WorkspaceModel {
     private func beginRefresh() -> Task<Void, Never>? {
         guard !busy, history != nil, github != nil, !account.isEmpty else { return nil }
         busy = true
+        beforeRefresh = snapshot
         snapshot.coverage.phase = "refreshing"
         snapshot.coverage.message = "Refreshing…"
         let operation = generation
@@ -135,6 +144,8 @@ final class WorkspaceModel {
             if operation == self.generation {
                 self.lastRefreshFinished = self.now()
                 self.refreshTask = nil
+                self.beforeRefresh = nil
+                self.progress = nil
                 self.busy = false
             }
         }
@@ -183,8 +194,10 @@ final class WorkspaceModel {
                 return
             }
             current = await scan(
-                repos, previous: current, history: history, configuration: config, live: true)
+                repos, previous: current, history: history, configuration: config, live: true,
+                reportsProgress: true)
             guard operation == generation, !Task.isCancelled else { return }
+            progress = nil
             snapshot = current
             snapshot.coverage.message = "Loading pull-request evidence…"
             let prs = await github.fetch(
@@ -206,6 +219,7 @@ final class WorkspaceModel {
             current.cachedOnly = false
             snapshot = current
             restrictSnapshot()
+            if snapshot.repositories.contains(where: { !$0.stale }) { lastUpdated = now() }
         } catch {
             guard operation == generation, !Task.isCancelled else { return }
             if error as? GitHubFailure == .auth || error is GitHubCLIFailure {
@@ -220,7 +234,6 @@ final class WorkspaceModel {
                 snapshot.repositories[i].stale = true
                 snapshot.repositories[i].prStale = true
             }
-            self.error = error.localizedDescription
         }
     }
     private struct ScanOutcome: Sendable {
@@ -229,8 +242,13 @@ final class WorkspaceModel {
     }
     private func scan(
         _ repos: [Repository], previous: Snapshot, history: GitHistory, configuration: WorkspaceConfiguration,
-        live: Bool
+        live: Bool, reportsProgress: Bool = false
     ) async -> Snapshot {
+        let operation = generation
+        if reportsProgress {
+            progress = RefreshProgress(completed: 0, total: repos.count)
+            snapshot.coverage.message = "Updating history…"
+        }
         var result = Snapshot(generatedAt: Date(), accountID: previous.accountID, viewer: previous.viewer)
         result.pullRequests = previous.pullRequests
         result.cachedOnly = !live
@@ -266,7 +284,10 @@ final class WorkspaceModel {
                     }
                 }
                 var values: [ScanOutcome] = []
-                for await value in group { values.append(value) }
+                for await value in group {
+                    values.append(value)
+                    if reportsProgress, operation == self.generation { self.progress?.completed += 1 }
+                }
                 return values
             }
             for outcome in outcomes.sorted(by: { $0.repository.id < $1.repository.id }) {
@@ -345,7 +366,19 @@ final class WorkspaceModel {
         await refresh?.value
         await discovery?.value
         busy = false
+        progress = nil
         return true
+    }
+    func stop() async {
+        guard canStopRefresh else { return }
+        let previous = beforeRefresh
+        guard await stopRefresh() else { return }
+        beforeRefresh = nil
+        if let previous { snapshot = previous }
+        restrictSnapshot()
+        snapshot.coverage.phase = "stopped"
+        snapshot.coverage.message = "Refresh stopped. Showing the evidence loaded before it started."
+        lastRefreshFinished = now()
     }
     func discover(roots: [String]? = nil) async {
         guard !account.isEmpty, !shuttingDown else { return }

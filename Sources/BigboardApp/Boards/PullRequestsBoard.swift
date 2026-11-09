@@ -76,6 +76,9 @@ struct PullRequestsBoard: View {
             HStack {
                 BoardSearch(navigation: navigation)
                 Spacer()
+                if !workspace.snapshot.cachedOnly, incomplete {
+                    IncompleteBadge(text: loading ? "Still loading" : "Incomplete")
+                }
                 Text(summary).foregroundStyle(.secondary).monospacedDigit()
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
@@ -253,18 +256,25 @@ struct PullRequestsBoard: View {
         return !filters.query.isEmpty || !filters.authors.isEmpty || !filters.reviews.isEmpty
             || !filters.checks.isEmpty || !filters.states.isEmpty || !filters.mine.isEmpty
     }
+    private var incomplete: Bool {
+        unknown || loading
+            || workspace.snapshot.pullRequests.contains {
+                !$0.reviewersComplete
+                    && (navigation.repositories.isEmpty || navigation.repositories.contains($0.repo))
+                    && (navigation.contextualRepository == nil || $0.repo == navigation.contextualRepository)
+            }
+    }
     private var summary: String {
         guard !workspace.snapshot.cachedOnly else { return "Unavailable offline" }
         if loading && prs.isEmpty { return "Loading…" }
-        let count = "\(prs.count) open\(unknown || loading ? " (incomplete)" : "")"
+        let count = "\(prs.count) open"
         guard !viewer.isEmpty else { return count }
         let scoped = workspace.snapshot.pullRequests.filter {
             (navigation.repositories.isEmpty || navigation.repositories.contains($0.repo))
                 && (navigation.contextualRepository == nil || $0.repo == navigation.contextualRepository)
         }
         let awaiting = scoped.filter { Analysis.requested($0, viewer: viewer) }.count
-        let partial = unknown || scoped.contains { !$0.reviewersComplete }
-        return "\(count) · \(awaiting) awaiting your review\(partial ? " (incomplete)" : "")"
+        return "\(count) · \(awaiting) awaiting your review"
     }
     private func relative(_ date: Date?) -> String {
         guard let date else { return "Unknown" }

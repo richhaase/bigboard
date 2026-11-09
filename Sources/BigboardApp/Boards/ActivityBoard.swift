@@ -361,8 +361,7 @@ struct ActivityBoard: View {
                             || ((!inspectScope.path.isEmpty || !inspectScope.areaName.isEmpty)
                                 && !$0.prFilesComplete))
                 }) {
-                    Text("Evidence is incomplete or stale; this list may omit matching PRs.").font(.caption)
-                        .foregroundStyle(.orange)
+                    IncompleteBadge(text: "Evidence is incomplete or stale; this list may omit matching PRs.")
                 }
                 ForEach(related.prefix(5)) { pr in
                     Button {

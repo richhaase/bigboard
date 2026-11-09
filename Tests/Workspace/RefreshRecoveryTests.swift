@@ -50,6 +50,39 @@ import Testing
         await restarted.shutdown()
     }
 
+    @Test func stopKeepsPreviousSnapshotAndReportsProgress() async throws {
+        let fixture = try RefreshRecoveryFixture()
+        defer { fixture.remove() }
+        let workspace = fixture.workspace()
+        await workspace.start()
+        #expect(workspace.lastUpdated != nil)
+        #expect(workspace.progress == nil && !workspace.canStopRefresh)
+        let before = workspace.snapshot
+        let updated = workspace.lastUpdated
+        await fixture.historyRefresh.hold(RefreshRecoveryFixture.second)
+        let running = Task { await workspace.refresh() }
+        var waited = 0
+        while workspace.progress?.completed != 1, waited < 500 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(workspace.progress == WorkspaceModel.RefreshProgress(completed: 1, total: 2))
+        #expect(workspace.canStopRefresh)
+        await workspace.stop()
+        await running.value
+        await fixture.historyRefresh.release()
+        #expect(!workspace.busy && !workspace.canStopRefresh && workspace.progress == nil)
+        #expect(workspace.snapshot.coverage.phase == "stopped")
+        #expect(workspace.snapshot.repositories == before.repositories)
+        #expect(workspace.snapshot.commits.count == before.commits.count)
+        #expect(workspace.snapshot.pullRequests == before.pullRequests)
+        #expect(workspace.lastUpdated == updated)
+        #expect(workspace.error.isEmpty)
+        await workspace.refresh()
+        #expect(workspace.snapshot.coverage.phase == "ready")
+        await workspace.shutdown()
+    }
+
     @Test func boundedSupportingDetailsKeepInventoryAvailable() async throws {
         var config = RefreshRecoveryFixture.configuration
         config.repositories = [RefreshRecoveryFixture.first]; config.requestBudget = 1
@@ -120,9 +153,13 @@ enum RefreshRecoveryInterruption: CaseIterable, Sendable { case history, invento
 
 private actor RefreshRecoveryHistoryRefresh {
     private var failures: [String: GitHubFailure] = [:]
+    private var held: Set<String> = []
     func fail(_ id: String, failure: GitHubFailure = .unavailable) { failures[id] = failure }
     func recover() { failures = [:] }
-    func refresh(_ repo: Repository) throws -> Repository {
+    func hold(_ id: String) { held.insert(id) }
+    func release() { held = [] }
+    func refresh(_ repo: Repository) async throws -> Repository {
+        while held.contains(repo.id) { try await Task.sleep(for: .milliseconds(10)) }
         if let failure = failures[repo.id] { throw failure }
         var value = repo; value.stale = false; value.error = ""; return value
     }
