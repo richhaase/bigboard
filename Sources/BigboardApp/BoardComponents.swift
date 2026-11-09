@@ -153,11 +153,28 @@ func membership(_ value: String, _ values: Binding<Set<String>>) -> Binding<Bool
         set: { if $0 { values.wrappedValue.insert(value) } else { values.wrappedValue.remove(value) } })
 }
 
+func counted(_ value: Int, _ singular: String, _ plural: String? = nil) -> String {
+    "\(value.formatted()) \(value == 1 ? singular : plural ?? singular + "s")"
+}
+
+struct RemovedBadge: View {
+    var body: some View {
+        Text("Removed")
+            .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+            .help("Not in the repository at the latest scan")
+    }
+}
+
 struct ScopeLinkItems: View {
     let scope: ActivityScope
     let workspace: WorkspaceModel
     var body: some View {
-        if !scope.repo.isEmpty && scope.areaName.isEmpty {
+        if workspace.pathExists(scope) == false {
+            Button("Not in the latest scan; no GitHub link") {}.disabled(true)
+            Button("Copy Path") { copyToPasteboard(scope.path) }
+        } else if !scope.repo.isEmpty && scope.areaName.isEmpty {
             Button("Open on GitHub", systemImage: "arrow.up.right") { openGitHub(scope, workspace: workspace) }
             Button("Copy Link") { copyGitHubLink(scope, workspace: workspace) }
             Button(scope.path.isEmpty ? "Copy Repository Name" : "Copy Path") {

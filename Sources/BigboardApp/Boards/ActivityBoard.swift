@@ -25,6 +25,7 @@ struct ActivityBoard: View {
         guard let id = navigation.scopedPerson else { return nil }
         return Analysis.people(scoped, canonicalRecords: records).first { $0.id == id }?.name ?? id
     }
+    private var singlePerson: Bool { Analysis.totals(scoped).people <= 1 }
     private var title: String {
         let scope = navigation.scope
         if !scope.areaName.isEmpty { return scope.areaName }
@@ -51,7 +52,9 @@ struct ActivityBoard: View {
                 inspector.frame(minWidth: 260, idealWidth: 310, maxWidth: 390)
             }
         }
-        .focusedSceneValue(\.selectedGitHubTarget, inspectScope.repo.isEmpty ? nil : .scope(inspectScope))
+        .focusedSceneValue(
+            \.selectedGitHubTarget,
+            inspectScope.repo.isEmpty || workspace.pathExists(inspectScope) == false ? nil : .scope(inspectScope))
     }
 
     private var scopeBar: some View {
@@ -163,6 +166,7 @@ struct ActivityBoard: View {
             if rows.isEmpty {
                 EmptyBoard(title: "No paths match", message: "Try a broader scope or another date range.")
             } else {
+                let single = singlePerson
                 List(rows, selection: $navigation.activitySelection) { row in
                     HStack {
                         Image(
@@ -171,9 +175,16 @@ struct ActivityBoard: View {
                         )
                         .foregroundStyle(.secondary)
                         VStack(alignment: .leading) {
-                            Text(row.label).lineLimit(1)
-                            Text("\(row.totals.commits) commits · \(row.totals.people) contributors")
-                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Text(row.label).lineLimit(1)
+                                if workspace.pathExists(row.scope) == false { RemovedBadge() }
+                            }
+                            Text(
+                                single
+                                    ? counted(row.totals.commits, "commit")
+                                    : "\(counted(row.totals.commits, "commit")) · \(counted(row.totals.people, "contributor"))"
+                            )
+                            .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         DeltaView(
@@ -198,6 +209,7 @@ struct ActivityBoard: View {
                         navigation.explore(row.scope)
                     }
                 }
+                .task(id: rows.map(\.id)) { await workspace.checkPaths(rows.map(\.scope)) }
                 .onKeyPress(.rightArrow) { exploreSelected() }
                 .onKeyPress(.return) { exploreSelected() }
             }
@@ -333,6 +345,10 @@ struct ActivityBoard: View {
                         inspectRecords, snapshot: workspace.snapshot))
                 SectionTitle(title: "Open pull requests")
                 let related = relatedPRs
+                if navigation.dateRange.isCustomInterval && !related.isEmpty {
+                    Text("Still open, and opened before this range ended.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if workspace.snapshot.cachedOnly {
                     Text("PR context is unavailable offline.").font(.caption).foregroundStyle(.secondary)
                 } else if workspace.busy && workspace.snapshot.repositories.contains(where: {
@@ -361,13 +377,26 @@ struct ActivityBoard: View {
                         Button("Copy Link") { copyToPasteboard(pr.url) }
                     }
                 }
+                if related.isEmpty && !inspectScope.repo.isEmpty {
+                    Text(
+                        navigation.dateRange.isCustomInterval
+                            ? "No open pull requests were opened by the end of this range."
+                            : "No open pull requests."
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
+                }
                 if !inspectScope.repo.isEmpty {
                     Button("View repository PRs") { navigation.showPRs(repo: inspectScope.repo) }
                     let scope = inspectScope
-                    Button(
-                        scope.path.isEmpty ? "Open repository on GitHub" : "Open path on GitHub",
-                        systemImage: "arrow.up.right"
-                    ) { openGitHub(scope, workspace: workspace) }
+                    if workspace.pathExists(scope) == false {
+                        Text("This path is not in the latest scan, so it has no GitHub link.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button(
+                            scope.path.isEmpty ? "Open repository on GitHub" : "Open path on GitHub",
+                            systemImage: "arrow.up.right"
+                        ) { openGitHub(scope, workspace: workspace) }
+                    }
                 }
             }
             .padding(16)
@@ -375,7 +404,8 @@ struct ActivityBoard: View {
     }
     private var relatedPRs: [PullRequest] {
         Analysis.relatedPRs(
-            workspace.snapshot.pullRequests, scope: inspectScope, workAreas: workspace.configuration.workAreas
-        )
+            workspace.snapshot.pullRequests, scope: inspectScope, workAreas: workspace.configuration.workAreas,
+            openedBy: navigation.dateRange.isCustomInterval
+                ? navigation.dateRange.end(relativeTo: workspace.snapshot.generatedAt) : nil)
     }
 }
