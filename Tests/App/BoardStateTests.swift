@@ -70,6 +70,46 @@ import Testing
         let offline = state.activityMergedPRs(snapshot)
         #expect(offline.records.isEmpty && offline.coverage(in: state.scope).label(0) == "—")
     }
+    @Test func weeklyPRTrendsDistinguishMissingCountsAndSizesByScope() throws {
+        let start = try #require(ISO8601DateFormatter().date(from: "2026-01-05T00:00:00Z"))
+        let day: TimeInterval = 86_400
+        let end = start.addingTimeInterval(16 * day)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        calendar.firstWeekday = 2
+        let repo = Repository(
+            id: "acme/app", mergedPRCoverage: MergedPRCoverage(
+                coveredFrom: start.addingTimeInterval(7 * day), checkedAt: end, inventoryComplete: true))
+        var sized = mergedPR(1, at: start.addingTimeInterval(8 * day), paths: ["Sources/A.swift", "Sources/B.swift"])
+        sized.additions = 10
+        sized.deletions = 4
+        let unknownSize = mergedPR(2, at: start.addingTimeInterval(15 * day), paths: ["Sources/A.swift"])
+        var unknownPath = mergedPR(3, at: unknownSize.mergedAt, paths: ["Tests/A.swift"])
+        unknownPath.filesComplete = false
+        let outside = mergedPR(4, at: sized.mergedAt, paths: ["Tests/A.swift"])
+        var snapshot = Snapshot(generatedAt: end, repositories: [repo], mergedPullRequests: [sized, sized, outside, unknownSize, unknownPath])
+        let state = BoardState()
+        state.board = .activity
+        state.dateRange = .between(DateInterval(start: start, end: end))
+        state.scope = ActivityScope(repo: repo.id, path: "Sources")
+        state.setLens(.prTrends)
+        let configuration = WorkspaceConfiguration()
+        let trend = state.activityPRTrends(snapshot, configuration: configuration, calendar: calendar)
+        #expect(trend.coverage == .incomplete)
+        try #require(trend.weeks.count == 3)
+        #expect(!trend.weeks[0].hasMergeCount && !trend.weeks[0].hasLineTotals)
+        #expect(trend.weeks[1].coverage == .complete && trend.weeks[1].size.mergedCount == 1)
+        #expect(trend.weeks[1].size.medianChangedLines == 14 && trend.weeks[1].size.net == 6)
+        #expect(trend.weeks[2].coverage == .incomplete && trend.weeks[2].size.mergedCount == 1)
+        #expect(trend.weeks[2].hasMergeCount && !trend.weeks[2].hasLineTotals)
+        let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: configuration, navigation: state)
+        #expect(markdown.contains("| Median size | P90 size | Additions | Deletions | Net growth |"))
+        #expect(markdown.contains("| 1 | 14 | 14 | 10 | 4 | +6 |"))
+        snapshot.cachedOnly = true
+        #expect(state.activityPRTrends(snapshot, configuration: configuration, calendar: calendar).weeks.isEmpty)
+        state.goUp()
+        #expect(state.lens == .prTrends && state.scope == ActivityScope(repo: repo.id))
+    }
     @Test func contributorsSortByRecencyUnlessConfigured() {
         let state = BoardState()
         #expect(state.contributors.sort == "recent")

@@ -23,7 +23,8 @@ import AppKit
         if navigation.searchPrompt != nil && !navigation.searchQuery.isEmpty {
             lines.append("Search: \(navigation.searchQuery)")
         }
-        if navigation.currentFilters.hideBots && navigation.board != .pullRequests {
+        let viewingPRTrends = navigation.board == .activity && navigation.lens == .prTrends
+        if navigation.currentFilters.hideBots && navigation.board != .pullRequests && !viewingPRTrends {
             lines.append("Bots hidden")
         }
         if snapshot.cachedOnly { lines.append("Cached history; PR context unavailable") }
@@ -64,8 +65,8 @@ import AppKit
             lines += ["## \(navigation.lens.rawValue)", "Scope: \(scopeName(navigation.scope))", ""]
             lines.append("Merged PRs: \(coverage.label(mergedPRCount))")
             if let note = coverage.note { lines.append(note) }
-            if let note = navigation.mergedPRScopeNote { lines.append(note) }
-            if let evidence = navigation.relatedEvidence {
+            if !viewingPRTrends, let note = navigation.mergedPRScopeNote { lines.append(note) }
+            if !viewingPRTrends, let evidence = navigation.relatedEvidence {
                 lines.append(
                     "Restricted to \(evidence.mode == "people" ? "contributors" : "commits") shared with the previous area"
                 )
@@ -112,6 +113,29 @@ import AppKit
                         workAreas: configuration.workAreas
                     )
                     .map { [escaped(scopeName($0.scope)), "\($0.count)"] })
+            case .prTrends:
+                lines += [
+                    "PR size is additions plus deletions. Net growth is additions minus deletions.",
+                    "Size statistics and line totals use PRs with available line counts across the whole PR.",
+                ]
+                let trend = navigation.activityPRTrends(snapshot, configuration: configuration)
+                lines += table(
+                    ["Week of", "Merged PRs", "PRs with line counts", "Median size", "P90 size", "Additions", "Deletions", "Net growth"],
+                    trend.weeks.map { week in
+                        let size = week.size
+                        let date = size.weekStart.formatted(date: .abbreviated, time: .omitted)
+                        let net = size.net.formatted(.number.sign(strategy: .always(includingZero: false)))
+                        return [
+                            date + (size.isPartial ? " (partial)" : ""),
+                            week.hasMergeCount ? week.coverage.label(size.mergedCount) : "—",
+                            week.hasMergeCount ? size.sizedCount.formatted() : "—",
+                            size.medianChangedLines?.formatted(.number.precision(.fractionLength(0...1))) ?? "—",
+                            size.p90ChangedLines?.formatted() ?? "—",
+                            week.hasLineTotals ? size.additions.formatted() : "—",
+                            week.hasLineTotals ? size.deletions.formatted() : "—",
+                            week.hasLineTotals ? net : "—",
+                        ]
+                    })
             }
         case .contributors:
             lines += people(navigation.peopleRows(snapshot))

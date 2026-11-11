@@ -186,6 +186,15 @@ People filters apply to Git commits. Merged PR counts use the selected date,
 repository, and path because GitHub PR authors and Git contributors have
 separate identities.
 
+**PR Trends** groups those merges into calendar weeks in your local time zone.
+The charts show weekly merge counts, median and 90th-percentile PR size, and
+separate totals for additions, deletions, and net growth. PR size is additions
+plus deletions. Net growth is additions minus deletions. The 90th percentile
+uses the nearest rank, rounding 90 percent of the sample size up to the next
+rank. For a path or work area, the size and totals use the whole PR for each
+matching merge. Weeks at either edge of the date range can be partial. Expand
+**Weekly values** to see exact counts, sizes, and available line evidence.
+
 **Commits** shows commit subjects, authors, dates, and measured line changes.
 Commit subjects marked with an arrow open GitHub. Right-click a commit to copy
 its link, SHA, or subject, or to show its author in Contributors. Lists show an
@@ -557,7 +566,7 @@ and Space to toggle a focused checkbox.
 | ⌘⇧C | Copy current view as Markdown |
 | ⌘Return | Open selection on GitHub |
 | ⌘⌥C | Copy GitHub link to the selection |
-| ⌘⌥1–4 | Activity: Directories, Commits, People, Related |
+| ⌘⌥1–5 | Activity: Directories, Commits, People, Related, PR Trends |
 | ⌘⌥M, ⌘⌥A, ⌘⌥R | PRs: needs my attention, authored by me, review requested |
 | Return or right arrow | Explore the selected directory row |
 | Escape | Dismiss the active popover or sheet |

@@ -21,6 +21,7 @@ enum ActivityLens: String, CaseIterable, Identifiable {
     case commits = "Commits"
     case people = "People"
     case related = "Related"
+    case prTrends = "PR Trends"
     var id: String { rawValue }
 }
 enum Panel: String, Identifiable {
@@ -79,6 +80,21 @@ struct BoardFilters: Equatable {
 enum MergedPRCountCoverage {
     case complete, incomplete, unavailable
 
+    init(_ coverage: MergedPRCoverage, since start: Date?, through end: Date) {
+        guard let checkedAt = coverage.checkedAt else {
+            self = .unavailable
+            return
+        }
+        let coversStart = coverage.coveredFrom.map { from in start.map { $0 >= from } ?? false } ?? true
+        self = coverage.inventoryComplete && !coverage.stale && checkedAt >= end && coversStart
+            ? .complete : .incomplete
+    }
+
+    static func combined(_ values: some Collection<Self>) -> Self {
+        if values.allSatisfy({ $0 == .unavailable }) { return .unavailable }
+        return values.allSatisfy { $0 == .complete } ? .complete : .incomplete
+    }
+
     func label(_ count: Int) -> String {
         if self == .unavailable && count == 0 { return "—" }
         return count.formatted() + (self == .complete ? "" : " + ?")
@@ -103,9 +119,7 @@ struct ActivityMergedPREvidence {
 
     func coverage(in scope: ActivityScope) -> MergedPRCountCoverage {
         guard !scope.repo.isEmpty else {
-            let values = inventoryCoverage.values
-            if values.allSatisfy({ $0 == .unavailable }) { return .unavailable }
-            return values.allSatisfy { $0 == .complete } ? .complete : .incomplete
+            return .combined(inventoryCoverage.values)
         }
         let inventory = inventoryCoverage[scope.repo] ?? .unavailable
         if inventory == .complete, !scope.path.isEmpty || !scope.areaName.isEmpty,
@@ -119,6 +133,13 @@ struct ActivityMergedPREvidence {
     func count(in scope: ActivityScope, workAreas: [String: [WorkArea]]) -> Int {
         Analysis.mergedPRs(records, scope: scope, workAreas: workAreas).count
     }
+}
+struct ActivityPRTrendWeek: Identifiable {
+    var size: WeeklyMergedPRSize
+    var coverage: MergedPRCountCoverage
+    var id: Date { size.weekStart }
+    var hasMergeCount: Bool { size.mergedCount > 0 || coverage == .complete }
+    var hasLineTotals: Bool { size.sizedCount > 0 || (size.mergedCount == 0 && coverage == .complete) }
 }
 struct RepositoryChecklist {
     var selection: Set<String>
@@ -293,7 +314,7 @@ enum DateRange: Hashable {
             switch lens {
             case .commits: "Search commits"
             case .people: scopedPerson == nil ? "Find a contributor" : "Search commits"
-            case .directories, .related: nil
+            case .directories, .related, .prTrends: nil
             }
         case .contributors: "Find a contributor"
         case .pullRequests: "Search pull requests"
@@ -393,13 +414,7 @@ enum DateRange: Hashable {
         let end = dateRange.end(relativeTo: snapshot.generatedAt)
         let includesStart = dateRange.includesStart
         let inventory = Dictionary(uniqueKeysWithValues: visibleRepositories(snapshot).map { repo in
-            let coverage = repo.mergedPRCoverage
-            guard let checkedAt = coverage.checkedAt else {
-                return (repo.id, MergedPRCountCoverage.unavailable)
-            }
-            let complete = coverage.inventoryComplete && !coverage.stale && checkedAt >= end
-                && (coverage.coveredFrom.map { from in start.map { $0 >= from } ?? false } ?? true)
-            return (repo.id, complete ? .complete : .incomplete)
+            (repo.id, MergedPRCountCoverage(repo.mergedPRCoverage, since: start, through: end))
         })
         let records = snapshot.mergedPullRequests.filter { pr in
             guard inventory[pr.repo] != nil, let date = pr.mergedAt, date <= end else { return false }
@@ -414,6 +429,36 @@ enum DateRange: Hashable {
         guard activity.hideBots || !activity.people.isEmpty || relatedEvidence != nil || scopedPerson != nil
         else { return nil }
         return "Merged PR counts cover the full date and path scope."
+    }
+    func activityPRTrends(
+        _ snapshot: Snapshot, configuration: WorkspaceConfiguration, calendar: Calendar = .current
+    ) -> (weeks: [ActivityPRTrendWeek], coverage: MergedPRCountCoverage) {
+        let evidence = activityMergedPRs(snapshot)
+        let scopeCoverage = evidence.coverage(in: scope)
+        let records = Analysis.mergedPRs(evidence.records, scope: scope, workAreas: configuration.workAreas)
+        guard !records.isEmpty || scopeCoverage != .unavailable else { return ([], scopeCoverage) }
+        let start = dateRange.start(relativeTo: snapshot.generatedAt)
+        let end = dateRange.end(relativeTo: snapshot.generatedAt)
+        let inventories = visibleRepositories(snapshot)
+            .filter { scope.repo.isEmpty || $0.id == scope.repo }.map(\.mergedPRCoverage)
+        let scopedToPath = !scope.path.isEmpty || !scope.areaName.isEmpty
+        let incompleteWeeks: Set<Date> = scopedToPath ? Set(evidence.records.compactMap { pr in
+            guard pr.repo == scope.repo, !pr.filesComplete, let date = pr.mergedAt else { return nil }
+            return calendar.dateInterval(of: .weekOfYear, for: date)?.start
+        }) : []
+        let weeks = Analysis.weeklyMergedPRSizes(
+            records, since: start, through: end, includesStart: dateRange.includesStart, calendar: calendar
+        ).map { week in
+            let weekStart = max(start ?? week.weekStart, week.weekStart)
+            let weekEnd = calendar.dateInterval(of: .weekOfYear, for: week.weekStart)?.end ?? end
+            let coverage = MergedPRCountCoverage.combined(inventories.map {
+                MergedPRCountCoverage($0, since: weekStart, through: min(weekEnd, end))
+            })
+            return ActivityPRTrendWeek(
+                size: week,
+                coverage: coverage == .complete && incompleteWeeks.contains(week.weekStart) ? .incomplete : coverage)
+        }
+        return (weeks, scopeCoverage)
     }
     func timelinePoints(_ records: [Commit], snapshot: Snapshot) -> [TimelinePoint] {
         Analysis.timeline(
@@ -549,7 +594,7 @@ enum DateRange: Hashable {
             relatedEvidence = nil
             activitySelection = nil
             scopedPerson = nil
-            if scope.isFile { lens = .commits }
+            if scope.isFile && lens != .prTrends { lens = .commits }
         }
     }
     func showPerson(_ id: String?) {
@@ -590,8 +635,8 @@ enum DateRange: Hashable {
         if scope.isFile {
             scope.path = scope.path.split(separator: "/").dropLast().joined(separator: "/")
             scope.isFile = false
-            lens = .directories
-        } else if lens != .directories {
+            if lens != .prTrends { lens = .directories }
+        } else if lens != .directories && (lens != .prTrends || scope.repo.isEmpty) {
             lens = .directories
             return
         } else if !scope.path.isEmpty {
@@ -672,7 +717,7 @@ enum DateRange: Hashable {
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil
-            lens = .directories
+            if lens != .prTrends { lens = .directories }
         }
         if let contextualRepository, !available.contains(contextualRepository) { restorePRFilters() }
         backStack.removeAll { !$0.repositoryIDs.isSubset(of: available) }
@@ -689,7 +734,7 @@ enum DateRange: Hashable {
             activitySelection = nil
             scopedPerson = nil
             relatedEvidence = nil
-            lens = .directories
+            if lens != .prTrends { lens = .directories }
         }
         if let contextualRepository,
             !repositories.isEmpty && !repositories.contains(contextualRepository)

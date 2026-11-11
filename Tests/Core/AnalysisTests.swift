@@ -388,6 +388,70 @@ struct AnalysisTests {
         #expect(Analysis.timelineUnit(since: now.addingTimeInterval(-181 * 86_400), now: now) == .month)
         #expect(Analysis.timelineUnit(since: nil, now: now) == .month)
     }
+    @Test func weeklyMergedPRSizesUseDistinctPRsAndKnownSizes() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        calendar.firstWeekday = 2
+        let mergedAt = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 12)))
+        let through = mergedAt.addingTimeInterval(3_600)
+        let sizes = [0, 1, 2, 3, 4, 7, 8, 9, 10, 100]
+        let sized = sizes.enumerated().map { index, size in
+            let additions = size == 7 ? 3 : 0
+            return mergedPR(index + 1, at: mergedAt, additions: additions, deletions: size - additions)
+        }
+        let partial = mergedPR(11, at: mergedAt, additions: 99)
+        let sameNumberOtherRepo = mergedPR(1, repo: "o/b", at: mergedAt)
+        let duplicateWithoutSize = mergedPR(1, at: mergedAt)
+        let future = mergedPR(12, at: through.addingTimeInterval(1), additions: 5, deletions: 0)
+        let open = mergedPR(13, at: nil, additions: 20, deletions: 0)
+        let records = [duplicateWithoutSize] + sized + [sized[0], partial, sameNumberOtherRepo, future, open]
+        let weeks = Analysis.weeklyMergedPRSizes(records, since: nil, through: through, calendar: calendar)
+        let week = try #require(weeks.first)
+        #expect(weeks.count == 1)
+        #expect(week.mergedCount == 12)
+        #expect(week.sizedCount == 10)
+        #expect(week.medianChangedLines == 5.5)
+        #expect(week.p90ChangedLines == 10)
+        #expect(week.additions == 3)
+        #expect(week.deletions == 141)
+        #expect(week.net == -138)
+    }
+    @Test func weeklyMergedPRSizesAlignToLocalCalendarAndKeepEmptyWeeks() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Denver"))
+        calendar.firstWeekday = 1
+        func day(_ month: Int, _ day: Int, hour: Int = 0) throws -> Date {
+            try #require(calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour)))
+        }
+        let since = try day(10, 31, hour: 12)
+        let firstWeek = try day(10, 25)
+        let secondWeek = try day(11, 1)
+        let thirdWeek = try day(11, 8)
+        let through = try day(11, 15)
+        let records = [mergedPR(1, at: since), mergedPR(2, at: thirdWeek, additions: 0, deletions: 0)]
+        let exclusive = Analysis.weeklyMergedPRSizes(records, since: since, through: through, calendar: calendar)
+        #expect(exclusive.map(\.weekStart) == [firstWeek, secondWeek, thirdWeek])
+        #expect(exclusive.map(\.mergedCount) == [0, 0, 1])
+        #expect(exclusive.map(\.isPartial) == [true, false, false])
+        #expect(exclusive.map(\.medianChangedLines) == [nil, nil, 0])
+        #expect(thirdWeek.timeIntervalSince(secondWeek) == 169 * 3600)
+
+        let inclusive = Analysis.weeklyMergedPRSizes(
+            records + [mergedPR(3, at: through)], since: since, through: through, includesStart: true,
+            calendar: calendar)
+        #expect(inclusive.map(\.mergedCount) == [1, 0, 1, 1])
+        #expect(inclusive.last?.weekStart == through)
+        #expect(inclusive.last?.isPartial == true)
+        #expect(inclusive.first?.p90ChangedLines == nil)
+        #expect(Analysis.weeklyMergedPRSizes([], since: nil, through: through, calendar: calendar).isEmpty)
+    }
+    private func mergedPR(
+        _ number: Int, repo: String = "o/a", at date: Date?, additions: Int? = nil, deletions: Int? = nil
+    ) -> PullRequest {
+        PullRequest(
+            repo: repo, number: number, title: "", author: "", url: "", updatedAt: now,
+            mergedAt: date, additions: additions, deletions: deletions)
+    }
 }
 
 struct InspectorEvidenceTests {
