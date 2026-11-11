@@ -58,7 +58,13 @@ import AppKit
             let scoped = navigation.evidenceRecords(
                 Analysis.scoped(records, scope: navigation.scope, workAreas: configuration.workAreas),
                 canonical: records)
+            let mergedPRs = navigation.activityMergedPRs(snapshot)
+            let coverage = mergedPRs.coverage(in: navigation.scope)
+            let mergedPRCount = mergedPRs.count(in: navigation.scope, workAreas: configuration.workAreas)
             lines += ["## \(navigation.lens.rawValue)", "Scope: \(scopeName(navigation.scope))", ""]
+            lines.append("Merged PRs: \(coverage.label(mergedPRCount))")
+            if let note = coverage.note { lines.append(note) }
+            if let note = navigation.mergedPRScopeNote { lines.append(note) }
             if let evidence = navigation.relatedEvidence {
                 lines.append(
                     "Restricted to \(evidence.mode == "people" ? "contributors" : "commits") shared with the previous area"
@@ -71,13 +77,14 @@ import AppKit
                     break
                 }
                 lines += table(
-                    ["Path", "Commits", "People", "Added", "Removed"],
+                    ["Path", "Commits", "People", "Added", "Removed", "Merged PRs"],
                     navigation.activityRows(snapshot, configuration: configuration)
                         .map {
                             [
                                 escaped($0.label + ($0.kind == "directory" ? "/" : "")),
                                 "\($0.totals.commits)", "\($0.totals.people)", "\($0.totals.added)",
                                 "\($0.totals.removed)\($0.totals.unknown ? " + ?" : "")",
+                                mergedPRs.coverage(in: $0.scope).label($0.mergedPRCount),
                             ]
                         })
             case .commits:

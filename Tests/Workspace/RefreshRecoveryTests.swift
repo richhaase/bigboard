@@ -29,6 +29,7 @@ import Testing
         let board = BoardState(); board.dateRange = .days(0)
         #expect(board.filteredCommits(restarted.snapshot).contains { $0.repo == RefreshRecoveryFixture.second })
         #expect(board.pullRequests(restarted.snapshot).contains { $0.repo == RefreshRecoveryFixture.second })
+        #expect(restarted.snapshot.mergedPullRequests.map(\.repo).sorted() == [RefreshRecoveryFixture.first, RefreshRecoveryFixture.second])
         await restarted.shutdown()
     }
 
@@ -47,6 +48,7 @@ import Testing
         let restarted = fixture.workspace()
         await restarted.start()
         #expect(restarted.snapshot.cachedOnly && !restarted.snapshot.commits.isEmpty)
+        #expect(restarted.snapshot.mergedPullRequests.isEmpty)
         await restarted.shutdown()
     }
 
@@ -76,6 +78,7 @@ import Testing
         #expect(workspace.snapshot.repositories == before.repositories)
         #expect(workspace.snapshot.commits.count == before.commits.count)
         #expect(workspace.snapshot.pullRequests == before.pullRequests)
+        #expect(!before.mergedPullRequests.isEmpty && workspace.snapshot.mergedPullRequests == before.mergedPullRequests)
         #expect(workspace.lastUpdated == updated)
         #expect(workspace.error.isEmpty)
         await workspace.refresh()
@@ -112,6 +115,7 @@ import Testing
         #expect(workspace.snapshot.repositories.map(\.id) == both)
         #expect(workspace.snapshot.commits.contains { $0.repo == RefreshRecoveryFixture.second })
         #expect(workspace.snapshot.pullRequests.contains { $0.repo == RefreshRecoveryFixture.second } == (interruption == .history))
+        #expect(workspace.snapshot.mergedPullRequests.contains { $0.repo == RefreshRecoveryFixture.second } == (interruption == .history))
         if interruption == .history {
             let row = workspace.snapshot.repositories.first { $0.id == RefreshRecoveryFixture.second }
             #expect(row?.stale == true && row?.error == GitHubFailure.permission.localizedDescription)
@@ -169,6 +173,7 @@ private actor RefreshRecoveryTransport: GitHubTransport {
     enum Mode: Sendable { case complete, incomplete, supportingDetails, denied }
     private let repositories: [String]
     private var modes: [String: Mode] = [:]
+    private let mergeTime = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
     private(set) var requests = 0
     init(repositories: [String]) { self.repositories = repositories }
     func setMode(_ mode: Mode, for id: String) { modes[id] = mode }
@@ -184,6 +189,16 @@ private actor RefreshRecoveryTransport: GitHubTransport {
             if mode == .denied { return GitHubHTTPResponse(status: 403, headers: [:], data: Data("{}".utf8)) }
             guard variables["number"] == nil else { throw GitHubFailure.unavailable }
             let empty: [String: Any] = ["totalCount": 0, "nodes": [], "pageInfo": ["hasNextPage": false]]
+            if let search = variables["search"] as? String {
+                let merged: [String: Any] = [
+                    "number": 2, "title": "Merged work", "state": "MERGED", "baseRefName": "main",
+                    "mergedAt": mergeTime, "updatedAt": mergeTime, "repository": ["nameWithOwner": id],
+                    "changedFiles": 0, "files": empty,
+                ]
+                let nodes = search.contains("merged:<") ? [] : [merged]
+                object = ["data": ["repository": ["nameWithOwner": id], "search": ["issueCount": nodes.count, "nodes": nodes, "pageInfo": ["hasNextPage": false]]]]
+                break
+            }
             var pr: [String: Any] = ["number": 1, "title": "Recovered work", "author": ["login": "fixture"], "updatedAt": "2026-10-02T12:00:00Z", "headRefOid": "head", "baseRefOid": "base", "files": empty, "reviewRequests": empty, "latestReviews": empty]
             if mode == .supportingDetails {
                 pr["files"] = ["totalCount": 1001, "nodes": [["path": "first.swift"]], "pageInfo": ["hasNextPage": true, "endCursor": "files"]]

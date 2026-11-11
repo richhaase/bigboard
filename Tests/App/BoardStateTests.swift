@@ -5,6 +5,71 @@ import Testing
 @MainActor struct BoardStateTests {
     let now = Date(timeIntervalSince1970: 2_000_000_000)
     func commit(_ id: String, repo: String = "acme/app", email: String = "alex@example.test", days: Int = 1, added: Int = 10) -> Commit { Commit(id: id, repo: repo, author: email, email: email, date: now.addingTimeInterval(-Double(days) * 86400), subject: "Change \(id)", added: added, files: [FileChange(path: "Sources/App.swift", added: added)]) }
+    func mergedPR(_ number: Int, at date: Date?, repo: String = "acme/app", paths: [String] = []) -> PullRequest {
+        PullRequest(
+            repo: repo, number: number, title: "Change", author: "alex", url: "", updatedAt: now,
+            mergedAt: date, files: paths, filesComplete: true)
+    }
+    @Test func mergedActivityUsesMergeDatesAndTheSelectedRepositoryAndRange() {
+        let start = now.addingTimeInterval(-3600)
+        let snapshot = Snapshot(
+            generatedAt: now, repositories: [Repository(id: "acme/app"), Repository(id: "acme/other")],
+            mergedPullRequests: [
+                mergedPR(1, at: start.addingTimeInterval(-1)),
+                mergedPR(2, at: start),
+                mergedPR(3, at: start.addingTimeInterval(1)),
+                mergedPR(4, at: now),
+                mergedPR(5, at: now.addingTimeInterval(1)),
+                mergedPR(6, at: nil),
+                mergedPR(7, at: now, repo: "acme/other"),
+                mergedPR(8, at: now, repo: "acme/unloaded"),
+            ])
+        let state = BoardState()
+        state.dateRange = .hours(1)
+        #expect(state.activityMergedPRs(snapshot).records.map(\.number) == [3, 4, 7])
+        state.repositories = ["acme/app"]
+        #expect(state.activityMergedPRs(snapshot).records.map(\.number) == [3, 4])
+        let interval = DateInterval(start: start, duration: 1)
+        state.showHeatActivity(ActivityScope(repo: "acme/app"), interval: interval, includesStart: true)
+        #expect(state.activityMergedPRs(snapshot).records.map(\.number) == [2, 3])
+        state.dateRange = .between(interval)
+        #expect(state.activityMergedPRs(snapshot).records.map(\.number) == [3])
+        state.dateRange = .days(0)
+        #expect(state.activityMergedPRs(snapshot).records.map(\.number) == [1, 2, 3, 4])
+    }
+    @Test func mergedActivitySortsByDistinctCountsAndQualifiesIncompletePaths() {
+        let start = now.addingTimeInterval(-86_400)
+        let repo = Repository(
+            id: "acme/app", mergedPRCoverage: MergedPRCoverage(
+                coveredFrom: start, checkedAt: now, inventoryComplete: true))
+        let both = mergedPR(1, at: now, paths: ["Sources/API/Client.swift", "Sources/UI/Window.swift"])
+        var ui = mergedPR(2, at: now, paths: ["Sources/UI/Window.swift"])
+        ui.filesComplete = false
+        var snapshot = Snapshot(generatedAt: now, repositories: [repo], mergedPullRequests: [both, ui])
+        let state = BoardState()
+        state.board = .activity
+        state.dateRange = .days(1)
+        state.scope = ActivityScope(repo: repo.id, path: "Sources")
+        state.activity.sort = "mergedPRs"
+        let configuration = WorkspaceConfiguration()
+        let rows = state.activityRows(snapshot, configuration: configuration)
+        #expect(rows.map(\.label) == ["UI", "API"])
+        #expect(rows.map(\.mergedPRCount) == [2, 1])
+        let evidence = state.activityMergedPRs(snapshot)
+        #expect(evidence.count(in: state.scope, workAreas: [:]) == 2)
+        #expect(evidence.coverage(in: state.scope).label(2) == "2 + ?")
+        #expect(evidence.coverage(in: ActivityScope(repo: repo.id)).label(2) == "2")
+        let markdown = BoardMarkdown.render(snapshot: snapshot, configuration: configuration, navigation: state)
+        #expect(markdown.contains("Merged PRs: 2 + ?"))
+        #expect(markdown.contains("| UI/ | 0 | 0 | 0 | 0 | 2 + ? |"))
+        state.activity.reversed = true
+        #expect(state.activityRows(snapshot, configuration: configuration).map(\.label) == ["API", "UI"])
+        state.dateRange = .days(0)
+        #expect(state.activityMergedPRs(snapshot).coverage(in: ActivityScope()).label(2) == "2 + ?")
+        snapshot.cachedOnly = true
+        let offline = state.activityMergedPRs(snapshot)
+        #expect(offline.records.isEmpty && offline.coverage(in: state.scope).label(0) == "—")
+    }
     @Test func contributorsSortByRecencyUnlessConfigured() {
         let state = BoardState()
         #expect(state.contributors.sort == "recent")

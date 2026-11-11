@@ -30,6 +30,7 @@ struct ActivityRow: Identifiable, Sendable {
     var records: [Commit]
     var totals: ActivityTotals
     var latest: Date?
+    var mergedPRCount = 0
 }
 enum TimelineUnit: String, Sendable, Encodable {
     case hour, day, week, month
@@ -219,36 +220,47 @@ enum Analysis {
             }
         }
     }
+    static func mergedPRs(
+        _ pullRequests: [PullRequest], scope: ActivityScope, workAreas: [String: [WorkArea]] = [:]
+    ) -> [PullRequest] {
+        let scoped = scope.repo.isEmpty ? pullRequests : relatedPRs(pullRequests, scope: scope, workAreas: workAreas)
+        var seen: Set<String> = []
+        return scoped.filter { seen.insert($0.id).inserted }
+    }
     static func activityRows(
         _ commits: [Commit], repositories: [Repository], scope: ActivityScope = ActivityScope(),
-        workAreas: [String: [WorkArea]] = [:]
+        workAreas: [String: [WorkArea]] = [:], mergedPullRequests: [PullRequest] = []
     ) -> [ActivityRow] {
         if scope.repo.isEmpty {
             let grouped = Dictionary(grouping: commits, by: \.repo)
+            let pullRequestsByRepo = Dictionary(grouping: mergedPullRequests, by: \.repo)
             return repositories.map { repo in
                 let rows = grouped[repo.id] ?? []
                 return ActivityRow(
                     id: repo.id, label: repo.id, kind: "repository", scope: ActivityScope(repo: repo.id),
-                    records: rows, totals: totals(rows), latest: rows.map(\.date).max())
+                    records: rows, totals: totals(rows), latest: rows.map(\.date).max(),
+                    mergedPRCount: Set((pullRequestsByRepo[repo.id] ?? []).map(\.id)).count)
             }
         }
         guard !scope.isFile else { return [] }
         let prefix = scope.path.isEmpty ? "" : scope.path + "/"
         let rules = workAreas[scope.repo] ?? []
+        func childScope(for path: String) -> ActivityScope? {
+            guard path.hasPrefix(prefix),
+                scope.areaName.isEmpty || classifyWorkArea(path, rules: rules) == scope.areaName
+            else { return nil }
+            let remainder = path.dropFirst(prefix.count)
+            guard let first = remainder.split(separator: "/", omittingEmptySubsequences: false).first,
+                !first.isEmpty
+            else { return nil }
+            return ActivityScope(
+                repo: scope.repo, path: prefix + first, isFile: !remainder.contains("/"), areaName: scope.areaName)
+        }
         var grouped: [ActivityScope: [Commit]] = [:]
         for commit in commits where commit.repo == scope.repo && !commit.pathsUnknown {
             var changes: [ActivityScope: [FileChange]] = [:]
-            for file in commit.files where file.excludedReason.isEmpty && file.path.hasPrefix(prefix) {
-                if !scope.areaName.isEmpty && classifyWorkArea(file.path, rules: rules) != scope.areaName {
-                    continue
-                }
-                let remainder = String(file.path.dropFirst(prefix.count))
-                guard let first = remainder.split(separator: "/", omittingEmptySubsequences: false).first,
-                    !first.isEmpty
-                else { continue }
-                let path = prefix + first
-                let location = ActivityScope(
-                    repo: scope.repo, path: path, isFile: !remainder.contains("/"), areaName: scope.areaName)
+            for file in commit.files where file.excludedReason.isEmpty {
+                guard let location = childScope(for: file.path) else { continue }
                 changes[location, default: []].append(file)
             }
             for (location, files) in changes {
@@ -259,14 +271,23 @@ enum Analysis {
                 grouped[location, default: []].append(record)
             }
         }
+        var mergedPRIDs: [ActivityScope: Set<String>] = [:]
+        for pullRequest in mergedPullRequests where pullRequest.repo == scope.repo {
+            let id = pullRequest.id
+            for path in pullRequest.files {
+                guard let location = childScope(for: path) else { continue }
+                mergedPRIDs[location, default: []].insert(id)
+            }
+        }
         return
-            grouped.map { location, records in
+            Set(grouped.keys).union(mergedPRIDs.keys).map { location in
+                let records = grouped[location] ?? []
                 let kind = location.isFile ? "file" : "directory"
                 return ActivityRow(
                     id: kind + ":" + location.path,
                     label: String(location.path.split(separator: "/").last ?? ""), kind: kind,
                     scope: location, records: records, totals: totals(records),
-                    latest: records.map(\.date).max())
+                    latest: records.map(\.date).max(), mergedPRCount: mergedPRIDs[location]?.count ?? 0)
             }
             .sorted {
                 $0.totals.change != $1.totals.change

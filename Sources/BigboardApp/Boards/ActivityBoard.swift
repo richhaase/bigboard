@@ -83,6 +83,7 @@ struct ActivityBoard: View {
                 Picker("Sort", selection: $navigation.activity.sort) {
                     Text("Lines changed").tag("change")
                     Text("Commits").tag("commits")
+                    Text("Merged PRs").tag("mergedPRs")
                     Text("Recent").tag("recent")
                     Text("Name").tag("name")
                 }
@@ -143,10 +144,20 @@ struct ActivityBoard: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             let total = Analysis.totals(scoped)
+            let mergedPRs = navigation.activityMergedPRs(workspace.snapshot)
+            let coverage = mergedPRs.coverage(in: navigation.scope)
+            let prCount = mergedPRs.count(in: navigation.scope, workAreas: workspace.configuration.workAreas)
             HStack {
                 MetricView(title: "Commits", value: total.commits.formatted())
+                MetricView(title: "Merged PRs", value: coverage.label(prCount))
                 MetricView(title: "Contributors", value: total.people.formatted())
                 MetricView(title: "Lines changed", value: total.change.formatted())
+            }
+            if let note = coverage.note {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+            if let note = navigation.mergedPRScopeNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
             }
             if scoped.contains(where: \.pathsUnknown) {
                 Text("Some commits have unknown paths and cannot be assigned to directories.").font(.caption)
@@ -167,6 +178,7 @@ struct ActivityBoard: View {
                 EmptyBoard(title: "No paths match", message: "Try a broader scope or another date range.")
             } else {
                 let single = singlePerson
+                let mergedPRs = navigation.activityMergedPRs(workspace.snapshot)
                 List(rows, selection: $navigation.activitySelection) { row in
                     HStack {
                         Image(
@@ -179,12 +191,13 @@ struct ActivityBoard: View {
                                 Text(row.label).lineLimit(1)
                                 if workspace.pathExists(row.scope) == false { RemovedBadge() }
                             }
-                            Text(
-                                single
-                                    ? counted(row.totals.commits, "commit")
-                                    : "\(counted(row.totals.commits, "commit")) · \(counted(row.totals.people, "contributor"))"
-                            )
-                            .font(.caption).foregroundStyle(.secondary)
+                            let coverage = mergedPRs.coverage(in: row.scope)
+                            let activity = single
+                                ? counted(row.totals.commits, "commit")
+                                : "\(counted(row.totals.commits, "commit")) · \(counted(row.totals.people, "contributor"))"
+                            Text("\(activity) · \(coverage.activityLabel(row.mergedPRCount))")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .help(coverage.note ?? "Merged PRs that touched this scope")
                         }
                         Spacer()
                         DeltaView(
@@ -319,7 +332,12 @@ struct ActivityBoard: View {
                     .font(.caption).foregroundStyle(.secondary)
                 let total = Analysis.totals(inspectRecords)
                 DeltaView(added: total.added, removed: total.removed, unknown: total.unknown)
-                Text("\(total.commits) commits").foregroundStyle(.secondary)
+                let mergedPRs = navigation.activityMergedPRs(workspace.snapshot)
+                let coverage = mergedPRs.coverage(in: inspectScope)
+                let prCount = mergedPRs.count(in: inspectScope, workAreas: workspace.configuration.workAreas)
+                Text("\(counted(total.commits, "commit")) · \(coverage.activityLabel(prCount))")
+                    .foregroundStyle(.secondary)
+                    .help(coverage.note ?? "Merged PRs that touched this scope")
                 SectionTitle(title: "Contributors")
                 ForEach(Array(Analysis.people(inspectRecords, canonicalRecords: records).prefix(8))) {
                     person in

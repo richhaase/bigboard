@@ -88,6 +88,13 @@ struct Repository: Sendable, Identifiable, Equatable {
     var shallow = false
     var partial = false
     var skippedCommits = 0
+    var mergedPRCoverage = MergedPRCoverage()
+}
+struct MergedPRCoverage: Sendable, Equatable {
+    var coveredFrom: Date? = nil
+    var checkedAt: Date? = nil
+    var inventoryComplete = false
+    var stale = false
 }
 struct Review: Sendable, Equatable {
     var author: String
@@ -102,6 +109,7 @@ struct PullRequest: Sendable, Identifiable, Equatable {
     var url: String
     var updatedAt: Date?
     var createdAt: Date? = nil
+    var mergedAt: Date? = nil
     var additions: Int? = nil
     var deletions: Int? = nil
     var labels: [String] = []
@@ -129,6 +137,8 @@ struct Coverage: Sendable, Equatable {
     var errors: [String] = []
     var inventoryRequests = 0
     var fileRequests = 0
+    var mergedInventoryRequests = 0
+    var mergedFileRequests = 0
 }
 struct Snapshot: Sendable {
     var generatedAt = Date()
@@ -137,6 +147,7 @@ struct Snapshot: Sendable {
     var repositories: [Repository] = []
     var commits: [Commit] = []
     var pullRequests: [PullRequest] = []
+    var mergedPullRequests: [PullRequest] = []
     var coverage = Coverage()
     var cachedOnly = false
 }
