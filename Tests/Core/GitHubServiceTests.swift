@@ -107,38 +107,44 @@ private func graphCursor(in request: URLRequest) throws -> String? {
 }
 
 private func mergedNode(
-    _ number: Int, age: TimeInterval = 60, branch: String = "main", changedFiles: Int = 1
+    _ number: Int, age: TimeInterval = 60, branch: String = "main", changedFiles: Int = 1,
+    additions: Int? = nil, deletions: Int? = nil
 ) -> [String: Any] {
     let formatter = ISO8601DateFormatter()
     let mergedAt = formatter.string(from: testNow.addingTimeInterval(-age))
-    return [
+    var node: [String: Any] = [
         "number": number, "title": "Merged PR \(number)", "author": ["login": "author"],
         "repository": ["nameWithOwner": "owner/repo"], "state": "MERGED", "baseRefName": branch,
         "mergedAt": mergedAt, "updatedAt": mergedAt, "changedFiles": changedFiles,
         "headRefOid": "head", "baseRefOid": "base",
         "files": ["totalCount": 1, "pageInfo": ["hasNextPage": false], "nodes": [["path": "src/a.swift"]]],
     ]
+    if let additions { node["additions"] = additions }
+    if let deletions { node["deletions"] = deletions }
+    return node
 }
 
 private func mergedPage(
-    _ nodes: [[String: Any]], count: Int? = nil, next: String? = nil
+    _ nodes: [[String: Any]?], count: Int? = nil, next: String? = nil, errors: [[String: Any]] = []
 ) throws -> GitHubHTTPResponse {
-    let data = try JSONSerialization.data(withJSONObject: [
+    var document: [String: Any] = [
         "data": [
             "repository": ["nameWithOwner": "owner/repo"],
             "search": [
-                "issueCount": count ?? nodes.count, "nodes": nodes,
+                "issueCount": count ?? nodes.count, "nodes": nodes.map { $0 as Any? ?? NSNull() },
                 "pageInfo": ["hasNextPage": next != nil, "endCursor": next as Any? ?? NSNull()],
             ],
         ],
-    ])
+    ]
+    if !errors.isEmpty { document["errors"] = errors }
+    let data = try JSONSerialization.data(withJSONObject: document)
     return GitHubHTTPResponse(status: 200, headers: [:], data: data)
 }
 
 @Test func mergedInventoryPaginatesWithDateAndBranchScope() async throws {
     let network = ScriptedGitHub([
         reply(onePR),
-        try mergedPage([mergedNode(2)], count: 2, next: "second-page"),
+        try mergedPage([mergedNode(2, additions: 25, deletions: 4)], count: 2, next: "second-page"),
         try mergedPage([mergedNode(3, branch: "release")], count: 2),
         try mergedPage([mergedNode(4, age: 20 * 86_400)]),
     ])
@@ -148,6 +154,8 @@ private func mergedPage(
     #expect(result.pullRequests.map(\.number) == [1])
     #expect(result.mergedPullRequests.map(\.number) == [2, 4])
     #expect(result.mergedPullRequests.first?.mergedAt == testNow.addingTimeInterval(-60))
+    #expect(result.mergedPullRequests.first?.additions == 25)
+    #expect(result.mergedPullRequests.first?.deletions == 4)
     #expect(result.mergedPullRequests.allSatisfy { $0.filesComplete })
     #expect(result.repositories.first?.mergedPRCoverage == MergedPRCoverage(checkedAt: testNow, inventoryComplete: true))
     #expect(result.coverage.inventoryRequests == 1)
@@ -164,6 +172,58 @@ private func mergedPage(
     #expect(search.contains("repo:owner/repo is:pr is:merged merged:"))
     #expect(search.contains(" base:\"main\""))
     #expect(search.contains(".."))
+    #expect(variables["includeSizes"] as? Bool == true)
+}
+
+@Test func mergedSizeResolverFailureRecoversInventoryAndOtherKnownSizes() async throws {
+    let errors: [[String: Any]] = [["type": "FORBIDDEN", "path": ["search", "nodes", 1, "additions"]]]
+    let network = ScriptedGitHub([
+        reply(onePR),
+        try mergedPage([mergedNode(2, additions: 25, deletions: 4), nil], errors: errors),
+        try mergedPage([mergedNode(2), mergedNode(3)]),
+        try mergedPage([]),
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 16, previous: [], previousMerged: [])
+
+    #expect(result.mergedPullRequests.map(\.number) == [2, 3])
+    #expect(result.mergedPullRequests.first?.additions == 25)
+    #expect(result.mergedPullRequests.first?.deletions == 4)
+    #expect(result.mergedPullRequests.last?.additions == nil)
+    #expect(result.mergedPullRequests.last?.deletions == nil)
+    #expect(result.repositories.first?.mergedPRCoverage.inventoryComplete == true)
+    #expect(result.coverage.errors.isEmpty)
+
+    let requests = await network.requests
+    try #require(requests.count == 4)
+    let body = try #require(requests[2].httpBody)
+    let document = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let variables = try #require(document["variables"] as? [String: Any])
+    #expect(variables["includeSizes"] as? Bool == false)
+}
+
+@Test func mergedSizesRejectNegativeValuesAndRetainMatchingEvidence() async throws {
+    let network = ScriptedGitHub([
+        reply(onePR),
+        try mergedPage([
+            mergedNode(2, additions: 25), mergedNode(3, additions: -1, deletions: 0), mergedNode(4, additions: 26),
+        ]),
+        try mergedPage([]),
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let date = testNow.addingTimeInterval(-60)
+    let prior = [2, 3, 4].map { number in
+        PullRequest(
+            repo: "owner/repo", number: number, title: "Prior PR", author: "author", url: "", updatedAt: date,
+            mergedAt: date, additions: 25, deletions: 4, headOID: "head", baseOID: number == 3 ? "old-base" : "base")
+    }
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 16, previous: [], previousMerged: prior)
+
+    let rows = Dictionary(uniqueKeysWithValues: result.mergedPullRequests.map { ($0.number, $0) })
+    #expect(rows[2]?.additions == 25 && rows[2]?.deletions == 4)
+    #expect(rows[3]?.additions == nil && rows[3]?.deletions == 0)
+    #expect(rows[4]?.additions == 26 && rows[4]?.deletions == nil)
+    #expect(result.repositories.first?.mergedPRCoverage.inventoryComplete == true)
 }
 
 @Test func cappedOlderHistoryPreservesRecentCoverageAndPreviouslyKnownMerges() async throws {

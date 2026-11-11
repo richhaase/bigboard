@@ -42,6 +42,18 @@ struct TimelinePoint: Identifiable, Sendable {
     var removed = 0
     var id: Date { date }
 }
+struct WeeklyMergedPRSize: Identifiable, Sendable {
+    var weekStart: Date
+    var isPartial: Bool
+    var mergedCount: Int
+    var sizedCount: Int
+    var medianChangedLines: Double?
+    var p90ChangedLines: Int?
+    var additions: Int
+    var deletions: Int
+    var net: Int { additions - deletions }
+    var id: Date { weekStart }
+}
 struct RelatedRow: Identifiable, Sendable {
     var scope: ActivityScope
     var evidence: [String]
@@ -399,6 +411,51 @@ enum Analysis {
         guard let since else { return .month }
         let span = max(0, now.timeIntervalSince(since) / 86_400)
         return span <= 2 ? .hour : span <= 30 ? .day : span <= 180 ? .week : .month
+    }
+    static func weeklyMergedPRSizes(
+        _ pullRequests: [PullRequest], since: Date?, through: Date, includesStart: Bool = false,
+        calendar: Calendar = .current
+    ) -> [WeeklyMergedPRSize] {
+        if let since, since > through { return [] }
+        var selected: [String: (date: Date, pullRequest: PullRequest)] = [:]
+        for pullRequest in pullRequests {
+            guard let date = pullRequest.mergedAt, date <= through else { continue }
+            if let since, date < since || (date == since && !includesStart) { continue }
+            let id = pullRequest.id
+            if let previous = selected[id], prSize(previous.pullRequest) >= 0 { continue }
+            selected[id] = (date, pullRequest)
+        }
+        let buckets = Dictionary(grouping: selected.values) { weekStart($0.date, calendar: calendar) }
+        guard let firstWeek = since.map({ weekStart($0, calendar: calendar) }) ?? buckets.keys.min() else {
+            return []
+        }
+        var week = firstWeek
+        var result: [WeeklyMergedPRSize] = []
+        while week < through || week == firstWeek || buckets[week] != nil {
+            guard let nextWeek = calendar.dateInterval(of: .weekOfYear, for: week)?.end, nextWeek > week else {
+                break
+            }
+            let merged = buckets[week] ?? []
+            var additions = 0, deletions = 0
+            var sizes: [Int] = []
+            for entry in merged {
+                let pullRequest = entry.pullRequest
+                guard let added = pullRequest.additions, let deleted = pullRequest.deletions else { continue }
+                additions += added
+                deletions += deleted
+                sizes.append(prSize(pullRequest))
+            }
+            sizes.sort()
+            let count = sizes.count
+            let median: Double? = sizes.isEmpty ? nil : (Double(sizes[(count - 1) / 2]) + Double(sizes[count / 2])) / 2
+            let p90: Int? = sizes.isEmpty ? nil : sizes[count - count / 10 - 1]
+            result.append(WeeklyMergedPRSize(
+                weekStart: week, isPartial: since.map { $0 > week } == true || through < nextWeek,
+                mergedCount: merged.count, sizedCount: count, medianChangedLines: median, p90ChangedLines: p90,
+                additions: additions, deletions: deletions))
+            week = nextWeek
+        }
+        return result
     }
     private static func weekStart(_ date: Date, calendar: Calendar) -> Date {
         calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)

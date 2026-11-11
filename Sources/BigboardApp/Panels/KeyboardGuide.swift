@@ -16,7 +16,7 @@ struct KeyboardGuide: View {
         ("⌘⇧C", "Copy view as Markdown"),
         ("⌘Return", "Open selection on GitHub"),
         ("⌘⌥C", "Copy GitHub link to the selection"),
-        ("⌘⌥1–4", "Activity: Directories, Commits, People, Related"),
+        ("⌘⌥1–5", "Activity: Directories, Commits, People, Related, PR Trends"),
         ("⌘⌥M / ⌘⌥A / ⌘⌥R", "PRs: needs my attention / authored by me / review requested"),
         ("Return / →", "Explore the selected directory row"),
         ("Esc", "Dismiss the active popover or sheet"),

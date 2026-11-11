@@ -3,6 +3,7 @@ import SwiftUI
 struct ActivityBoard: View {
     @Bindable var workspace: WorkspaceModel
     @Bindable var navigation: BoardState
+    @Environment(\.calendar) private var calendar
     var records: [Commit] { navigation.filteredCommits(workspace.snapshot, for: .activity) }
     var scoped: [Commit] {
         navigation.evidenceRecords(
@@ -34,27 +35,34 @@ struct ActivityBoard: View {
     }
 
     var body: some View {
+        let linkScope = navigation.lens == .prTrends ? navigation.scope : inspectScope
         VStack(spacing: 0) {
-            HStack {
-                BoardSearch(navigation: navigation)
-                Spacer()
-                PeopleFilter(records: workspace.snapshot.commits, filters: $navigation.activity)
+            if navigation.lens != .prTrends {
+                HStack {
+                    BoardSearch(navigation: navigation)
+                    Spacer()
+                    PeopleFilter(records: workspace.snapshot.commits, filters: $navigation.activity)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            scopeBar
+            scopeBar.padding(.top, navigation.lens == .prTrends ? 12 : 0)
             Picker(
                 "Activity lens",
                 selection: Binding(get: { navigation.lens }, set: { navigation.setLens($0) })
             ) { ForEach(ActivityLens.allCases) { Text($0.rawValue).tag($0) } }
             .pickerStyle(.segmented).padding(.horizontal, 12).padding(.bottom, 12)
-            HSplitView {
-                lensContent.frame(minWidth: 450)
-                inspector.frame(minWidth: 260, idealWidth: 310, maxWidth: 390)
+            if navigation.lens == .prTrends {
+                prTrends
+            } else {
+                HSplitView {
+                    lensContent.frame(minWidth: 450)
+                    inspector.frame(minWidth: 260, idealWidth: 310, maxWidth: 390)
+                }
             }
         }
         .focusedSceneValue(
             \.selectedGitHubTarget,
-            inspectScope.repo.isEmpty || workspace.pathExists(inspectScope) == false ? nil : .scope(inspectScope))
+            linkScope.repo.isEmpty || workspace.pathExists(linkScope) == false ? nil : .scope(linkScope))
     }
 
     private var scopeBar: some View {
@@ -124,11 +132,48 @@ struct ActivityBoard: View {
                                 showAuthor: { navigation.showContributor($0) })
                         case .people: scopedPeople
                         case .related: relatedList
-                        case .directories: EmptyView()
+                        case .directories, .prTrends: EmptyView()
                         }
                     }
                     .padding(16)
                 }
+            }
+        }
+    }
+
+    private var prTrends: some View {
+        let trend = navigation.activityPRTrends(
+            workspace.snapshot, configuration: workspace.configuration, calendar: calendar)
+        return Group {
+            if trend.weeks.contains(where: \.hasMergeCount) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("PR size is additions plus deletions. Net growth is additions minus deletions.")
+                            .foregroundStyle(.secondary)
+                        if !navigation.scope.path.isEmpty || !navigation.scope.areaName.isEmpty {
+                            Text("Line totals cover every file in each PR that touched this scope.")
+                                .foregroundStyle(.secondary)
+                        }
+                        if trend.coverage != .complete {
+                            Text("Merge coverage is incomplete or stale. The charts show known PRs.")
+                                .foregroundStyle(.secondary)
+                        }
+                        let merged = trend.weeks.reduce(0) { $0 + $1.size.mergedCount }
+                        let sized = trend.weeks.reduce(0) { $0 + $1.size.sizedCount }
+                        if sized < merged {
+                            Text("Line counts available for \(sized.formatted()) of \(merged.formatted()) known merged PRs.")
+                                .foregroundStyle(.secondary)
+                        }
+                        WeeklyPRTrends(points: trend.weeks)
+                    }
+                    .padding(16)
+                }
+            } else if trend.coverage == .complete {
+                EmptyBoard(title: "No merged PRs", message: "No pull requests merged in the selected scope and date range.")
+            } else {
+                EmptyBoard(
+                    title: "Weekly PR trends unavailable",
+                    message: "Data Status shows merged PR coverage for the selected repositories.")
             }
         }
     }

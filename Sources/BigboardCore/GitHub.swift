@@ -395,9 +395,14 @@ actor GitHubService {
             result.coverage.mergedInventoryRequests += requests - before
             if result.authenticationRequired { break }
 
-            for rowIndex in rows.indices where !rows[rowIndex].filesComplete {
+            for rowIndex in rows.indices {
                 guard !Task.isCancelled else { return }
-                let row = rows[rowIndex]
+                var row = rows[rowIndex]
+                if let prior = oldByID[row.id] {
+                    retainMergedSize(from: prior, in: &row)
+                    rows[rowIndex] = row
+                }
+                guard !row.filesComplete else { continue }
                 if let prior = oldByID[row.id], prior.filesComplete,
                     !row.headOID.isEmpty, prior.headOID == row.headOID, prior.baseOID == row.baseOID,
                     prior.fileCount == row.fileCount, prior.updatedAt == row.updatedAt, prior.mergedAt == row.mergedAt
@@ -439,6 +444,17 @@ actor GitHubService {
             result.repositories[index] = repo
             result.mergedPullRequests += rows
         }
+    }
+
+    private func retainMergedSize(from prior: PullRequest, in row: inout PullRequest) {
+        guard row.additions == nil || row.deletions == nil,
+            !row.headOID.isEmpty, !row.baseOID.isEmpty, prior.headOID == row.headOID, prior.baseOID == row.baseOID,
+            prior.mergedAt == row.mergedAt, prior.updatedAt == row.updatedAt,
+            let additions = prior.additions, additions >= 0, let deletions = prior.deletions, deletions >= 0,
+            row.additions == nil || row.additions == additions, row.deletions == nil || row.deletions == deletions
+        else { return }
+        row.additions = additions
+        row.deletions = deletions
     }
 
     private enum MergedWindow {
@@ -494,12 +510,20 @@ actor GitHubService {
         let query = "repo:\(repo.id) is:pr is:merged merged:\(boundary)\(branchQualifier) sort:updated-desc"
         var cursor: String?, cursors = Set<String>(), seen = Set<Int>(), expectedCount: Int?
         while true {
-            let page = try await graph(repo: repo.id, cursor: cursor, search: query)
-            do { try validateGraphErrors(page.errors) } catch let failure as GitHubFailure {
-                if failure.isAccessDenied || failure == .rateLimited
-                    || page.errors?.allSatisfy(\.isMergedSupportingField) != true
-                {
-                    throw failure
+            var page = try await graph(repo: repo.id, cursor: cursor, search: query)
+            try validateMergedErrors(page.errors)
+            var sizesBeforeRetry: [Int: RawPR] = [:], retryFailure: GitHubFailure?
+            if page.errors?.contains(where: \.isMergedSizeField) == true,
+                page.data?.search?.nodes?.contains(where: { $0 == nil }) != false
+            {
+                do {
+                    let recovered = try await graph(repo: repo.id, cursor: cursor, search: query, includeMergedSizes: false)
+                    try validateMergedErrors(recovered.errors)
+                    let available = page.data?.search?.nodes?.compactMap { $0 } ?? []
+                    sizesBeforeRetry = Dictionary(available.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
+                    page = recovered
+                } catch let failure as GitHubFailure where !failure.isAccessDenied {
+                    retryFailure = failure
                 }
             }
             guard let name = page.data?.repository?.nameWithOwner else { throw GitHubFailure.notFound }
@@ -511,7 +535,7 @@ actor GitHubService {
             if expectedCount == nil && count > 1000 { return .capped(count) }
             guard let nodes = search.nodes, nodes.count <= 50, let info = search.pageInfo,
                 expectedCount == nil || expectedCount == count
-            else { throw GitHubFailure.incomplete }
+            else { throw retryFailure ?? GitHubFailure.incomplete }
             expectedCount = count
             var complete = true
             for node in nodes {
@@ -529,12 +553,19 @@ actor GitHubService {
                 guard branch == repo.branch else { continue }
                 var row = convert(node, repo: repo.id)
                 row.mergedAt = mergedAt
+                if let previous = sizesBeforeRetry[node.number], previous.state == "MERGED",
+                    previous.baseRefName == branch, canonicalGitHubRepository(previous.repository?.nameWithOwner ?? "") == repo.id
+                {
+                    var prior = convert(previous, repo: repo.id)
+                    prior.mergedAt = githubDate(previous.mergedAt)
+                    retainMergedSize(from: prior, in: &row)
+                }
                 row.files = Array(Set(row.files.filter { !$0.isEmpty && !$0.contains("\0") })).sorted()
                 row.filesComplete = row.filesComplete && node.changedFiles == row.files.count
                 row.fileCount = node.changedFiles.flatMap { $0 >= 0 ? $0 : nil } ?? row.fileCount
                 rows.append(row)
             }
-            guard complete, seen.count <= count else { throw GitHubFailure.incomplete }
+            guard complete, seen.count <= count else { throw retryFailure ?? GitHubFailure.incomplete }
             if !info.hasNextPage {
                 guard seen.count == count else { throw GitHubFailure.incomplete }
                 return .complete(count)
@@ -578,7 +609,9 @@ actor GitHubService {
             return (row, GitHubFailure.incomplete)
         } catch { return (row, error) }
     }
-    private func graph(repo: String, cursor: String?, number: Int? = nil, search: String? = nil) async throws -> GraphEnvelope {
+    private func graph(
+        repo: String, cursor: String?, number: Int? = nil, search: String? = nil, includeMergedSizes: Bool = true
+    ) async throws -> GraphEnvelope {
         let components = repo.split(separator: "/")
         guard components.count == 2 else { throw GitHubFailure.response }
         var variables: [String: Any] = [
@@ -586,7 +619,10 @@ actor GitHubService {
             "cursor": cursor as Any? ?? NSNull(),
         ]
         if let number { variables["number"] = number }
-        if let search { variables["search"] = search }
+        if let search {
+            variables["search"] = search
+            variables["includeSizes"] = includeMergedSizes
+        }
         let query = search != nil ? Self.mergedQuery : (number == nil ? Self.inventoryQuery : Self.filesQuery)
         let body = try JSONSerialization.data(withJSONObject: [
             "query": query, "variables": variables,
@@ -608,6 +644,13 @@ actor GitHubService {
             throw GitHubFailure.notFound
         }
         throw GitHubFailure.incomplete
+    }
+    private func validateMergedErrors(_ errors: [GraphError]?) throws {
+        do { try validateGraphErrors(errors) } catch let failure as GitHubFailure {
+            if failure.isAccessDenied || failure == .rateLimited || errors?.allSatisfy(\.isMergedSupportingField) != true {
+                throw failure
+            }
+        }
     }
     private func convert(_ raw: RawPR, repo: String) -> PullRequest {
         var row = PullRequest(
@@ -701,7 +744,7 @@ actor GitHubService {
         }
         """
     private static let mergedQuery = """
-        query BigboardMerged($owner:String!,$name:String!,$search:String!,$cursor:String) {
+        query BigboardMerged($owner:String!,$name:String!,$search:String!,$cursor:String,$includeSizes:Boolean!) {
           repository(owner:$owner,name:$name) { nameWithOwner }
           search(query:$search,type:ISSUE,first:50,after:$cursor) {
             issueCount pageInfo { hasNextPage endCursor }
@@ -709,6 +752,7 @@ actor GitHubService {
               ... on PullRequest {
                 repository { nameWithOwner } number title author { login } state baseRefName mergedAt updatedAt
                 headRefOid baseRefOid changedFiles
+                additions @include(if:$includeSizes) deletions @include(if:$includeSizes)
                 files(first:100) { totalCount pageInfo { hasNextPage endCursor } nodes { path } }
               }
             }
@@ -839,10 +883,14 @@ private struct GraphError: Decodable {
             .contains(field)
     }
     var isMergedSupportingField: Bool {
+        mergedField == "files" || mergedField == "changedFiles" || isMergedSizeField
+    }
+    var isMergedSizeField: Bool { mergedField == "additions" || mergedField == "deletions" }
+    private var mergedField: String? {
         guard let path, path.count >= 4, case .field("search") = path[0], case .field("nodes") = path[1],
             case .index = path[2], case .field(let field) = path[3]
-        else { return false }
-        return field == "files" || field == "changedFiles"
+        else { return nil }
+        return field
     }
 }
 private struct GraphRepositoryName: Decodable { var nameWithOwner: String? }
