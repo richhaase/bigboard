@@ -174,8 +174,17 @@ Choose **View repository PRs** to inspect current review and check evidence.
 
 Breadcrumbs and **Go → Enclosing Scope** (Command-Up Arrow) move to broader
 scopes while keeping board filters applied.
-Directory totals include only files in that directory. Additions and removals
-stay separate even when rows are sorted by commits, recency, or name.
+Directory totals include only files in that directory. You can sort rows by
+lines changed, commits, merged PRs, recency, or name.
+
+**Merged PRs** counts pull requests merged into a repository's default branch
+within the selected date range. A PR that touches two directories appears in
+both directory counts and counts once in their shared parent. Repository counts
+use the merge inventory. Path counts also use GitHub's changed-file lists.
+Incomplete coverage is marked on Activity and can be inspected in Data Status.
+People filters apply to Git commits. Merged PR counts use the selected date,
+repository, and path because GitHub PR authors and Git contributors have
+separate identities.
 
 **Commits** shows commit subjects, authors, dates, and measured line changes.
 Commit subjects marked with an arrow open GitHub. Right-click a commit to copy
@@ -203,8 +212,7 @@ The selection panel shows the top contributors, a **Recent activity** chart
 that uses the same hour, day, week, or month buckets as the date range, links
 to open the repository or path on GitHub, and the open pull requests for the
 selected repository or path. With a custom date range, such as a Heat Maps drill-down, it lists only
-those opened before the range ended; merged and closed pull requests are not
-collected. Repository PR context opens Pull requests for the selected repository with its own filters;
+those opened before the range ended. Repository PR context opens Pull requests for the selected repository with its own filters;
 **Show All Repositories** or Back restores the previous PR filters.
 
 ## Contributors and identities
@@ -310,8 +318,8 @@ Orange **Incomplete** badges on boards also open Data Status.
 Data Status has its own **Refresh** button, which becomes **Stop** while a
 refresh runs. It shows refresh phase, last successful update, snapshot time, request counts,
 per-repository timestamps and coverage, errors, and
-storage locations. History, PR inventory, changed files, and reviewer evidence
-have separate completeness signals. Explicit refresh preserves usable data on
+storage locations. History, open PR inventory, changed files, reviewer evidence,
+and merged PR date coverage have separate completeness signals. Explicit refresh preserves usable data on
 transient failure and labels stale or incomplete evidence.
 
 **Settings → General → Use cached history only** reads your clones without

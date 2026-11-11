@@ -119,6 +119,7 @@ struct GitHubResult: Sendable {
     var pullRequests: [PullRequest]
     var coverage: Coverage
     var authenticationRequired = false
+    var mergedPullRequests: [PullRequest] = []
 }
 struct GitHubUser: Decodable, Sendable {
     var login: String
@@ -204,14 +205,18 @@ actor GitHubService {
         guard user.valid else { throw GitHubFailure.response }
         return user
     }
-    func fetch(_ repos: [Repository], budget: Int, previous: [PullRequest]) async -> GitHubResult {
+    func fetch(
+        _ repos: [Repository], budget: Int, previous: [PullRequest], previousMerged: [PullRequest]? = nil
+    ) async -> GitHubResult {
         do { try await begin(budget: budget) } catch {
             return GitHubResult(
                 repositories: repos, pullRequests: previous,
-                coverage: Coverage(errors: [error.localizedDescription]))
+                coverage: Coverage(errors: [error.localizedDescription]), mergedPullRequests: previousMerged ?? [])
         }
         defer { busy = false }
         var result = GitHubResult(repositories: [], pullRequests: [], coverage: Coverage())
+        let mergedReserve = previousMerged == nil ? 0 : min(maximumRequests / 2, max(repos.count, maximumRequests / 3))
+        let openFileLimit = maximumRequests - mergedReserve
         let previousByID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for original in repos {
             var repo = original
@@ -299,7 +304,10 @@ actor GitHubService {
                 }
                 if !rows[index].filesComplete, !rows[index].headOID.isEmpty {
                     let before = requests
+                    let inventoryLimit = repositoryLimit
+                    repositoryLimit = min(inventoryLimit, openFileLimit)
                     let collection = await collectFiles(rows[index])
+                    repositoryLimit = inventoryLimit
                     rows[index] = collection.0
                     if let error = collection.1 {
                         result.coverage.errors.append(
@@ -333,15 +341,210 @@ actor GitHubService {
             result.repositories.append(repo)
             result.pullRequests += rows
         }
+        if let previousMerged, !result.authenticationRequired {
+            await fetchMerged(into: &result, previous: previousMerged)
+        }
         if result.authenticationRequired {
             result.pullRequests = []
+            result.mergedPullRequests = []
             for index in result.repositories.indices {
                 result.repositories[index].prStale = true
                 result.repositories[index].prInventoryComplete = false
+                result.repositories[index].mergedPRCoverage = MergedPRCoverage(stale: true)
             }
         }
         return result
     }
+    private func fetchMerged(into result: inout GitHubResult, previous: [PullRequest]) async {
+        let previousByRepo = Dictionary(grouping: previous, by: \.repo)
+        let checkedAt = now()
+        for index in result.repositories.indices {
+            guard !Task.isCancelled else { return }
+            var repo = result.repositories[index]
+            let remainingRepositories = result.repositories.count - index
+            let available = maximumRequests - requests
+            let share = available / remainingRepositories + (available % remainingRepositories == 0 ? 0 : 1)
+            let repositoryBudget = min(64, share)
+            let limit = requests + repositoryBudget
+            repositoryLimit = limit
+            let cached = previousByRepo[repo.id] ?? []
+            let oldByID = Dictionary(cached.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var rows: [PullRequest] = []
+            var verified = repo.prInventoryComplete
+            var coverage = MergedPRCoverage()
+            let before = requests
+            do {
+                try await collectMergedInventory(
+                    repo, checkedAt: checkedAt, fileReserve: min(6, repositoryBudget / 4),
+                    rows: &rows, coverage: &coverage, verified: &verified)
+            } catch {
+                guard !Task.isCancelled else { return }
+                if let failure = error as? GitHubFailure, failure.isAccessDenied {
+                    verified = false
+                    rows = []
+                    coverage = MergedPRCoverage(stale: true)
+                    if failure == .auth { result.authenticationRequired = true }
+                } else {
+                    coverage.stale = !coverage.inventoryComplete && !cached.isEmpty
+                }
+                if !coverage.inventoryComplete || (error as? GitHubFailure) != .budget {
+                    result.coverage.errors.append("\(repo.id) merged PR history: \(error.localizedDescription)")
+                }
+            }
+            repositoryLimit = limit
+            result.coverage.mergedInventoryRequests += requests - before
+            if result.authenticationRequired { break }
+
+            for rowIndex in rows.indices where !rows[rowIndex].filesComplete {
+                guard !Task.isCancelled else { return }
+                let row = rows[rowIndex]
+                if let prior = oldByID[row.id], prior.filesComplete,
+                    !row.headOID.isEmpty, prior.headOID == row.headOID, prior.baseOID == row.baseOID,
+                    prior.fileCount == row.fileCount, prior.updatedAt == row.updatedAt, prior.mergedAt == row.mergedAt
+                {
+                    rows[rowIndex].files = prior.files
+                    rows[rowIndex].filesComplete = true
+                } else if !row.headOID.isEmpty, requests < repositoryLimit {
+                    let before = requests
+                    let (collected, error) = await collectFiles(row)
+                    result.coverage.mergedFileRequests += requests - before
+                    rows[rowIndex] = collected
+                    if let failure = error as? GitHubFailure, failure.isAccessDenied {
+                        verified = false
+                        rows = []
+                        coverage = MergedPRCoverage(stale: true)
+                        if failure == .auth { result.authenticationRequired = true }
+                        result.coverage.errors.append("\(repo.id) merged PR files: \(failure.localizedDescription)")
+                        break
+                    }
+                }
+            }
+            if rows.contains(where: { !$0.filesComplete }) {
+                result.coverage.errors.append("\(repo.id): Some merged PR file paths are unavailable.")
+            }
+            if verified {
+                let loaded = Set(rows.map(\.id))
+                rows += cached.filter { prior in
+                    guard !loaded.contains(prior.id), let mergedAt = prior.mergedAt, mergedAt <= checkedAt else {
+                        return false
+                    }
+                    return !coverage.inventoryComplete || (coverage.coveredFrom.map { mergedAt < $0 } ?? false)
+                }
+                if !coverage.inventoryComplete, repo.mergedPRCoverage.checkedAt != nil {
+                    coverage = repo.mergedPRCoverage
+                    coverage.stale = true
+                }
+            }
+            repo.mergedPRCoverage = coverage
+            result.repositories[index] = repo
+            result.mergedPullRequests += rows
+        }
+    }
+
+    private enum MergedWindow {
+        case complete(Int), capped(Int)
+    }
+
+    private func collectMergedInventory(
+        _ repo: Repository, checkedAt: Date, fileReserve: Int, rows: inout [PullRequest],
+        coverage: inout MergedPRCoverage, verified: inout Bool
+    ) async throws {
+        guard canonicalGitHubRepository(repo.id) == repo.id, !repo.branch.isEmpty else {
+            throw GitHubFailure.response
+        }
+        let recent: TimeInterval = 15 * 24 * 60 * 60
+        var upper = Date(timeIntervalSince1970: floor(checkedAt.timeIntervalSince1970) + 1)
+        let recentBoundary = upper.addingTimeInterval(-recent)
+        let inventoryLimit = repositoryLimit - fileReserve
+        var span: TimeInterval? = recent
+        var olderCount: Int?
+        while true {
+            let lower = span.map { upper.addingTimeInterval(-$0) }
+            switch try await collectMergedWindow(repo, from: lower, before: upper, rows: &rows, verified: &verified) {
+            case .capped(let count):
+                if let span, span <= 1 { throw GitHubFailure.incomplete }
+                if span == nil { olderCount = count }
+                span = span.map { floor($0 / 2) } ?? recent
+            case .complete(let count):
+                coverage = MergedPRCoverage(coveredFrom: lower, checkedAt: checkedAt, inventoryComplete: true)
+                guard let lower else { return }
+                if lower <= recentBoundary && rows.contains(where: { !$0.filesComplete }) {
+                    repositoryLimit = inventoryLimit
+                }
+                upper = lower
+                olderCount = olderCount.map { max(0, $0 - count) }
+                if let olderCount, olderCount > 1000 {
+                    span = min((span ?? recent) * 2, 365 * 24 * 60 * 60)
+                } else {
+                    span = nil
+                }
+            }
+        }
+    }
+
+    private func collectMergedWindow(
+        _ repo: Repository, from lower: Date?, before upper: Date, rows: inout [PullRequest], verified: inout Bool
+    ) async throws -> MergedWindow {
+        let formatter = ISO8601DateFormatter()
+        let boundary = lower.map {
+            formatter.string(from: $0) + ".." + formatter.string(from: upper.addingTimeInterval(-1))
+        } ?? "<" + formatter.string(from: upper)
+        let branchQualifier = repo.branch.contains { $0.isWhitespace || $0 == "\"" || $0 == "\\" }
+            ? "" : " base:\"\(repo.branch)\""
+        let query = "repo:\(repo.id) is:pr is:merged merged:\(boundary)\(branchQualifier) sort:updated-desc"
+        var cursor: String?, cursors = Set<String>(), seen = Set<Int>(), expectedCount: Int?
+        while true {
+            let page = try await graph(repo: repo.id, cursor: cursor, search: query)
+            do { try validateGraphErrors(page.errors) } catch let failure as GitHubFailure {
+                if failure.isAccessDenied || failure == .rateLimited
+                    || page.errors?.allSatisfy(\.isMergedSupportingField) != true
+                {
+                    throw failure
+                }
+            }
+            guard let name = page.data?.repository?.nameWithOwner else { throw GitHubFailure.notFound }
+            guard canonicalGitHubRepository(name) == repo.id else { throw GitHubFailure.incomplete }
+            verified = true
+            guard let search = page.data?.search, let count = search.issueCount, count >= 0 else {
+                throw GitHubFailure.incomplete
+            }
+            if expectedCount == nil && count > 1000 { return .capped(count) }
+            guard let nodes = search.nodes, nodes.count <= 50, let info = search.pageInfo,
+                expectedCount == nil || expectedCount == count
+            else { throw GitHubFailure.incomplete }
+            expectedCount = count
+            var complete = true
+            for node in nodes {
+                guard let node, node.number > 0, node.state == "MERGED",
+                    canonicalGitHubRepository(node.repository?.nameWithOwner ?? "") == repo.id,
+                    let branch = node.baseRefName, !branch.isEmpty,
+                    let mergedAt = githubDate(node.mergedAt), mergedAt < upper,
+                    githubDate(node.updatedAt) != nil,
+                    lower.map({ mergedAt >= $0 }) ?? true,
+                    seen.insert(node.number).inserted
+                else {
+                    complete = false
+                    continue
+                }
+                guard branch == repo.branch else { continue }
+                var row = convert(node, repo: repo.id)
+                row.mergedAt = mergedAt
+                row.files = Array(Set(row.files.filter { !$0.isEmpty && !$0.contains("\0") })).sorted()
+                row.filesComplete = row.filesComplete && node.changedFiles == row.files.count
+                row.fileCount = node.changedFiles.flatMap { $0 >= 0 ? $0 : nil } ?? row.fileCount
+                rows.append(row)
+            }
+            guard complete, seen.count <= count else { throw GitHubFailure.incomplete }
+            if !info.hasNextPage {
+                guard seen.count == count else { throw GitHubFailure.incomplete }
+                return .complete(count)
+            }
+            guard !nodes.isEmpty, let next = info.endCursor, !next.isEmpty, cursors.insert(next).inserted
+            else { throw GitHubFailure.incomplete }
+            cursor = next
+        }
+    }
+
     private func collectFiles(_ original: PullRequest) async -> (PullRequest, (any Error)?) {
         var row = original, cursor: String?, paths = Set<String>(), cursors = Set<String>()
         do {
@@ -353,6 +556,7 @@ actor GitHubService {
                     raw.headRefOid == row.headOID, raw.baseRefOid == row.baseOID,
                     githubDate(raw.updatedAt) == row.updatedAt, let files = raw.files,
                     files.totalCount == row.fileCount, let nodes = files.nodes, nodes.count <= 100,
+                    row.mergedAt == nil || raw.changedFiles == row.fileCount,
                     let info = files.pageInfo
                 else { throw GitHubFailure.incomplete }
                 for file in nodes {
@@ -374,7 +578,7 @@ actor GitHubService {
             return (row, GitHubFailure.incomplete)
         } catch { return (row, error) }
     }
-    private func graph(repo: String, cursor: String?, number: Int? = nil) async throws -> GraphEnvelope {
+    private func graph(repo: String, cursor: String?, number: Int? = nil, search: String? = nil) async throws -> GraphEnvelope {
         let components = repo.split(separator: "/")
         guard components.count == 2 else { throw GitHubFailure.response }
         var variables: [String: Any] = [
@@ -382,8 +586,10 @@ actor GitHubService {
             "cursor": cursor as Any? ?? NSNull(),
         ]
         if let number { variables["number"] = number }
+        if let search { variables["search"] = search }
+        let query = search != nil ? Self.mergedQuery : (number == nil ? Self.inventoryQuery : Self.filesQuery)
         let body = try JSONSerialization.data(withJSONObject: [
-            "query": number == nil ? Self.inventoryQuery : Self.filesQuery, "variables": variables,
+            "query": query, "variables": variables,
         ])
         return try decode(GraphEnvelope.self, try await request("graphql", body: body))
     }
@@ -491,7 +697,22 @@ actor GitHubService {
         """
     private static let filesQuery = """
         query BigboardFiles($owner:String!,$name:String!,$number:Int!,$cursor:String) {
-          repository(owner:$owner,name:$name) { nameWithOwner pullRequest(number:$number) { number updatedAt headRefOid baseRefOid files(first:100,after:$cursor) { totalCount pageInfo { hasNextPage endCursor } nodes { path } } } }
+          repository(owner:$owner,name:$name) { nameWithOwner pullRequest(number:$number) { number updatedAt headRefOid baseRefOid changedFiles files(first:100,after:$cursor) { totalCount pageInfo { hasNextPage endCursor } nodes { path } } } }
+        }
+        """
+    private static let mergedQuery = """
+        query BigboardMerged($owner:String!,$name:String!,$search:String!,$cursor:String) {
+          repository(owner:$owner,name:$name) { nameWithOwner }
+          search(query:$search,type:ISSUE,first:50,after:$cursor) {
+            issueCount pageInfo { hasNextPage endCursor }
+            nodes {
+              ... on PullRequest {
+                repository { nameWithOwner } number title author { login } state baseRefName mergedAt updatedAt
+                headRefOid baseRefOid changedFiles
+                files(first:100) { totalCount pageInfo { hasNextPage endCursor } nodes { path } }
+              }
+            }
+          }
         }
         """
 }
@@ -576,6 +797,11 @@ private struct RawPR: Decodable {
     var mergeable: String?
     var createdAt: String?
     var updatedAt: String?
+    var mergedAt: String?
+    var state: String?
+    var baseRefName: String?
+    var changedFiles: Int?
+    var repository: GraphRepositoryName?
     var additions: Int?
     var deletions: Int?
     var labels: Connection<RawLabel>?
@@ -612,14 +838,29 @@ private struct GraphError: Decodable {
         ]
             .contains(field)
     }
+    var isMergedSupportingField: Bool {
+        guard let path, path.count >= 4, case .field("search") = path[0], case .field("nodes") = path[1],
+            case .index = path[2], case .field(let field) = path[3]
+        else { return false }
+        return field == "files" || field == "changedFiles"
+    }
 }
+private struct GraphRepositoryName: Decodable { var nameWithOwner: String? }
 private struct GraphRepository: Decodable {
     var nameWithOwner: String?
     var pullRequests: Connection<RawPR>?
     var pullRequest: RawPR?
 }
 private struct GraphEnvelope: Decodable {
-    struct GraphData: Decodable { var repository: GraphRepository? }
+    struct GraphData: Decodable {
+        var repository: GraphRepository?
+        var search: GraphSearch?
+    }
+    struct GraphSearch: Decodable {
+        var issueCount: Int?
+        var pageInfo: PageInfo?
+        var nodes: [RawPR?]?
+    }
     var data: GraphData?
     var errors: [GraphError]?
 }

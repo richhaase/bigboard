@@ -40,6 +40,13 @@ struct DataStatusPanel: View {
                     value:
                         "\(workspace.snapshot.coverage.inventoryRequests) inventory · \(workspace.snapshot.coverage.fileRequests) files"
                 )
+                if !workspace.snapshot.cachedOnly {
+                    LabeledContent(
+                        "Merged PR requests",
+                        value:
+                            "\(workspace.snapshot.coverage.mergedInventoryRequests) inventory · \(workspace.snapshot.coverage.mergedFileRequests) files"
+                    )
+                }
                 SectionTitle(title: "Repository evidence")
                 ForEach(workspace.snapshot.repositories) { repo in
                     VStack(alignment: .leading, spacing: 4) {
@@ -57,6 +64,10 @@ struct DataStatusPanel: View {
                             "PR inventory \(repo.prInventoryComplete ? "complete" : "incomplete") · files \(repo.prFilesComplete ? "complete" : "incomplete") · reviewers \(repo.prReviewersComplete ? "complete" : "incomplete")\(repo.prStale ? " · stale" : "")"
                         )
                         .font(.caption).foregroundStyle(.secondary)
+                        if !workspace.snapshot.cachedOnly {
+                            Text(mergedPRStatus(repo.mergedPRCoverage))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if !repo.error.isEmpty {
                             Text(repo.error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
                         }
@@ -74,5 +85,14 @@ struct DataStatusPanel: View {
             }
             .padding(24)
         }
+    }
+
+    private func mergedPRStatus(_ coverage: MergedPRCoverage) -> String {
+        guard let checkedAt = coverage.checkedAt, coverage.inventoryComplete else {
+            return "Merged PR inventory incomplete"
+        }
+        let end = checkedAt.formatted()
+        let range = coverage.coveredFrom.map { "\($0.formatted()) – \(end)" } ?? "all history through \(end)"
+        return "Merged PR inventory \(range)\(coverage.stale ? " · stale" : "")"
     }
 }

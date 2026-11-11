@@ -180,6 +180,48 @@ struct AnalysisTests {
         #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/other")).isEmpty)
         #expect(Analysis.relatedPRs(prs, scope: ActivityScope(repo: "o/a")).count == 3)
     }
+    @Test func mergedPRCountsDeduplicateAcrossChildrenAndKeepRepositoryIdentity() {
+        let shared = PullRequest(repo: "o/a", number: 1, title: "Shared", author: "a", url: "", updatedAt: now,
+            files: ["src/api/route.swift", "src/ui/view.swift", "src/ui/style.swift"])
+        let other = PullRequest(repo: "o/b", number: 1, title: "Other", author: "b", url: "", updatedAt: now,
+            files: ["src/ui/view.swift"])
+        let pathsUnknown = PullRequest(repo: "o/a", number: 2, title: "Unknown files", author: "a", url: "", updatedAt: now)
+        let merged = [shared, shared, other, pathsUnknown]
+        let records = [commit("one", files: [FileChange(path: "src/ui/view.swift", added: 3), FileChange(path: "src/legacy.swift", added: 1)])]
+        let repositories = [Repository(id: "o/a"), Repository(id: "o/b"), Repository(id: "o/c")]
+        let repositoryRows = Analysis.activityRows(records, repositories: repositories, mergedPullRequests: merged)
+        #expect(repositoryRows.map(\.mergedPRCount) == [2, 1, 0])
+        #expect(Analysis.mergedPRs(merged, scope: ActivityScope()).map(\.id) == ["o/a#1", "o/b#1", "o/a#2"])
+
+        let scope = ActivityScope(repo: "o/a", path: "src")
+        let children = Analysis.activityRows(records, repositories: repositories, scope: scope, mergedPullRequests: merged)
+        #expect(Dictionary(uniqueKeysWithValues: children.map { ($0.label, $0.mergedPRCount) }) == [
+            "api": 1, "legacy.swift": 0, "ui": 1
+        ])
+        #expect(children.first { $0.label == "api" }?.totals.commits == 0)
+        #expect(children.first { $0.label == "ui" }?.totals.commits == 1)
+        #expect(Analysis.mergedPRs(merged, scope: scope).map(\.id) == ["o/a#1"])
+    }
+    @Test func mergedPRCountsUseExactFileDirectoryAndWorkAreaScopes() {
+        let merged = [
+            PullRequest(repo: "o/a", number: 1, title: "", author: "", url: "", updatedAt: now,
+                files: ["src/module", "src/module/new.swift"]),
+            PullRequest(repo: "o/a", number: 2, title: "", author: "", url: "", updatedAt: now,
+                files: ["src/module2/other.swift"]),
+            PullRequest(repo: "o/a", number: 3, title: "", author: "", url: "", updatedAt: now,
+                files: ["src/module/internal/build.swift"])
+        ]
+        let areas = ["o/a": [WorkArea(name: "Engine", paths: ["src/module"]), WorkArea(name: "Build", paths: ["src/module/internal"])]]
+        let scope = ActivityScope(repo: "o/a", path: "src", areaName: "Engine")
+        let rows = Analysis.activityRows([], repositories: [], scope: scope, workAreas: areas, mergedPullRequests: merged)
+        #expect(Set(rows.map(\.id)) == ["file:src/module", "directory:src/module"])
+        for row in rows {
+            #expect(row.mergedPRCount == 1)
+            #expect(Analysis.mergedPRs(merged, scope: row.scope, workAreas: areas).map(\.number) == [1])
+        }
+        let directory = ActivityScope(repo: "o/a", path: "src/module")
+        #expect(Analysis.mergedPRs(merged, scope: directory).map(\.number) == [1, 3])
+    }
     @Test func longestWorkAreaPrefixWins() {
         let rules = [WorkArea(name: "All", paths: ["src/"]), WorkArea(name: "Engine", paths: ["src/core"]), WorkArea(name: "Later tie", paths: ["src/core"])]
         #expect(Analysis.classifyWorkArea("src/core/parser.swift", rules: rules) == "Engine")

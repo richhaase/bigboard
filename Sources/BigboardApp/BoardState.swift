@@ -76,6 +76,50 @@ struct BoardFilters: Equatable {
     var states: Set<String> = []
     var mine: Set<String> = []
 }
+enum MergedPRCountCoverage {
+    case complete, incomplete, unavailable
+
+    func label(_ count: Int) -> String {
+        if self == .unavailable && count == 0 { return "—" }
+        return count.formatted() + (self == .complete ? "" : " + ?")
+    }
+
+    func activityLabel(_ count: Int) -> String {
+        "\(label(count)) merged \(self == .complete && count == 1 ? "PR" : "PRs")"
+    }
+
+    var note: String? {
+        switch self {
+        case .complete: nil
+        case .incomplete: "Merged PR coverage is incomplete or stale."
+        case .unavailable: "Merged PR history is unavailable."
+        }
+    }
+}
+struct ActivityMergedPREvidence {
+    var records: [PullRequest] = []
+    var inventoryCoverage: [String: MergedPRCountCoverage] = [:]
+    var incompletePaths: Set<String> = []
+
+    func coverage(in scope: ActivityScope) -> MergedPRCountCoverage {
+        guard !scope.repo.isEmpty else {
+            let values = inventoryCoverage.values
+            if values.allSatisfy({ $0 == .unavailable }) { return .unavailable }
+            return values.allSatisfy { $0 == .complete } ? .complete : .incomplete
+        }
+        let inventory = inventoryCoverage[scope.repo] ?? .unavailable
+        if inventory == .complete, !scope.path.isEmpty || !scope.areaName.isEmpty,
+            incompletePaths.contains(scope.repo)
+        {
+            return .incomplete
+        }
+        return inventory
+    }
+
+    func count(in scope: ActivityScope, workAreas: [String: [WorkArea]]) -> Int {
+        Analysis.mergedPRs(records, scope: scope, workAreas: workAreas).count
+    }
+}
 struct RepositoryChecklist {
     var selection: Set<String>
     var available: Set<String>
@@ -343,6 +387,34 @@ enum DateRange: Hashable {
             return commit.date >= since
         }
     }
+    func activityMergedPRs(_ snapshot: Snapshot) -> ActivityMergedPREvidence {
+        guard !snapshot.cachedOnly else { return ActivityMergedPREvidence() }
+        let start = dateRange.start(relativeTo: snapshot.generatedAt)
+        let end = dateRange.end(relativeTo: snapshot.generatedAt)
+        let includesStart = dateRange.includesStart
+        let inventory = Dictionary(uniqueKeysWithValues: visibleRepositories(snapshot).map { repo in
+            let coverage = repo.mergedPRCoverage
+            guard let checkedAt = coverage.checkedAt else {
+                return (repo.id, MergedPRCountCoverage.unavailable)
+            }
+            let complete = coverage.inventoryComplete && !coverage.stale && checkedAt >= end
+                && (coverage.coveredFrom.map { from in start.map { $0 >= from } ?? false } ?? true)
+            return (repo.id, complete ? .complete : .incomplete)
+        })
+        let records = snapshot.mergedPullRequests.filter { pr in
+            guard inventory[pr.repo] != nil, let date = pr.mergedAt, date <= end else { return false }
+            guard let start else { return true }
+            return date > start || (includesStart && date == start)
+        }
+        return ActivityMergedPREvidence(
+            records: records, inventoryCoverage: inventory,
+            incompletePaths: Set(records.lazy.filter { !$0.filesComplete }.map(\.repo)))
+    }
+    var mergedPRScopeNote: String? {
+        guard activity.hideBots || !activity.people.isEmpty || relatedEvidence != nil || scopedPerson != nil
+        else { return nil }
+        return "Merged PR counts cover the full date and path scope."
+    }
     func timelinePoints(_ records: [Commit], snapshot: Snapshot) -> [TimelinePoint] {
         Analysis.timeline(
             records, days: 0, since: dateRange.start(relativeTo: snapshot.generatedAt),
@@ -407,12 +479,14 @@ enum DateRange: Hashable {
         let rows =
             Analysis.activityRows(
                 filteredCommits(snapshot, for: .activity), repositories: visibleRepositories(snapshot), scope: scope,
-                workAreas: configuration.workAreas
+                workAreas: configuration.workAreas, mergedPullRequests: activityMergedPRs(snapshot).records
             )
         func compare(_ a: ActivityRow, _ b: ActivityRow) -> Bool {
             switch activity.sort {
             case "commits":
                 if a.totals.commits != b.totals.commits { return a.totals.commits > b.totals.commits }
+            case "mergedPRs":
+                if a.mergedPRCount != b.mergedPRCount { return a.mergedPRCount > b.mergedPRCount }
             case "recent":
                 if a.latest != b.latest { return (a.latest ?? .distantPast) > (b.latest ?? .distantPast) }
             case "name": break

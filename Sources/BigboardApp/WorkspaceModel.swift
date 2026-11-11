@@ -176,6 +176,7 @@ final class WorkspaceModel {
             current.cachedOnly = config.cachedOnly
             if config.cachedOnly {
                 current.pullRequests = []
+                current.mergedPullRequests = []
                 current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
                 current.coverage.message = "Cached history. Pull-request evidence is unavailable offline."
                 snapshot = current
@@ -201,7 +202,8 @@ final class WorkspaceModel {
             snapshot = current
             snapshot.coverage.message = "Loading pull-request evidence…"
             let prs = await github.fetch(
-                current.repositories, budget: config.requestBudget, previous: current.pullRequests)
+                current.repositories, budget: config.requestBudget, previous: current.pullRequests,
+                previousMerged: current.mergedPullRequests)
             guard operation == generation, !Task.isCancelled else { return }
             if prs.authenticationRequired {
                 await invalidateAuthentication(operation: operation)
@@ -209,9 +211,12 @@ final class WorkspaceModel {
             }
             current.repositories = prs.repositories
             current.pullRequests = prs.pullRequests
+            current.mergedPullRequests = prs.mergedPullRequests
             current.coverage.errors += prs.coverage.errors
             current.coverage.inventoryRequests = prs.coverage.inventoryRequests
             current.coverage.fileRequests = prs.coverage.fileRequests
+            current.coverage.mergedInventoryRequests = prs.coverage.mergedInventoryRequests
+            current.coverage.mergedFileRequests = prs.coverage.mergedFileRequests
             current.coverage.phase = current.coverage.errors.isEmpty ? "ready" : "partial"
             current.coverage.message =
                 current.coverage.errors.isEmpty
@@ -233,6 +238,7 @@ final class WorkspaceModel {
             for i in snapshot.repositories.indices {
                 snapshot.repositories[i].stale = true
                 snapshot.repositories[i].prStale = true
+                snapshot.repositories[i].mergedPRCoverage.stale = true
             }
         }
     }
@@ -251,6 +257,8 @@ final class WorkspaceModel {
         }
         var result = Snapshot(generatedAt: Date(), accountID: previous.accountID, viewer: previous.viewer)
         result.pullRequests = previous.pullRequests
+        let previousRepositories = Dictionary(uniqueKeysWithValues: previous.repositories.map { ($0.id, $0) })
+        var retainMerged = Set<String>()
         result.cachedOnly = !live
         result.coverage.phase = "refreshing"
         for start in stride(from: 0, to: repos.count, by: 8) {
@@ -292,12 +300,16 @@ final class WorkspaceModel {
             }
             for outcome in outcomes.sorted(by: { $0.repository.id < $1.repository.id }) {
                 var repo = outcome.repository
-                if let prior = previous.repositories.first(where: { $0.id == repo.id }) {
+                if let prior = previousRepositories[repo.id] {
                     repo.prCheckedAt = prior.prCheckedAt
                     repo.prInventoryComplete = prior.prInventoryComplete
                     repo.prFilesComplete = prior.prFilesComplete
                     repo.prReviewersComplete = prior.prReviewersComplete
                     repo.prStale = prior.prStale
+                    if !configuration.cachedOnly, prior.branch == repo.branch {
+                        repo.mergedPRCoverage = prior.mergedPRCoverage
+                        retainMerged.insert(repo.id)
+                    }
                 }
                 result.repositories.append(repo)
                 result.commits += outcome.commits
@@ -306,6 +318,7 @@ final class WorkspaceModel {
         }
         let retained = Set(result.repositories.map(\.id))
         result.pullRequests.removeAll { !retained.contains($0.repo) }
+        result.mergedPullRequests = previous.mergedPullRequests.filter { retainMerged.contains($0.repo) }
         return result
     }
     private func invalidateAuthentication(operation: Int) async {
@@ -339,6 +352,14 @@ final class WorkspaceModel {
         snapshot.repositories.removeAll { !collected.contains($0.id) }
         snapshot.commits.removeAll { !collected.contains($0.repo) }
         snapshot.pullRequests.removeAll { !collected.contains($0.repo) }
+        if configuration.cachedOnly {
+            snapshot.mergedPullRequests = []
+            for index in snapshot.repositories.indices {
+                snapshot.repositories[index].mergedPRCoverage = MergedPRCoverage()
+            }
+        } else {
+            snapshot.mergedPullRequests.removeAll { !collected.contains($0.repo) }
+        }
     }
     private func findClones(operation: Int, roots: [String]) async -> Bool {
         let rows = await CloneDiscovery.find(in: CloneDiscovery.roots(roots))
@@ -490,6 +511,7 @@ final class WorkspaceModel {
                 }
                 self.snapshot.repositories = rescanned.repositories
                 self.snapshot.commits = rescanned.commits
+                self.snapshot.mergedPullRequests = rescanned.mergedPullRequests
                 self.snapshot.coverage.errors = errors
                 self.refreshTask = nil
                 self.busy = false

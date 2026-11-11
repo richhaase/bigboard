@@ -65,6 +65,7 @@ import Testing
         #expect(fixture.workspace.snapshot.repositories.map(\.id) == [chosen])
         #expect(Set(fixture.workspace.snapshot.commits.map(\.repo)) == [chosen])
         #expect(await fixture.network.graphRepositories == [chosen])
+        #expect(await fixture.network.mergedRepositories == [chosen])
         #expect(!fixture.scanExists(new) && !fixture.lockExists(new))
         let choices = SettingsRepositories.rows(available: fixture.workspace.discovered, saved: fixture.workspace.configuration.repositories, sort: .name, query: "")
         #expect(choices.map(\.id) == [chosen, new])
@@ -308,6 +309,7 @@ private actor CollectionTransport: GitHubTransport {
     private var discoveryFails = false
     private(set) var calls = 0
     private(set) var graphRepositories: [String] = []
+    private(set) var mergedRepositories: Set<String> = []
     func failDiscovery() { discoveryFails = true }
     func send(_ request: URLRequest, maximumBytes: Int) async throws -> GitHubHTTPResponse {
         calls += 1
@@ -319,8 +321,13 @@ private actor CollectionTransport: GitHubTransport {
         case "/graphql":
             guard let body = request.httpBody, let document = try JSONSerialization.jsonObject(with: body) as? [String: Any], let variables = document["variables"] as? [String: Any], let owner = variables["owner"] as? String, let name = variables["name"] as? String else { throw GitHubFailure.response }
             let id = owner + "/" + name
-            graphRepositories.append(id)
-            object = ["data": ["repository": ["nameWithOwner": id, "pullRequests": ["totalCount": 0, "nodes": [], "pageInfo": ["hasNextPage": false, "endCursor": NSNull()]]]]]
+            if variables["search"] != nil {
+                mergedRepositories.insert(id)
+                object = ["data": ["repository": ["nameWithOwner": id], "search": ["issueCount": 0, "nodes": [], "pageInfo": ["hasNextPage": false]]]]
+            } else {
+                graphRepositories.append(id)
+                object = ["data": ["repository": ["nameWithOwner": id, "pullRequests": ["totalCount": 0, "nodes": [], "pageInfo": ["hasNextPage": false, "endCursor": NSNull()]]]]]
+            }
         default: throw GitHubFailure.unavailable
         }
         return GitHubHTTPResponse(status: 200, headers: [:], data: try JSONSerialization.data(withJSONObject: object))

@@ -106,6 +106,141 @@ private func graphCursor(in request: URLRequest) throws -> String? {
     return variables["cursor"] as? String
 }
 
+private func mergedNode(
+    _ number: Int, age: TimeInterval = 60, branch: String = "main", changedFiles: Int = 1
+) -> [String: Any] {
+    let formatter = ISO8601DateFormatter()
+    let mergedAt = formatter.string(from: testNow.addingTimeInterval(-age))
+    return [
+        "number": number, "title": "Merged PR \(number)", "author": ["login": "author"],
+        "repository": ["nameWithOwner": "owner/repo"], "state": "MERGED", "baseRefName": branch,
+        "mergedAt": mergedAt, "updatedAt": mergedAt, "changedFiles": changedFiles,
+        "headRefOid": "head", "baseRefOid": "base",
+        "files": ["totalCount": 1, "pageInfo": ["hasNextPage": false], "nodes": [["path": "src/a.swift"]]],
+    ]
+}
+
+private func mergedPage(
+    _ nodes: [[String: Any]], count: Int? = nil, next: String? = nil
+) throws -> GitHubHTTPResponse {
+    let data = try JSONSerialization.data(withJSONObject: [
+        "data": [
+            "repository": ["nameWithOwner": "owner/repo"],
+            "search": [
+                "issueCount": count ?? nodes.count, "nodes": nodes,
+                "pageInfo": ["hasNextPage": next != nil, "endCursor": next as Any? ?? NSNull()],
+            ],
+        ],
+    ])
+    return GitHubHTTPResponse(status: 200, headers: [:], data: data)
+}
+
+@Test func mergedInventoryPaginatesWithDateAndBranchScope() async throws {
+    let network = ScriptedGitHub([
+        reply(onePR),
+        try mergedPage([mergedNode(2)], count: 2, next: "second-page"),
+        try mergedPage([mergedNode(3, branch: "release")], count: 2),
+        try mergedPage([mergedNode(4, age: 20 * 86_400)]),
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 16, previous: [], previousMerged: [])
+
+    #expect(result.pullRequests.map(\.number) == [1])
+    #expect(result.mergedPullRequests.map(\.number) == [2, 4])
+    #expect(result.mergedPullRequests.first?.mergedAt == testNow.addingTimeInterval(-60))
+    #expect(result.mergedPullRequests.allSatisfy { $0.filesComplete })
+    #expect(result.repositories.first?.mergedPRCoverage == MergedPRCoverage(checkedAt: testNow, inventoryComplete: true))
+    #expect(result.coverage.inventoryRequests == 1)
+    #expect(result.coverage.mergedInventoryRequests == 3)
+    #expect(result.coverage.errors.isEmpty)
+
+    let requests = await network.requests
+    try #require(requests.count == 4)
+    #expect(try graphCursor(in: requests[2]) == "second-page")
+    let body = try #require(requests[1].httpBody)
+    let document = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let variables = try #require(document["variables"] as? [String: Any])
+    let search = try #require(variables["search"] as? String)
+    #expect(search.contains("repo:owner/repo is:pr is:merged merged:"))
+    #expect(search.contains(" base:\"main\""))
+    #expect(search.contains(".."))
+}
+
+@Test func cappedOlderHistoryPreservesRecentCoverageAndPreviouslyKnownMerges() async throws {
+    let network = ScriptedGitHub([reply(onePR), try mergedPage([mergedNode(2)]), try mergedPage([], count: 1200)])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let older = PullRequest(
+        repo: "owner/repo", number: 9, title: "Older", author: "author", url: "",
+        updatedAt: testNow, mergedAt: testNow.addingTimeInterval(-20 * 86_400))
+    let result = await service.fetch(
+        [Repository(id: "owner/repo")], budget: 3, previous: [], previousMerged: [older])
+
+    #expect(result.mergedPullRequests.map(\.number) == [2, 9])
+    let coverage = try #require(result.repositories.first?.mergedPRCoverage)
+    #expect(coverage.inventoryComplete && !coverage.stale)
+    #expect(coverage.coveredFrom == testNow.addingTimeInterval(1 - 15 * 86_400))
+    #expect(coverage.checkedAt == testNow)
+    #expect(result.coverage.errors.isEmpty)
+    #expect(await network.count == 3)
+}
+
+@Test func mergedCollectionPreservesOpenInventoryPriorityUnderTightBudget() async {
+    let network = ScriptedGitHub([reply(onePR), reply(onePR.replacingOccurrences(of: "owner/repo", with: "owner/other"))])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch(
+        [Repository(id: "owner/repo"), Repository(id: "owner/other")], budget: 2, previous: [], previousMerged: [])
+
+    #expect(result.repositories.map(\.prInventoryComplete) == [true, true])
+    #expect(result.coverage.inventoryRequests == 2)
+    #expect(result.coverage.mergedInventoryRequests == 0)
+    #expect(await network.count == 2)
+}
+
+@Test func incompleteMergedFilePathsDoNotInvalidateInventory() async throws {
+    let network = ScriptedGitHub([
+        reply(onePR), try mergedPage([mergedNode(2, changedFiles: 2)]), try mergedPage([]), reply("{}", status: 503),
+    ])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let result = await service.fetch([Repository(id: "owner/repo")], budget: 12, previous: [], previousMerged: [])
+
+    let pr = try #require(result.mergedPullRequests.first)
+    #expect(pr.files == ["src/a.swift"])
+    #expect(pr.fileCount == 2 && !pr.filesComplete)
+    #expect(result.repositories.first?.mergedPRCoverage.inventoryComplete == true)
+    #expect(result.coverage.mergedFileRequests == 1)
+    #expect(result.coverage.errors.contains { $0.contains("merged PR file paths") })
+}
+
+@Test func transientMergedFailurePreservesVerifiedPriorCoverageAsStale() async throws {
+    let network = ScriptedGitHub([reply(onePR), reply("{}", status: 503)])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let priorCheck = testNow.addingTimeInterval(-600)
+    let repo = Repository(
+        id: "owner/repo", mergedPRCoverage: MergedPRCoverage(checkedAt: priorCheck, inventoryComplete: true))
+    let prior = PullRequest(
+        repo: repo.id, number: 2, title: "Prior merge", author: "author", url: "", updatedAt: priorCheck,
+        mergedAt: priorCheck)
+    let result = await service.fetch([repo], budget: 4, previous: [], previousMerged: [prior])
+
+    #expect(result.mergedPullRequests == [prior])
+    #expect(result.repositories.first?.mergedPRCoverage == MergedPRCoverage(
+        checkedAt: priorCheck, inventoryComplete: true, stale: true))
+}
+
+@Test func mergedAccessDenialDropsPreviouslyKnownMerges() async throws {
+    let network = ScriptedGitHub([reply(onePR), try mergedPage([mergedNode(2)]), reply("{}", status: 403)])
+    let service = GitHubService(token: { "token" }, transport: network, now: { testNow })
+    let older = PullRequest(
+        repo: "owner/repo", number: 9, title: "Older", author: "author", url: "",
+        updatedAt: testNow, mergedAt: testNow.addingTimeInterval(-20 * 86_400))
+    let result = await service.fetch(
+        [Repository(id: "owner/repo")], budget: 12, previous: [], previousMerged: [older])
+
+    #expect(result.mergedPullRequests.isEmpty)
+    #expect(result.pullRequests.map(\.number) == [1])
+    #expect(result.repositories.first?.mergedPRCoverage == MergedPRCoverage(stale: true))
+}
+
 @Test func pullRequestInventoryFollowsCursorAndCombinesPages() async throws {
     let network = ScriptedGitHub([
         try inventoryPage([1], total: 2, next: "second-page"),
