@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "bigboard-mcp-app",
+  "version": "0.1.0",
+  "description": "Explore a shared activity board with an agent. Interaction milestone using synthetic data.",
+  "repository": "https://github.com/richhaase/bigboard",
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "BigBoard MCP",
+        "shortDescription": "Explore activity together with your agent",
+        "longDescription": "A fixture-backed activity board for testing selection context, agent-driven filters, comparisons, and independent boards.",
+        "developerName": "Rich Haase",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "brandColor": "#3872D8",
+        "defaultPrompt": ["Open a BigBoard activity board using the demo data."]
+      }
+    }
+  }
+}

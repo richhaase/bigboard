@@ -31,3 +31,5 @@ dist/
 
 xcuserdata/
 *.xcuserstate
+
+/plugin/node_modules/

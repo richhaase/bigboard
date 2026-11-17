@@ -1,0 +1,34 @@
+name: MCP app
+
+on:
+  push:
+    paths:
+      - 'plugin/**'
+      - '.agents/plugins/marketplace.json'
+      - '.github/workflows/plugin.yml'
+  pull_request:
+    paths:
+      - 'plugin/**'
+      - '.agents/plugins/marketplace.json'
+      - '.github/workflows/plugin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: plugin/.node-version
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - name: Verify committed installable bundles
+        run: git diff --exit-code -- bundle

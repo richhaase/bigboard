@@ -10,6 +10,26 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
 - `Sources/BigboardCLI`: the `bigboard` command, dispatched from the app executable.
 - `Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
 - `Tests`: native tests; `scripts`: app packaging and release checks.
+- `plugin/`: fixture-backed MCP server, web app, packaged skill, and committed
+  installable bundles. See [the plugin guide](plugin/README.md).
+
+## MCP app integration branch
+
+`codex/bigboard-mcp-app` is the integration baseline for the MCP rebuild, with
+the managed worktree named `bigboard-mcp-app`. Base follow-up MCP work on this
+branch and preserve its history with follow-up commits. Keep `main` as the
+native app baseline until Rich requests a merge.
+
+The `bigboard-mcp` repo marketplace tracks this branch when installed with the
+guide's commands. For each installable change, bump `plugin/plugin.json` and
+`plugin/package.json` together, refresh the lockfile and bundles, and run the
+plugin checks before pushing. Run Node commands from `plugin/` with `fnm exec`
+to use its `.node-version`. Bundles are committed so installing the plugin
+does not require a compiler, dependency download, or install script.
+
+The first milestone uses synthetic fixtures only. Its state lives separately
+from the native app. Verify the protocol and rendered UI with the plugin tests;
+record actual desktop-host interaction separately using the guide's checklist.
 
 ## Working rules
 

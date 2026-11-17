@@ -4,6 +4,11 @@ A native macOS app for understanding activity across your GitHub repositories:
 where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
+An experimental [MCP app plugin](plugin/README.md) is being rebuilt on
+`codex/bigboard-mcp-app`. The first milestone uses synthetic data to test a
+shared activity board and agent interaction. The native app below remains
+available during that work.
+
 ## Install
 
 Requires **macOS 26 Tahoe or later**, Git (Homebrew or Xcode Command Line
