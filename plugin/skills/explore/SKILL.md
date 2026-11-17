@@ -1,41 +1,59 @@
 ---
 name: explore
-description: Open and discuss a BigBoard MCP activity board, explain a selected interval, or change its filters and period comparison. This milestone uses synthetic fixture records.
+description: Open and discuss a BigBoard MCP activity board backed by local Git history and GitHub PRs, explain selected evidence, configure collection sources, or change viewing filters and comparisons.
 ---
 
 # BigBoard exploration
 
-Use the bundled BigBoard MCP tools for this workflow. This milestone contains
-synthetic data only; describe findings as fixture activity.
+Use the bundled BigBoard tools. The collection selection is shared; each board
+keeps independent viewing filters. Git activity, PR merges, and current open
+PRs describe different events. Merged does not establish deployed.
 
-## Open or resume
+## Sources and freshness
 
-Call `open_board` with no arguments to create an independent board. To reopen
-an existing board, pass its exact `board_id`. Retain the returned board ID,
-revision, snapshot ID, resolved scope, and coverage for follow-up.
+Call `list_sources` before changing collection settings. Use
+`configure_sources` with either explicit absolute clone `paths` or
+`import_native:true` when the user asks to reuse native BigBoard selection.
+Pass the current `expected_revision`. This replaces saved sources and clears
+collected evidence; filtering a board is a separate operation.
 
-## Discuss a selection
+Call `refresh_sources` when current evidence is requested or no collection
+exists. It can take up to 150 seconds; allow sufficient tool timeout. It reads
+existing remote-tracking default branches without fetching or modifying the
+clones and collects GitHub open and merged PRs with GitHub CLI authentication.
+Review its coverage result before describing findings as complete. Do not
+repair authentication or modify clones as a recovery step.
 
-The app supplies selection context containing its board ID, revision, snapshot
-ID, query, scope, bucket start, and record IDs. Use that board and selection
-when the user refers to "this", "the spike", or "the selection". If the context
-does not identify a board, ask the user to select it or supply its board ID.
+After server restart, refresh explicitly to revalidate GitHub access before
+using cached PR evidence. Displayed Git activity still comes from the saved
+local scan. Collection time and scanned revisions are part of the answer.
 
-Call `read_board` to verify the latest state, then `query_evidence` with its
-`board_id`, `snapshot_id`, and the selected `bucket_start` when present. If
-the snapshot changed, explain the change and refresh the selection before
-attributing records. Ground explanations in returned fixture record IDs and
-scope. Distinguish unavailable prior-period evidence from zero activity.
+## Open, inspect, and discuss
+
+Call `open_board` without `board_id` for a new independent board, or with an
+exact existing ID to reopen it. Use app selection context to identify the
+board, snapshot, and optional selected bucket. If the intended board is
+ambiguous, ask the user to select it or supply its ID.
+
+Call `read_board`, then `query_evidence` with the exact board and snapshot IDs
+and selected `bucket_start` when present. If the selection's snapshot differs
+from the current board, disclose that change and refresh the selection before
+attributing records. Follow `nextCursor` with the same snapshot and bucket to
+inspect more evidence. Shortened record IDs or file lists are not exhaustive.
+
+Explain commits using their author dates and exact links. Merged PRs follow
+the selected interval and default branch; open PRs remain current context as
+of collection time, including older drafts. Keep incomplete coverage and
+unknown line counts visible; zero under incomplete coverage is not absence.
 
 ## Change the view
 
-Call `read_board`, then `update_board` with that exact board ID and its
-`expected_revision`. Supported controls are `days` (7 or 14), `repository`
-(`all`, `sample/api`, or `sample/web`), and `compare` (true or false).
-On a revision conflict, read the board again and reconcile the user's request
-with its current state. A filter change applies to that board only.
+Call `read_board`, then `update_board` with its `board_id` and current
+`expected_revision`. Controls are `days` (7 or 14), `repository` (`all` or an ID
+returned by `list_sources`), and `compare`. These do not change collected
+sources or start network requests. Reconcile revision conflicts with the
+latest state before retrying.
 
-The open app reads the same saved board to display agent changes. Subsequent
-reads and updates do not need to open a second panel. Report the resulting
-scope and revision; do not claim the host rendered a change without observing
-it. Call `open_board` without `board_id` only when the user wants another board.
+The existing panel reads the same saved board. Subsequent reads and updates
+need no new panel. Report the resulting scope and revision without claiming a
+rendered change unless observed. Open a new board only when requested.

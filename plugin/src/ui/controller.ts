@@ -1,4 +1,4 @@
-import type { ActivityRecord, BoardQuery, BoardSnapshot, SelectionContext } from "../shared";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PullRequestRecord, SelectionContext } from "../shared";
 
 export interface ToolResult {
   isError?: boolean;
@@ -18,8 +18,13 @@ export interface BoardViewState {
   snapshot: BoardSnapshot | null;
   selectedBucket: string | null;
   records: ActivityRecord[];
+  pullRequests: PullRequestRecord[];
+  totalRecords: number;
+  totalPullRequests: number;
+  nextCursor: string | null;
   phase: "connecting" | "waiting" | "ready";
   busy: boolean;
+  sourceRefreshing: boolean;
   evidenceLoading: boolean;
   contextReady: boolean;
   contextFailed: boolean;
@@ -36,18 +41,21 @@ export function selectionContext(snapshot: BoardSnapshot, bucketStart: string | 
     query: snapshot.query,
     scope: snapshot.scope,
     bucketStart: bucket?.start ?? null,
-    recordIds: bucket ? bucket.recordIds : snapshot.buckets.flatMap((item) => item.recordIds),
+    recordIds: bucket?.recordIds.slice(0, 100) ?? [],
+    recordIdsTruncated: bucket?.recordIdsTruncated === true || (bucket?.recordIds.length ?? 0) > 100,
   };
 }
 
+function toolError(result: ToolResult): void {
+  if (result.isError) throw new Error(result.content?.find((item) => item.type === "text")?.text ?? "BigBoard could not complete the request.");
+}
+
 export function snapshotFromResult(result: ToolResult): BoardSnapshot {
-  if (result.isError) {
-    throw new Error(result.content?.find((item) => item.type === "text")?.text ?? "BigBoard could not complete the request.");
-  }
+  toolError(result);
   const value = result.structuredContent as BoardSnapshot | undefined;
   if (!value || typeof value.boardId !== "string" || typeof value.revision !== "number" ||
       typeof value.snapshotId !== "string" || !Array.isArray(value.buckets) || !value.query ||
-      !value.scope || !value.coverage || !value.totals) {
+      !value.scope || !value.coverage || !value.totals || !value.configuration) {
     throw new Error("BigBoard returned an unreadable board. Reopen it from the conversation.");
   }
   return value;
@@ -58,8 +66,13 @@ export class BoardController {
     snapshot: null,
     selectedBucket: null,
     records: [],
+    pullRequests: [],
+    totalRecords: 0,
+    totalPullRequests: 0,
+    nextCursor: null,
     phase: "connecting",
     busy: false,
+    sourceRefreshing: false,
     evidenceLoading: false,
     contextReady: false,
     contextFailed: false,
@@ -111,9 +124,7 @@ export class BoardController {
       }
       if (this.pollMilliseconds > 0) {
         this.poll = setInterval(() => {
-          if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-            void this.refresh();
-          }
+          if (typeof document === "undefined" || document.visibilityState !== "hidden") void this.refresh();
         }, this.pollMilliseconds);
       }
     } catch {
@@ -130,7 +141,7 @@ export class BoardController {
     const selectedBucket = snapshot.buckets.some((bucket) => bucket.start === this.state.selectedBucket)
       ? this.state.selectedBucket : null;
     this.evidenceSequence += 1;
-    this.setState({ snapshot, selectedBucket, records: [], phase: "ready", contextReady: false, contextFailed: false });
+    this.setState({ snapshot, selectedBucket, records: [], pullRequests: [], totalRecords: 0, totalPullRequests: 0, nextCursor: null, phase: "ready", contextReady: false, contextFailed: false });
     if (this.connected) {
       void this.loadEvidence();
       void this.shareSelection();
@@ -151,6 +162,25 @@ export class BoardController {
       this.setState({ error: this.refreshError });
     } finally {
       this.syncing = false;
+    }
+  }
+
+  async refreshSources(): Promise<void> {
+    if (!this.connected || this.state.busy || this.destroyed) return;
+    this.setState({ busy: true, sourceRefreshing: true, error: null, notice: null });
+    try {
+      const result = await this.bridge.callTool("refresh_sources", {});
+      toolError(result);
+      const snapshot = this.state.snapshot;
+      if (snapshot) {
+        this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
+      }
+      this.setState({ notice: "Source collection finished. Check coverage for unavailable evidence." });
+    } catch (error) {
+      this.setState({ error: this.errorMessage(error) });
+      await this.refresh();
+    } finally {
+      this.setState({ busy: false, sourceRefreshing: false });
     }
   }
 
@@ -189,13 +219,19 @@ export class BoardController {
   async selectBucket(start: string | null): Promise<void> {
     const snapshot = this.state.snapshot;
     if (!snapshot || (start && !snapshot.buckets.some((bucket) => bucket.start === start))) return;
-    this.setState({ selectedBucket: start, records: [], contextReady: false, contextFailed: false, error: null, notice: null });
+    this.setState({ selectedBucket: start, records: [], pullRequests: [], totalRecords: snapshot.buckets.find((bucket) => bucket.start === start)?.commits ?? snapshot.totals.commits, totalPullRequests: 0, nextCursor: null, contextReady: false, contextFailed: false, error: null, notice: null });
     await Promise.all([this.loadEvidence(), this.shareSelection()]);
   }
 
-  private async loadEvidence(): Promise<void> {
+  async loadMore(): Promise<void> {
+    if (!this.state.nextCursor || this.state.evidenceLoading) return;
+    await this.loadEvidence(true);
+  }
+
+  private async loadEvidence(append = false): Promise<void> {
     const snapshot = this.state.snapshot;
     if (!snapshot || !this.connected || this.destroyed) return;
+    const cursor = append ? this.state.nextCursor : null;
     const sequence = ++this.evidenceSequence;
     this.setState({ evidenceLoading: true });
     try {
@@ -203,18 +239,26 @@ export class BoardController {
         board_id: snapshot.boardId,
         snapshot_id: snapshot.snapshotId,
         ...(this.state.selectedBucket ? { bucket_start: this.state.selectedBucket } : {}),
+        ...(cursor ? { cursor } : {}),
       });
       if (sequence !== this.evidenceSequence || this.destroyed) return;
-      if (result.isError) throw new Error("Could not load the selected evidence.");
-      const evidence = result.structuredContent as { snapshotId?: string; records?: ActivityRecord[] } | undefined;
-      if (evidence?.snapshotId !== snapshot.snapshotId || !Array.isArray(evidence.records)) {
+      toolError(result);
+      const evidence = result.structuredContent as EvidenceResult | undefined;
+      if (evidence?.snapshotId !== snapshot.snapshotId || !Array.isArray(evidence.records) || !Array.isArray(evidence.pullRequests)) {
         throw new Error("The selected evidence changed. Refresh the board and select it again.");
       }
-      this.setState({ records: evidence.records, evidenceLoading: false });
+      const records = append ? [...this.state.records, ...evidence.records] : evidence.records;
+      const pullRequests = append ? [...this.state.pullRequests, ...evidence.pullRequests] : evidence.pullRequests;
+      this.setState({
+        records: [...new Map(records.map((record) => [record.id, record])).values()],
+        pullRequests: [...new Map(pullRequests.map((record) => [record.id, record])).values()],
+        totalRecords: evidence.totalRecords,
+        totalPullRequests: evidence.totalPullRequests,
+        nextCursor: evidence.nextCursor,
+        evidenceLoading: false,
+      });
     } catch (error) {
-      if (sequence === this.evidenceSequence) {
-        this.setState({ error: this.errorMessage(error), evidenceLoading: false });
-      }
+      if (sequence === this.evidenceSequence) this.setState({ error: this.errorMessage(error), evidenceLoading: false });
     }
   }
 
@@ -229,9 +273,7 @@ export class BoardController {
         await this.bridge.updateContext(context);
         if (sequence === this.contextSequence) this.setState({ contextReady: true, contextFailed: false });
       } catch {
-        if (sequence === this.contextSequence) {
-          this.setState({ contextReady: false, contextFailed: true, error: "The selection could not be shared with the conversation. Try again." });
-        }
+        if (sequence === this.contextSequence) this.setState({ contextReady: false, contextFailed: true, error: "The selection could not be shared with the conversation. Try again." });
       }
     });
     return this.contextQueue;
@@ -245,14 +287,13 @@ export class BoardController {
     try {
       await this.shareSelection();
       const current = this.state.snapshot;
-      if (!current || current.snapshotId !== context.snapshotId ||
-          this.state.selectedBucket !== context.bucketStart) {
+      if (!current || current.snapshotId !== context.snapshotId || this.state.selectedBucket !== context.bucketStart) {
         throw new Error("The view changed. Select the activity you want to discuss and try again.");
       }
       await this.bridge.sendMessage(
         `Explain this BigBoard selection using query_evidence with board_id ${context.boardId}, ` +
         `snapshot_id ${context.snapshotId}` + (context.bucketStart ? `, bucket_start ${context.bucketStart}` : "") +
-        `. This is synthetic fixture data. Preserve the selected scope and distinguish observations from interpretation.\n\n` +
+        `. Preserve the selected scope, include source links, and distinguish Git activity, merged pull requests, and current open work.\n\n` +
         JSON.stringify(context),
       );
       this.setState({ notice: "Selection sent to the conversation.", error: null });

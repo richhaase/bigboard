@@ -20,12 +20,12 @@ export class McpBoardBridge implements BoardBridge {
   }
 
   callTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-    return this.app.callServerTool({ name, arguments: args }) as Promise<ToolResult>;
+    return this.app.callServerTool({ name, arguments: args }, { timeout: name === "refresh_sources" ? 180_000 : 30_000 }) as Promise<ToolResult>;
   }
 
   async updateContext(context: SelectionContext): Promise<void> {
     await this.app.updateModelContext({
-      content: [{ type: "text", text: `BigBoard selected scope (synthetic fixture data):\n${JSON.stringify(context)}` }],
+      content: [{ type: "text", text: `BigBoard selected scope:\n${JSON.stringify(context)}` }],
       structuredContent: { ...context },
     });
   }

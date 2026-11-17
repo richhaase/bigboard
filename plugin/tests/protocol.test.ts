@@ -1,90 +1,82 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { promisify } from "node:util";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { BOARD_RESOURCE_URI, type ActivityRecord, type BoardSnapshot } from "../src/shared.js";
+import { BOARD_RESOURCE_URI, type BoardSnapshot, type EvidenceResult, type SourceConfiguration } from "../src/shared";
 
+const exec = promisify(execFile);
 type ToolResult = Awaited<ReturnType<Client["callTool"]>>;
-
-interface EvidenceResult {
-  boardId: string;
-  revision: number;
-  snapshotId: string;
-  scope: BoardSnapshot["scope"];
-  coverage: BoardSnapshot["coverage"];
-  records: ActivityRecord[];
-}
-
-function board(result: ToolResult): BoardSnapshot {
+function value<T>(result: ToolResult): T {
   assert.notEqual(result.isError, true, JSON.stringify(result.content));
   assert.ok(result.structuredContent);
-  const snapshot = result.structuredContent as unknown as BoardSnapshot;
-  assert.equal(snapshot.coverage.source, "fixture");
-  assert.equal(typeof snapshot.boardId, "string");
-  assert.equal(typeof snapshot.snapshotId, "string");
-  return snapshot;
+  return result.structuredContent as unknown as T;
 }
-
-function evidence(result: ToolResult): EvidenceResult {
-  assert.notEqual(result.isError, true, JSON.stringify(result.content));
-  assert.ok(result.structuredContent);
-  const value = result.structuredContent as unknown as EvidenceResult;
-  assert.equal(value.coverage.source, "fixture");
-  assert.ok(Array.isArray(value.records));
-  return value;
-}
+const board = (result: ToolResult) => {
+  const resultBoard = value<BoardSnapshot>(result);
+  assert.equal(resultBoard.coverage.source, "git+github");
+  return resultBoard;
+};
 
 async function installation(t: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "bigboard-mcp-protocol-"));
+  const root = await mkdtemp(join(tmpdir(), "bigboard-real-protocol-"));
   const installed = join(root, "installed");
-  const bundle = fileURLToPath(new URL("../bundle/", import.meta.url));
-  await cp(bundle, installed, { recursive: true });
+  await cp(fileURLToPath(new URL("../bundle/", import.meta.url)), installed, { recursive: true });
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  const fakeGH = join(bin, "gh");
+  await writeFile(fakeGH, "#!/bin/sh\nexit 1\n");
+  await chmod(fakeGH, 0o755);
+  const paths: string[] = [];
+  for (const name of ["widget", "other"]) {
+    const path = join(root, name);
+    await mkdir(path);
+    const git = async (args: string[], date?: string) => (await exec("git", ["-C", path, ...args], { encoding: "utf8", env: { ...process.env, ...(date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {}) } })).stdout.trim();
+    await git(["init", "--initial-branch=main", "--quiet"]);
+    await git(["config", "user.name", "Contributor A"]);
+    await git(["config", "user.email", "contributor@example.invalid"]);
+    await git(["remote", "add", "origin", `https://github.com/example/${name}.git`]);
+    await writeFile(join(path, "source.txt"), "first\n");
+    await git(["add", "--all"]);
+    await git(["commit", "--quiet", "-m", "Prior week change"], new Date(Date.now() - 9 * 86_400_000).toISOString());
+    await writeFile(join(path, "source.txt"), "first\nsecond\n");
+    await git(["add", "--all"]);
+    await git(["commit", "--quiet", "-m", "Current week change"], new Date(Date.now() - 1 * 86_400_000).toISOString());
+    await git(["update-ref", "refs/remotes/origin/main", await git(["rev-parse", "HEAD"])]);
+    await git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    paths.push(path);
+  }
   const clients = new Set<Client>();
-  t.after(async () => {
-    await Promise.all([...clients].map((client) => client.close()));
-    await rm(root, { recursive: true, force: true });
-  });
+  t.after(async () => { await Promise.all([...clients].map(client => client.close())); await rm(root, { recursive: true, force: true }); });
   const start = async () => {
-    const client = new Client({ name: "bigboard-protocol-test", version: "0.1.0" });
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [join(installed, "server.cjs")],
-      cwd: installed,
-      env: { ...getDefaultEnvironment(), BIGBOARD_STATE_DIR: join(root, "state") },
-      stderr: "pipe",
-    });
+    const client = new Client({ name: "real-source-protocol-test", version: "1.0.0" });
+    const transport = new StdioClientTransport({ command: process.execPath, args: [join(installed, "server.cjs")], cwd: installed,
+      env: { ...getDefaultEnvironment(), PATH: bin + delimiter + (process.env.PATH ?? ""), BIGBOARD_STATE_DIR: join(root, "state") }, stderr: "pipe" });
     let stderr = "";
-    transport.stderr?.on("data", (data) => { stderr += data.toString(); });
+    transport.stderr?.on("data", data => { stderr += String(data); });
     clients.add(client);
-    try {
-      await client.connect(transport);
-    } catch (error) {
-      await transport.close();
-      throw new Error(`Bundled server could not initialize: ${String(error)}\n${stderr}`);
-    }
+    try { await client.connect(transport); }
+    catch (error) { await transport.close(); throw new Error(`Installed server failed to initialize: ${String(error)}\n${stderr}`); }
     return client;
   };
-  const stop = async (client: Client) => {
-    await client.close();
-    clients.delete(client);
-  };
-  return { start, stop };
+  const stop = async (client: Client) => { await client.close(); clients.delete(client); };
+  const configure = async (client: Client) => value<SourceConfiguration>(await client.callTool({ name: "configure_sources", arguments: { paths, expected_revision: 0 } }));
+  return { paths, start, stop, configure };
 }
 
-test("the standalone bundle exposes the board resource and keeps polling tools headless", async (t) => {
-  const { start } = await installation(t);
+test("clean installed bundle exposes source tools and keeps polling calls headless", async t => {
+  const { start, configure } = await installation(t);
   const client = await start();
   const inventory = await client.listTools();
-  assert.deepEqual(inventory.tools.map((tool) => tool.name).sort(), [
-    "open_board", "query_evidence", "read_board", "update_board",
-  ]);
-  const opener = inventory.tools.find((tool) => tool.name === "open_board");
-  assert.equal((opener?._meta?.ui as { resourceUri?: string } | undefined)?.resourceUri, BOARD_RESOURCE_URI);
-  for (const tool of inventory.tools.filter((tool) => tool.name !== "open_board")) {
+  assert.deepEqual(inventory.tools.map(tool => tool.name).sort(), ["configure_sources", "list_sources", "open_board", "query_evidence", "read_board", "refresh_sources", "update_board"]);
+  const opener = inventory.tools.find(tool => tool.name === "open_board");
+  assert.equal((opener?._meta?.ui as { resourceUri?: string })?.resourceUri, BOARD_RESOURCE_URI);
+  for (const tool of inventory.tools.filter(tool => tool.name !== "open_board")) {
     assert.equal((tool._meta?.ui as { resourceUri?: string } | undefined)?.resourceUri, undefined);
     assert.equal(tool._meta?.["openai/outputTemplate"], undefined);
   }
@@ -93,120 +85,91 @@ test("the standalone bundle exposes the board resource and keeps polling tools h
   const content = resource.contents[0];
   assert.equal(content.mimeType, "text/html;profile=mcp-app");
   assert.ok("text" in content);
-  assert.match(content.text, /<html\b/i);
-  assert.match(content.text, /<script\b/i);
   assert.match(content.text, /ui\/initialize/);
-  const result = await client.callTool({ name: "open_board", arguments: {} });
-  const snapshot = board(result);
-  assert.deepEqual(snapshot.query, { days: 7, repository: "all", compare: false });
-  assert.equal(snapshot.buckets.length, 7);
-  assert.equal(snapshot.totals.commits, snapshot.buckets.reduce((sum, bucket) => sum + bucket.commits, 0));
-  assert.match(JSON.stringify(result.content), /fixture|synthetic/i);
+  const before = board(await client.callTool({ name: "open_board", arguments: {} }));
+  assert.equal(before.collectedAt, null);
+  assert.equal(before.configuration.repositories.length, 0);
+  assert.equal(before.coverage.complete, false);
+  const configured = await configure(client);
+  assert.equal(configured.revision, 1);
+  assert.equal(configured.repositories.length, 2);
+  assert.deepEqual(value<SourceConfiguration>(await client.callTool({ name: "list_sources", arguments: {} })), configured);
+  const conflict = await client.callTool({ name: "configure_sources", arguments: { paths: [], expected_revision: 0 } });
+  assert.equal(conflict.isError, true);
+  assert.equal(value<SourceConfiguration>(await client.callTool({ name: "list_sources", arguments: {} })).repositories.length, 2);
 });
 
-test("agent updates and selected evidence use one revision while independent boards retain their scope", async (t) => {
-  const { start } = await installation(t);
+test("real Git refresh feeds the same board and stale selections fail without requiring GitHub auth", async t => {
+  const { start, configure } = await installation(t);
   const client = await start();
+  await configure(client);
   const first = board(await client.callTool({ name: "open_board", arguments: {} }));
   const second = board(await client.callTool({ name: "open_board", arguments: {} }));
-  assert.notEqual(first.boardId, second.boardId);
-  const changed = board(await client.callTool({
-    name: "update_board",
-    arguments: {
-      board_id: first.boardId,
-      expected_revision: first.revision,
-      repository: "sample/api",
-      compare: true,
-    },
-  }));
-  assert.equal(changed.boardId, first.boardId);
+  const refresh = value<{ repositoryCount: number; complete: boolean }>(await client.callTool({ name: "refresh_sources", arguments: {} }));
+  assert.equal(refresh.repositoryCount, 2);
+  assert.equal(refresh.complete, false);
+  const collected = board(await client.callTool({ name: "read_board", arguments: { board_id: first.boardId } }));
+  assert.equal(collected.boardId, first.boardId);
+  assert.notEqual(collected.snapshotId, first.snapshotId);
+  assert.equal(collected.totals.commits, 2);
+  assert.equal(collected.totals.openPRs, 0);
+  assert.equal(collected.account, null);
+  assert.ok(collected.coverage.repositories.every(repo => repo.historyComplete && !repo.openPRsComplete));
+  const changed = board(await client.callTool({ name: "update_board", arguments: { board_id: first.boardId, expected_revision: first.revision, repository: "example/widget", compare: true } }));
   assert.equal(changed.revision, first.revision + 1);
-  assert.notEqual(changed.snapshotId, first.snapshotId);
-  assert.deepEqual(changed.query, { days: 7, repository: "sample/api", compare: true });
-  assert.equal(changed.coverage.complete, true);
-  assert.equal(typeof changed.totals.previousCommits, "number");
-  const polled = board(await client.callTool({ name: "read_board", arguments: { board_id: first.boardId } }));
-  assert.deepEqual(polled, changed);
-  assert.deepEqual(board(await client.callTool({ name: "read_board", arguments: { board_id: second.boardId } })), second);
-  const bucket = changed.buckets.find((value) => value.commits > 0);
+  assert.equal(changed.totals.commits, 1);
+  assert.equal(changed.totals.previousCommits, 1);
+  assert.deepEqual((board(await client.callTool({ name: "read_board", arguments: { board_id: second.boardId } }))).query, second.query);
+  const bucket = changed.buckets.find(bucket => bucket.commits > 0);
   assert.ok(bucket);
-  const selected = evidence(await client.callTool({
-    name: "query_evidence",
-    arguments: { board_id: changed.boardId, snapshot_id: changed.snapshotId, bucket_start: bucket.start },
-  }));
-  assert.equal(selected.boardId, changed.boardId);
-  assert.equal(selected.revision, changed.revision);
-  assert.equal(selected.snapshotId, changed.snapshotId);
-  assert.deepEqual(selected.records.map((record) => record.id).sort(), [...bucket.recordIds].sort());
-  assert.equal(selected.records.length, bucket.commits);
-  assert.ok(selected.records.every((record) => record.repository === "sample/api"));
-  assert.ok(selected.records.every((record) => record.timestamp >= bucket.start && record.timestamp < bucket.end));
-  const all = evidence(await client.callTool({
-    name: "query_evidence",
-    arguments: { board_id: changed.boardId, snapshot_id: changed.snapshotId },
-  }));
-  assert.equal(all.records.length, changed.totals.commits);
-  assert.ok(all.records.every((record) => record.timestamp >= changed.scope.since && record.timestamp < changed.scope.until));
-  const conflict = await client.callTool({
-    name: "update_board",
-    arguments: { board_id: changed.boardId, expected_revision: first.revision, repository: "sample/web" },
-  });
-  assert.equal(conflict.isError, true);
-  assert.deepEqual(board(await client.callTool({ name: "read_board", arguments: { board_id: first.boardId } })), changed);
-  const staleSelection = await client.callTool({
-    name: "query_evidence",
-    arguments: { board_id: changed.boardId, snapshot_id: first.snapshotId, bucket_start: bucket.start },
-  });
-  assert.equal(staleSelection.isError, true);
-  const longer = board(await client.callTool({
-    name: "update_board",
-    arguments: { board_id: changed.boardId, expected_revision: changed.revision, days: 14 },
-  }));
-  assert.equal(longer.buckets.length, 14);
-  assert.equal(longer.query.compare, true);
-  assert.equal(longer.totals.previousCommits, null);
-  assert.equal(longer.coverage.complete, false);
+  const selected = value<EvidenceResult>(await client.callTool({ name: "query_evidence", arguments: { board_id: changed.boardId, snapshot_id: changed.snapshotId, bucket_start: bucket.start } }));
+  assert.deepEqual(selected.records.map(record => record.id), bucket.recordIds);
+  assert.equal(selected.records.length, 1);
+  assert.equal(selected.records[0].repository, "example/widget");
+  assert.match(selected.records[0].url, /^https:\/\/github\.com\/example\/widget\/commit\/[a-f0-9]{40}$/);
+  assert.ok(selected.records[0].timestamp >= bucket.start && selected.records[0].timestamp < bucket.end);
+  const oldRevision = await client.callTool({ name: "update_board", arguments: { board_id: first.boardId, expected_revision: first.revision, days: 14 } });
+  assert.equal(oldRevision.isError, true);
+  await client.callTool({ name: "refresh_sources", arguments: {} });
+  const oldSnapshot = await client.callTool({ name: "query_evidence", arguments: { board_id: changed.boardId, snapshot_id: changed.snapshotId } });
+  assert.equal(oldSnapshot.isError, true);
 });
 
-test("reopening a saved board after the stdio server restarts preserves the agent's update", async (t) => {
-  const { start, stop } = await installation(t);
+test("server restart preserves selected sources and board query while requiring fresh GitHub verification", async t => {
+  const { start, stop, configure, paths } = await installation(t);
   const original = await start();
+  await configure(original);
+  await original.callTool({ name: "refresh_sources", arguments: {} });
   const initial = board(await original.callTool({ name: "open_board", arguments: {} }));
-  const updated = board(await original.callTool({
-    name: "update_board",
-    arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "sample/web", days: 14 },
-  }));
+  const updated = board(await original.callTool({ name: "update_board", arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "example/other", days: 14 } }));
   await stop(original);
   const restarted = await start();
   const reopened = board(await restarted.callTool({ name: "open_board", arguments: { board_id: initial.boardId } }));
-  assert.deepEqual(reopened, updated);
-  const records = evidence(await restarted.callTool({
-    name: "query_evidence", arguments: { board_id: reopened.boardId, snapshot_id: reopened.snapshotId },
-  }));
-  assert.equal(records.records.length, reopened.totals.commits);
-  assert.ok(records.records.every((record) => record.repository === "sample/web"));
+  assert.equal(reopened.boardId, updated.boardId);
+  assert.equal(reopened.revision, updated.revision);
+  assert.deepEqual(reopened.query, updated.query);
+  assert.equal(reopened.totals.commits, updated.totals.commits);
+  assert.equal(reopened.configuration.needsRefresh, true);
+  assert.equal(reopened.account, null);
+  const settings = value<SourceConfiguration>(await restarted.callTool({ name: "list_sources", arguments: {} }));
+  assert.equal(settings.revision, 1);
+  assert.equal(settings.repositories.length, paths.length);
 });
 
-test("two stdio processes cannot overwrite the same board revision", async (t) => {
-  const { start } = await installation(t);
-  const first = await start();
-  const second = await start();
+test("separate installed stdio processes cannot overwrite the same board revision", async t => {
+  const { start, configure } = await installation(t);
+  const first = await start(), second = await start();
+  await configure(first);
   const initial = board(await first.callTool({ name: "open_board", arguments: {} }));
   const results = await Promise.all([
-    first.callTool({
-      name: "update_board",
-      arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "sample/api" },
-    }),
-    second.callTool({
-      name: "update_board",
-      arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "sample/web" },
-    }),
+    first.callTool({ name: "update_board", arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "example/widget" } }),
+    second.callTool({ name: "update_board", arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "example/other" } }),
   ]);
-  const successful = results.filter((result) => result.isError !== true);
-  assert.equal(successful.length, 1);
-  assert.equal(results.filter((result) => result.isError === true).length, 1);
-  const saved = board(successful[0]);
+  const successes = results.filter(result => result.isError !== true);
+  assert.equal(successes.length, 1);
+  assert.equal(results.filter(result => result.isError === true).length, 1);
+  const saved = board(successes[0]);
   assert.equal(saved.revision, initial.revision + 1);
-  assert.deepEqual(board(await first.callTool({ name: "read_board", arguments: { board_id: initial.boardId } })), saved);
-  assert.deepEqual(board(await second.callTool({ name: "read_board", arguments: { board_id: initial.boardId } })), saved);
+  assert.deepEqual((board(await first.callTool({ name: "read_board", arguments: { board_id: initial.boardId } }))).query, saved.query);
+  assert.deepEqual((board(await second.callTool({ name: "read_board", arguments: { board_id: initial.boardId } }))).query, saved.query);
 });

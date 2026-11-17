@@ -5,8 +5,8 @@ where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
 An experimental [MCP app plugin](plugin/README.md) is being rebuilt on
-`codex/bigboard-mcp-app`. The first milestone uses synthetic data to test a
-shared activity board and agent interaction. The native app below remains
+`codex/bigboard-mcp-app`. It now connects real local Git history and GitHub
+pull requests to a shared activity board and agent discussion. The native app below remains
 available during that work.
 
 ## Install

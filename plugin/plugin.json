@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "bigboard-mcp-app",
-  "version": "0.1.0",
-  "description": "Explore a shared activity board with an agent. Interaction milestone using synthetic data.",
+  "version": "0.2.0",
+  "description": "Explore real local Git history and GitHub pull requests with a shared activity board.",
   "repository": "https://github.com/richhaase/bigboard",
   "license": "MIT",
   "extensions": {
@@ -11,12 +11,17 @@
       "interface": {
         "displayName": "BigBoard MCP",
         "shortDescription": "Explore activity together with your agent",
-        "longDescription": "A fixture-backed activity board for testing selection context, agent-driven filters, comparisons, and independent boards.",
+        "longDescription": "Explore commits, merged and open pull requests, source coverage, and selected evidence together with your agent.",
         "developerName": "Rich Haase",
         "category": "Developer Tools",
-        "capabilities": ["Read", "Write"],
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
         "brandColor": "#3872D8",
-        "defaultPrompt": ["Open a BigBoard activity board using the demo data."]
+        "defaultPrompt": [
+          "Import my native BigBoard repository selection, refresh sources, and open an activity board."
+        ]
       }
     }
   }

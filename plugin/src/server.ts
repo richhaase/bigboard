@@ -2,92 +2,66 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
-import { BoardError, BoardStore, type EvidenceResult } from "./core";
-import { APP_VERSION, BOARD_RESOURCE_URI, REPOSITORIES, type BoardSnapshot } from "./shared";
+import { BoardError, BoardStore } from "./core";
+import { APP_VERSION, BOARD_RESOURCE_URI, type BoardSnapshot, type EvidenceResult } from "./shared";
 
 const boardId = z.string().uuid();
 const annotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-
 function boardText(board: BoardSnapshot): string {
-  const comparison = board.query.compare
-    ? board.totals.previousCommits === null ? " Prior-period comparison is unavailable." : ` Previous period: ${board.totals.previousCommits} commits.`
-    : "";
-  return `Synthetic BigBoard activity. Board ${board.boardId}, revision ${board.revision}, snapshot ${board.snapshotId}. ` +
-    `${board.query.repository}, [${board.scope.since}, ${board.scope.until}) UTC: ${board.totals.commits} commits, ` +
-    `${board.totals.additions} additions, ${board.totals.deletions} deletions.${comparison} ${board.coverage.note}`;
+  return `BigBoard ${board.boardId}, revision ${board.revision}, snapshot ${board.snapshotId}. ${board.query.repository}, ` +
+    `[${board.scope.since}, ${board.scope.until}) UTC: ${board.totals.commits} recorded non-merge commits, ${board.totals.mergedPRs} observed merged PRs, ${board.totals.openPRs} observed open PRs. ` +
+    `${board.totals.unknownLineCommits} commits have unknown line counts. ${board.coverage.note}`;
 }
-
 function evidenceText(evidence: EvidenceResult): string {
-  const selected = evidence.bucketStart ? ` Bucket ${evidence.bucketStart}.` : " Whole current board.";
-  return `Synthetic fixture evidence. Board ${evidence.boardId}, revision ${evidence.revision}, snapshot ${evidence.snapshotId}. ` +
-    `${evidence.query.repository}, [${evidence.scope.since}, ${evidence.scope.until}) UTC.${selected} ` +
-    `${evidence.records.length} records. ${evidence.coverage.note}\n${JSON.stringify(evidence.records)}`;
+  return `Git/GitHub evidence for board ${evidence.boardId}, snapshot ${evidence.snapshotId}. ` +
+    `${evidence.bucketStart ? `Selected 24-hour interval ${evidence.bucketStart}.` : "Whole board period."} Current open PRs are independent of this date interval. ` +
+    `${evidence.records.length}/${evidence.totalRecords} commit records and ${evidence.pullRequests.length}/${evidence.totalPullRequests} PR records on this page. ` +
+    `${evidence.coverage.note}\n${JSON.stringify({ records: evidence.records, pullRequests: evidence.pullRequests, nextCursor: evidence.nextCursor })}`;
 }
-
-async function result<T extends BoardSnapshot | EvidenceResult>(operation: () => Promise<T>): Promise<CallToolResult> {
+async function result(operation: () => Promise<unknown>): Promise<CallToolResult> {
   try {
-    const value = await operation();
-    return {
-      content: [{ type: "text", text: "records" in value ? evidenceText(value) : boardText(value) }],
-      structuredContent: value as unknown as Record<string, unknown>,
-    };
+    const value = await operation() as Record<string, unknown>;
+    const text = "records" in value ? evidenceText(value as unknown as EvidenceResult) : "boardId" in value ? boardText(value as unknown as BoardSnapshot) : JSON.stringify(value);
+    return { content: [{ type: "text", text }], structuredContent: value };
   } catch (error) {
-    const code = error instanceof BoardError ? error.code : "storage_error";
-    const message = error instanceof BoardError ? error.message : "Board state could not be accessed. Try again or create a new board.";
+    const code = error instanceof BoardError ? error.code : "source_error";
+    const message = error instanceof BoardError ? error.message : "BigBoard could not complete the operation. Check repository paths, Git, and GitHub CLI access, then retry.";
     return { isError: true, content: [{ type: "text", text: message }], structuredContent: { error: { code, message } } };
   }
 }
-
 export function createBigboardServer(html: string, store: BoardStore): McpServer {
   const server = new McpServer({ name: "bigboard-mcp-app", version: APP_VERSION });
   const resourceMeta = { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } };
   registerAppResource(server, "BigBoard activity", BOARD_RESOURCE_URI,
-    { description: "Interactive synthetic activity board", _meta: resourceMeta },
-    async () => ({ contents: [{ uri: BOARD_RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html, _meta: resourceMeta }] }),
-  );
+    { description: "Git history and GitHub pull request activity", _meta: resourceMeta },
+    async () => ({ contents: [{ uri: BOARD_RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html, _meta: resourceMeta }] }));
   registerAppTool(server, "open_board", {
-    title: "Open BigBoard",
-    description: "Open an interactive activity board backed by synthetic fixture data. Omit board_id to create an independent board; provide a saved board ID to reopen it. No live repositories are read.",
-    inputSchema: { board_id: boardId.optional() },
-    annotations: { ...annotations, readOnlyHint: false },
-    _meta: { ui: { resourceUri: BOARD_RESOURCE_URI, visibility: ["model", "app"] } },
+    title: "Open BigBoard", description: "Open a Git/GitHub activity board. Omit board_id for an independent board or provide an existing ID to reopen it. Opening and viewing never collect data. If unconfigured, use configure_sources then refresh_sources.",
+    inputSchema: { board_id: boardId.optional() }, annotations: { ...annotations, readOnlyHint: false }, _meta: { ui: { resourceUri: BOARD_RESOURCE_URI, visibility: ["model", "app"] } },
   }, ({ board_id }) => result(() => store.open(board_id)));
-
   server.registerTool("read_board", {
-    title: "Read BigBoard",
-    description: "Read a board's latest authoritative state, revision, scope, and fixture coverage without opening another view. Use this before updating a board after a conflict.",
-    inputSchema: { board_id: boardId },
-    annotations,
-    _meta: { ui: { visibility: ["model", "app"] } },
+    title: "Read BigBoard", description: "Read saved board state and collected evidence coverage without opening a panel or refreshing sources. Use before updating viewing filters.",
+    inputSchema: { board_id: boardId }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
   }, ({ board_id }) => result(() => store.read(board_id)));
-
   server.registerTool("update_board", {
-    title: "Update BigBoard view",
-    description: "Update this board's viewing filters or prior-period comparison. Pass its latest revision as expected_revision. Changes appear in the existing board through explicit reads; other boards remain independent. Only local fixture view state changes.",
-    inputSchema: {
-      board_id: boardId,
-      expected_revision: z.number().int().positive(),
-      days: z.union([z.literal(7), z.literal(14)]).optional(),
-      repository: z.enum(REPOSITORIES).optional(),
-      compare: z.boolean().optional(),
-    },
-    annotations: { ...annotations, readOnlyHint: false },
-    _meta: { ui: { visibility: ["model", "app"] } },
-  }, ({ board_id, expected_revision, days, repository, compare }) => {
-    const patch = {
-      ...(days === undefined ? {} : { days }),
-      ...(repository === undefined ? {} : { repository }),
-      ...(compare === undefined ? {} : { compare }),
-    };
-    return result(() => store.update(board_id, expected_revision, patch));
-  });
-
+    title: "Update BigBoard view", description: "Change this board's viewing filters and comparison using its latest expected_revision. Repository must be all or an ID in list_sources. Viewing changes never change collected repositories or perform network requests.",
+    inputSchema: { board_id: boardId, expected_revision: z.number().int().positive(), days: z.union([z.literal(7),z.literal(14)]).optional(), repository: z.string().min(1).optional(), compare: z.boolean().optional() },
+    annotations: { ...annotations, readOnlyHint: false }, _meta: { ui: { visibility: ["model", "app"] } },
+  }, ({ board_id,expected_revision,days,repository,compare }) => result(() => store.update(board_id,expected_revision,{ ...(days === undefined ? {} : { days }), ...(repository === undefined ? {} : { repository }), ...(compare === undefined ? {} : { compare }) })));
   server.registerTool("query_evidence", {
-    title: "Inspect BigBoard evidence",
-    description: "Read exact synthetic records supporting the current board or selected UTC day. Use boardId and snapshotId from the selection context or latest board result. Old snapshots and buckets outside the current scope are rejected.",
-    inputSchema: { board_id: boardId, snapshot_id: z.string(), bucket_start: z.string().optional() },
-    annotations,
-    _meta: { ui: { visibility: ["model", "app"] } },
-  }, ({ board_id, snapshot_id, bucket_start }) => result(() => store.evidence(board_id, snapshot_id, bucket_start)));
+    title: "Inspect BigBoard evidence", description: "Page actual commit and PR evidence for an exact snapshot and optional selected 24-hour bucket. Commits use Git author dates; merged PRs use merged_at and default branch. Current open PRs ignore the historical interval. Supply nextCursor as cursor to load more; retain the same snapshot and selection.",
+    inputSchema: { board_id: boardId, snapshot_id: z.string(), bucket_start: z.string().optional(), cursor: z.string().optional() }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
+  }, ({ board_id,snapshot_id,bucket_start,cursor }) => result(() => store.evidence(board_id,snapshot_id,bucket_start,cursor)));
+  server.registerTool("list_sources", {
+    title: "List BigBoard sources", description: "Read saved collection selection and its revision. Paths refer to existing local clones, distinct from temporary viewing filters.", inputSchema: {}, annotations,
+  }, () => result(async () => store.sources()));
+  server.registerTool("configure_sources", {
+    title: "Configure BigBoard sources", description: "Save local repository paths, or set import_native:true to copy native BigBoard selected repositories read-only. Provide exactly one of paths or import_native:true. Pass expected_revision from list_sources to avoid overwriting changed settings. Replaces selection and clears old collected data; does not fetch or modify clones.",
+    inputSchema: { paths: z.array(z.string().min(1)).max(100).optional(), import_native: z.boolean().optional(), expected_revision: z.number().int().nonnegative().optional() }, annotations: { ...annotations, readOnlyHint: false },
+  }, ({ paths,import_native,expected_revision }) => result(() => store.configure(paths,import_native === true,expected_revision)));
+  server.registerTool("refresh_sources", {
+    title: "Refresh BigBoard sources", description: "Explicitly collect 28 days of author-date Git history from saved local remote-tracking default refs plus open and merged GitHub PRs. Reads existing clones without fetching/modifying them, authenticates using gh auth token, and saves coverage/collection time. May take up to 150 seconds. Polling and filter changes do not refresh.",
+    inputSchema: {}, annotations: { ...annotations, readOnlyHint: false, openWorldHint: true }, _meta: { ui: { visibility: ["model", "app"] } },
+  }, (_,extra) => result(() => store.refresh(extra.signal)));
   return server;
 }
