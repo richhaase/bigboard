@@ -75,6 +75,12 @@ separate `pullRequestId` is the row whose details are open; it does not replace
 the checkbox selection. Use the explicit batch when the user says “these PRs.”
 Do not expand it to every loaded PR or the whole board.
 
+App navigation updates background model context; it does not send a chat turn.
+Explicit app actions send brief requests such as “Explain the selected Activity
+interval” or “Review the 3 pull requests selected in BigBoard.” Resolve their
+exact scope from the latest app context. Do not ask the user to paste the JSON
+or repeat it into the chat. Retrieve supporting evidence through the tools.
+
 The PR table shows author, draft/open/merged state, GitHub's review decision,
 pending review, and account relationships. Optional `review` metadata travels
 with each selected PR. A missing review object or `decision:unknown` means the

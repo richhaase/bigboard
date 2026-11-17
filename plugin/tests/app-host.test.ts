@@ -9,6 +9,7 @@ import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PeopleR
 
 type ContextUpdate = Parameters<NonNullable<AppBridge["onupdatemodelcontext"]>>[0];
 type ChatMessage = Parameters<NonNullable<AppBridge["onmessage"]>>[0];
+type ContextSupport = "structured" | "text" | "none";
 const DAY = 86_400_000;
 const END = Date.parse("2026-11-17T12:00:00.000Z");
 
@@ -41,6 +42,20 @@ function choose(document: Document, label: string, value: string): void {
   assert.ok(found, `Missing ${label} select`);
   found.value = value;
   found.dispatchEvent(new document.defaultView!.Event("change", { bubbles: true }));
+}
+
+function humanMessage(message: ChatMessage, context: SelectionContext): string {
+  assert.equal(message.role, "user");
+  assert.equal(message.content.length, 1);
+  const content = message.content[0];
+  assert.equal(content.type, "text");
+  const text = content.type === "text" ? content.text : "";
+  assert.ok(text.trim().length > 0);
+  assert.doesNotMatch(text, /[{}]|boardId|snapshotId|recordIds|bucket_start|person_id|query_evidence|headSha|requestedReviewers/);
+  assert.ok(!text.includes(context.boardId));
+  assert.ok(!text.includes(context.snapshotId));
+  for (const pr of context.selectedPullRequests ?? []) assert.ok(!text.includes(pr.headSha));
+  return text;
 }
 
 function review(decision: NonNullable<PullRequestRecord["review"]>["decision"], fields: Partial<NonNullable<PullRequestRecord["review"]>> = {}): NonNullable<PullRequestRecord["review"]> {
@@ -261,7 +276,7 @@ class Workspace {
   }
 }
 
-async function panel(workspace: Workspace, initial: BoardSnapshot) {
+async function panel(workspace: Workspace, initial: BoardSnapshot, contextSupport: ContextSupport = "structured") {
   const html = await readFile(new URL("../bundle/board.html", import.meta.url), "utf8");
   const host = new JSDOM("<!doctype html><html><body></body></html>");
   const contexts: ContextUpdate[] = [];
@@ -284,7 +299,8 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
     },
   };
   host.window.postMessage = ((message: unknown) => { queueMicrotask(() => { if (!closed) transport.onmessage?.(structuredClone(message) as JSONRPCMessage); }); }) as typeof host.window.postMessage;
-  const bridge = new AppBridge(null, { name: "BigBoard test host", version: "1.0.0" }, { serverTools: {}, updateModelContext: { text: {}, structuredContent: {} }, message: { text: {} } }, { hostContext: { theme: "light", displayMode: "inline", locale: "en-US", timeZone: "UTC" } });
+  const updateModelContext = contextSupport === "structured" ? { text: {}, structuredContent: {} } : contextSupport === "text" ? { text: {} } : {};
+  const bridge = new AppBridge(null, { name: "BigBoard test host", version: "1.0.0" }, { serverTools: {}, updateModelContext, message: { text: {} } }, { hostContext: { theme: "light", displayMode: "inline", locale: "en-US", timeZone: "UTC" } });
   bridge.oncalltool = async (params) => { calls.push(params); return workspace.tool(params); };
   bridge.onupdatemodelcontext = async (params) => {
     if (rejectContext) throw new Error("Context sharing unavailable");
@@ -304,9 +320,14 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
     Object.defineProperty(window, "ResizeObserver", { value: class { observe() {} unobserve() {} disconnect() {} } });
     window.addEventListener("error", (event) => errors.push(String(event.error ?? event.message)));
   } });
-  await waitFor(() => initialized && contexts.length > 0, "MCP Apps handshake and initial context");
+  await waitFor(() => initialized && (contexts.length > 0 || contextSupport === "none" && Boolean(guest?.window.document.querySelector('[role="alert"]'))), "MCP Apps handshake and initial context");
   const document = guest.window.document;
-  const selectedContext = () => contexts.at(-1)?.structuredContent as unknown as SelectionContext;
+  const selectedContext = (): SelectionContext => {
+    const context = contexts.at(-1);
+    if (context?.structuredContent) return context.structuredContent as unknown as SelectionContext;
+    const text = context?.content?.filter(item => item.type === "text").map(item => item.text).join("\n");
+    return text ? JSON.parse(text.slice(text.indexOf("{"))) as SelectionContext : undefined as unknown as SelectionContext;
+  };
   const close = async () => {
     if (closed || !guest) return;
     await bridge.teardownResource({}, { timeout: 1000 });
@@ -343,10 +364,12 @@ test("Activity stays quiet until a bucket is selected, then shares only its supp
   assert.equal(first.selectedContext().bucketStart, bucket.start);
   assert.deepEqual(first.selectedContext().recordIds, bucket.recordIds);
   assert.equal(first.selectedContext().snapshotId, initial.snapshotId);
+  assert.equal(first.messages.length, 0);
+  assert.ok(first.contexts.every(context => context.content === undefined));
   button(first.document, "Explain selection").click();
   await waitFor(() => first.messages.length === 1, "Activity follow-up");
-  assert.match(JSON.stringify(first.messages[0].content), /activity/);
-  assert.ok(JSON.stringify(first.messages[0].content).includes(bucket.start));
+  assert.match(humanMessage(first.messages[0], first.selectedContext()), /activity/i);
+  assert.equal(first.selectedContext().bucketStart, bucket.start);
   button(first.document, "Load more evidence").click();
   await waitFor(() => first.document.querySelectorAll('[aria-label="Commit records"] article').length === 6, "selected Activity next page");
   button(first.document, "Load more evidence").click();
@@ -388,9 +411,9 @@ test("Pull requests has separate Open and Merged inventories and exact selected 
   assert.equal(link.rel, "noopener noreferrer");
   button(first.document, "Explain selection").click();
   await waitFor(() => first.messages.length === 1, "PR follow-up");
-  const message = JSON.stringify(first.messages[0].content);
-  assert.ok(message.includes("sample/web#9"));
-  assert.ok(message.includes(initial.snapshotId));
+  assert.match(humanMessage(first.messages[0], first.selectedContext()), /pull request|PR/i);
+  assert.equal(first.selectedContext().pullRequestId, "sample/web#9");
+  assert.equal(first.selectedContext().snapshotId, initial.snapshotId);
   assert.equal(first.selectedContext().bucketStart, null);
   button(first.document, "Close pull request details").click();
   await waitFor(() => first.document.querySelector('[aria-label="Pull request details"]') === null, "dismissed PR detail");
@@ -521,7 +544,8 @@ test("People can open directly and keep Git and GitHub identities and evidence s
   assert.ok(!first.document.querySelector('[aria-label="Commit records"]')?.textContent?.includes(gitPerson.name === "Contributor A" ? "Contributor B" : "Contributor A"));
   button(first.document, "Explain selection").click();
   await waitFor(() => first.messages.length === 1, "People explanation");
-  assert.ok(JSON.stringify(first.messages[0].content).includes(gitPerson.id));
+  assert.match(humanMessage(first.messages[0], first.selectedContext()), /person|people|contributor/i);
+  assert.equal(first.selectedContext().personId, gitPerson.id);
   button(first.document, "GitHub authors").click();
   await waitFor(() => first.selectedContext()?.peopleSource === "github" && first.document.querySelectorAll('[aria-label="People records"] [data-person-id]').length === 2, "GitHub authors");
   assert.equal(first.selectedContext().personId, null);
@@ -574,16 +598,21 @@ test("PR multi-selection survives paging and sorting and sends the exact request
   await waitFor(() => first.messages.length === 1, "explicit shared PR selection");
   button(first.document, "Request code reviews").click();
   await waitFor(() => first.messages.length === 2, "explicit code review request");
-  const message = JSON.stringify(first.messages[1].content);
+  humanMessage(first.messages[0], first.selectedContext());
+  const message = humanMessage(first.messages[1], first.selectedContext());
   assert.match(message, /review/i);
+  assert.match(message, /3/);
   for (const id of ids) {
     const pr = workspace.prs.find(pr => pr.id === id)!;
-    assert.ok(message.includes(pr.repository));
-    assert.ok(message.includes(pr.url));
-    assert.ok(message.includes(pr.headSha));
+    const selected = first.selectedContext().selectedPullRequests?.find(item => item.id === id);
+    assert.ok(selected);
+    assert.equal(selected.repository, pr.repository);
+    assert.equal(selected.number, pr.number);
+    assert.equal(selected.url, pr.url);
+    assert.equal(selected.headSha, pr.headSha);
   }
-  assert.ok(!message.includes("https://github.com/sample/web/pull/11"));
-  assert.ok(message.includes(first.selectedContext().snapshotId));
+  assert.ok(!first.selectedContext().selectedPullRequests?.some(pr => pr.id === "sample/web#11"));
+  assert.ok(first.contexts.every(context => context.content === undefined));
   button(first.document, "Clear selection").click();
   await waitFor(() => !first.selectedContext()?.selectedPullRequests?.length, "cleared batch selection");
   assert.equal(first.document.querySelector('[aria-label="Selected pull requests"]'), null);
@@ -709,7 +738,8 @@ test("retry keeps a later-page People selection visible and consistent with shar
   assert.equal(button(first.document, `Select person ${person.name}: ${person.identity}`).getAttribute("aria-pressed"), "true");
   button(first.document, "Explain selection").click();
   await waitFor(() => first.messages.length === 1, "retried exact person explanation");
-  assert.ok(JSON.stringify(first.messages[0].content).includes(person.id));
+  humanMessage(first.messages[0], first.selectedContext());
+  assert.equal(first.selectedContext().personId, person.id);
   assert.deepEqual(first.errors, []);
 });
 
@@ -973,9 +1003,80 @@ test("table header sorting covers the inventory while selected PR review metadat
   assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id).sort(), selected.map(pr => pr.id).sort());
   button(first.document, "Request code reviews").click();
   await waitFor(() => first.messages.length === 1, "review request from table selection");
-  const message = JSON.stringify(first.messages[0].content);
-  assert.ok(message.includes("requestedReviewers"));
-  for (const pr of selected) assert.ok(message.includes(pr.url));
-  assert.ok(!message.includes("https://github.com/sample/web/pull/11"));
+  assert.match(humanMessage(first.messages[0], first.selectedContext()), /review/i);
+  for (const pr of selected) assert.deepEqual(first.selectedContext().selectedPullRequests?.find(item => item.id === pr.id), pr);
+  assert.ok(!first.selectedContext().selectedPullRequests?.some(pr => pr.id === "sample/web#11"));
+  assert.deepEqual(first.errors, []);
+});
+
+test("ordinary navigation updates structured background context without creating chat messages", async t => {
+  const workspace = new Workspace();
+  const initial = workspace.open();
+  const first = await panel(workspace, initial);
+  t.after(first.close);
+  await waitFor(() => dailyButtons(first.document).length === 7, "initial Activity navigation");
+  const bucket = initial.buckets.find(item => item.commits > 0)!;
+  dailyButtons(first.document)[initial.buckets.indexOf(bucket)].click();
+  await waitFor(() => first.selectedContext()?.bucketStart === bucket.start, "background Activity selection");
+  button(first.document, "People").click();
+  const person = workspace.people(initial, "git")[0];
+  await waitFor(() => first.document.querySelector(`[data-person-id="${person.id}"]`) !== null, "People navigation");
+  button(first.document, `Select person ${person.name}: ${person.identity}`).click();
+  await waitFor(() => first.selectedContext()?.personId === person.id, "background person selection");
+  button(first.document, "Pull requests").click();
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#10"]') !== null, "PR navigation");
+  button(first.document, "Select pull request #9: An older draft still open").click();
+  await waitFor(() => first.selectedContext()?.pullRequestId === "sample/web#9", "background PR inspection");
+  checkbox(first.document, "Select sample/api#10").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1, "background PR checkbox selection");
+  button(first.document, "Sort by Author").click();
+  await waitFor(() => first.selectedContext()?.pullRequestSort === "author", "background sort selection");
+  choose(first.document, "Repository", "sample/api");
+  await waitFor(() => first.selectedContext()?.query.repository === "sample/api", "background scope change");
+  assert.equal(first.messages.length, 0);
+  assert.ok(first.contexts.length >= 7);
+  assert.ok(first.contexts.every(context => context.content === undefined && context.structuredContent !== undefined));
+  assert.equal(first.selectedContext().boardId, initial.boardId);
+  assert.deepEqual(first.errors, []);
+});
+
+test("text-only context hosts receive assistant-only background data and human action messages", async t => {
+  const workspace = new Workspace();
+  const initial = { ...workspace.open(), initialView: "pullRequests" as const };
+  const first = await panel(workspace, initial, "text");
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "text-only host PR inventory");
+  checkbox(first.document, "Select sample/api#10").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1, "assistant-only selection fallback");
+  assert.equal(first.messages.length, 0);
+  for (const context of first.contexts) {
+    assert.equal(context.structuredContent, undefined);
+    assert.ok(context.content?.length);
+    for (const content of context.content ?? []) {
+      assert.equal(content.type, "text");
+      assert.deepEqual(content.annotations?.audience, ["assistant"]);
+    }
+  }
+  const pr = workspace.prs.find(item => item.id === "sample/api#10")!;
+  assert.equal(first.selectedContext().snapshotId, initial.snapshotId);
+  assert.deepEqual(first.selectedContext().selectedPullRequests, [pr]);
+  button(first.document, "Request code reviews").click();
+  await waitFor(() => first.messages.length === 1, "text-only host review action");
+  assert.match(humanMessage(first.messages[0], first.selectedContext()), /review/i);
+  assert.deepEqual(first.errors, []);
+});
+
+test("unsupported background context never falls back to posting selection data in chat", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" }, "none");
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "PR inventory without context support");
+  checkbox(first.document, "Select sample/api#10").click();
+  await waitFor(() => first.document.querySelector('[aria-label="Selected pull requests"]') !== null && first.document.querySelector('[role="alert"]')?.textContent?.includes("could not be shared") === true, "unavailable context reported");
+  assert.equal(button(first.document, "Request code reviews").disabled, true);
+  assert.equal(button(first.document, "Share selection").disabled, true);
+  button(first.document, "Request code reviews").click();
+  assert.equal(first.contexts.length, 0);
+  assert.equal(first.messages.length, 0);
   assert.deepEqual(first.errors, []);
 });

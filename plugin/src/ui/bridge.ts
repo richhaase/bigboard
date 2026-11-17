@@ -24,10 +24,12 @@ export class McpBoardBridge implements BoardBridge {
   }
 
   async updateContext(context: SelectionContext): Promise<void> {
-    await this.app.updateModelContext({
-      content: [{ type: "text", text: `BigBoard selected scope:\n${JSON.stringify(context)}` }],
-      structuredContent: { ...context },
-    });
+    const supported = this.app.getHostCapabilities()?.updateModelContext;
+    if (supported?.structuredContent) {
+      await this.app.updateModelContext({ structuredContent: { ...context } });
+    } else if (supported?.text) {
+      await this.app.updateModelContext({ content: [{ type: "text", text: `BigBoard selected scope:\n${JSON.stringify(context)}`, annotations: { audience: ["assistant"] } }] });
+    } else throw new Error("This host cannot receive BigBoard selection context.");
   }
 
   async sendMessage(text: string): Promise<void> {

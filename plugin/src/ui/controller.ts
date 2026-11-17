@@ -419,7 +419,7 @@ export class BoardController {
       await this.shareSelection();
       if (JSON.stringify(this.context()) !== JSON.stringify(context)) throw new Error("The view changed. Select the evidence you want to discuss and try again.");
       if (!this.state.contextReady || this.state.contextFailed) throw new Error("The selection could not be shared with the conversation. Try again.");
-      await this.bridge.sendMessage(`${message}\n\n${JSON.stringify(context)}`);
+      await this.bridge.sendMessage(message);
       this.setState({ notice: "Selection sent to the conversation.", error: null });
     } catch (error) { this.setState({ error: this.errorMessage(error) }); }
     finally { this.setState({ busy: false }); }
@@ -428,7 +428,9 @@ export class BoardController {
   async sharePullRequestSelection(review = false): Promise<void> {
     const context = this.context();
     if (!context || context.view !== "pullRequests" || !context.selectedPullRequests?.length || !this.connected || this.state.busy) return;
-    const request = review ? "Run a code review for each of these selected BigBoard pull requests using your normal review workflow. Use the exact repositories, numbers, and URLs below; verify their current state and head commits before reviewing." : "I selected these BigBoard pull requests for discussion. Use this exact selection as context for my next request.";
+    const count = context.selectedPullRequests.length;
+    const selection = `${count} pull ${count === 1 ? "request" : "requests"} selected in BigBoard`;
+    const request = review ? `Review the ${selection} using your normal review workflow.` : `Let's discuss the ${selection}.`;
     await this.sendSelection(context, request);
   }
 
@@ -436,8 +438,8 @@ export class BoardController {
     const context = this.context();
     const selected = this.state.view === "activity" ? this.state.selectedBucket : this.state.view === "people" ? this.state.selectedPersonId : this.state.selectedPullRequestId;
     if (!context || !selected || !this.connected || this.state.busy) return;
-    const request = { board_id: context.boardId, snapshot_id: context.snapshotId, kind: context.view === "activity" || (context.view === "people" && this.state.peopleSource === "git") ? "activity" : "pull_requests", ...(context.bucketStart ? { bucket_start: context.bucketStart } : {}), ...(context.view === "pullRequests" ? { pull_request_state: context.pullRequestState, pull_request_id: context.pullRequestId } : {}), ...(context.view === "people" ? { person_id: context.personId } : {}) };
-    await this.sendSelection(context, `Explain this BigBoard selection using query_evidence with ${JSON.stringify(request)}. Preserve this exact scope, include source links, and distinguish observations from interpretation.`);
+    const request = context.view === "activity" ? "Explain the selected Activity interval in BigBoard using its supporting evidence." : context.view === "people" ? "Explain the person selected in BigBoard using their supporting evidence." : "Explain the pull request whose details are open in BigBoard using its supporting evidence.";
+    await this.sendSelection(context, request);
   }
 
   async destroy(closeBridge = true): Promise<void> {

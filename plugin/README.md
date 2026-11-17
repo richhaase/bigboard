@@ -156,6 +156,18 @@ the agent follows its normal review workflow. Checkboxes also update agent
 context directly, so you can select PRs and type “review these” in the chat.
 Opening a row's details and selecting a checkbox are independent actions.
 
+On hosts advertising structured context, ordinary navigation and selection
+update background model context through
+`ui/update-model-context` using `structuredContent`. They do not post a user
+message or attach raw JSON to the composer. On hosts supporting only text
+context, the serialized fallback is marked for the assistant audience, following
+OpenAI's background-context extension. Rendering on other hosts depends on
+their support for that annotation. Explain,
+Share selection, and Request code reviews send short human-readable messages;
+exact board, snapshot, and PR records stay in background context. If context
+sharing is unsupported or fails, those actions stay disabled. This follows the
+[MCP Apps background-context pattern](https://github.com/openai/mcp-extensions/blob/main/docs/patterns.md#background-context).
+
 **People** has Git contributors and GitHub authors tabs. Git contributors are
 grouped by the scanned revision's mailmapped author email; GitHub authors are
 grouped by login. These sources are not linked by display name. Commit and
