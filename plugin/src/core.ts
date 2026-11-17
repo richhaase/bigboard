@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { collectGitHistory, describeRepository, importNativeSources } from "./sources/git";
 import { collectGitHub } from "./sources/github";
-import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceResult, GitCollectionResult, GitHubCollectionResult, RepositoryCoverage, SourceConfiguration } from "./shared";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceFilter, EvidenceResult, GitCollectionResult, GitHubCollectionResult, RepositoryCoverage, SourceConfiguration } from "./shared";
 
 export type { EvidenceResult } from "./shared";
 const DAY = 86_400_000;
@@ -225,30 +225,48 @@ export class BoardStore {
     return this.snapshot(next);
   }
   private conflict(revision: number): never { throw new BoardError("revision_conflict", `Board revision ${revision} is current. Call read_board, then retry with that revision.`); }
-  async evidence(boardId: string, snapshotId: string, bucketStart?: string, cursor?: string): Promise<EvidenceResult> {
+  async evidence(boardId: string, snapshotId: string, bucketStart?: string, cursor?: string, filter: EvidenceFilter = {}): Promise<EvidenceResult> {
     const workspace = this.workspace();
     const board = this.snapshot(this.load(boardId),workspace);
     if (board.snapshotId !== snapshotId) throw new BoardError("stale_snapshot", "The selected evidence changed. Read the board and select the current snapshot.");
     const bucket = bucketStart !== undefined ? board.buckets.find(value => value.start === bucketStart) : undefined;
     if (bucketStart !== undefined && !bucket) throw new BoardError("invalid_selection", "The selected bucket is outside this board's scope.");
+    if ((filter.kind !== undefined && !["all", "activity", "pull_requests"].includes(filter.kind)) ||
+        (filter.pullRequestState !== undefined && !["open", "merged"].includes(filter.pullRequestState)) ||
+        (filter.pullRequestId !== undefined && (typeof filter.pullRequestId !== "string" || filter.pullRequestId.length === 0 || filter.pullRequestId.length > 256))) {
+      throw new BoardError("invalid_filter", "Choose activity or pull_requests evidence, an open or merged PR state, and an exact returned PR ID.");
+    }
+    if (filter.kind === "activity" && (filter.pullRequestState !== undefined || filter.pullRequestId !== undefined)) {
+      throw new BoardError("invalid_filter", "Activity evidence cannot include pull request filters.");
+    }
+    const kind = filter.pullRequestId !== undefined ? "pull_requests" : filter.kind ?? (filter.pullRequestState === undefined ? "all" : "pull_requests");
+    const filterKey = JSON.stringify([kind, filter.pullRequestState ?? null, filter.pullRequestId ?? null]);
     const collection = workspace.collection;
     const since = bucket?.start ?? board.scope.since;
     const until = bucket?.end ?? board.scope.until;
     const selected = (id:string) => board.configuration.repositories.includes(id) && (board.query.repository === "all" || board.query.repository === id);
-    const records = (collection?.git ?? []).filter(repo => selected(repo.repository.id)).flatMap(repo => repo.records).filter(r => r.timestamp >= since && r.timestamp < until).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));
-    const pullRequests = collection?.id === this.verifiedCollection && workspace.verification === this.verifiedEpoch ? collection.github.pullRequests.filter(pr => selected(pr.repository) && (pr.state === "open" || (pr.mergedAt !== null && pr.mergedAt >= since && pr.mergedAt < until))).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) : [];
+    const records = kind === "pull_requests" ? [] : (collection?.git ?? []).filter(repo => selected(repo.repository.id)).flatMap(repo => repo.records).filter(r => r.timestamp >= since && r.timestamp < until).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));
+    const pullRequests = kind !== "activity" && collection?.id === this.verifiedCollection && workspace.verification === this.verifiedEpoch
+      ? collection.github.pullRequests.filter(pr => selected(pr.repository) &&
+        (filter.pullRequestState === undefined || pr.state === filter.pullRequestState) &&
+        (filter.pullRequestId === undefined || pr.id === filter.pullRequestId) &&
+        (pr.state === "open" || (pr.mergedAt !== null && pr.mergedAt >= since && pr.mergedAt < until)))
+        .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) : [];
+    if (filter.pullRequestId !== undefined && pullRequests.length === 0) {
+      throw new BoardError("selection_not_found", "The selected pull request is unavailable in this board's current repository, date, state, or verified account scope. Refresh the selection before discussing it.");
+    }
     let offset = 0;
     if (cursor !== undefined) {
       try {
         if (cursor.length > 1024 || !/^[a-zA-Z0-9_-]+$/.test(cursor)) throw new Error();
         const decoded = JSON.parse(Buffer.from(cursor,"base64url").toString("utf8"));
-        if (!Array.isArray(decoded) || decoded.length !== 3 || decoded[0] !== snapshotId || decoded[1] !== (bucketStart ?? null) || !Number.isSafeInteger(decoded[2]) || decoded[2] < 0 || decoded[2] > Math.max(records.length,pullRequests.length)) throw new Error();
-        offset = decoded[2];
-      } catch { throw new BoardError("invalid_cursor", "Use the nextCursor returned for this snapshot and selection."); }
+        if (!Array.isArray(decoded) || decoded.length !== 4 || decoded[0] !== snapshotId || decoded[1] !== (bucketStart ?? null) || decoded[2] !== filterKey || !Number.isSafeInteger(decoded[3]) || decoded[3] < 0 || decoded[3] > Math.max(records.length,pullRequests.length)) throw new Error();
+        offset = decoded[3];
+      } catch { throw new BoardError("invalid_cursor", "Use the nextCursor returned for this snapshot, selection, and evidence filters."); }
     }
     const pageSize = 25;
     const more = offset+pageSize < Math.max(records.length,pullRequests.length);
-    return { boardId, revision:board.revision,snapshotId,query:board.query,scope:board.scope,coverage:board.coverage,bucketStart:bucketStart ?? null,records:records.slice(offset,offset+pageSize).map(record => ({ ...record, files: record.files.slice(0,25), filesTruncated: record.files.length > 25 })),pullRequests:pullRequests.slice(offset,offset+pageSize),nextCursor:more ? Buffer.from(JSON.stringify([snapshotId,bucketStart ?? null,offset+pageSize])).toString("base64url") : null,totalRecords:records.length,totalPullRequests:pullRequests.length };
+    return { boardId, revision:board.revision,snapshotId,query:board.query,scope:board.scope,coverage:board.coverage,bucketStart:bucketStart ?? null,records:records.slice(offset,offset+pageSize).map(record => ({ ...record, files: record.files.slice(0,25), filesTruncated: record.files.length > 25 })),pullRequests:pullRequests.slice(offset,offset+pageSize),nextCursor:more ? Buffer.from(JSON.stringify([snapshotId,bucketStart ?? null,filterKey,offset+pageSize])).toString("base64url") : null,totalRecords:records.length,totalPullRequests:pullRequests.length,kind,pullRequestState:filter.pullRequestState,selectedPullRequestId:filter.pullRequestId };
   }
   close(): void { this.database?.close(); this.database=undefined; this.verifiedCollection=null; this.verifiedEpoch=null; }
 }

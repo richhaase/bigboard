@@ -328,3 +328,92 @@ test("independent SQLite stores enforce board CAS and reset removed repository f
   assert.equal(removed.query.repository, "all");
   assert.equal(removed.revision, current.revision + 1);
 });
+
+test("activity and PR views receive only their own evidence while the default query stays compatible", async t => {
+  const { store } = await installation(t);
+  await store.configure(undefined, true, 0);
+  await store.refresh();
+  const board = await store.open();
+  const mixed = await store.evidence(board.boardId, board.snapshotId);
+  assert.ok(mixed.records.length > 0);
+  assert.ok(mixed.pullRequests.length > 0);
+  assert.equal(mixed.kind, "all");
+  const bucket = board.buckets[0];
+  const activity = await store.evidence(board.boardId, board.snapshotId, bucket.start, undefined, { kind: "activity" });
+  assert.equal(activity.kind, "activity");
+  assert.deepEqual(activity.records.map(record => record.id), bucket.recordIds);
+  assert.deepEqual(activity.pullRequests, []);
+  assert.equal(activity.totalPullRequests, 0);
+  const open = await store.evidence(board.boardId, board.snapshotId, bucket.start, undefined, { kind: "pull_requests", pullRequestState: "open" });
+  assert.deepEqual(open.records, []);
+  assert.equal(open.totalRecords, 0);
+  assert.equal(open.pullRequestState, "open");
+  assert.equal(open.pullRequests.length, 1);
+  assert.ok(open.pullRequests.every(request => request.state === "open" && request.createdAt < bucket.start));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "activity", pullRequestState: "open" }), code("invalid_filter"));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "activity", pullRequestId: "example/widget#1" }), code("invalid_filter"));
+});
+
+test("PR tabs filter before pagination and reject cursors from another evidence view or state", async t => {
+  const { store, data } = await installation(t);
+  data.setPRs(Array.from({ length: 61 }, (_, index) => pr(repos[0].id, index + 1, index % 2 ? "open" : "merged", "2026-11-16T12:00:00.000Z")));
+  await store.configure([repos[0].path], false, 0);
+  await store.refresh();
+  const board = await store.open();
+  const first = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "pull_requests", pullRequestState: "open" });
+  assert.equal(first.totalPullRequests, 30);
+  assert.equal(first.pullRequests.length, 25);
+  assert.ok(first.pullRequests.every(request => request.state === "open"));
+  assert.deepEqual(first.records, []);
+  assert.ok(first.nextCursor);
+  const second = await store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, { kind: "pull_requests", pullRequestState: "open" });
+  assert.equal(second.pullRequests.length, 5);
+  assert.equal(second.nextCursor, null);
+  assert.equal(new Set([...first.pullRequests, ...second.pullRequests].map(request => request.id)).size, 30);
+  const merged = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { pullRequestState: "merged" });
+  assert.equal(merged.kind, "pull_requests");
+  assert.equal(merged.totalPullRequests, 31);
+  assert.ok(merged.pullRequests.every(request => request.state === "merged"));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, { kind: "pull_requests", pullRequestState: "merged" }), code("invalid_cursor"));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, { kind: "activity" }), code("invalid_cursor"));
+  const activity = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "activity" });
+  assert.equal(activity.totalPullRequests, 0);
+  const all = await store.evidence(board.boardId, board.snapshotId);
+  assert.ok(all.nextCursor);
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, all.nextCursor, { kind: "activity" }), code("invalid_cursor"));
+  await store.refresh();
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, { kind: "pull_requests", pullRequestState: "open" }), code("stale_snapshot"));
+});
+
+test("selected PR evidence is exact and constrained by repository, merge interval, state, and verified account", async t => {
+  const { store, data } = await installation(t);
+  data.setPRs([
+    pr(repos[0].id, 1, "open", "2026-08-02T00:00:00.000Z"),
+    pr(repos[0].id, 2, "merged", "2026-11-15T10:00:00.000Z"),
+    pr(repos[0].id, 3, "merged", "2026-10-20T10:00:00.000Z"),
+    pr(repos[1].id, 4, "open", "2026-11-16T10:00:00.000Z"),
+  ]);
+  await store.configure(undefined, true, 0);
+  await store.refresh();
+  const initial = await store.open();
+  const board = await store.update(initial.boardId, initial.revision, { repository: repos[0].id });
+  const selected = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { pullRequestId: "example/widget#1" });
+  assert.equal(selected.kind, "pull_requests");
+  assert.equal(selected.selectedPullRequestId, "example/widget#1");
+  assert.deepEqual(selected.records, []);
+  assert.deepEqual(selected.pullRequests.map(request => request.id), ["example/widget#1"]);
+  assert.equal(selected.nextCursor, null);
+  for (const filter of [
+    { kind: "pull_requests" as const, pullRequestId: "example/other#4" },
+    { kind: "pull_requests" as const, pullRequestId: "example/widget#3" },
+    { kind: "pull_requests" as const, pullRequestId: "example/widget#99" },
+    { kind: "pull_requests" as const, pullRequestId: "example/widget#1", pullRequestState: "merged" as const },
+  ]) await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, filter), code("selection_not_found"));
+  const merged = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "pull_requests", pullRequestState: "merged", pullRequestId: "example/widget#2" });
+  assert.deepEqual(merged.pullRequests.map(request => request.id), ["example/widget#2"]);
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, board.buckets[0].start, undefined, { pullRequestId: "example/widget#2" }), code("selection_not_found"));
+  data.setFailure("denied");
+  await store.refresh();
+  const denied = await store.read(board.boardId);
+  await assert.rejects(store.evidence(denied.boardId, denied.snapshotId, undefined, undefined, { pullRequestId: "example/widget#1" }), code("selection_not_found"));
+});

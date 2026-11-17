@@ -1,5 +1,8 @@
 import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PullRequestRecord, SelectionContext } from "../shared";
 
+export type BoardViewMode = "activity" | "pullRequests";
+export type PullRequestState = "open" | "merged";
+
 export interface ToolResult {
   isError?: boolean;
   content?: Array<{ type: string; text?: string }>;
@@ -16,7 +19,10 @@ export interface BoardBridge {
 
 export interface BoardViewState {
   snapshot: BoardSnapshot | null;
+  view: BoardViewMode;
+  pullRequestState: PullRequestState;
   selectedBucket: string | null;
+  selectedPullRequestId: string | null;
   records: ActivityRecord[];
   pullRequests: PullRequestRecord[];
   totalRecords: number;
@@ -32,14 +38,16 @@ export interface BoardViewState {
   notice: string | null;
 }
 
-export function selectionContext(snapshot: BoardSnapshot, bucketStart: string | null): SelectionContext {
-  const bucket = snapshot.buckets.find((item) => item.start === bucketStart);
+export function selectionContext(snapshot: BoardSnapshot, bucketStart: string | null, view: BoardViewMode = "activity", pullRequestState: PullRequestState = "open", pullRequestId: string | null = null): SelectionContext {
+  const bucket = view === "activity" ? snapshot.buckets.find((item) => item.start === bucketStart) : undefined;
   return {
     boardId: snapshot.boardId,
     revision: snapshot.revision,
     snapshotId: snapshot.snapshotId,
     query: snapshot.query,
     scope: snapshot.scope,
+    view,
+    ...(view === "pullRequests" ? { pullRequestState, pullRequestId } : {}),
     bucketStart: bucket?.start ?? null,
     recordIds: bucket?.recordIds.slice(0, 100) ?? [],
     recordIdsTruncated: bucket?.recordIdsTruncated === true || (bucket?.recordIds.length ?? 0) > 100,
@@ -64,7 +72,10 @@ export function snapshotFromResult(result: ToolResult): BoardSnapshot {
 export class BoardController {
   private state: BoardViewState = {
     snapshot: null,
+    view: "activity",
+    pullRequestState: "open",
     selectedBucket: null,
+    selectedPullRequestId: null,
     records: [],
     pullRequests: [],
     totalRecords: 0,
@@ -104,14 +115,21 @@ export class BoardController {
     this.listeners.forEach((listener) => listener());
   }
 
+  private clearEvidence(patch: Partial<BoardViewState> = {}): void {
+    this.evidenceSequence += 1;
+    this.setState({ records: [], pullRequests: [], totalRecords: 0, totalPullRequests: 0, nextCursor: null, evidenceLoading: false, ...patch });
+  }
+
+  private context(): SelectionContext | null {
+    const snapshot = this.state.snapshot;
+    return snapshot ? selectionContext(snapshot, this.state.selectedBucket, this.state.view, this.state.pullRequestState, this.state.selectedPullRequestId) : null;
+  }
+
   async start(): Promise<void> {
     try {
       await this.bridge.connect((result) => {
-        try {
-          this.acceptSnapshot(snapshotFromResult(result));
-        } catch (error) {
-          this.setState({ error: this.errorMessage(error) });
-        }
+        try { this.acceptSnapshot(snapshotFromResult(result)); }
+        catch (error) { this.setState({ error: this.errorMessage(error) }); }
       }, () => { void this.destroy(false); });
       if (this.destroyed) return;
       this.connected = true;
@@ -119,9 +137,7 @@ export class BoardController {
         await this.refresh();
         void this.loadEvidence();
         void this.shareSelection();
-      } else {
-        this.setState({ phase: "waiting" });
-      }
+      } else this.setState({ phase: "waiting" });
       if (this.pollMilliseconds > 0) {
         this.poll = setInterval(() => {
           if (typeof document === "undefined" || document.visibilityState !== "hidden") void this.refresh();
@@ -135,13 +151,9 @@ export class BoardController {
   acceptSnapshot(snapshot: BoardSnapshot): void {
     if (this.destroyed) return;
     const previous = this.state.snapshot;
-    if (previous && previous.boardId !== snapshot.boardId) return;
-    if (previous && snapshot.revision < previous.revision) return;
-    if (previous && snapshot.snapshotId === previous.snapshotId) return;
-    const selectedBucket = snapshot.buckets.some((bucket) => bucket.start === this.state.selectedBucket)
-      ? this.state.selectedBucket : null;
-    this.evidenceSequence += 1;
-    this.setState({ snapshot, selectedBucket, records: [], pullRequests: [], totalRecords: 0, totalPullRequests: 0, nextCursor: null, phase: "ready", contextReady: false, contextFailed: false });
+    if (previous && (previous.boardId !== snapshot.boardId || snapshot.revision < previous.revision || snapshot.snapshotId === previous.snapshotId)) return;
+    const selectedBucket = snapshot.buckets.some((bucket) => bucket.start === this.state.selectedBucket) ? this.state.selectedBucket : null;
+    this.clearEvidence({ snapshot, selectedBucket, selectedPullRequestId: null, phase: "ready", contextReady: false, contextFailed: false });
     if (this.connected) {
       void this.loadEvidence();
       void this.shareSelection();
@@ -153,43 +165,32 @@ export class BoardController {
     if (!this.connected || !snapshot || this.syncing || this.destroyed) return;
     this.syncing = true;
     try {
-      const result = await this.bridge.callTool("read_board", { board_id: snapshot.boardId });
-      this.acceptSnapshot(snapshotFromResult(result));
+      this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
       if (this.state.error === this.refreshError) this.setState({ error: null });
       this.refreshError = null;
     } catch {
       this.refreshError = "The board could not refresh. Your last view is still here. Try again.";
       this.setState({ error: this.refreshError });
-    } finally {
-      this.syncing = false;
-    }
+    } finally { this.syncing = false; }
   }
 
   async refreshSources(): Promise<void> {
     if (!this.connected || this.state.busy || this.destroyed) return;
     this.setState({ busy: true, sourceRefreshing: true, error: null, notice: null });
     try {
-      const result = await this.bridge.callTool("refresh_sources", {});
-      toolError(result);
+      toolError(await this.bridge.callTool("refresh_sources", {}));
       const snapshot = this.state.snapshot;
-      if (snapshot) {
-        this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
-      }
-      this.setState({ notice: "Source collection finished. Check coverage for unavailable evidence." });
+      if (snapshot) this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
+      this.setState({ notice: "Sources refreshed." });
     } catch (error) {
       this.setState({ error: this.errorMessage(error) });
       await this.refresh();
-    } finally {
-      this.setState({ busy: false, sourceRefreshing: false });
-    }
+    } finally { this.setState({ busy: false, sourceRefreshing: false }); }
   }
 
   async retry(): Promise<void> {
     this.setState({ error: null, notice: null });
-    if (!this.connected) {
-      await this.start();
-      return;
-    }
+    if (!this.connected) { await this.start(); return; }
     await this.refresh();
     if (this.state.snapshot) {
       await this.loadEvidence();
@@ -202,25 +203,36 @@ export class BoardController {
     if (!snapshot || this.state.busy || !this.connected) return;
     this.setState({ busy: true, error: null, notice: null });
     try {
-      const result = await this.bridge.callTool("update_board", {
-        board_id: snapshot.boardId,
-        expected_revision: snapshot.revision,
-        ...patch,
-      });
-      this.acceptSnapshot(snapshotFromResult(result));
+      this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("update_board", { board_id: snapshot.boardId, expected_revision: snapshot.revision, ...patch })));
     } catch (error) {
       this.setState({ error: this.errorMessage(error) });
       await this.refresh();
-    } finally {
-      this.setState({ busy: false });
-    }
+    } finally { this.setState({ busy: false }); }
+  }
+
+  async setView(view: BoardViewMode): Promise<void> {
+    if (view === this.state.view || this.destroyed) return;
+    this.clearEvidence({ view, selectedPullRequestId: null, contextReady: false, contextFailed: false, error: null, notice: null });
+    await Promise.all([this.loadEvidence(), this.shareSelection()]);
+  }
+
+  async setPullRequestState(pullRequestState: PullRequestState): Promise<void> {
+    if (pullRequestState === this.state.pullRequestState || this.destroyed) return;
+    this.clearEvidence({ pullRequestState, selectedPullRequestId: null, contextReady: false, contextFailed: false, error: null, notice: null });
+    await Promise.all([this.loadEvidence(), this.shareSelection()]);
   }
 
   async selectBucket(start: string | null): Promise<void> {
     const snapshot = this.state.snapshot;
-    if (!snapshot || (start && !snapshot.buckets.some((bucket) => bucket.start === start))) return;
-    this.setState({ selectedBucket: start, records: [], pullRequests: [], totalRecords: snapshot.buckets.find((bucket) => bucket.start === start)?.commits ?? snapshot.totals.commits, totalPullRequests: 0, nextCursor: null, contextReady: false, contextFailed: false, error: null, notice: null });
+    if (!snapshot || this.state.view !== "activity" || (start && !snapshot.buckets.some((bucket) => bucket.start === start))) return;
+    this.clearEvidence({ selectedBucket: start, contextReady: false, contextFailed: false, error: null, notice: null });
     await Promise.all([this.loadEvidence(), this.shareSelection()]);
+  }
+
+  async selectPullRequest(id: string | null): Promise<void> {
+    if (this.state.view !== "pullRequests" || (id && !this.state.pullRequests.some((pr) => pr.id === id))) return;
+    this.setState({ selectedPullRequestId: id, contextReady: false, contextFailed: false, error: null, notice: null });
+    await this.shareSelection();
   }
 
   async loadMore(): Promise<void> {
@@ -230,7 +242,10 @@ export class BoardController {
 
   private async loadEvidence(append = false): Promise<void> {
     const snapshot = this.state.snapshot;
-    if (!snapshot || !this.connected || this.destroyed) return;
+    const view = this.state.view;
+    const bucketStart = view === "activity" ? this.state.selectedBucket : null;
+    const pullRequestState = this.state.pullRequestState;
+    if (!snapshot || !this.connected || this.destroyed || !snapshot.collectedAt || !snapshot.configuration.repositories.length || (view === "activity" && !bucketStart)) return;
     const cursor = append ? this.state.nextCursor : null;
     const sequence = ++this.evidenceSequence;
     this.setState({ evidenceLoading: true });
@@ -238,35 +253,32 @@ export class BoardController {
       const result = await this.bridge.callTool("query_evidence", {
         board_id: snapshot.boardId,
         snapshot_id: snapshot.snapshotId,
-        ...(this.state.selectedBucket ? { bucket_start: this.state.selectedBucket } : {}),
+        kind: view === "activity" ? "activity" : "pull_requests",
+        ...(bucketStart ? { bucket_start: bucketStart } : {}),
+        ...(view === "pullRequests" ? { pull_request_state: pullRequestState } : {}),
         ...(cursor ? { cursor } : {}),
       });
       if (sequence !== this.evidenceSequence || this.destroyed) return;
       toolError(result);
       const evidence = result.structuredContent as EvidenceResult | undefined;
-      if (evidence?.snapshotId !== snapshot.snapshotId || !Array.isArray(evidence.records) || !Array.isArray(evidence.pullRequests)) {
+      const kind = view === "activity" ? "activity" : "pull_requests";
+      if (evidence?.snapshotId !== snapshot.snapshotId || !Array.isArray(evidence.records) || !Array.isArray(evidence.pullRequests) ||
+          (evidence.kind !== undefined && evidence.kind !== kind) ||
+          (view === "pullRequests" && evidence.pullRequestState !== undefined && evidence.pullRequestState !== pullRequestState)) {
         throw new Error("The selected evidence changed. Refresh the board and select it again.");
       }
       const records = append ? [...this.state.records, ...evidence.records] : evidence.records;
       const pullRequests = append ? [...this.state.pullRequests, ...evidence.pullRequests] : evidence.pullRequests;
-      this.setState({
-        records: [...new Map(records.map((record) => [record.id, record])).values()],
-        pullRequests: [...new Map(pullRequests.map((record) => [record.id, record])).values()],
-        totalRecords: evidence.totalRecords,
-        totalPullRequests: evidence.totalPullRequests,
-        nextCursor: evidence.nextCursor,
-        evidenceLoading: false,
-      });
+      this.setState({ records: [...new Map(records.map((record) => [record.id, record])).values()], pullRequests: [...new Map(pullRequests.map((record) => [record.id, record])).values()], totalRecords: evidence.totalRecords, totalPullRequests: evidence.totalPullRequests, nextCursor: evidence.nextCursor, evidenceLoading: false });
     } catch (error) {
       if (sequence === this.evidenceSequence) this.setState({ error: this.errorMessage(error), evidenceLoading: false });
     }
   }
 
   private shareSelection(): Promise<void> {
-    const snapshot = this.state.snapshot;
-    if (!snapshot || !this.connected) return Promise.resolve();
+    const context = this.context();
+    if (!context || !this.connected) return Promise.resolve();
     const sequence = ++this.contextSequence;
-    const context = selectionContext(snapshot, this.state.selectedBucket);
     this.contextQueue = this.contextQueue.catch(() => {}).then(async () => {
       if (this.destroyed || sequence !== this.contextSequence) return;
       try {
@@ -280,28 +292,18 @@ export class BoardController {
   }
 
   async explainSelection(): Promise<void> {
-    const snapshot = this.state.snapshot;
-    if (!snapshot || !this.connected || this.state.busy) return;
-    const context = selectionContext(snapshot, this.state.selectedBucket);
+    const context = this.context();
+    const selected = this.state.view === "activity" ? this.state.selectedBucket : this.state.selectedPullRequestId;
+    if (!context || !selected || !this.connected || this.state.busy) return;
     this.setState({ busy: true, error: null, notice: null });
     try {
       await this.shareSelection();
-      const current = this.state.snapshot;
-      if (!current || current.snapshotId !== context.snapshotId || this.state.selectedBucket !== context.bucketStart) {
-        throw new Error("The view changed. Select the activity you want to discuss and try again.");
-      }
-      await this.bridge.sendMessage(
-        `Explain this BigBoard selection using query_evidence with board_id ${context.boardId}, ` +
-        `snapshot_id ${context.snapshotId}` + (context.bucketStart ? `, bucket_start ${context.bucketStart}` : "") +
-        `. Preserve the selected scope, include source links, and distinguish Git activity, merged pull requests, and current open work.\n\n` +
-        JSON.stringify(context),
-      );
+      if (JSON.stringify(this.context()) !== JSON.stringify(context)) throw new Error("The view changed. Select the evidence you want to discuss and try again.");
+      const request = { board_id: context.boardId, snapshot_id: context.snapshotId, kind: context.view === "pullRequests" ? "pull_requests" : "activity", ...(context.bucketStart ? { bucket_start: context.bucketStart } : {}), ...(context.view === "pullRequests" ? { pull_request_state: context.pullRequestState, pull_request_id: context.pullRequestId } : {}) };
+      await this.bridge.sendMessage(`Explain this BigBoard selection using query_evidence with ${JSON.stringify(request)}. Preserve this exact scope, include source links, and distinguish observations from interpretation.\n\n${JSON.stringify(context)}`);
       this.setState({ notice: "Selection sent to the conversation.", error: null });
-    } catch (error) {
-      this.setState({ error: this.errorMessage(error) });
-    } finally {
-      this.setState({ busy: false });
-    }
+    } catch (error) { this.setState({ error: this.errorMessage(error) }); }
+    finally { this.setState({ busy: false }); }
   }
 
   async destroy(closeBridge = true): Promise<void> {

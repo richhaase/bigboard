@@ -128,6 +128,12 @@ export interface BoardSnapshot {
   totals: { commits: number; additions: number; deletions: number; unknownLineCommits: number; previousCommits: number | null; mergedPRs: number; openPRs: number };
 }
 
+export interface EvidenceFilter {
+  kind?: "all" | "activity" | "pull_requests";
+  pullRequestState?: "open" | "merged";
+  pullRequestId?: string;
+}
+
 export interface EvidenceResult {
   boardId: string;
   revision: number;
@@ -141,6 +147,9 @@ export interface EvidenceResult {
   nextCursor: string | null;
   totalRecords: number;
   totalPullRequests: number;
+  kind?: "all" | "activity" | "pull_requests";
+  pullRequestState?: "open" | "merged";
+  selectedPullRequestId?: string;
 }
 
 export interface SelectionContext {
@@ -152,6 +161,9 @@ export interface SelectionContext {
   bucketStart: string | null;
   recordIds: string[];
   recordIdsTruncated?: boolean;
+  view?: "activity" | "pullRequests";
+  pullRequestState?: "open" | "merged";
+  pullRequestId?: string | null;
 }
 
 export const BOARD_RESOURCE_URI = "ui://bigboard/activity.html";

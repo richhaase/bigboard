@@ -1,8 +1,9 @@
 # BigBoard MCP app
 
-Explore real Git history and GitHub pull requests in a shared activity board.
-Select a day, discuss the supporting commits and PRs, and ask the agent to
-change the same board's repository, range, or comparison.
+Explore real Git history and GitHub pull requests in focused views. Activity
+opens with a chart and a small summary. Select an interval to reveal its
+supporting commits. Pull requests has separate Open and Merged lists; selecting
+a PR opens its details. Discuss either selection with the agent.
 
 ## Integration branch
 
@@ -68,8 +69,9 @@ board read the last completed collection without starting collection.
   disclosed through repository coverage.
 - Merged PRs use GitHub's merge date and target default branch. Current open
   PRs, including drafts, remain visible regardless of the historical window.
-  A selected bucket narrows commits and merged PRs, while open PRs remain
-  current context as of collection time. Merged does not establish deployed.
+  Activity selections narrow commit evidence to a chart interval. In Pull
+  requests, Open is independent of the Activity interval, while Merged follows
+  the board's date range. Merged does not establish deployed.
 - Git author email identities use the scanned revision's mailmap. Different
   emails are not merged by display name. Line totals include tracked file
   changes; binary files and unavailable details have unknown line counts,
@@ -83,35 +85,51 @@ board read the last completed collection without starting collection.
   stays hidden until an explicit refresh verifies access for the new session.
   Failed or denied refreshes do not keep old PRs under a different account.
 
-**Board details** exposes per-repository coverage, refs, collection time, and
-snapshot identity. Commit and PR links open their exact GitHub records.
-Evidence is paged; the agent uses `nextCursor` with the same snapshot and
-selected interval. Large file lists and selection ID lists are explicitly
-marked when shortened.
+## Views and supporting evidence
+
+**Activity** is the default overview. It shows repository/date controls, the
+commit chart, and a compact summary. Commit evidence is requested and shown
+after selecting an interval. Close its detail pane to return to the overview.
+
+**Pull requests** has Open and Merged tabs with their own paged lists. Open
+includes older drafts as of collection time; Merged uses the selected date
+range. Select a row to inspect that exact PR and explain it with the agent.
+Activity's selected interval does not filter this view.
+
+The compact source-status control exposes collection time, scanned refs,
+coverage gaps, and board/snapshot details. Refresh remains explicit. The
+agent receives the active view and selection, including an exact PR ID when
+one is selected. Changing views does not change collected sources.
+
+Evidence tools accept `kind:activity` or `kind:pull_requests`. PR queries can
+include `pull_request_state` and `pull_request_id`. Page cursors are bound to
+those filters, the snapshot, and any selected interval. Shortened record-ID
+and file lists remain explicitly marked.
 
 ## Interaction acceptance test
 
-1. Configure sources, refresh, and open a board. Confirm selected repository
-   IDs, scanned revisions, collection time, and any coverage gaps.
-2. Select a daily bar and ask "What contributed to this change?" The agent
-   should use its board ID, snapshot ID, and bucket start to query supporting
-   records. **Explain selection** sends the same context into the conversation.
-3. Ask for one configured repository and a previous-period comparison. The
-   same panel should update within its next visible refresh, usually two
-   seconds; collection settings must stay unchanged.
-4. Check that older open PRs remain visible when selecting a recent bucket,
-   and merged PRs follow the selected interval. Use **Load more evidence**
-   when more pages are available.
-5. Refresh sources and confirm the snapshot changes. Queries with an old
-   snapshot must fail instead of mixing records from different collections.
-6. Close and reopen the board using its existing `board_id`. Create a second
-   board and confirm their viewing filters remain independent. After a server
-   restart, refresh once to revalidate GitHub access.
+1. Open Activity. Confirm the chart and summary are visible without commit or
+   PR lists. Inspect the compact status control for source coverage.
+2. Select an interval. Its supporting commits should appear in a detail pane;
+   **Explain selection** should send that interval's exact context to the
+   agent. Close the pane and confirm the overview becomes quiet again.
+3. Switch to Pull requests. Open should include older drafts without the
+   Activity interval filter. Switch to Merged and check its date range.
+4. Select a PR. Its details and explanation should identify that exact PR and
+   snapshot. Closing details or changing tabs must clear the old selection.
+5. Page through a list, switch views, and change the repository. Results from
+   a prior view or filter must not appear in the new view.
+6. Ask the agent to change the repository or Activity comparison. Confirm the
+   same board updates while source settings remain unchanged. Refresh sources
+   explicitly and verify old snapshot queries fail.
+7. Reopen an existing board and create another independent board. Their saved
+   queries must remain separate. After server restart, refresh once to verify
+   GitHub access before using PR evidence.
 
-Automated checks cover actual Git repositories created in temporary test
-folders, mocked GitHub responses, the packaged stdio server, persistent state,
-and the rendered web app through the official MCP Apps bridge. Desktop-host
-acceptance is recorded separately from those tests.
+Automated checks cover actual Git repositories in temporary test folders,
+mocked GitHub responses, the packaged stdio server, saved state, and the
+rendered app through the official MCP Apps bridge. Desktop-host acceptance
+is recorded separately from those tests.
 
 ## Build and verify
 

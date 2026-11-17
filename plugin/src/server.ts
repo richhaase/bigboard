@@ -14,6 +14,7 @@ function boardText(board: BoardSnapshot): string {
 }
 function evidenceText(evidence: EvidenceResult): string {
   return `Git/GitHub evidence for board ${evidence.boardId}, snapshot ${evidence.snapshotId}. ` +
+    `Evidence kind: ${evidence.kind ?? "all"}${evidence.pullRequestState ? `; PR state: ${evidence.pullRequestState}` : ""}${evidence.selectedPullRequestId ? `; selected PR: ${evidence.selectedPullRequestId}` : ""}. ` +
     `${evidence.bucketStart ? `Selected 24-hour interval ${evidence.bucketStart}.` : "Whole board period."} Current open PRs are independent of this date interval. ` +
     `${evidence.records.length}/${evidence.totalRecords} commit records and ${evidence.pullRequests.length}/${evidence.totalPullRequests} PR records on this page. ` +
     `${evidence.coverage.note}\n${JSON.stringify({ records: evidence.records, pullRequests: evidence.pullRequests, nextCursor: evidence.nextCursor })}`;
@@ -32,8 +33,8 @@ async function result(operation: () => Promise<unknown>): Promise<CallToolResult
 export function createBigboardServer(html: string, store: BoardStore): McpServer {
   const server = new McpServer({ name: "bigboard-mcp-app", version: APP_VERSION });
   const resourceMeta = { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } };
-  registerAppResource(server, "BigBoard activity", BOARD_RESOURCE_URI,
-    { description: "Git history and GitHub pull request activity", _meta: resourceMeta },
+  registerAppResource(server, "BigBoard", BOARD_RESOURCE_URI,
+    { description: "Git Activity and Pull requests views", _meta: resourceMeta },
     async () => ({ contents: [{ uri: BOARD_RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html, _meta: resourceMeta }] }));
   registerAppTool(server, "open_board", {
     title: "Open BigBoard", description: "Open a Git/GitHub activity board. Omit board_id for an independent board or provide an existing ID to reopen it. Opening and viewing never collect data. If unconfigured, use configure_sources then refresh_sources.",
@@ -49,9 +50,9 @@ export function createBigboardServer(html: string, store: BoardStore): McpServer
     annotations: { ...annotations, readOnlyHint: false }, _meta: { ui: { visibility: ["model", "app"] } },
   }, ({ board_id,expected_revision,days,repository,compare }) => result(() => store.update(board_id,expected_revision,{ ...(days === undefined ? {} : { days }), ...(repository === undefined ? {} : { repository }), ...(compare === undefined ? {} : { compare }) })));
   server.registerTool("query_evidence", {
-    title: "Inspect BigBoard evidence", description: "Page actual commit and PR evidence for an exact snapshot and optional selected 24-hour bucket. Commits use Git author dates; merged PRs use merged_at and default branch. Current open PRs ignore the historical interval. Supply nextCursor as cursor to load more; retain the same snapshot and selection.",
-    inputSchema: { board_id: boardId, snapshot_id: z.string(), bucket_start: z.string().optional(), cursor: z.string().optional() }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
-  }, ({ board_id,snapshot_id,bucket_start,cursor }) => result(() => store.evidence(board_id,snapshot_id,bucket_start,cursor)));
+    title: "Inspect BigBoard evidence", description: "Page evidence for an exact snapshot and optional selected 24-hour bucket. Use kind:activity for commits or kind:pull_requests with pull_request_state:open/merged for the PR view. An exact pull_request_id selects one available PR within the board scope. Commits use author dates; merges use merged_at and default branch; open PRs ignore the historical interval. Reuse nextCursor with the same snapshot, selection, and filters.",
+    inputSchema: { board_id: boardId, snapshot_id: z.string(), bucket_start: z.string().optional(), cursor: z.string().optional(), kind: z.enum(["all", "activity", "pull_requests"]).optional(), pull_request_state: z.enum(["open", "merged"]).optional(), pull_request_id: z.string().min(1).max(256).optional() }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
+  }, ({ board_id,snapshot_id,bucket_start,cursor,kind,pull_request_state,pull_request_id }) => result(() => store.evidence(board_id,snapshot_id,bucket_start,cursor,{kind,pullRequestState:pull_request_state,pullRequestId:pull_request_id})));
   server.registerTool("list_sources", {
     title: "List BigBoard sources", description: "Read saved collection selection and its revision. Paths refer to existing local clones, distinct from temporary viewing filters.", inputSchema: {}, annotations,
   }, () => result(async () => store.sources()));
