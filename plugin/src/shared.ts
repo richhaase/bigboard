@@ -2,6 +2,10 @@ import { version } from "../package.json";
 
 export const APP_VERSION = version;
 export type RepositoryFilter = string;
+export type BoardViewMode = "activity" | "pullRequests" | "people";
+export type PeopleSource = "git" | "github";
+export type PullRequestSort = "updated" | "created" | "number" | "title" | "author" | "repository";
+export type SortDirection = "asc" | "desc";
 
 export interface BoardQuery {
   days: 7 | 14;
@@ -114,6 +118,7 @@ export interface ActivityBucket {
 }
 
 export interface BoardSnapshot {
+  initialView?: BoardViewMode;
   boardId: string;
   revision: number;
   snapshotId: string;
@@ -132,6 +137,36 @@ export interface EvidenceFilter {
   kind?: "all" | "activity" | "pull_requests";
   pullRequestState?: "open" | "merged";
   pullRequestId?: string;
+  personId?: string;
+  pullRequestSort?: PullRequestSort;
+  sortDirection?: SortDirection;
+}
+
+export interface PersonSummary {
+  id: string;
+  source: PeopleSource;
+  name: string;
+  identity: string;
+  commits: number;
+  additions: number;
+  deletions: number;
+  unknownLineCommits: number;
+  openPRs: number;
+  mergedPRs: number;
+  repositories: string[];
+}
+
+export interface PeopleResult {
+  boardId: string;
+  revision: number;
+  snapshotId: string;
+  query: BoardQuery;
+  scope: BoardSnapshot["scope"];
+  coverage: BoardSnapshot["coverage"];
+  source: PeopleSource;
+  people: PersonSummary[];
+  totalPeople: number;
+  nextCursor: string | null;
 }
 
 export interface EvidenceResult {
@@ -150,6 +185,9 @@ export interface EvidenceResult {
   kind?: "all" | "activity" | "pull_requests";
   pullRequestState?: "open" | "merged";
   selectedPullRequestId?: string;
+  selectedPersonId?: string;
+  pullRequestSort?: PullRequestSort;
+  sortDirection?: SortDirection;
 }
 
 export interface SelectionContext {
@@ -161,9 +199,14 @@ export interface SelectionContext {
   bucketStart: string | null;
   recordIds: string[];
   recordIdsTruncated?: boolean;
-  view?: "activity" | "pullRequests";
+  view?: BoardViewMode;
   pullRequestState?: "open" | "merged";
   pullRequestId?: string | null;
+  personId?: string | null;
+  peopleSource?: PeopleSource;
+  selectedPullRequests?: PullRequestRecord[];
+  pullRequestSort?: PullRequestSort;
+  sortDirection?: SortDirection;
 }
 
 export const BOARD_RESOURCE_URI = "ui://bigboard/activity.html";

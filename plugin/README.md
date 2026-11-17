@@ -2,8 +2,9 @@
 
 Explore real Git history and GitHub pull requests in focused views. Activity
 opens with a chart and a small summary. Select an interval to reveal its
-supporting commits. Pull requests has separate Open and Merged lists; selecting
-a PR opens its details. Discuss either selection with the agent.
+supporting commits. People groups Git contributors and GitHub authors in
+separate lists. Pull requests has Open and Merged lists, sorting, and checkbox
+selection. Discuss evidence or request reviews for selected PRs with the agent.
 
 ## Integration branch
 
@@ -93,18 +94,45 @@ after selecting an interval. Close its detail pane to return to the overview.
 
 **Pull requests** has Open and Merged tabs with their own paged lists. Open
 includes older drafts as of collection time; Merged uses the selected date
-range. Select a row to inspect that exact PR and explain it with the agent.
+range. Sort by update time, creation time, number, title, author, or repository,
+in either direction. Sorting applies to the full collected list before paging.
+Select a row to inspect that exact PR and explain it with the agent.
 Activity's selected interval does not filter this view.
+
+Use checkboxes to select several PRs. **Select loaded** adds the currently
+loaded rows; it does not select unseen pages. Select up to 100 PRs per batch;
+larger selections are rejected without changing the existing set. The selected set survives sorting
+and paging within the same scope. It clears when the snapshot, repository,
+state tab, or view changes. **Share selection** sends those exact PRs to the
+conversation. **Request code reviews** sends a review request for the same set;
+the agent follows its normal review workflow. Checkboxes also update agent
+context directly, so you can select PRs and type “review these” in the chat.
+Opening a row's details and selecting a checkbox are independent actions.
+
+**People** has Git contributors and GitHub authors tabs. Git contributors are
+grouped by the scanned revision's mailmapped author email; GitHub authors are
+grouped by login. These sources are not linked by display name. Commit and
+merged PR counts use the board's repository and date range; open PR counts are
+as of collection time. Select a person to inspect supporting evidence and
+discuss that exact identity with the agent. Counts retain the source coverage
+limits and describe observed activity within the collected scope.
+
+`open_board` accepts `view:activity`, `view:people`, or `view:pull_requests`.
+Pass an existing `board_id` to open another view of that board's saved scope,
+or omit it for a new independent board. The view argument chooses the opening
+tab; subsequent reads do not reset the user's active tab.
 
 The compact source-status control exposes collection time, scanned refs,
 coverage gaps, and board/snapshot details. Refresh remains explicit. The
-agent receives the active view and selection, including an exact PR ID when
-one is selected. Changing views does not change collected sources.
+agent receives the active view and selection, including selected PR records
+and a separate inspected PR ID. Changing views does not change collected sources.
 
 Evidence tools accept `kind:activity` or `kind:pull_requests`. PR queries can
-include `pull_request_state` and `pull_request_id`. Page cursors are bound to
-those filters, the snapshot, and any selected interval. Shortened record-ID
-and file lists remain explicitly marked.
+include `pull_request_state`, `pull_request_id`, `pull_request_sort`, and
+`sort_direction`. People summaries use `query_people` with source `git` or
+`github`; `query_evidence` accepts an exact `person_id` for supporting records.
+Page cursors are bound to their filters, sorting, snapshot, and any selected
+interval. Shortened record-ID and file lists remain explicitly marked.
 
 ## Interaction acceptance test
 
@@ -115,14 +143,19 @@ and file lists remain explicitly marked.
    agent. Close the pane and confirm the overview becomes quiet again.
 3. Switch to Pull requests. Open should include older drafts without the
    Activity interval filter. Switch to Merged and check its date range.
-4. Select a PR. Its details and explanation should identify that exact PR and
-   snapshot. Closing details or changing tabs must clear the old selection.
-5. Page through a list, switch views, and change the repository. Results from
+4. Select a PR row. Its details and explanation should identify that exact PR
+   and snapshot. Check several PRs, sort, and load more. The selected count and
+   agent context must preserve that exact set. Share the selection or request
+   reviews; verify the chat receives only the checked PRs. Checkbox changes
+   alone must not start reviews.
+5. Open directly into People. Switch identity sources, select a person, and
+   inspect evidence. Confirm Git contributors and GitHub logins stay separate.
+6. Page through a list, switch views, and change the repository. Results from
    a prior view or filter must not appear in the new view.
-6. Ask the agent to change the repository or Activity comparison. Confirm the
+7. Ask the agent to change the repository or Activity comparison. Confirm the
    same board updates while source settings remain unchanged. Refresh sources
    explicitly and verify old snapshot queries fail.
-7. Reopen an existing board and create another independent board. Their saved
+8. Reopen an existing board and create another independent board. Their saved
    queries must remain separate. After server restart, refresh once to verify
    GitHub access before using PR evidence.
 

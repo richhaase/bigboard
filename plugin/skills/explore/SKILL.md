@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Open and discuss BigBoard Activity and Pull requests views, explain a selected interval or PR, configure collection sources, or change repository filters and comparisons.
+description: Open and discuss BigBoard Activity, People, and Pull requests views, inspect supporting evidence, discuss or review selected PRs, configure collection sources, or change viewing filters.
 ---
 
 # BigBoard exploration
@@ -31,24 +31,51 @@ local scan. Collection time and scanned revisions are part of the answer.
 ## Open, inspect, and discuss
 
 Call `open_board` without `board_id` for a new independent board, or with an
-exact existing ID to reopen it. Use app selection context to identify the
-board, snapshot, active view, and selected interval or PR. If the intended board is
+exact existing ID to reopen it. Set `view` to `activity`, `people`, or
+`pull_requests` to open directly into that view. These are views of the same
+board and share its repository and date filters. Use app selection context to
+identify the board, snapshot, active view, and selected interval, person, or PRs. If the intended board is
 ambiguous, ask the user to select it or supply its ID.
 
 Call `read_board`, then `query_evidence` with the exact board and snapshot IDs.
 For Activity use `kind:activity` and its selected `bucket_start` when present.
 For Pull requests use `kind:pull_requests`, its `pull_request_state` (open or
 merged), and selected `pull_request_id` when present. Do not carry a hidden
-Activity interval into a PR query. If no view context exists, use the user's
+Activity interval into a PR query. For People, use `query_people` with its
+`source` (`git` or `github`); inspect a selected person's evidence with
+`query_evidence` and its exact `person_id`, without a hidden Activity interval.
+Git contributors and GitHub authors are separate identities; do not link them
+by similar names. Git statistics and merged PRs follow the board period, while
+open PRs are current as of collection time. If no view context exists, use the user's
 question to choose the evidence kind. If the selection's snapshot differs
 from the current board, disclose that change and refresh the selection before
 attributing records. Follow `nextCursor` with the same snapshot, bucket, kind,
-and PR filters to inspect more evidence. Shortened record IDs or file lists are not exhaustive.
+and filters to inspect more evidence. PR sorting uses `pull_request_sort`
+(`updated`, `created`, `number`, `title`, `author`, or `repository`) and
+`sort_direction` (`asc` or `desc`). Sorting applies before paging. Shortened
+record IDs or file lists are not exhaustive.
 
 Explain commits using their author dates and exact links. Merged PRs follow
 the selected interval and default branch; open PRs remain current context as
 of collection time, including older drafts. Keep incomplete coverage and
 unknown line counts visible; zero under incomplete coverage is not absence.
+
+## Selected PRs and code reviews
+
+Checkbox selections are in `selectedPullRequests` in the app context. Each
+record identifies its repository, number, URL, and collected head SHA. A
+separate `pullRequestId` is the row whose details are open; it does not replace
+the checkbox selection. Use the explicit batch when the user says “these PRs.”
+Do not expand it to every loaded PR or the whole board.
+
+Selecting checkboxes updates context without requesting reviews. **Share
+selection** sends the selection for discussion; **Request code reviews** sends
+the user's review request for that exact set. When reviews are requested,
+follow the host agent's applicable review workflow and repository instructions.
+BigBoard supplies context; it does not execute reviews. Check current PR state
+and head before reviewing, since the collected snapshot may be older. If the
+selection is missing or its snapshot changed, ask for a fresh selection rather
+than guessing the batch.
 
 ## Change the board scope
 
@@ -58,7 +85,7 @@ returned by `list_sources`), and `compare`. These do not change collected
 sources or start network requests. Reconcile revision conflicts with the
 latest state before retrying.
 
-Activity and Pull requests are display tabs in the app. `update_board` changes
+Activity, People, and Pull requests are display tabs in the app. `update_board` changes
 the shared board query, not the active tab; do not claim to switch tabs with
 that tool. The existing panel reads the same saved board. Subsequent reads
 and updates need no new panel. Report the resulting scope and revision without claiming a

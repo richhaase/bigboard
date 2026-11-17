@@ -5,12 +5,25 @@ import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { collectGitHistory, describeRepository, importNativeSources } from "./sources/git";
 import { collectGitHub } from "./sources/github";
-import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceFilter, EvidenceResult, GitCollectionResult, GitHubCollectionResult, RepositoryCoverage, SourceConfiguration } from "./shared";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceFilter, EvidenceResult, GitCollectionResult, GitHubCollectionResult, PeopleResult, PeopleSource, PersonSummary, PullRequestRecord, PullRequestSort, RepositoryCoverage, SortDirection, SourceConfiguration } from "./shared";
 
 export type { EvidenceResult } from "./shared";
 const DAY = 86_400_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const DEFAULT_QUERY: BoardQuery = { days: 7, repository: "all", compare: false };
+const PR_SORTS: PullRequestSort[] = ["updated", "created", "number", "title", "author", "repository"];
+
+function gitPersonId(record: ActivityRecord): string {
+  return `git:${Buffer.from(JSON.stringify(record.email ? ["email", record.email] : ["record", record.id])).toString("base64url")}`;
+}
+function githubPersonId(author: string): string { return `github:${Buffer.from(author.toLowerCase()).toString("base64url")}`; }
+function comparePullRequests(a: PullRequestRecord, b: PullRequestRecord, sort: PullRequestSort, direction: SortDirection): number {
+  const order = sort === "number" ? a.number - b.number :
+    sort === "updated" ? a.updatedAt.localeCompare(b.updatedAt) :
+    sort === "created" ? a.createdAt.localeCompare(b.createdAt) :
+    a[sort].localeCompare(b[sort]);
+  return (direction === "asc" ? order : -order) || a.id.localeCompare(b.id);
+}
 
 export class BoardError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = "BoardError"; }
@@ -225,6 +238,56 @@ export class BoardStore {
     return this.snapshot(next);
   }
   private conflict(revision: number): never { throw new BoardError("revision_conflict", `Board revision ${revision} is current. Call read_board, then retry with that revision.`); }
+  async people(boardId: string, snapshotId: string, source: PeopleSource, cursor?: string): Promise<PeopleResult> {
+    const workspace = this.workspace();
+    const board = this.snapshot(this.load(boardId), workspace);
+    if (board.snapshotId !== snapshotId) throw new BoardError("stale_snapshot", "The selected evidence changed. Read the board and select the current snapshot.");
+    if (source !== "git" && source !== "github") throw new BoardError("invalid_filter", "Choose git contributors or github PR authors.");
+    const collection = workspace.collection;
+    const selected = (id: string) => board.configuration.repositories.includes(id) && (board.query.repository === "all" || board.query.repository === id);
+    const people = new Map<string, PersonSummary>();
+    const person = (id: string, name: string, identity: string, repository: string) => {
+      let value = people.get(id);
+      if (!value) {
+        value = { id, source, name, identity, commits: 0, additions: 0, deletions: 0, unknownLineCommits: 0, openPRs: 0, mergedPRs: 0, repositories: [] };
+        people.set(id, value);
+      }
+      if (!value.repositories.includes(repository)) value.repositories.push(repository);
+      return value;
+    };
+    if (source === "git") {
+      const records = (collection?.git ?? []).filter(repo => selected(repo.repository.id)).flatMap(repo => repo.records)
+        .filter(record => record.timestamp >= board.scope.since && record.timestamp < board.scope.until)
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));
+      for (const record of records) {
+        const value = person(gitPersonId(record), record.contributor, record.email || "Email unavailable", record.repository);
+        value.commits += 1;
+        value.additions += record.additions ?? 0;
+        value.deletions += record.deletions ?? 0;
+        value.unknownLineCommits += Number(record.additions === null || record.deletions === null);
+      }
+    } else if (collection?.id === this.verifiedCollection && workspace.verification === this.verifiedEpoch) {
+      for (const pr of collection.github.pullRequests.filter(pr => selected(pr.repository) &&
+          (pr.state === "open" || (pr.mergedAt !== null && pr.mergedAt >= board.scope.since && pr.mergedAt < board.scope.until)))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))) {
+        const value = person(githubPersonId(pr.author), pr.author, pr.author, pr.repository);
+        if (pr.state === "open") value.openPRs += 1;
+        else value.mergedPRs += 1;
+      }
+    }
+    const sorted = [...people.values()].map(value => ({ ...value, repositories: value.repositories.sort() }))
+      .sort((a, b) => (source === "git" ? b.commits - a.commits : b.openPRs + b.mergedPRs - a.openPRs - a.mergedPRs) || a.identity.localeCompare(b.identity) || a.id.localeCompare(b.id));
+    let offset = 0;
+    if (cursor !== undefined) {
+      try {
+        if (cursor.length > 2048 || !/^[a-zA-Z0-9_-]+$/.test(cursor)) throw new Error();
+        const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+        if (!Array.isArray(decoded) || decoded.length !== 4 || decoded[0] !== "people" || decoded[1] !== snapshotId || decoded[2] !== source || !Number.isSafeInteger(decoded[3]) || decoded[3] < 0 || decoded[3] > sorted.length) throw new Error();
+        offset = decoded[3];
+      } catch { throw new BoardError("invalid_cursor", "Use the nextCursor returned for this People snapshot and source."); }
+    }
+    return { boardId, revision: board.revision, snapshotId, query: board.query, scope: board.scope, coverage: board.coverage, source, people: sorted.slice(offset, offset + 25), totalPeople: sorted.length, nextCursor: offset + 25 < sorted.length ? Buffer.from(JSON.stringify(["people", snapshotId, source, offset + 25])).toString("base64url") : null };
+  }
   async evidence(boardId: string, snapshotId: string, bucketStart?: string, cursor?: string, filter: EvidenceFilter = {}): Promise<EvidenceResult> {
     const workspace = this.workspace();
     const board = this.snapshot(this.load(boardId),workspace);
@@ -233,32 +296,44 @@ export class BoardStore {
     if (bucketStart !== undefined && !bucket) throw new BoardError("invalid_selection", "The selected bucket is outside this board's scope.");
     if ((filter.kind !== undefined && !["all", "activity", "pull_requests"].includes(filter.kind)) ||
         (filter.pullRequestState !== undefined && !["open", "merged"].includes(filter.pullRequestState)) ||
-        (filter.pullRequestId !== undefined && (typeof filter.pullRequestId !== "string" || filter.pullRequestId.length === 0 || filter.pullRequestId.length > 256))) {
-      throw new BoardError("invalid_filter", "Choose activity or pull_requests evidence, an open or merged PR state, and an exact returned PR ID.");
+        (filter.pullRequestId !== undefined && (typeof filter.pullRequestId !== "string" || filter.pullRequestId.length === 0 || filter.pullRequestId.length > 256)) ||
+        (filter.personId !== undefined && (typeof filter.personId !== "string" || filter.personId.length === 0 || filter.personId.length > 8192)) ||
+        (filter.pullRequestSort !== undefined && !PR_SORTS.includes(filter.pullRequestSort)) ||
+        (filter.sortDirection !== undefined && filter.sortDirection !== "asc" && filter.sortDirection !== "desc")) {
+      throw new BoardError("invalid_filter", "Choose a supported evidence kind, PR state and sort, and exact returned selection IDs.");
     }
-    if (filter.kind === "activity" && (filter.pullRequestState !== undefined || filter.pullRequestId !== undefined)) {
+    if (filter.kind === "activity" && (filter.pullRequestState !== undefined || filter.pullRequestId !== undefined || filter.pullRequestSort !== undefined || filter.sortDirection !== undefined)) {
       throw new BoardError("invalid_filter", "Activity evidence cannot include pull request filters.");
     }
-    const kind = filter.pullRequestId !== undefined ? "pull_requests" : filter.kind ?? (filter.pullRequestState === undefined ? "all" : "pull_requests");
-    const filterKey = JSON.stringify([kind, filter.pullRequestState ?? null, filter.pullRequestId ?? null]);
+    const kind = filter.pullRequestId !== undefined ? "pull_requests" : filter.kind ?? (filter.pullRequestState === undefined && filter.pullRequestSort === undefined && filter.sortDirection === undefined ? "all" : "pull_requests");
+    if (filter.personId !== undefined && ((filter.personId.startsWith("git:") && kind === "pull_requests") || (filter.personId.startsWith("github:") && kind === "activity"))) {
+      throw new BoardError("invalid_filter", "Git contributors have commit evidence; GitHub authors have pull request evidence.");
+    }
+    const pullRequestSort = filter.pullRequestSort ?? "updated";
+    const sortDirection = filter.sortDirection ?? "desc";
+    const filterKey = JSON.stringify([kind, filter.pullRequestState ?? null, filter.pullRequestId ?? null, filter.personId ?? null, pullRequestSort, sortDirection]);
     const collection = workspace.collection;
     const since = bucket?.start ?? board.scope.since;
     const until = bucket?.end ?? board.scope.until;
     const selected = (id:string) => board.configuration.repositories.includes(id) && (board.query.repository === "all" || board.query.repository === id);
-    const records = kind === "pull_requests" ? [] : (collection?.git ?? []).filter(repo => selected(repo.repository.id)).flatMap(repo => repo.records).filter(r => r.timestamp >= since && r.timestamp < until).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));
+    const records = kind === "pull_requests" ? [] : (collection?.git ?? []).filter(repo => selected(repo.repository.id)).flatMap(repo => repo.records).filter(r => r.timestamp >= since && r.timestamp < until && (filter.personId === undefined || gitPersonId(r) === filter.personId)).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));
     const pullRequests = kind !== "activity" && collection?.id === this.verifiedCollection && workspace.verification === this.verifiedEpoch
       ? collection.github.pullRequests.filter(pr => selected(pr.repository) &&
         (filter.pullRequestState === undefined || pr.state === filter.pullRequestState) &&
         (filter.pullRequestId === undefined || pr.id === filter.pullRequestId) &&
+        (filter.personId === undefined || githubPersonId(pr.author) === filter.personId) &&
         (pr.state === "open" || (pr.mergedAt !== null && pr.mergedAt >= since && pr.mergedAt < until)))
-        .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) : [];
+        .sort((a,b) => comparePullRequests(a,b,pullRequestSort,sortDirection)) : [];
     if (filter.pullRequestId !== undefined && pullRequests.length === 0) {
       throw new BoardError("selection_not_found", "The selected pull request is unavailable in this board's current repository, date, state, or verified account scope. Refresh the selection before discussing it.");
+    }
+    if (filter.personId !== undefined && records.length === 0 && pullRequests.length === 0) {
+      throw new BoardError("selection_not_found", "The selected person is unavailable in this board's current repository, date, or verified account scope. Refresh the selection before discussing it.");
     }
     let offset = 0;
     if (cursor !== undefined) {
       try {
-        if (cursor.length > 1024 || !/^[a-zA-Z0-9_-]+$/.test(cursor)) throw new Error();
+        if (cursor.length > 16384 || !/^[a-zA-Z0-9_-]+$/.test(cursor)) throw new Error();
         const decoded = JSON.parse(Buffer.from(cursor,"base64url").toString("utf8"));
         if (!Array.isArray(decoded) || decoded.length !== 4 || decoded[0] !== snapshotId || decoded[1] !== (bucketStart ?? null) || decoded[2] !== filterKey || !Number.isSafeInteger(decoded[3]) || decoded[3] < 0 || decoded[3] > Math.max(records.length,pullRequests.length)) throw new Error();
         offset = decoded[3];
@@ -266,7 +341,7 @@ export class BoardStore {
     }
     const pageSize = 25;
     const more = offset+pageSize < Math.max(records.length,pullRequests.length);
-    return { boardId, revision:board.revision,snapshotId,query:board.query,scope:board.scope,coverage:board.coverage,bucketStart:bucketStart ?? null,records:records.slice(offset,offset+pageSize).map(record => ({ ...record, files: record.files.slice(0,25), filesTruncated: record.files.length > 25 })),pullRequests:pullRequests.slice(offset,offset+pageSize),nextCursor:more ? Buffer.from(JSON.stringify([snapshotId,bucketStart ?? null,filterKey,offset+pageSize])).toString("base64url") : null,totalRecords:records.length,totalPullRequests:pullRequests.length,kind,pullRequestState:filter.pullRequestState,selectedPullRequestId:filter.pullRequestId };
+    return { boardId, revision:board.revision,snapshotId,query:board.query,scope:board.scope,coverage:board.coverage,bucketStart:bucketStart ?? null,records:records.slice(offset,offset+pageSize).map(record => ({ ...record, files: record.files.slice(0,25), filesTruncated: record.files.length > 25 })),pullRequests:pullRequests.slice(offset,offset+pageSize),nextCursor:more ? Buffer.from(JSON.stringify([snapshotId,bucketStart ?? null,filterKey,offset+pageSize])).toString("base64url") : null,totalRecords:records.length,totalPullRequests:pullRequests.length,kind,pullRequestState:filter.pullRequestState,selectedPullRequestId:filter.pullRequestId,selectedPersonId:filter.personId,pullRequestSort:kind === "activity" ? undefined : pullRequestSort,sortDirection:kind === "activity" ? undefined : sortDirection };
   }
   close(): void { this.database?.close(); this.database=undefined; this.verifiedCollection=null; this.verifiedEpoch=null; }
 }

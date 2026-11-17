@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { BoardError, BoardStore } from "../src/core";
-import type { ActivityRecord, ConfiguredRepository, GitCollectionResult, GitHubCollectionResult, PullRequestRecord } from "../src/shared";
+import type { ActivityRecord, ConfiguredRepository, GitCollectionResult, GitHubCollectionResult, PullRequestRecord, PullRequestSort } from "../src/shared";
 
 const DAY = 86_400_000;
 const NOW = new Date("2026-11-17T12:00:00.000Z");
@@ -416,4 +416,130 @@ test("selected PR evidence is exact and constrained by repository, merge interva
   await store.refresh();
   const denied = await store.read(board.boardId);
   await assert.rejects(store.evidence(denied.boardId, denied.snapshotId, undefined, undefined, { pullRequestId: "example/widget#1" }), code("selection_not_found"));
+});
+
+test("People keeps mailmapped email and GitHub login identities distinct with exact date and repository scope", async t => {
+  const { store, data } = await installation(t);
+  const since = new Date(NOW.getTime() - 7 * DAY).toISOString();
+  data.setRecords([
+    { ...commit(repos[0].id, 1, since), contributor: "Same Name", email: "first@example.invalid" },
+    { ...commit(repos[1].id, 2, "2026-11-16T10:00:00.000Z"), contributor: "New Name", email: "first@example.invalid", additions: null, deletions: null },
+    { ...commit(repos[0].id, 3, "2026-11-16T09:00:00.000Z"), contributor: "Same Name", email: "other@example.invalid" },
+    { ...commit(repos[0].id, 4, new Date(Date.parse(since) - 1).toISOString()), email: "prior@example.invalid" },
+    { ...commit(repos[0].id, 5, NOW.toISOString()), email: "future@example.invalid" },
+    { ...commit(repos[0].id, 6, "2026-11-15T09:00:00.000Z"), contributor: "Same Name", email: "" },
+    { ...commit(repos[0].id, 7, "2026-11-14T09:00:00.000Z"), contributor: "Same Name", email: "" },
+  ]);
+  data.setPRs([
+    { ...pr(repos[0].id, 1, "open", "2026-08-02T00:00:00.000Z"), author: "Same Name" },
+    { ...pr(repos[1].id, 2, "merged", "2026-11-15T10:00:00.000Z"), author: "SAME NAME" },
+    { ...pr(repos[0].id, 3, "merged", new Date(Date.parse(since) - 1).toISOString()), author: "prior-user" },
+    { ...pr(repos[0].id, 4, "merged", NOW.toISOString()), author: "future-user" },
+  ]);
+  await store.configure(undefined, true, 0);
+  await store.refresh();
+  const board = await store.open();
+  const git = await store.people(board.boardId, board.snapshotId, "git");
+  assert.equal(git.totalPeople, 4);
+  assert.equal(git.source, "git");
+  const first = git.people.find(person => person.identity === "first@example.invalid")!;
+  assert.equal(first.name, "New Name");
+  assert.equal(first.commits, 2);
+  assert.equal(first.additions, 10);
+  assert.equal(first.deletions, 2);
+  assert.equal(first.unknownLineCommits, 1);
+  assert.deepEqual(first.repositories, [repos[1].id, repos[0].id]);
+  assert.equal(git.people.filter(person => person.identity === "Email unavailable").length, 2);
+  const commits = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { personId: first.id });
+  assert.equal(commits.selectedPersonId, first.id);
+  assert.equal(commits.records.length, 2);
+  assert.deepEqual(commits.pullRequests, []);
+  assert.ok(commits.records.every(record => record.email === first.identity));
+  const github = await store.people(board.boardId, board.snapshotId, "github");
+  assert.equal(github.totalPeople, 1);
+  const author = github.people[0];
+  assert.notEqual(author.id, first.id);
+  assert.equal(author.openPRs, 1);
+  assert.equal(author.mergedPRs, 1);
+  assert.equal(author.commits, 0);
+  const prs = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { personId: author.id });
+  assert.equal(prs.pullRequests.length, 2);
+  assert.deepEqual(prs.records, []);
+  assert.ok(prs.pullRequests.some(request => request.createdAt < since));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, { personId: first.id, kind: "pull_requests" }), code("invalid_filter"));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, { personId: author.id, kind: "activity" }), code("invalid_filter"));
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, undefined, { personId: "git:unavailable" }), code("selection_not_found"));
+  const narrowed = await store.update(board.boardId, board.revision, { repository: repos[0].id });
+  const narrowedGit = await store.people(narrowed.boardId, narrowed.snapshotId, "git");
+  assert.equal(narrowedGit.people.find(person => person.id === first.id)?.commits, 1);
+  assert.deepEqual((await store.people(narrowed.boardId, narrowed.snapshotId, "github")).people.map(person => [person.openPRs, person.mergedPRs]), [[1, 0]]);
+  await assert.rejects(store.people(board.boardId, board.snapshotId, "git"), code("stale_snapshot"));
+});
+
+test("People pages after aggregation, binds cursors to source and snapshot, and honors GitHub access invalidation", async t => {
+  const { store, data, open } = await installation(t);
+  data.setRecords(Array.from({ length: 31 }, (_, index) => ({ ...commit(repos[0].id, index, "2026-11-16T10:00:00.000Z"), email: `contributor-${String(index).padStart(2, "0")}@example.invalid` })));
+  data.setPRs(Array.from({ length: 31 }, (_, index) => ({ ...pr(repos[0].id, index + 1, "open", "2026-08-02T00:00:00.000Z"), author: `author-${index}` })));
+  await store.configure([repos[0].path], false, 0);
+  await store.refresh();
+  const board = await store.open();
+  const first = await store.people(board.boardId, board.snapshotId, "git");
+  assert.equal(first.totalPeople, 31);
+  assert.equal(first.people.length, 25);
+  assert.ok(first.nextCursor);
+  const second = await store.people(board.boardId, board.snapshotId, "git", first.nextCursor);
+  assert.equal(second.people.length, 6);
+  assert.equal(second.nextCursor, null);
+  assert.equal(new Set([...first.people, ...second.people].map(person => person.id)).size, 31);
+  await assert.rejects(store.people(board.boardId, board.snapshotId, "github", first.nextCursor), code("invalid_cursor"));
+  const github = await store.people(board.boardId, board.snapshotId, "github");
+  assert.equal(github.totalPeople, 31);
+  const restarted = open();
+  const cached = await restarted.read(board.boardId);
+  assert.equal((await restarted.people(cached.boardId, cached.snapshotId, "github")).totalPeople, 0);
+  assert.equal((await restarted.people(cached.boardId, cached.snapshotId, "git")).totalPeople, 31);
+  await assert.rejects(restarted.evidence(cached.boardId, cached.snapshotId, undefined, undefined, { personId: github.people[0].id }), code("selection_not_found"));
+  data.setFailure("denied");
+  await store.refresh();
+  const denied = await store.read(board.boardId);
+  assert.equal((await store.people(denied.boardId, denied.snapshotId, "github")).totalPeople, 0);
+  await assert.rejects(store.people(board.boardId, board.snapshotId, "git", first.nextCursor), code("stale_snapshot"));
+});
+
+test("PR sorts cover the full filtered inventory before paging and bind cursors to normalized sort scope", async t => {
+  const { store, data } = await installation(t);
+  const prs = Array.from({ length: 61 }, (_, index) => ({
+    ...pr(index % 2 ? repos[0].id : repos[1].id, index + 1, index % 4 ? "open" : "merged", new Date(NOW.getTime() - index * 1000).toISOString()),
+    title: `Title ${String(61 - index).padStart(2, "0")}`,
+    author: `author-${index % 3}`,
+    createdAt: new Date(NOW.getTime() - (61 - index) * DAY).toISOString(),
+  }));
+  data.setPRs(prs);
+  await store.configure(undefined, true, 0);
+  await store.refresh();
+  const board = await store.open();
+  for (const field of ["updated", "created", "number", "title", "author", "repository"] as PullRequestSort[]) {
+    for (const direction of ["asc", "desc"] as const) {
+      const filter = { kind: "pull_requests" as const, pullRequestState: "open" as const, pullRequestSort: field, sortDirection: direction };
+      const first = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, filter);
+      assert.equal(first.pullRequestSort, field);
+      assert.equal(first.sortDirection, direction);
+      assert.equal(first.totalPullRequests, prs.filter(pr => pr.state === "open").length);
+      assert.equal(first.pullRequests.length, 25);
+      assert.ok(first.nextCursor);
+      const second = await store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, filter);
+      const key = (pr: PullRequestRecord) => field === "updated" ? pr.updatedAt : field === "created" ? pr.createdAt : pr[field];
+      const expected = prs.filter(pr => pr.state === "open").sort((a, b) => {
+        const aKey = key(a), bKey = key(b);
+        const order = typeof aKey === "number" && typeof bKey === "number" ? aKey - bKey : String(aKey).localeCompare(String(bKey));
+        return (direction === "asc" ? order : -order) || a.id.localeCompare(b.id);
+      });
+      assert.deepEqual([...first.pullRequests, ...second.pullRequests].map(pr => pr.id), expected.map(pr => pr.id));
+      await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, first.nextCursor, { ...filter, sortDirection: direction === "asc" ? "desc" : "asc" }), code("invalid_cursor"));
+    }
+  }
+  const implicit = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "pull_requests", pullRequestState: "open" });
+  assert.ok(implicit.nextCursor);
+  await store.evidence(board.boardId, board.snapshotId, undefined, implicit.nextCursor, { kind: "pull_requests", pullRequestState: "open", pullRequestSort: "updated", sortDirection: "desc" });
+  await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, implicit.nextCursor, { kind: "pull_requests", pullRequestState: "open", pullRequestSort: "title" }), code("invalid_cursor"));
 });

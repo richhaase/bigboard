@@ -5,7 +5,7 @@ import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { JSDOM, VirtualConsole } from "jsdom";
-import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PullRequestRecord, SelectionContext } from "../src/shared.js";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PeopleResult, PersonSummary, PullRequestRecord, SelectionContext } from "../src/shared.js";
 
 type ContextUpdate = Parameters<NonNullable<AppBridge["onupdatemodelcontext"]>>[0];
 type ChatMessage = Parameters<NonNullable<AppBridge["onmessage"]>>[0];
@@ -30,13 +30,28 @@ function button(document: Document, label: string): HTMLButtonElement {
   return found;
 }
 
+function checkbox(document: Document, label: string): HTMLInputElement {
+  const found = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(item => item.getAttribute("aria-label") === label);
+  assert.ok(found, `Missing ${label} checkbox`);
+  return found;
+}
+
+function choose(document: Document, label: string, value: string): void {
+  const found = [...document.querySelectorAll<HTMLSelectElement>("select")].find(item => item.getAttribute("aria-label") === label || item.closest("label")?.textContent?.startsWith(label));
+  assert.ok(found, `Missing ${label} select`);
+  found.value = value;
+  found.dispatchEvent(new document.defaultView!.Event("change", { bubbles: true }));
+}
+
 class Workspace {
   boards = new Map<string, { revision: number; query: BoardQuery }>();
   generation = 1;
   configured = true;
   collected = true;
   delayEvidence: ((args: Record<string, unknown>) => Promise<void>) | null = null;
+  delayPeople: ((args: Record<string, unknown>) => Promise<void>) | null = null;
   completedEvidence: Array<Record<string, unknown>> = [];
+  completedPeople: Array<Record<string, unknown>> = [];
   readonly records: ActivityRecord[] = Array.from({ length: 62 }, (_, index) => ({
     id: `sample/${index % 2 ? "web" : "api"}:${index.toString(16).padStart(40, "0")}`,
     repository: `sample/${index % 2 ? "web" : "api"}`,
@@ -98,6 +113,34 @@ class Workspace {
     };
   }
 
+  people(snapshot: BoardSnapshot, source: "git" | "github"): PersonSummary[] {
+    const people = new Map<string, PersonSummary>();
+    const person = (identity: string, name: string): PersonSummary => {
+      const id = `${source}:${identity}`;
+      if (!people.has(id)) people.set(id, { id, source, name, identity, commits: 0, additions: 0, deletions: 0, unknownLineCommits: 0, openPRs: 0, mergedPRs: 0, repositories: [] });
+      return people.get(id)!;
+    };
+    if (!this.collected) return [];
+    if (source === "git") {
+      for (const record of this.records.filter(record => (snapshot.query.repository === "all" || record.repository === snapshot.query.repository) && record.timestamp >= snapshot.scope.since && record.timestamp < snapshot.scope.until)) {
+        const summary = person(record.email, record.contributor);
+        summary.commits += 1;
+        summary.additions += record.additions ?? 0;
+        summary.deletions += record.deletions ?? 0;
+        summary.unknownLineCommits += record.additions === null || record.deletions === null ? 1 : 0;
+        if (!summary.repositories.includes(record.repository)) summary.repositories.push(record.repository);
+      }
+    } else {
+      for (const pr of this.prs.filter(pr => (snapshot.query.repository === "all" || pr.repository === snapshot.query.repository) && (pr.state === "open" || (pr.mergedAt! >= snapshot.scope.since && pr.mergedAt! < snapshot.scope.until)))) {
+        const summary = person(pr.author, pr.author);
+        if (pr.state === "open") summary.openPRs += 1;
+        else summary.mergedPRs += 1;
+        if (!summary.repositories.includes(pr.repository)) summary.repositories.push(pr.repository);
+      }
+    }
+    return [...people.values()].sort((a,b) => (source === "git" ? b.commits - a.commits : b.openPRs + b.mergedPRs - a.openPRs - a.mergedPRs) || a.identity.localeCompare(b.identity));
+  }
+
   async tool(params: { name: string; arguments?: Record<string, unknown> }): Promise<CallToolResult> {
     const args = params.arguments ?? {};
     if (params.name === "refresh_sources") {
@@ -115,18 +158,43 @@ class Workspace {
       saved.query = { ...saved.query, ...(args.repository === undefined ? {} : { repository: String(args.repository) }), ...(args.days === undefined ? {} : { days: args.days as 7 | 14 }), ...(args.compare === undefined ? {} : { compare: Boolean(args.compare) }) };
       return { content: [], structuredContent: { ...this.snapshot(boardId) } };
     }
-    assert.equal(params.name, "query_evidence");
     if (args.snapshot_id !== snapshot.snapshotId) return { isError: true, content: [{ type: "text", text: "The selected snapshot changed." }] };
+    if (params.name === "query_people") {
+      await this.delayPeople?.(args);
+      const source = args.source as "git" | "github";
+      const people = this.people(snapshot, source);
+      const signature = JSON.stringify([snapshot.snapshotId, source]);
+      let offset = 0;
+      if (args.cursor) {
+        const decoded = JSON.parse(Buffer.from(String(args.cursor), "base64url").toString("utf8"));
+        if (decoded[0] !== signature) return { isError: true, content: [{ type: "text", text: "The people cursor changed scope." }] };
+        offset = decoded[1];
+      }
+      const nextOffset = offset + 3;
+      const result: PeopleResult = { boardId, revision: snapshot.revision, snapshotId: snapshot.snapshotId, query: snapshot.query, scope: snapshot.scope, coverage: snapshot.coverage, source, people: people.slice(offset, nextOffset), totalPeople: people.length, nextCursor: people.length > nextOffset ? Buffer.from(JSON.stringify([signature, nextOffset])).toString("base64url") : null };
+      this.completedPeople.push(args);
+      return { content: [], structuredContent: { ...result } };
+    }
+    assert.equal(params.name, "query_evidence");
     await this.delayEvidence?.(args);
     const kind = String(args.kind ?? (args.pull_request_state || args.pull_request_id ? "pull_requests" : "all"));
     const prState = args.pull_request_state as "open" | "merged" | undefined;
     const prId = args.pull_request_id as string | undefined;
+    const personId = args.person_id as string | undefined;
+    const selectedPerson = personId ? [...this.people(snapshot, "git"), ...this.people(snapshot, "github")].find(person => person.id === personId) : undefined;
+    if (personId && !selectedPerson) return { isError: true, content: [{ type: "text", text: "The selected person is unavailable." }] };
     if (kind === "activity" && (prState || prId)) return { isError: true, content: [{ type: "text", text: "Incompatible evidence filters." }] };
     const bucket = snapshot.buckets.find(item => item.start === args.bucket_start);
-    const records = kind !== "pull_requests" && this.collected ? this.records.filter(record => (snapshot.query.repository === "all" || record.repository === snapshot.query.repository) && record.timestamp >= (bucket?.start ?? snapshot.scope.since) && record.timestamp < (bucket?.end ?? snapshot.scope.until)).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id)) : [];
-    const prs = kind !== "activity" && this.collected ? this.prs.filter(pr => (snapshot.query.repository === "all" || pr.repository === snapshot.query.repository) && (!prState || pr.state === prState) && (!prId || pr.id === prId) && (pr.state === "open" || (pr.mergedAt! >= (bucket?.start ?? snapshot.scope.since) && pr.mergedAt! < (bucket?.end ?? snapshot.scope.until)))).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) : [];
+    const records = kind !== "pull_requests" && this.collected ? this.records.filter(record => (snapshot.query.repository === "all" || record.repository === snapshot.query.repository) && (!selectedPerson || selectedPerson.source === "git" && record.email === selectedPerson.identity) && record.timestamp >= (bucket?.start ?? snapshot.scope.since) && record.timestamp < (bucket?.end ?? snapshot.scope.until)).sort((a,b) => b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id)) : [];
+    const sort = String(args.pull_request_sort ?? "updated");
+    const direction = args.sort_direction === "asc" ? 1 : -1;
+    const sortValue = (pr: PullRequestRecord): string | number => sort === "created" ? pr.createdAt : sort === "updated" ? pr.updatedAt : sort === "number" ? pr.number : sort === "title" ? pr.title : sort === "author" ? pr.author : pr.repository;
+    const prs = kind !== "activity" && this.collected ? this.prs.filter(pr => (snapshot.query.repository === "all" || pr.repository === snapshot.query.repository) && (!selectedPerson || selectedPerson.source === "github" && pr.author === selectedPerson.identity) && (!prState || pr.state === prState) && (!prId || pr.id === prId) && (pr.state === "open" || (pr.mergedAt! >= (bucket?.start ?? snapshot.scope.since) && pr.mergedAt! < (bucket?.end ?? snapshot.scope.until)))).sort((a,b) => {
+      const av = sortValue(a), bv = sortValue(b);
+      return direction * (typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv))) || a.id.localeCompare(b.id);
+    }) : [];
     if (prId && !prs.length) return { isError: true, content: [{ type: "text", text: "The selected pull request is unavailable." }] };
-    const signature = JSON.stringify([snapshot.snapshotId, args.bucket_start ?? null, kind, prState ?? null, prId ?? null]);
+    const signature = JSON.stringify([snapshot.snapshotId, args.bucket_start ?? null, kind, prState ?? null, prId ?? null, personId ?? null, sort, direction]);
     let offset = 0;
     if (args.cursor) {
       const decoded = JSON.parse(Buffer.from(String(args.cursor), "base64url").toString("utf8"));
@@ -134,7 +202,7 @@ class Workspace {
       offset = decoded[1];
     }
     const nextOffset = offset + 3;
-    const evidence: EvidenceResult = { boardId, revision: snapshot.revision, snapshotId: snapshot.snapshotId, query: snapshot.query, scope: snapshot.scope, coverage: snapshot.coverage, bucketStart: bucket?.start ?? null, kind: kind as "all" | "activity" | "pull_requests", pullRequestState: prState, selectedPullRequestId: prId, records: records.slice(offset, nextOffset), pullRequests: prs.slice(offset, nextOffset), nextCursor: Math.max(records.length, prs.length) > nextOffset ? Buffer.from(JSON.stringify([signature, nextOffset])).toString("base64url") : null, totalRecords: records.length, totalPullRequests: prs.length };
+    const evidence: EvidenceResult = { boardId, revision: snapshot.revision, snapshotId: snapshot.snapshotId, query: snapshot.query, scope: snapshot.scope, coverage: snapshot.coverage, bucketStart: bucket?.start ?? null, kind: kind as "all" | "activity" | "pull_requests", pullRequestState: prState, selectedPullRequestId: prId, selectedPersonId: personId, records: records.slice(offset, nextOffset), pullRequests: prs.slice(offset, nextOffset), nextCursor: Math.max(records.length, prs.length) > nextOffset ? Buffer.from(JSON.stringify([signature, nextOffset])).toString("base64url") : null, totalRecords: records.length, totalPullRequests: prs.length };
     this.completedEvidence.push(args);
     return { content: [], structuredContent: { ...evidence } };
   }
@@ -150,6 +218,8 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
   let guest: JSDOM | undefined;
   let closed = false;
   let initialized = false;
+  let rejectContext = false;
+  let rejectMessage = false;
   const transport: Transport = {
     async start() {},
     async close() { transport.onclose?.(); },
@@ -163,8 +233,16 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
   host.window.postMessage = ((message: unknown) => { queueMicrotask(() => { if (!closed) transport.onmessage?.(structuredClone(message) as JSONRPCMessage); }); }) as typeof host.window.postMessage;
   const bridge = new AppBridge(null, { name: "BigBoard test host", version: "1.0.0" }, { serverTools: {}, updateModelContext: { text: {}, structuredContent: {} }, message: { text: {} } }, { hostContext: { theme: "light", displayMode: "inline", locale: "en-US", timeZone: "UTC" } });
   bridge.oncalltool = async (params) => { calls.push(params); return workspace.tool(params); };
-  bridge.onupdatemodelcontext = async (params) => { contexts.push(params); return {}; };
-  bridge.onmessage = async (params) => { messages.push(params); return {}; };
+  bridge.onupdatemodelcontext = async (params) => {
+    if (rejectContext) throw new Error("Context sharing unavailable");
+    contexts.push(params);
+    return {};
+  };
+  bridge.onmessage = async (params) => {
+    if (rejectMessage) return { isError: true };
+    messages.push(params);
+    return {};
+  };
   bridge.oninitialized = () => { initialized = true; void bridge.sendToolInput({ arguments: {} }).then(() => bridge.sendToolResult({ content: [], structuredContent: { ...initial } })).catch((error) => errors.push(String(error))); };
   await bridge.connect(transport);
   guest = new JSDOM(html, { url: "https://bigboard.test/activity", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VirtualConsole(), beforeParse(window) {
@@ -185,7 +263,7 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
     guest.window.close();
     host.window.close();
   };
-  return { document, contexts, messages, calls, errors, selectedContext, close };
+  return { document, contexts, messages, calls, errors, selectedContext, close, rejectContext: (value: boolean) => { rejectContext = value; }, rejectMessage: (value: boolean) => { rejectMessage = value; } };
 }
 
 test("Activity stays quiet until a bucket is selected, then shares only its supporting commits", async t => {
@@ -367,4 +445,217 @@ test("setup stays passive and independent boards recover their saved query witho
   assert.equal(reopened.document.querySelector('[aria-label="Activity evidence"]'), null);
   assert.equal(reopened.calls.some(call => call.name === "query_evidence"), false);
   assert.deepEqual([...empty.errors, ...first.errors, ...second.errors, ...reopened.errors], []);
+});
+
+test("People can open directly and keep Git and GitHub identities and evidence separate", async t => {
+  const workspace = new Workspace();
+  const initial = { ...workspace.open(), initialView: "people" as const };
+  const first = await panel(workspace, initial);
+  t.after(first.close);
+  await waitFor(() => first.document.querySelectorAll('[aria-label="People records"] [data-person-id]').length === 2, "Git contributors");
+  assert.equal(first.selectedContext().view, "people");
+  assert.equal(first.document.querySelector('[aria-label="Daily commits"]'), null);
+  assert.equal(first.calls.some(call => call.name === "query_evidence"), false);
+  const gitPerson = workspace.people(initial, "git")[0];
+  button(first.document, `Select person ${gitPerson.name}: ${gitPerson.identity}`).click();
+  await waitFor(() => first.document.querySelector('[aria-label="People evidence"]') !== null && first.document.querySelectorAll('[aria-label="Commit records"] article').length > 0 && first.selectedContext()?.personId === gitPerson.id, "selected Git identity");
+  const gitEvidence = first.calls.find(call => call.name === "query_evidence")!.arguments!;
+  assert.equal(gitEvidence.person_id, gitPerson.id);
+  assert.equal(gitEvidence.bucket_start, undefined);
+  assert.equal(first.selectedContext().bucketStart, null);
+  assert.equal(first.selectedContext().pullRequestId, undefined);
+  assert.ok(first.document.querySelector('[aria-label="Commit records"]')?.textContent?.includes(gitPerson.name));
+  assert.ok(!first.document.querySelector('[aria-label="Commit records"]')?.textContent?.includes(gitPerson.name === "Contributor A" ? "Contributor B" : "Contributor A"));
+  button(first.document, "Explain selection").click();
+  await waitFor(() => first.messages.length === 1, "People explanation");
+  assert.ok(JSON.stringify(first.messages[0].content).includes(gitPerson.id));
+  button(first.document, "GitHub authors").click();
+  await waitFor(() => first.selectedContext()?.peopleSource === "github" && first.document.querySelectorAll('[aria-label="People records"] [data-person-id]').length === 2, "GitHub authors");
+  assert.equal(first.selectedContext().personId, null);
+  assert.equal(first.document.querySelector('[aria-label="People evidence"]'), null);
+  const githubPerson = workspace.people(initial, "github")[0];
+  button(first.document, `Select person ${githubPerson.name}: ${githubPerson.identity}`).click();
+  await waitFor(() => first.document.querySelector('[aria-label="People evidence"]') !== null && first.selectedContext()?.personId === githubPerson.id && first.document.querySelector('[aria-label="Person pull requests"]') !== null, "GitHub identity evidence");
+  assert.equal(first.document.querySelector('[aria-label="Commit records"]'), null);
+  const prEvidence = first.calls.filter(call => call.name === "query_evidence").at(-1)!.arguments!;
+  assert.equal(prEvidence.person_id, githubPerson.id);
+  assert.equal(prEvidence.pull_request_state, undefined);
+  assert.equal(prEvidence.bucket_start, undefined);
+  const personLinks = [...first.document.querySelectorAll<HTMLAnchorElement>('[aria-label="Person pull requests"] a')];
+  assert.ok(personLinks.length > 0);
+  assert.ok(personLinks.every(link => workspace.prs.some(pr => pr.url === link.href && pr.author === githubPerson.identity)));
+  button(first.document, "Close people evidence").click();
+  await waitFor(() => first.selectedContext()?.personId === null && first.document.querySelector('[aria-label="People evidence"]') === null, "dismissed person selection");
+  assert.deepEqual(first.errors, []);
+});
+
+test("PR multi-selection survives paging and sorting and sends the exact requested review set", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 3, "direct PR view");
+  assert.equal(first.selectedContext().view, "pullRequests");
+  assert.equal(first.document.querySelector('[aria-label="Daily commits"]'), null);
+  checkbox(first.document, "Select sample/api#10").click();
+  checkbox(first.document, "Select sample/web#9").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 2, "two exact PR references shared");
+  assert.equal(first.messages.length, 0);
+  button(first.document, "Select pull request #11: Improve keyboard navigation").click();
+  await waitFor(() => first.selectedContext()?.pullRequestId === "sample/web#11", "inspected PR independent of batch");
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id).sort(), ["sample/api#10", "sample/web#9"]);
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 4, "next PR page");
+  checkbox(first.document, "Select sample/api#12").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 3, "cross-page PR selection");
+  choose(first.document, "PR sort", "number");
+  await waitFor(() => first.calls.some(call => call.name === "query_evidence" && call.arguments?.pull_request_sort === "number") && first.document.querySelector<HTMLButtonElement>('[aria-label="Pull request records"] [data-pr-id]')?.dataset.prId === "sample/api#12", "global numeric sort before paging");
+  choose(first.document, "Sort direction", "asc");
+  await waitFor(() => first.document.querySelector<HTMLButtonElement>('[aria-label="Pull request records"] [data-pr-id]')?.dataset.prId === "sample/web#9" && first.selectedContext()?.sortDirection === "asc", "ascending sort");
+  const ids = ["sample/api#10", "sample/api#12", "sample/web#9"];
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id).sort(), ids);
+  assert.equal(checkbox(first.document, "Select sample/api#10").checked, true);
+  assert.equal(checkbox(first.document, "Select sample/web#9").checked, true);
+  assert.equal(first.document.querySelector('[aria-label="Select sample/api#12"]'), null);
+  assert.equal(first.messages.length, 0);
+  button(first.document, "Share selection").click();
+  await waitFor(() => first.messages.length === 1, "explicit shared PR selection");
+  button(first.document, "Request code reviews").click();
+  await waitFor(() => first.messages.length === 2, "explicit code review request");
+  const message = JSON.stringify(first.messages[1].content);
+  assert.match(message, /review/i);
+  for (const id of ids) {
+    const pr = workspace.prs.find(pr => pr.id === id)!;
+    assert.ok(message.includes(pr.repository));
+    assert.ok(message.includes(pr.url));
+    assert.ok(message.includes(pr.headSha));
+  }
+  assert.ok(!message.includes("https://github.com/sample/web/pull/11"));
+  assert.ok(message.includes(first.selectedContext().snapshotId));
+  button(first.document, "Clear selection").click();
+  await waitFor(() => !first.selectedContext()?.selectedPullRequests?.length, "cleared batch selection");
+  assert.equal(first.document.querySelector('[aria-label="Selected pull requests"]'), null);
+  assert.deepEqual(first.errors, []);
+});
+
+test("PR selections clear when state, view, repository, or source snapshot changes", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  const select = async () => {
+    await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "selectable PR");
+    checkbox(first.document, "Select sample/api#10").click();
+    await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1, "selected PR batch");
+  };
+  await select();
+  button(first.document, "Merged").click();
+  await waitFor(() => first.selectedContext()?.pullRequestState === "merged" && !first.selectedContext()?.selectedPullRequests?.length, "cleared after PR state change");
+  button(first.document, "Open").click();
+  await select();
+  button(first.document, "People").click();
+  await waitFor(() => first.selectedContext()?.view === "people", "People view");
+  assert.ok(!first.selectedContext().selectedPullRequests?.length);
+  button(first.document, "Pull requests").click();
+  await select();
+  choose(first.document, "Repository", "sample/api");
+  await waitFor(() => first.selectedContext()?.query.repository === "sample/api" && !first.selectedContext()?.selectedPullRequests?.length, "cleared after repository change");
+  await select();
+  const oldSnapshot = first.selectedContext().snapshotId;
+  button(first.document, "Refresh sources").click();
+  await waitFor(() => first.selectedContext()?.snapshotId !== oldSnapshot && !first.selectedContext()?.selectedPullRequests?.length, "cleared after source refresh");
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("a late People response cannot replace the newer source or leak its selection", async t => {
+  const workspace = new Workspace();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  workspace.delayPeople = args => args.source === "git" ? gate : Promise.resolve();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "people" });
+  t.after(first.close);
+  await waitFor(() => first.calls.some(call => call.name === "query_people" && call.arguments?.source === "git"), "delayed Git people query");
+  button(first.document, "GitHub authors").click();
+  await waitFor(() => first.document.querySelector('[aria-label="People records"]')?.textContent?.includes("contributor-a") ?? false, "new GitHub people");
+  release();
+  await waitFor(() => workspace.completedPeople.some(args => args.source === "git"), "late Git people completion");
+  assert.equal(first.selectedContext().peopleSource, "github");
+  assert.equal(first.selectedContext().personId, null);
+  assert.ok(!first.document.querySelector('[aria-label="People records"]')?.textContent?.includes("@example.test"));
+  assert.equal(first.calls.some(call => call.name === "query_evidence"), false);
+  assert.deepEqual(first.errors, []);
+});
+
+test("late PR inventory responses cannot replace a newer sort or its batch selection", async t => {
+  const workspace = new Workspace();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  workspace.delayEvidence = args => args.pull_request_sort === "updated" ? gate : Promise.resolve();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.calls.some(call => call.name === "query_evidence" && call.arguments?.pull_request_sort === "updated"), "delayed initial inventory");
+  choose(first.document, "PR sort", "number");
+  await waitFor(() => first.document.querySelector<HTMLButtonElement>('[aria-label="Pull request records"] [data-pr-id]')?.dataset.prId === "sample/api#12", "newer numeric inventory");
+  checkbox(first.document, "Select sample/api#12").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.[0]?.id === "sample/api#12", "selected newer PR");
+  release();
+  await waitFor(() => workspace.completedEvidence.some(args => args.pull_request_sort === "updated"), "late original inventory completion");
+  assert.equal(first.document.querySelector<HTMLButtonElement>('[aria-label="Pull request records"] [data-pr-id]')?.dataset.prId, "sample/api#12");
+  assert.equal(checkbox(first.document, "Select sample/api#12").checked, true);
+  assert.equal(first.selectedContext().pullRequestSort, "number");
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#12"]);
+  assert.deepEqual(first.errors, []);
+});
+
+test("failed context updates block review requests and rejected messages remain retryable", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "PR inventory");
+  first.rejectContext(true);
+  checkbox(first.document, "Select sample/api#10").click();
+  await waitFor(() => first.document.querySelector('[role="alert"]')?.textContent?.includes("could not be shared") ?? false, "context update failure");
+  assert.equal(button(first.document, "Request code reviews").disabled, true);
+  assert.equal(first.messages.length, 0);
+  first.rejectContext(false);
+  button(first.document, "Try again").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1 && !button(first.document, "Request code reviews").disabled, "context sharing recovered");
+  first.rejectMessage(true);
+  button(first.document, "Request code reviews").click();
+  await waitFor(() => first.document.querySelector('[role="alert"]')?.textContent?.includes("did not accept") ?? false, "message rejected");
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
+  first.rejectMessage(false);
+  button(first.document, "Request code reviews").click();
+  await waitFor(() => first.messages.length === 1, "review request retry accepted");
+  assert.deepEqual(first.errors, []);
+});
+
+test("retry keeps a later-page People selection visible and consistent with shared context", async t => {
+  const workspace = new Workspace();
+  for (const name of ["C", "D", "E"]) {
+    const source = workspace.records[0];
+    workspace.records.push({ ...source, id: `sample/api:person-${name}`, subject: `Improve ${name} evidence`, timestamp: "2026-11-16T09:00:00Z", contributor: `Contributor ${name}`, email: `contributor-${name.toLowerCase()}@example.test` });
+  }
+  const initial = { ...workspace.open(), initialView: "people" as const };
+  const first = await panel(workspace, initial);
+  t.after(first.close);
+  await waitFor(() => first.document.querySelectorAll('[aria-label="People records"] [data-person-id]').length === 3, "first people page");
+  button(first.document, "Load more people").click();
+  await waitFor(() => first.document.querySelectorAll('[aria-label="People records"] [data-person-id]').length === 5, "later people page");
+  const person = workspace.people(initial, "git").at(-1)!;
+  button(first.document, `Select person ${person.name}: ${person.identity}`).click();
+  await waitFor(() => first.document.querySelector('[aria-label="People evidence"]')?.textContent?.includes(person.identity) === true && first.selectedContext()?.personId === person.id, "later-page person selected");
+  first.rejectMessage(true);
+  button(first.document, "Explain selection").click();
+  await waitFor(() => first.document.querySelector('[role="alert"]') !== null, "explanation rejection");
+  first.rejectMessage(false);
+  const contextUpdates = first.contexts.length;
+  button(first.document, "Try again").click();
+  await waitFor(() => first.contexts.length > contextUpdates && first.document.querySelector('[role="alert"]') === null && first.selectedContext()?.personId === person.id, "People retry");
+  assert.ok(first.document.querySelector('[aria-label="People evidence"]')?.textContent?.includes(person.identity));
+  assert.equal(button(first.document, `Select person ${person.name}: ${person.identity}`).getAttribute("aria-pressed"), "true");
+  button(first.document, "Explain selection").click();
+  await waitFor(() => first.messages.length === 1, "retried exact person explanation");
+  assert.ok(JSON.stringify(first.messages[0].content).includes(person.id));
+  assert.deepEqual(first.errors, []);
 });

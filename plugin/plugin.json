@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "bigboard-mcp-app",
-  "version": "0.3.0",
-  "description": "Explore Git activity and pull requests in focused views with selected supporting evidence.",
+  "version": "0.4.0",
+  "description": "Explore Git activity, people, and pull requests, and share selected PRs with your agent.",
   "repository": "https://github.com/richhaase/bigboard",
   "license": "MIT",
   "extensions": {
@@ -11,7 +11,7 @@
       "interface": {
         "displayName": "BigBoard MCP",
         "shortDescription": "Explore activity together with your agent",
-        "longDescription": "Explore Activity or Pull requests, select an interval or PR to inspect its evidence, and discuss that exact selection with your agent.",
+        "longDescription": "Open Activity, People, or Pull requests. Inspect supporting evidence, sort and select PRs, and share the exact selection with your agent for discussion or code review.",
         "developerName": "Rich Haase",
         "category": "Developer Tools",
         "capabilities": [
