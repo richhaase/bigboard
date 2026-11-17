@@ -42,6 +42,7 @@ export interface BoardViewState {
   phase: "connecting" | "waiting" | "ready";
   busy: boolean;
   sourceRefreshing: boolean;
+  sourceRefreshPreviousId: string | null;
   evidenceLoading: boolean;
   contextReady: boolean;
   contextFailed: boolean;
@@ -86,13 +87,14 @@ export class BoardController {
     selectedBucket: null, selectedPullRequestId: null, selectedPullRequests: [],
     peopleSource: "git", selectedPersonId: null, people: [], totalPeople: 0, peopleNextCursor: null, peopleLoading: false,
     records: [], pullRequests: [], totalRecords: 0, totalPullRequests: 0, nextCursor: null,
-    phase: "connecting", busy: false, sourceRefreshing: false, evidenceLoading: false,
+    phase: "connecting", busy: false, sourceRefreshing: false, sourceRefreshPreviousId: null, evidenceLoading: false,
     contextReady: false, contextFailed: false, error: null, notice: null,
   };
   private listeners = new Set<() => void>();
   private connected = false;
   private destroyed = false;
   private syncing = false;
+  private boardReadSequence = 0;
   private evidenceSequence = 0;
   private peopleSequence = 0;
   private contextSequence = 0;
@@ -162,8 +164,17 @@ export class BoardController {
     if (this.destroyed) return;
     const previous = this.state.snapshot;
     if (previous && (previous.boardId !== snapshot.boardId || snapshot.revision < previous.revision)) return;
+    if (previous?.refresh && snapshot.refresh) {
+      const prior = previous.refresh;
+      const incoming = snapshot.refresh;
+      if (incoming.startedAt < prior.startedAt || (incoming.id === prior.id &&
+          (incoming.updatedAt < prior.updatedAt || (prior.status !== "running" && incoming.status === "running") ||
+          incoming.git.completedRepositories < prior.git.completedRepositories ||
+          incoming.github.completedRepositories < prior.github.completedRepositories || incoming.github.requests < prior.github.requests))) return;
+    }
     const openingView = ["activity", "pullRequests", "people"].includes(snapshot.initialView ?? "") ? snapshot.initialView : undefined;
     if (previous?.snapshotId === snapshot.snapshotId) {
+      if (JSON.stringify(previous.refresh ?? null) !== JSON.stringify(snapshot.refresh ?? null)) this.setState({ snapshot });
       if (openingView && openingView !== this.state.view) void this.setView(openingView);
       return;
     }
@@ -183,7 +194,7 @@ export class BoardController {
     if (!this.connected || !snapshot || this.syncing || this.destroyed) return;
     this.syncing = true;
     try {
-      this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
+      await this.readLatestBoard(snapshot.boardId);
       if (this.state.error === this.refreshError) this.setState({ error: null });
       this.refreshError = null;
     } catch {
@@ -192,14 +203,25 @@ export class BoardController {
     } finally { this.syncing = false; }
   }
 
+  private async readLatestBoard(boardId: string): Promise<void> {
+    const sequence = ++this.boardReadSequence;
+    try {
+      const snapshot = snapshotFromResult(await this.bridge.callTool("read_board", { board_id: boardId }));
+      if (sequence === this.boardReadSequence && !this.destroyed) this.acceptSnapshot(snapshot);
+    } catch (error) {
+      if (sequence === this.boardReadSequence && !this.destroyed) throw error;
+    }
+  }
+
   async refreshSources(): Promise<void> {
-    if (!this.connected || this.state.busy || this.destroyed) return;
-    this.setState({ busy: true, sourceRefreshing: true, error: null, notice: null });
+    if (!this.connected || this.state.busy || this.destroyed || this.state.snapshot?.refresh?.status === "running") return;
+    this.boardReadSequence += 1;
+    this.setState({ busy: true, sourceRefreshing: true, sourceRefreshPreviousId: this.state.snapshot?.refresh?.id ?? null, error: null, notice: null });
     try {
       toolError(await this.bridge.callTool("refresh_sources", {}));
       const snapshot = this.state.snapshot;
-      if (snapshot) this.acceptSnapshot(snapshotFromResult(await this.bridge.callTool("read_board", { board_id: snapshot.boardId })));
-      this.setState({ notice: "Sources refreshed. PR selection cleared." });
+      if (snapshot) await this.readLatestBoard(snapshot.boardId);
+      this.setState({ notice: this.state.snapshot?.refresh ? null : "Sources refreshed." });
     } catch (error) {
       this.setState({ error: this.errorMessage(error) });
       await this.refresh();
@@ -421,6 +443,7 @@ export class BoardController {
   async destroy(closeBridge = true): Promise<void> {
     this.destroyed = true;
     this.connected = false;
+    this.boardReadSequence += 1;
     this.evidenceSequence += 1;
     this.peopleSequence += 1;
     this.contextSequence += 1;

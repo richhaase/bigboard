@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createGitHubCollector, type GitHubDependencies } from "../src/sources/github";
+import { createGitHubCollector, type GitHubCollectionProgress, type GitHubDependencies } from "../src/sources/github";
 import type { ConfiguredRepository } from "../src/shared";
 
 const repository: ConfiguredRepository = { id: "example/alpha", path: "/synthetic/alpha", remote: "origin", defaultBranch: "main" };
@@ -18,6 +18,20 @@ function pull(number: number, overrides: Record<string, unknown> = {}) {
 
 function response(value: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", ...headers } });
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, "Collector did not reach the expected state.");
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
 }
 
 function harness(route: (url: URL, init: RequestInit) => Response | Promise<Response>, limits: Omit<GitHubDependencies, "request" | "token"> = {}) {
@@ -121,7 +135,7 @@ test("rate limits halt further API calls and remain distinct from repository den
   for (const status of [403, 429]) {
     const { calls, collect } = harness(() => response({}, status, { "x-ratelimit-remaining": "0", "retry-after": "30" }));
     const result = await collect([repository, other], interval);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.equal(result.account?.id, "17");
     assert.ok(result.repositories.every((row) => !row.accessDenied && !row.openComplete && !row.mergedComplete));
     assert.match(result.error!, /rate-limited/);
@@ -232,4 +246,147 @@ test("smaller PR pages retain the same 400-record inventory capacity without rai
   assert.equal(result.repositories[0].openComplete, true);
   assert.equal(result.repositories[0].mergedComplete, true);
   assert.equal(calls.length, 10);
+});
+
+test("repository workers overlap within the three-request limit and report monotonic progress in stable result order", async () => {
+  const repositories = Array.from({ length: 5 }, (_, index) => ({ ...repository, id: `example/project-${index}` }));
+  const gates = repositories.map(() => deferred());
+  const started = new Set<number>();
+  const activeRepositories = new Set<number>();
+  const progress: GitHubCollectionProgress[] = [];
+  let active = 0;
+  let maximumActive = 0;
+  const { collect } = harness(async url => {
+    const index = Number(url.pathname.match(/project-(\d+)/)![1]);
+    assert.ok(!activeRepositories.has(index));
+    activeRepositories.add(index);
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    const open = url.searchParams.get("state") === "open";
+    try {
+      if (open) {
+        started.add(index);
+        await gates[index].promise;
+      }
+      return response(open ? [pull(index + 1)] : []);
+    } finally {
+      active -= 1;
+      activeRepositories.delete(index);
+    }
+  });
+  const pending = collect(repositories, { ...interval, onProgress: item => {
+    progress.push(item);
+    if (item.requests === 3) throw new Error("Synthetic observer failure");
+  } });
+  await waitFor(() => started.size === 3);
+  assert.equal(maximumActive, 3);
+  assert.deepEqual([...started], [0, 1, 2]);
+  gates[2].resolve();
+  await waitFor(() => started.has(3));
+  gates[3].resolve();
+  await waitFor(() => started.has(4));
+  gates[4].resolve();
+  gates[1].resolve();
+  gates[0].resolve();
+  const result = await pending;
+  assert.equal(maximumActive, 3);
+  assert.deepEqual(result.pullRequests.map(pr => pr.repository), repositories.map(repo => repo.id));
+  assert.deepEqual(result.repositories.map(repo => repo.id), repositories.map(repo => repo.id));
+  assert.ok(result.repositories.every(repo => repo.openComplete && repo.mergedComplete));
+  assert.deepEqual(progress[0], { completedRepositories: 0, totalRepositories: 5, requests: 0 });
+  assert.deepEqual(progress.at(-1), { completedRepositories: 5, totalRepositories: 5, requests: 11 });
+  for (let index = 1; index < progress.length; index += 1) {
+    assert.ok(progress[index].completedRepositories >= progress[index - 1].completedRepositories);
+    assert.ok(progress[index].requests >= progress[index - 1].requests);
+    assert.equal(progress[index].totalRepositories, 5);
+  }
+});
+
+test("concurrent terminal failures stop queued repositories and respect the shared request budget", async () => {
+  for (const kind of ["auth", "rate", "budget"] as const) {
+    const repositories = Array.from({ length: 7 }, (_, index) => ({ ...repository, id: `example/project-${index}` }));
+    const gates = repositories.map(() => deferred());
+    const started = new Set<number>();
+    let completed = 0;
+    const { calls, collect } = harness(async url => {
+      const index = Number(url.pathname.match(/project-(\d+)/)![1]);
+      started.add(index);
+      await gates[index].promise;
+      if (index === 0 && kind === "auth") return response({}, 401);
+      if (index === 0 && kind === "rate") return response({}, 429, { "retry-after": "30" });
+      return response([pull(index + 1)]);
+    }, kind === "budget" ? { maximumRequests: 4 } : {});
+    const pending = collect(repositories, { ...interval, onProgress: item => { completed = item.completedRepositories; } });
+    await waitFor(() => started.size === 3);
+    gates[0].resolve();
+    await waitFor(() => completed > 0);
+    gates.forEach(gate => gate.resolve());
+    const result = await pending;
+    assert.equal(calls.length, 4);
+    assert.deepEqual([...started].sort(), [0, 1, 2]);
+    assert.ok(result.repositories.slice(3).every(repo => !repo.openComplete && !repo.mergedComplete && repo.error));
+    assert.equal(result.repositories.some(repo => repo.accessDenied), false);
+    assert.match(result.error!, kind === "auth" ? /authentication/ : kind === "rate" ? /rate-limited/ : /request budget/);
+    if (kind === "auth") {
+      assert.equal(result.account, null);
+      assert.deepEqual(result.pullRequests, []);
+      assert.ok(result.repositories.every(repo => !repo.openComplete && !repo.mergedComplete));
+    }
+  }
+});
+
+test("an overlapping 401 discards earlier successful repositories and ignores late successful responses", async () => {
+  const repositories = [repository, other, { ...repository, id: "example/gamma" }];
+  const denial = deferred();
+  const late = deferred();
+  let completed = 0;
+  let lateReturned = false;
+  const { calls, collect } = harness(async url => {
+    if (url.pathname.includes("/beta/")) {
+      await denial.promise;
+      return response({}, 401);
+    }
+    if (url.pathname.includes("/gamma/")) {
+      await late.promise;
+      lateReturned = true;
+    }
+    return response(url.searchParams.get("state") === "open" ? [pull(1)] : []);
+  });
+  const pending = collect(repositories, { ...interval, onProgress: item => { completed = item.completedRepositories; } });
+  await waitFor(() => completed === 1);
+  denial.resolve();
+  const result = await pending;
+  assert.equal(lateReturned, false);
+  assert.equal(result.account, null);
+  assert.deepEqual(result.pullRequests, []);
+  assert.ok(result.repositories.every(repo => !repo.openComplete && !repo.mergedComplete && /authentication/.test(repo.error!)));
+  const callsAtCompletion = calls.length;
+  late.resolve();
+  await waitFor(() => lateReturned);
+  assert.equal(calls.length, callsAtCompletion);
+  assert.deepEqual(result.pullRequests, []);
+  assert.equal(result.account, null);
+});
+
+test("cancellation releases active workers without starting queued repositories", async () => {
+  const repositories = Array.from({ length: 6 }, (_, index) => ({ ...repository, id: `example/project-${index}` }));
+  const gate = deferred();
+  const controller = new AbortController();
+  let active = 0;
+  const { calls, collect } = harness(async () => {
+    active += 1;
+    await gate.promise;
+    return response([pull(1)]);
+  });
+  const pending = collect(repositories, { ...interval, signal: controller.signal });
+  await waitFor(() => active === 3);
+  controller.abort();
+  const result = await pending;
+  assert.equal(calls.length, 4);
+  assert.match(result.error!, /cancelled/);
+  assert.ok(result.repositories.every(repo => !repo.openComplete && !repo.mergedComplete));
+  gate.resolve();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls.length, 4);
+  assert.deepEqual(result.pullRequests, []);
 });

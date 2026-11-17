@@ -12,6 +12,13 @@ export interface GitHubCollectionOptions {
   since: string;
   until: string;
   signal?: AbortSignal;
+  onProgress?: (progress: GitHubCollectionProgress) => void;
+}
+
+export interface GitHubCollectionProgress {
+  completedRepositories: number;
+  totalRepositories: number;
+  requests: number;
 }
 
 export interface GitHubDependencies {
@@ -21,6 +28,7 @@ export interface GitHubDependencies {
   maximumPages?: number;
   requestTimeoutMs?: number;
   timeoutMs?: number;
+  repositoryConcurrency?: number;
 }
 
 type FailureKind = "auth" | "denied" | "rate" | "budget" | "timeout" | "cancelled" | "unavailable" | "response";
@@ -146,6 +154,8 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
   const maximumPages = dependencies.maximumPages ?? 8;
   const requestTimeoutMs = dependencies.requestTimeoutMs ?? 15_000;
   const timeoutMs = dependencies.timeoutMs ?? 120_000;
+  const requestedConcurrency = dependencies.repositoryConcurrency ?? 3;
+  const repositoryConcurrency = Number.isFinite(requestedConcurrency) ? Math.max(1, Math.min(3, Math.floor(requestedConcurrency))) : 3;
 
   return async function collect(repositories: ConfiguredRepository[], options: GitHubCollectionOptions): Promise<GitHubCollectionResult> {
     const result: GitHubCollectionResult = {
@@ -154,6 +164,13 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       pullRequests: [],
       error: null,
     };
+    let requests = 0;
+    let completedRepositories = 0;
+    const report = () => {
+      try { options.onProgress?.({ completedRepositories, totalRepositories: repositories.length, requests }); }
+      catch {}
+    };
+    report();
     const since = date(options.since);
     const until = date(options.until);
     if (!since || !until || since >= until || repositories.some((repository) => !REPOSITORY.test(repository.id) ||
@@ -166,20 +183,27 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
     if (repositories.length === 0) return result;
     const deadline = AbortSignal.timeout(Math.max(1, timeoutMs));
     const collectionSignal = AbortSignal.any([deadline, ...(options.signal ? [options.signal] : [])]);
-    let requests = 0;
     let terminal: GitHubFailure | null = null;
+    const authenticationAbort = new AbortController();
     let credential: string;
     const abortFailure = () => failure(options.signal?.aborted ? "cancelled" : "timeout");
+    const halt = (issue: GitHubFailure): GitHubFailure => {
+      if (!terminal || issue.kind === "auth") terminal = issue;
+      if (issue.kind === "auth") authenticationAbort.abort();
+      return terminal;
+    };
     const request = async (endpoint: string, query?: Record<string, string>): Promise<{ value: unknown; next: boolean }> => {
       if (terminal) throw terminal;
-      if (collectionSignal.aborted) throw (terminal = abortFailure());
-      if (requests >= maximumRequests) throw (terminal = failure("budget"));
+      if (collectionSignal.aborted) throw halt(abortFailure());
+      if (requests >= maximumRequests) throw halt(failure("budget"));
       const url = new URL(`https://api.github.com/${endpoint}`);
       for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
       if (url.origin !== "https://api.github.com" || url.username || url.password || url.hash) throw failure("response");
-      const signal = AbortSignal.any([collectionSignal, AbortSignal.timeout(Math.max(1, requestTimeoutMs))]);
+      const signal = AbortSignal.any([collectionSignal, authenticationAbort.signal, AbortSignal.timeout(Math.max(1, requestTimeoutMs))]);
       requests += 1;
+      report();
       try {
+        signal.throwIfAborted();
         const response = await abortable(transport(url, {
           method: "GET",
           headers: {
@@ -191,17 +215,18 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
           redirect: "error",
           signal,
         }), signal);
-        if (response.status === 401) throw failure("auth");
+        if (response.status === 401) throw halt(failure("auth"));
         if (response.status === 429 || (response.status === 403 &&
             (response.headers.get("x-ratelimit-remaining") === "0" || response.headers.has("retry-after")))) {
-          throw (terminal = failure("rate"));
+          throw halt(failure("rate"));
         }
         if (response.status === 403 || response.status === 404) throw failure("denied");
         if (!response.ok) throw failure(response.status >= 500 ? "unavailable" : "response");
         return { value: await json(response, signal), next: /<[^>]+>;\s*rel="next"/.test(response.headers.get("link") ?? "") };
       } catch (error) {
         if (error instanceof GitHubFailure) throw error;
-        if (signal.aborted) throw (terminal = collectionSignal.aborted ? abortFailure() : failure("timeout"));
+        if ((terminal as GitHubFailure | null)?.kind === "auth") throw terminal;
+        if (signal.aborted) throw halt(collectionSignal.aborted ? abortFailure() : failure("timeout"));
         throw failure("unavailable");
       }
     };
@@ -264,38 +289,58 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       return { records, complete: false, error: "The GitHub page limit was reached; PR coverage is incomplete." };
     };
 
-    for (const [index, repository] of repositories.entries()) {
-      const coverage = result.repositories[index];
-      if (typeof repository.defaultBranch !== "string" || !repository.defaultBranch.trim()) {
-        coverage.error = "The repository's default branch is unavailable; PR collection was skipped.";
-        continue;
-      }
-      try {
-        const open = await inventory(repository, "open");
-        const merged = await inventory(repository, "merged");
-        coverage.openComplete = open.complete;
-        coverage.mergedComplete = merged.complete;
-        coverage.error = [...new Set([open.error, merged.error].filter((value): value is string => value !== null))].join(" ") || null;
-        result.pullRequests.push(...open.records, ...merged.records);
-      } catch (error) {
-        const issue = error instanceof GitHubFailure ? error : failure("unavailable");
-        if (issue.kind === "auth") {
-          result.account = null;
-          result.pullRequests = [];
-          result.error = issue.message;
-          result.repositories.forEach((item) => {
-            item.openComplete = false;
-            item.mergedComplete = false;
-            item.error = issue.message;
-          });
-          return result;
+    const recordsByRepository: PullRequestRecord[][] = repositories.map(() => []);
+    let nextRepository = 0;
+    const worker = async () => {
+      while (nextRepository < repositories.length && !terminal && !collectionSignal.aborted) {
+        const index = nextRepository++;
+        const repository = repositories[index];
+        const coverage = result.repositories[index];
+        if (typeof repository.defaultBranch !== "string" || !repository.defaultBranch.trim()) {
+          coverage.error = "The repository's default branch is unavailable; PR collection was skipped.";
+          completedRepositories += 1;
+          report();
+          continue;
         }
-        coverage.accessDenied = issue.kind === "denied";
-        coverage.error = issue.message;
+        try {
+          const open = await inventory(repository, "open");
+          const merged = await inventory(repository, "merged");
+          coverage.openComplete = open.complete;
+          coverage.mergedComplete = merged.complete;
+          coverage.error = [...new Set([open.error, merged.error].filter((value): value is string => value !== null))].join(" ") || null;
+          recordsByRepository[index] = [...open.records, ...merged.records];
+        } catch (error) {
+          const issue = error instanceof GitHubFailure ? error : failure("unavailable");
+          if (issue.kind === "auth") halt(issue);
+          coverage.accessDenied = issue.kind === "denied";
+          coverage.error = issue.message;
+        } finally {
+          completedRepositories += 1;
+          report();
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(repositoryConcurrency, repositories.length) }, worker));
+    if (collectionSignal.aborted && !terminal) halt(abortFailure());
+    if (terminal) {
+      const issue = terminal as GitHubFailure;
+      result.error = issue.message;
+      for (; nextRepository < repositories.length; nextRepository += 1) {
+        result.repositories[nextRepository].error = issue.message;
+        completedRepositories += 1;
+        report();
+      }
+      if (issue.kind === "auth") {
+        result.account = null;
+        result.repositories.forEach((item) => {
+          item.openComplete = false;
+          item.mergedComplete = false;
+          item.error = issue.message;
+        });
+        return result;
       }
     }
-    result.pullRequests = [...new Map(result.pullRequests.map((row) => [row.id, row])).values()];
-    if (terminal) result.error = (terminal as GitHubFailure).message;
+    result.pullRequests = [...new Map(recordsByRepository.flat().map((row) => [row.id, row])).values()];
     return result;
   };
 }

@@ -218,6 +218,16 @@ select { background: var(--surface); border: 1px solid var(--line); border-radiu
 .person-numbers { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; gap: 5px; font-size: 10px; color: var(--muted); }
 .person-numbers strong { font-size: 12px; font-weight: 600; color: var(--ink); }
 .person-detail-identity { font-size: 11px; overflow-wrap: anywhere; }
+.refresh-progress { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.refresh-progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; }
+.refresh-progress-heading > span { color: var(--muted); font-size: 10px; }
+.refresh-progress p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.refresh-progress-sources { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 12px; }
+.refresh-progress-sources label { flex: 1 1 200px; color: var(--muted); font-size: 11px; }
+.refresh-progress-sources label > span { display: flex; justify-content: space-between; gap: 8px; }
+.refresh-progress-sources progress { display: block; width: 100%; height: 7px; margin-top: 6px; accent-color: var(--blue); }
+.refresh-progress > progress { width: 100%; height: 7px; margin-top: 12px; accent-color: var(--blue); }
+.refresh-progress.failed, .refresh-progress.cancelled { border-color: var(--attention); }
 @media (max-width: 650px) {
   .person-row { gap: 12px; padding: 14px 6px; }
   .person-numbers { font-size: 9px; }

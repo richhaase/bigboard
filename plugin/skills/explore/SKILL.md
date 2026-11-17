@@ -24,6 +24,13 @@ clones and collects GitHub open and merged PRs with GitHub CLI authentication.
 Review its coverage result before describing findings as complete. Do not
 repair authentication or modify clones as a recovery step.
 
+GitHub repositories collect with bounded concurrency. Supply a progress token
+when the host supports MCP progress notifications. An open app also shows the
+saved `refresh` status returned by `read_board`, including separate Git and
+GitHub repository counts. Counts describe work processed, including failures;
+inspect coverage before claiming collection is complete. Polling progress does
+not start another refresh. A stale running status expires after three minutes.
+
 After server restart, refresh explicitly to revalidate GitHub access before
 using cached PR evidence. Displayed Git activity still comes from the saved
 local scan. Collection time and scanned revisions are part of the answer.

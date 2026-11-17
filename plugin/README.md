@@ -56,6 +56,27 @@ Use **Refresh sources**, or ask the agent to call `refresh_sources`, to collect
 28 days of history and GitHub PR evidence. Opening, polling, and filtering a
 board read the last completed collection without starting collection.
 
+GitHub collection processes up to three repositories concurrently. Each
+repository's Open and Merged inventories and their pages stay in order; the
+existing global request, page, response-size, and time limits still apply.
+Git history continues to use up to four workers alongside GitHub collection.
+
+The app shows separate Git and GitHub repository progress during collection,
+including refreshes started by the agent or another panel. Counts mean
+repositories processed and can include coverage failures. Completion reports
+coverage gaps separately from progress; it does not imply every source was
+available. The last outcome remains visible after completion or cancellation.
+Progress is available through `read_board` without changing the evidence
+snapshot for every progress update. Callers supplying an MCP progress token
+also receive progress notifications from `refresh_sources`.
+
+Progress is saved separately from collected evidence. A newer refresh or a
+source-configuration change prevents an older run from overwriting it. If a
+process disappears without finishing, its running status expires after three
+minutes and the app allows another explicit refresh. Collection still
+publishes one completed snapshot; a new server session still requires a
+refresh to verify GitHub access before displaying cached PR evidence.
+
 ## What the data means
 
 - Git activity uses non-merge commits reachable from each clone's
@@ -158,6 +179,10 @@ interval. Shortened record-ID and file lists remain explicitly marked.
 8. Reopen an existing board and create another independent board. Their saved
    queries must remain separate. After server restart, refresh once to verify
    GitHub access before using PR evidence.
+9. Refresh sources and watch separate Git and GitHub progress before the
+   request completes. Check a refresh started by the agent too. Coverage gaps,
+   cancellation, and interruption must show an honest final outcome. Progress
+   updates alone must not reset evidence paging or checkbox selections.
 
 Automated checks cover actual Git repositories in temporary test folders,
 mocked GitHub responses, the packaged stdio server, saved state, and the

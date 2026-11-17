@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { collectGitHistory, describeRepository, importNativeSources } from "./sources/git";
 import { collectGitHub } from "./sources/github";
-import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceFilter, EvidenceResult, GitCollectionResult, GitHubCollectionResult, PeopleResult, PeopleSource, PersonSummary, PullRequestRecord, PullRequestSort, RepositoryCoverage, SortDirection, SourceConfiguration } from "./shared";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, CollectedWorkspace, ConfiguredRepository, EvidenceFilter, EvidenceResult, GitCollectionResult, GitHubCollectionResult, PeopleResult, PeopleSource, PersonSummary, PullRequestRecord, PullRequestSort, RefreshProgress, RepositoryCoverage, SortDirection, SourceConfiguration } from "./shared";
 
 export type { EvidenceResult } from "./shared";
 const DAY = 86_400_000;
@@ -69,6 +69,7 @@ export class BoardStore {
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
       this.database = new DatabaseSync(join(this.directory, "boards.sqlite"));
       this.database.exec("PRAGMA busy_timeout = 2000; CREATE TABLE IF NOT EXISTS boards (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, generation INTEGER NOT NULL, verification INTEGER NOT NULL DEFAULT 0, configuration TEXT NOT NULL, collection TEXT)");
+      this.database.exec("CREATE TABLE IF NOT EXISTS refresh_progress (slot INTEGER PRIMARY KEY CHECK (slot = 1), run_id TEXT NOT NULL, configuration_revision INTEGER NOT NULL, verification INTEGER NOT NULL, state TEXT NOT NULL)");
       this.database.prepare("INSERT OR IGNORE INTO workspace (id,revision,generation,configuration) VALUES (1,0,0,?)").run(JSON.stringify({ revision: 0, repositories: [] }));
     }
     return this.database;
@@ -104,6 +105,7 @@ export class BoardStore {
       const result = this.db().prepare("UPDATE workspace SET revision=?,generation=generation+1,configuration=?,collection=NULL WHERE id=1 AND revision=?")
         .run(configuration.revision, JSON.stringify(configuration), current.revision);
       if (Number(result.changes) !== 1) throw new BoardError("configuration_conflict", "Source settings changed. Call list_sources before updating them.");
+      this.db().prepare("DELETE FROM refresh_progress WHERE slot=1").run();
       const retained = new Set(configuration.repositories.map(repo => repo.id));
       for (const row of this.db().prepare("SELECT id,state FROM boards").all()) {
         try {
@@ -119,29 +121,63 @@ export class BoardStore {
     this.verifiedCollection = null;
     return configuration;
   }
-  async refresh(signal?: AbortSignal): Promise<RefreshResult> {
+  async refresh(signal?: AbortSignal, onProgress?: (progress: RefreshProgress) => void): Promise<RefreshResult> {
     if (this.refreshing) throw new BoardError("refresh_in_progress", "A source refresh is already running. Read the board after it finishes.");
     const configuration = this.sources();
     if (!configuration.repositories.length) throw new BoardError("sources_required", "Configure repository paths or import the native BigBoard selection before refreshing.");
-    const started = this.db().prepare("UPDATE workspace SET verification=verification+1 WHERE id=1 AND revision=? RETURNING generation,verification").get(configuration.revision);
-    if (!started) throw new BoardError("configuration_conflict", "Source settings changed. Read the settings and retry refresh.");
-    const generation = Number(started.generation);
-    const verification = Number(started.verification);
+    const until = this.deps.now().toISOString();
+    const progress: RefreshProgress = { id: randomUUID(), status: "running", startedAt: until, updatedAt: until, finishedAt: null, git: { completedRepositories: 0, totalRepositories: configuration.repositories.length }, github: { completedRepositories: 0, totalRepositories: configuration.repositories.length, requests: 0 }, message: "Collecting Git history and GitHub pull requests." };
+    let generation: number, verification: number;
+    this.db().exec("BEGIN IMMEDIATE");
+    try {
+      const started = this.db().prepare("UPDATE workspace SET verification=verification+1 WHERE id=1 AND revision=? RETURNING generation,verification").get(configuration.revision);
+      if (!started) throw new BoardError("configuration_conflict", "Source settings changed. Read the settings and retry refresh.");
+      generation = Number(started.generation);
+      verification = Number(started.verification);
+      this.db().prepare("INSERT INTO refresh_progress (slot,run_id,configuration_revision,verification,state) VALUES (1,?,?,?,?) ON CONFLICT(slot) DO UPDATE SET run_id=excluded.run_id,configuration_revision=excluded.configuration_revision,verification=excluded.verification,state=excluded.state")
+        .run(progress.id, configuration.revision, verification, JSON.stringify(progress));
+      this.db().exec("COMMIT");
+    } catch (error) { this.db().exec("ROLLBACK"); throw error; }
     this.verifiedCollection = null;
     this.verifiedEpoch = null;
-    const until = this.deps.now().toISOString();
     const since = new Date(Date.parse(until) - 28 * DAY).toISOString();
     const boundedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(150_000)]) : AbortSignal.timeout(150_000);
+    const notifyProgress = () => {
+      try { onProgress?.({ ...progress, git: { ...progress.git }, github: { ...progress.github } }); }
+      catch {}
+    };
+    const publishProgress = () => {
+      progress.updatedAt = this.deps.now().toISOString();
+      this.db().prepare("UPDATE refresh_progress SET state=? WHERE slot=1 AND run_id=? AND configuration_revision=? AND verification=? AND EXISTS (SELECT 1 FROM workspace WHERE id=1 AND revision=? AND verification=?)")
+        .run(JSON.stringify(progress), progress.id, configuration.revision, verification, configuration.revision, verification);
+      notifyProgress();
+    };
+    const finishProgress = (status: RefreshProgress["status"], message: string) => {
+      progress.status = status;
+      progress.message = message;
+      progress.finishedAt = this.deps.now().toISOString();
+      publishProgress();
+    };
     this.refreshing = true;
+    notifyProgress();
     try {
       const git: GitCollectionResult[] = [];
       const queue = [...configuration.repositories];
-      const githubPromise = this.deps.collectGitHub(configuration.repositories, { since, until, signal: boundedSignal }).catch(() => blankGitHub(configuration.repositories, "GitHub collection could not complete. Refresh to retry."));
+      const githubPromise = this.deps.collectGitHub(configuration.repositories, { since, until, signal: boundedSignal, onProgress: value => {
+        if (progress.status !== "running") return;
+        progress.github.completedRepositories = Math.max(progress.github.completedRepositories, Math.min(configuration.repositories.length, value.completedRepositories));
+        progress.github.requests = Math.max(progress.github.requests, value.requests);
+        publishProgress();
+      } }).catch(() => blankGitHub(configuration.repositories, "GitHub collection could not complete. Refresh to retry."));
       await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
         for (let repo = queue.shift(); repo; repo = queue.shift()) {
           boundedSignal.throwIfAborted();
           try { git.push(await this.deps.collectGitHistory(repo, { since, until, signal: boundedSignal })); }
           catch { git.push({ repository: repo, revision: null, ref: `refs/remotes/${repo.remote}/${repo.defaultBranch}`, shallow: false, partial: false, complete: false, linesComplete: false, records: [], error: "Git history could not be read. Check the selected clone and default remote branch." }); }
+          if (progress.status === "running") {
+            progress.git.completedRepositories += 1;
+            publishProgress();
+          }
         }
       }));
       const github = await githubPromise;
@@ -154,16 +190,22 @@ export class BoardStore {
       this.verifiedEpoch = verification;
       const coverage = this.coverage(configuration.repositories, collection, true);
       const complete = coverage.every(repo => repo.historyComplete && repo.linesComplete && repo.openPRsComplete && repo.mergedPRsComplete);
+      finishProgress("complete", complete ? "Sources refreshed." : "Sources refreshed with coverage gaps. Check source coverage for details.");
       return { collectionId: collection.id, collectedAt: collection.generatedAt, configurationRevision: configuration.revision, repositoryCount: configuration.repositories.length, complete, note: complete ? "Git history and GitHub PR collection completed." : "Collection completed with coverage gaps; inspect the board's repository coverage." };
     } catch (error) {
+      finishProgress(signal?.aborted ? "cancelled" : "failed", error instanceof BoardError && error.code === "refresh_superseded" ? "Refresh was superseded by newer source settings or another refresh." : signal?.aborted ? "Source refresh was cancelled. Previous Git evidence remains available." : boundedSignal.aborted ? "Source refresh timed out. Previous Git evidence remains available." : "Source refresh could not finish. Check source coverage and retry.");
       if (error instanceof BoardError) throw error;
       throw new BoardError("refresh_cancelled", "Source refresh was cancelled or timed out. Previous Git evidence remains available; refresh again to verify GitHub access.");
     } finally { this.refreshing = false; }
   }
-  private workspace(): { configuration: SourceConfiguration; collection: CollectedWorkspace | null; verification: number } {
-    const row = this.db().prepare("SELECT configuration,collection,verification FROM workspace WHERE id=1").get()!;
+  private workspace(): { configuration: SourceConfiguration; collection: CollectedWorkspace | null; verification: number; refresh: RefreshProgress | null } {
+    const row = this.db().prepare("SELECT workspace.configuration,workspace.collection,workspace.verification,refresh_progress.state AS refresh FROM workspace LEFT JOIN refresh_progress ON refresh_progress.slot=1 AND refresh_progress.configuration_revision=workspace.revision AND refresh_progress.verification=workspace.verification WHERE workspace.id=1").get()!;
     try {
-      return { verification: Number(row.verification), configuration: JSON.parse(String(row.configuration)), collection: row.collection === null ? null : JSON.parse(String(row.collection)) };
+      let refresh = row.refresh === null ? null : JSON.parse(String(row.refresh)) as RefreshProgress;
+      if (refresh?.status === "running" && this.deps.now().getTime() - Date.parse(refresh.startedAt) >= 180_000) {
+        refresh = { ...refresh, status: "failed", finishedAt: new Date(Date.parse(refresh.startedAt) + 180_000).toISOString(), message: "Source refresh was interrupted or exceeded its time limit. Refresh again to collect sources." };
+      }
+      return { verification: Number(row.verification), configuration: JSON.parse(String(row.configuration)), collection: row.collection === null ? null : JSON.parse(String(row.collection)), refresh };
     } catch { throw new BoardError("collection_unreadable", "The collected evidence could not be read. Reconfigure sources to rebuild it."); }
   }
   private load(boardId: string): SavedBoard {
@@ -216,7 +258,7 @@ export class BoardStore {
     });
     const needsRefresh = !collection || collection.configRevision !== config.revision || !verified;
     const note = !config.repositories.length ? "Configure repository paths or import the native BigBoard selection, then refresh sources." : !collection ? "Sources are configured. Refresh sources to collect Git history and GitHub PRs." : `Git author-date activity from local remote-tracking default branches; GitHub PRs as of ${collection.generatedAt}. Local clones are read without fetching. ${complete ? "Coverage is complete for this collection." : "Coverage is incomplete; zero values do not establish absence of activity."}${!verified ? " Refresh to verify GitHub access for this session." : ""}`;
-    return { boardId: saved.boardId, revision: saved.revision, snapshotId: `${collection?.id ?? "uncollected"}:${config.revision}:${verified ? "verified" : "unverified"}:${workspace.verification}:${saved.boardId}:${saved.revision}`, updatedAt: saved.updatedAt, query: saved.query, scope: { since, until, timezone: "UTC" }, coverage: { source: "git+github", complete, note, repositories: coverage }, configuration: { revision: config.revision, repositories: config.repositories.map(repo => repo.id), needsRefresh }, account: verified ? collection!.github.account : null, collectedAt: collection?.generatedAt ?? null, buckets, totals: { commits: current.length, additions: current.reduce((sum,r) => sum + (r.additions ?? 0),0), deletions: current.reduce((sum,r) => sum + (r.deletions ?? 0),0), unknownLineCommits: current.filter(r => r.additions === null || r.deletions === null).length, previousCommits: previous?.length ?? null, mergedPRs: merged.length, openPRs: prs.filter(pr => pr.state === "open").length } };
+    return { refresh: workspace.refresh, boardId: saved.boardId, revision: saved.revision, snapshotId: `${collection?.id ?? "uncollected"}:${config.revision}:${verified ? "verified" : "unverified"}:${workspace.verification}:${saved.boardId}:${saved.revision}`, updatedAt: saved.updatedAt, query: saved.query, scope: { since, until, timezone: "UTC" }, coverage: { source: "git+github", complete, note, repositories: coverage }, configuration: { revision: config.revision, repositories: config.repositories.map(repo => repo.id), needsRefresh }, account: verified ? collection!.github.account : null, collectedAt: collection?.generatedAt ?? null, buckets, totals: { commits: current.length, additions: current.reduce((sum,r) => sum + (r.additions ?? 0),0), deletions: current.reduce((sum,r) => sum + (r.deletions ?? 0),0), unknownLineCommits: current.filter(r => r.additions === null || r.deletions === null).length, previousCommits: previous?.length ?? null, mergedPRs: merged.length, openPRs: prs.filter(pr => pr.state === "open").length } };
   }
   async open(boardId?: string): Promise<BoardSnapshot> {
     if (boardId !== undefined) return this.read(boardId);

@@ -117,8 +117,20 @@ export interface ActivityBucket {
   recordIdsTruncated?: boolean;
 }
 
+export interface RefreshProgress {
+  id: string;
+  status: "running" | "complete" | "failed" | "cancelled";
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  git: { completedRepositories: number; totalRepositories: number };
+  github: { completedRepositories: number; totalRepositories: number; requests: number };
+  message: string;
+}
+
 export interface BoardSnapshot {
   initialView?: BoardViewMode;
+  refresh?: RefreshProgress | null;
   boardId: string;
   revision: number;
   snapshotId: string;

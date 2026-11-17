@@ -10,7 +10,8 @@ const annotations = { readOnlyHint: true, destructiveHint: false, openWorldHint:
 function boardText(board: BoardSnapshot): string {
   return `BigBoard ${board.boardId}, revision ${board.revision}, snapshot ${board.snapshotId}. ${board.query.repository}, ` +
     `[${board.scope.since}, ${board.scope.until}) UTC: ${board.totals.commits} recorded non-merge commits, ${board.totals.mergedPRs} observed merged PRs, ${board.totals.openPRs} observed open PRs. ` +
-    `${board.totals.unknownLineCommits} commits have unknown line counts. ${board.initialView ? `Opening ${board.initialView}. ` : ""}${board.coverage.note}`;
+    `${board.totals.unknownLineCommits} commits have unknown line counts. ${board.initialView ? `Opening ${board.initialView}. ` : ""}${board.coverage.note}` +
+    (board.refresh ? ` Refresh ${board.refresh.status}: ${board.refresh.message} Git repositories checked ${board.refresh.git.completedRepositories}/${board.refresh.git.totalRepositories}; GitHub repositories checked ${board.refresh.github.completedRepositories}/${board.refresh.github.totalRepositories}; GitHub requests ${board.refresh.github.requests}.` : "");
 }
 function evidenceText(evidence: EvidenceResult): string {
   return `Git/GitHub evidence for board ${evidence.boardId}, snapshot ${evidence.snapshotId}. ` +
@@ -45,7 +46,7 @@ export function createBigboardServer(html: string, store: BoardStore): McpServer
     inputSchema: { board_id: boardId.optional(), view: z.enum(["activity", "pull_requests", "people"]).optional() }, annotations: { ...annotations, readOnlyHint: false }, _meta: { ui: { resourceUri: BOARD_RESOURCE_URI, visibility: ["model", "app"] } },
   }, ({ board_id,view }) => result(async () => ({ ...await store.open(board_id), initialView: view === "pull_requests" ? "pullRequests" : view ?? "activity" })));
   server.registerTool("read_board", {
-    title: "Read BigBoard", description: "Read saved board state and collected evidence coverage without opening a panel or refreshing sources. Use before updating viewing filters.",
+    title: "Read BigBoard", description: "Read saved board state, collected evidence coverage, and current source refresh progress without opening a panel or refreshing sources. Progress updates do not change the evidence snapshot. Use before updating viewing filters.",
     inputSchema: { board_id: boardId }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
   }, ({ board_id }) => result(() => store.read(board_id)));
   server.registerTool("update_board", {
@@ -69,8 +70,17 @@ export function createBigboardServer(html: string, store: BoardStore): McpServer
     inputSchema: { paths: z.array(z.string().min(1)).max(100).optional(), import_native: z.boolean().optional(), expected_revision: z.number().int().nonnegative().optional() }, annotations: { ...annotations, readOnlyHint: false },
   }, ({ paths,import_native,expected_revision }) => result(() => store.configure(paths,import_native === true,expected_revision)));
   server.registerTool("refresh_sources", {
-    title: "Refresh BigBoard sources", description: "Explicitly collect 28 days of author-date Git history from saved local remote-tracking default refs plus open and merged GitHub PRs. Reads existing clones without fetching/modifying them, authenticates using gh auth token, and saves coverage/collection time. May take up to 150 seconds. Polling and filter changes do not refresh.",
+    title: "Refresh BigBoard sources", description: "Explicitly collect 28 days of author-date Git history from saved local remote-tracking default refs plus open and merged GitHub PRs with bounded concurrency. Reads existing clones without fetching/modifying them, authenticates using gh auth token, and saves coverage/collection time. May take up to 150 seconds. Read current progress through read_board; callers requesting MCP progress receive notifications. Polling and filter changes do not refresh.",
     inputSchema: {}, annotations: { ...annotations, readOnlyHint: false, openWorldHint: true }, _meta: { ui: { visibility: ["model", "app"] } },
-  }, (_,extra) => result(() => store.refresh(extra.signal)));
+  }, (_,extra) => {
+    let lastProgress = -1;
+    return result(() => store.refresh(extra.signal, progress => {
+      const progressToken = extra._meta?.progressToken;
+      const completed = progress.git.completedRepositories + progress.github.completedRepositories;
+      if (progressToken === undefined || completed <= lastProgress) return;
+      lastProgress = completed;
+      void extra.sendNotification({ method: "notifications/progress", params: { progressToken, progress: completed, total: progress.git.totalRepositories + progress.github.totalRepositories, message: `${progress.message} Git repositories checked ${progress.git.completedRepositories}/${progress.git.totalRepositories}; GitHub repositories checked ${progress.github.completedRepositories}/${progress.github.totalRepositories}; GitHub requests ${progress.github.requests}.` } }).catch(() => {});
+    }));
+  });
   return server;
 }

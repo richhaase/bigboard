@@ -5,7 +5,7 @@ import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { JSDOM, VirtualConsole } from "jsdom";
-import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PeopleResult, PersonSummary, PullRequestRecord, SelectionContext } from "../src/shared.js";
+import type { ActivityRecord, BoardQuery, BoardSnapshot, EvidenceResult, PeopleResult, PersonSummary, PullRequestRecord, RefreshProgress, SelectionContext } from "../src/shared.js";
 
 type ContextUpdate = Parameters<NonNullable<AppBridge["onupdatemodelcontext"]>>[0];
 type ChatMessage = Parameters<NonNullable<AppBridge["onmessage"]>>[0];
@@ -43,11 +43,36 @@ function choose(document: Document, label: string, value: string): void {
   found.dispatchEvent(new document.defaultView!.Event("change", { bubbles: true }));
 }
 
+function refreshProgress(git: number, github: number, status: RefreshProgress["status"] = "running", message = "Collecting repository evidence."): RefreshProgress {
+  return {
+    id: "synthetic-refresh", status, startedAt: new Date(END).toISOString(), updatedAt: new Date(END + (git + github) * 1000).toISOString(),
+    finishedAt: status === "running" ? null : new Date(END + 10_000).toISOString(),
+    git: { completedRepositories: git, totalRepositories: 2 }, github: { completedRepositories: github, totalRepositories: 2, requests: github * 2 + 1 }, message,
+  };
+}
+
+function refreshSection(document: Document): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[aria-label="Source refresh progress"]');
+}
+
+function refreshButton(document: Document): HTMLButtonElement {
+  const found = document.querySelector<HTMLButtonElement>("button.refresh-sources");
+  assert.ok(found);
+  return found;
+}
+
+function processed(document: Document, source: "Git" | "GitHub"): number | null {
+  return document.querySelector<HTMLProgressElement>(`progress[aria-label="${source} repositories processed"]`)?.value ?? null;
+}
+
 class Workspace {
   boards = new Map<string, { revision: number; query: BoardQuery }>();
   generation = 1;
   configured = true;
   collected = true;
+  refresh: RefreshProgress | null = null;
+  refreshOperation: (() => Promise<void>) | null = null;
+  refreshFailure: string | null = null;
   delayEvidence: ((args: Record<string, unknown>) => Promise<void>) | null = null;
   delayPeople: ((args: Record<string, unknown>) => Promise<void>) | null = null;
   completedEvidence: Array<Record<string, unknown>> = [];
@@ -104,7 +129,7 @@ class Workspace {
       };
     });
     return {
-      boardId, revision: saved.revision, snapshotId: `${boardId}:${saved.revision}:${this.generation}`, updatedAt: new Date(END).toISOString(), query: { ...query },
+      boardId, revision: saved.revision, snapshotId: `${boardId}:${saved.revision}:${this.generation}`, updatedAt: new Date(END).toISOString(), query: { ...query }, refresh: this.refresh,
       scope: { since: new Date(since).toISOString(), until: new Date(END).toISOString(), timezone: "UTC" },
       coverage: { source: "git+github", complete: false, note: this.collected ? "Some line evidence is unavailable. Git remote-tracking refs were read without fetching." : "Refresh sources to collect evidence.", repositories: this.configured ? ["sample/api", "sample/web"].map(repository => ({ repository, revision: "a".repeat(40), ref: "refs/remotes/origin/main", shallow: false, partial: true, historyComplete: true, linesComplete: false, openPRsComplete: true, mergedPRsComplete: true, errors: ["Line evidence is incomplete."] })) : [] },
       configuration: { revision: 1, repositories: this.configured ? ["sample/api", "sample/web"] : [], needsRefresh: !this.collected },
@@ -144,6 +169,8 @@ class Workspace {
   async tool(params: { name: string; arguments?: Record<string, unknown> }): Promise<CallToolResult> {
     const args = params.arguments ?? {};
     if (params.name === "refresh_sources") {
+      await this.refreshOperation?.();
+      if (this.refreshFailure) return { isError: true, content: [{ type: "text", text: this.refreshFailure }] };
       this.collected = true;
       this.generation += 1;
       return { content: [], structuredContent: { collectionId: `collection-${this.generation}`, complete: false } };
@@ -263,7 +290,7 @@ async function panel(workspace: Workspace, initial: BoardSnapshot) {
     guest.window.close();
     host.window.close();
   };
-  return { document, contexts, messages, calls, errors, selectedContext, close, rejectContext: (value: boolean) => { rejectContext = value; }, rejectMessage: (value: boolean) => { rejectMessage = value; } };
+  return { document, contexts, messages, calls, errors, selectedContext, close, sendSnapshot: (snapshot: BoardSnapshot) => bridge.sendToolResult({ content: [], structuredContent: { ...snapshot } }), rejectContext: (value: boolean) => { rejectContext = value; }, rejectMessage: (value: boolean) => { rejectMessage = value; } };
 }
 
 test("Activity stays quiet until a bucket is selected, then shares only its supporting commits", async t => {
@@ -657,5 +684,162 @@ test("retry keeps a later-page People selection visible and consistent with shar
   button(first.document, "Explain selection").click();
   await waitFor(() => first.messages.length === 1, "retried exact person explanation");
   assert.ok(JSON.stringify(first.messages[0].content).includes(person.id));
+  assert.deepEqual(first.errors, []);
+});
+
+test("source refresh progress is visible while collection is pending and finishes honestly with coverage gaps", async t => {
+  const workspace = new Workspace();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  workspace.refreshOperation = async () => {
+    workspace.refresh = refreshProgress(1, 0);
+    await gate;
+    workspace.refresh = refreshProgress(2, 1, "complete", "Source refresh completed with coverage gaps.");
+  };
+  const first = await panel(workspace, workspace.open());
+  t.after(async () => { release(); await first.close(); });
+  const originalSnapshot = first.selectedContext().snapshotId;
+  refreshButton(first.document).click();
+  await waitFor(() => first.calls.some(call => call.name === "refresh_sources"), "started source collection");
+  assert.equal(refreshButton(first.document).disabled, true);
+  await waitFor(() => processed(first.document, "Git") === 1 && processed(first.document, "GitHub") === 0, "in-flight refresh progress");
+  assert.equal(refreshSection(first.document)?.getAttribute("role"), "status");
+  assert.equal(first.selectedContext().snapshotId, originalSnapshot);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  const git = first.document.querySelector<HTMLProgressElement>('progress[aria-label="Git repositories processed"]');
+  const github = first.document.querySelector<HTMLProgressElement>('progress[aria-label="GitHub repositories processed"]');
+  assert.equal(git?.max, 2);
+  assert.equal(github?.max, 2);
+  workspace.refresh = refreshProgress(2, 1);
+  await waitFor(() => processed(first.document, "Git") === 2 && processed(first.document, "GitHub") === 1, "updated refresh progress before completion");
+  assert.equal(refreshButton(first.document).disabled, true);
+  release();
+  await waitFor(() => refreshSection(first.document)?.textContent?.includes("completed with coverage gaps") === true && !refreshButton(first.document).disabled, "completed refresh with partial coverage");
+  assert.equal(refreshSection(first.document)?.querySelector("progress"), null);
+  assert.notEqual(first.selectedContext().snapshotId, originalSnapshot);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  assert.deepEqual(first.errors, []);
+});
+
+test("same-snapshot refresh progress keeps PR pages and selections while external collection disables refresh", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "PR selection ready");
+  checkbox(first.document, "Select sample/api#10").click();
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1 && first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 4, "paged PR selection");
+  const originalSnapshot = first.selectedContext().snapshotId;
+  const evidenceCalls = first.calls.filter(call => call.name === "query_evidence").length;
+  workspace.refresh = refreshProgress(1, 0);
+  await waitFor(() => processed(first.document, "Git") === 1, "external refresh progress");
+  assert.equal(refreshButton(first.document).disabled, true);
+  assert.equal(refreshButton(first.document).textContent, "Collecting…");
+  workspace.refresh = refreshProgress(2, 1);
+  await waitFor(() => processed(first.document, "GitHub") === 1, "external progress update");
+  assert.equal(first.selectedContext().snapshotId, originalSnapshot);
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
+  assert.equal(checkbox(first.document, "Select sample/api#10").checked, true);
+  assert.equal(first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length, 4);
+  assert.equal(first.calls.filter(call => call.name === "query_evidence").length, evidenceCalls);
+  workspace.refresh = refreshProgress(2, 1, "cancelled", "Source refresh was cancelled. Previous Git evidence remains available.");
+  await waitFor(() => refreshSection(first.document)?.textContent?.includes("was cancelled") === true && !refreshButton(first.document).disabled, "cancelled refresh progress");
+  assert.equal(refreshSection(first.document)?.querySelector("progress"), null);
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  assert.equal(first.calls.filter(call => call.name === "query_evidence").length, evidenceCalls);
+  assert.deepEqual(first.errors, []);
+});
+
+test("a failed refresh keeps its terminal progress and allows another explicit attempt", async t => {
+  const workspace = new Workspace();
+  workspace.refresh = refreshProgress(1, 0, "failed", "Source refresh stopped before all repositories were processed.");
+  const first = await panel(workspace, workspace.open());
+  t.after(first.close);
+  await waitFor(() => refreshSection(first.document)?.textContent?.includes("stopped before all repositories") === true, "failed progress on opening");
+  assert.equal(refreshSection(first.document)?.querySelector("progress"), null);
+  assert.equal(refreshButton(first.document).disabled, false);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  const originalSnapshot = first.selectedContext().snapshotId;
+  workspace.refreshFailure = "Source refresh failed. Try again.";
+  workspace.refreshOperation = async () => { workspace.refresh = refreshProgress(1, 0, "failed", "Source refresh failed. Previous Git evidence remains available."); };
+  refreshButton(first.document).click();
+  await waitFor(() => first.document.querySelector('[role="alert"]')?.textContent?.includes("Source refresh failed") === true && refreshSection(first.document)?.textContent?.includes("Previous Git evidence remains available") === true && !refreshButton(first.document).disabled, "failed refresh completion");
+  assert.equal(first.selectedContext().snapshotId, originalSnapshot);
+  assert.equal(dailyButtons(first.document).length, 7);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  workspace.refreshFailure = null;
+  workspace.refreshOperation = async () => { workspace.refresh = refreshProgress(2, 2, "complete", "Source refresh completed."); };
+  refreshButton(first.document).click();
+  await waitFor(() => first.selectedContext().snapshotId !== originalSnapshot && refreshSection(first.document)?.textContent?.includes("Source refresh completed.") === true, "explicit retry after failure");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 2);
+  assert.deepEqual(first.errors, []);
+});
+
+test("equal-timestamp progress cannot regress repository or request counters", async t => {
+  const workspace = new Workspace();
+  workspace.refresh = refreshProgress(2, 1, "running", "Current refresh progress.");
+  const first = await panel(workspace, workspace.open());
+  t.after(first.close);
+  await waitFor(() => processed(first.document, "Git") === 2 && processed(first.document, "GitHub") === 1, "current refresh counters");
+  const current = workspace.refresh;
+  const delayed = [
+    { ...current, git: { ...current.git, completedRepositories: 1 } },
+    { ...current, github: { ...current.github, completedRepositories: 0 } },
+    { ...current, github: { ...current.github, requests: 2 } },
+  ];
+  for (const progress of delayed) {
+    workspace.refresh = { ...progress, message: "Delayed refresh progress." };
+    await first.sendSnapshot(workspace.snapshot(first.selectedContext().boardId));
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(processed(first.document, "Git"), 2);
+    assert.equal(processed(first.document, "GitHub"), 1);
+    assert.ok(refreshSection(first.document)?.textContent?.includes("Current refresh progress."));
+    assert.ok(!refreshSection(first.document)?.textContent?.includes("Delayed refresh progress."));
+  }
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("a delayed pre-refresh board read cannot replace the completed snapshot or a new PR selection", async t => {
+  const workspace = new Workspace();
+  const originalTool = workspace.tool.bind(workspace);
+  let holdNextRead = false;
+  let capturedOldRead = false;
+  let returnedOldRead = false;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  workspace.tool = async params => {
+    const result = await originalTool(params);
+    if (params.name === "read_board" && holdNextRead) {
+      holdNextRead = false;
+      capturedOldRead = true;
+      await gate;
+      returnedOldRead = true;
+    }
+    return result;
+  };
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(async () => { release(); await first.close(); });
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "initial PR inventory");
+  const originalSnapshot = first.selectedContext().snapshotId;
+  holdNextRead = true;
+  await waitFor(() => capturedOldRead, "held pre-refresh poll response");
+  workspace.refreshOperation = async () => { workspace.refresh = refreshProgress(2, 2, "complete", "Source refresh completed."); };
+  refreshButton(first.document).click();
+  await waitFor(() => first.selectedContext().snapshotId !== originalSnapshot && refreshSection(first.document)?.textContent?.includes("Source refresh completed.") === true && first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "new collection and PR inventory");
+  checkbox(first.document, "Select sample/api#10").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1, "new-snapshot PR selection");
+  const completedSnapshot = first.selectedContext().snapshotId;
+  const evidenceCalls = first.calls.filter(call => call.name === "query_evidence").length;
+  release();
+  await waitFor(() => returnedOldRead, "delayed old response delivered");
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(first.selectedContext().snapshotId, completedSnapshot);
+  assert.ok(refreshSection(first.document)?.textContent?.includes("Source refresh completed."));
+  assert.equal(refreshButton(first.document).disabled, false);
+  assert.equal(checkbox(first.document, "Select sample/api#10").checked, true);
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
+  assert.equal(first.calls.filter(call => call.name === "query_evidence").length, evidenceCalls);
   assert.deepEqual(first.errors, []);
 });

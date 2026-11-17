@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { ActivityRecord, BoardSnapshot, PullRequestRecord, PullRequestSort, SortDirection } from "../shared";
+import type { ActivityRecord, BoardSnapshot, PullRequestRecord, PullRequestSort, RefreshProgress, SortDirection } from "../shared";
 import type { BoardController } from "./controller";
 
 const count = new Intl.NumberFormat("en-US");
@@ -40,8 +40,24 @@ function PullRequestDetails({ pr, timezone }: { pr: PullRequestRecord; timezone:
   </>;
 }
 
+function RefreshStatus({ progress, starting }: { progress: RefreshProgress | null | undefined; starting: boolean }) {
+  if (!progress && !starting) return null;
+  const running = starting || progress?.status === "running";
+  const status = running ? "running" : progress!.status;
+  return <section className={`refresh-progress ${status}`} aria-label="Source refresh progress" role="status" aria-atomic="true">
+    <div className="refresh-progress-heading"><strong>{starting ? "Starting source refresh…" : running ? "Refreshing sources" : status === "complete" ? "Refresh finished" : status === "cancelled" ? "Refresh cancelled" : "Refresh stopped"}</strong>{running && !starting && <span>Repositories processed</span>}</div>
+    {starting ? <progress aria-label="Starting source refresh" /> : <>
+      <p>{progress!.message}</p>
+      {running && <div className="refresh-progress-sources">
+        <label><span>Git history <span>{progress!.git.completedRepositories} / {progress!.git.totalRepositories}</span></span><progress aria-label="Git repositories processed" value={progress!.git.completedRepositories} max={Math.max(1, progress!.git.totalRepositories)} /></label>
+        <label><span>GitHub PRs <span>{progress!.github.completedRepositories} / {progress!.github.totalRepositories}</span></span><progress aria-label="GitHub repositories processed" value={progress!.github.completedRepositories} max={Math.max(1, progress!.github.totalRepositories)} /></label>
+      </div>}
+    </>}
+  </section>;
+}
+
 function SourceStatus({ board, timezone }: { board: BoardSnapshot; timezone: string }) {
-  const label = !board.configuration.repositories.length ? "No sources" : !board.collectedAt ? "Not collected" : board.configuration.needsRefresh ? "Needs refresh" : board.coverage.complete ? "Collected" : "Partial coverage";
+  const label = !board.configuration.repositories.length ? "No sources" : board.refresh?.status === "running" ? "Refreshing" : !board.collectedAt ? "Not collected" : board.configuration.needsRefresh ? "Needs refresh" : board.coverage.complete ? "Collected" : "Partial coverage";
   return <details className="source-status">
     <summary aria-label={`Source status: ${label}`}><span className={board.coverage.complete && !board.configuration.needsRefresh ? "ready-dot" : "attention-dot"} />{label}</summary>
     <section className="status-panel" aria-label="Source coverage">
@@ -75,6 +91,7 @@ export function BoardView({ controller }: { controller: BoardController }) {
   const timezone = board?.scope.timezone ?? "UTC";
   const hasSources = Boolean(board?.configuration.repositories.length);
   const hasCollection = hasSources && Boolean(board?.collectedAt);
+  const refreshRunning = state.sourceRefreshing || board?.refresh?.status === "running";
   const historyComplete = Boolean(board?.coverage.repositories.every(source => source.historyComplete));
   const prComplete = Boolean(board?.coverage.repositories.every(source => state.pullRequestState === "open" ? source.openPRsComplete : source.mergedPRsComplete));
   const label = (value: string) => dateLabel(value, timezone);
@@ -103,11 +120,12 @@ export function BoardView({ controller }: { controller: BoardController }) {
   return <main className="bigboard" aria-label="BigBoard">
     <header className="board-header">
       <div className="wordmark"><svg aria-hidden="true" viewBox="0 0 28 28" width="25" height="25" fill="none"><rect x="1" y="1" width="26" height="26" rx="6" stroke="currentColor" strokeWidth="1.5" /><path d="M7 20v-7m7 7V7m7 13v-10" stroke="currentColor" strokeWidth="3" /></svg><span>BigBoard</span></div>
-      <div className="source-controls">{board && <SourceStatus board={board} timezone={timezone} />}<button className="refresh-sources" disabled={state.busy || !hasSources} onClick={() => void controller.refreshSources()}>{state.sourceRefreshing ? "Collecting…" : "Refresh sources"}</button></div>
+      <div className="source-controls">{board && <SourceStatus board={board} timezone={timezone} />}<button className="refresh-sources" disabled={state.busy || refreshRunning || !hasSources} onClick={() => void controller.refreshSources()}>{refreshRunning ? "Collecting…" : "Refresh sources"}</button></div>
     </header>
     <nav className="board-navigation" aria-label="Board views"><button aria-pressed={activity} onClick={() => void controller.setView("activity")}>Activity</button><button aria-pressed={prView} onClick={() => void controller.setView("pullRequests")}>Pull requests</button><button aria-pressed={peopleView} onClick={() => void controller.setView("people")}>People</button></nav>
     {state.error && <div className="message error" role="alert"><span>{state.error}</span><button onClick={() => void controller.retry()}>Try again</button></div>}
     {state.notice && <div className="message success" role="status">{state.notice}</div>}
+    <RefreshStatus progress={board?.refresh} starting={state.sourceRefreshing && (board?.refresh?.id ?? null) === state.sourceRefreshPreviousId} />
     {!board ? <div className="waiting" role="status"><span className="loading-mark" /><h2>{state.phase === "connecting" ? "Connecting to your conversation" : "Waiting for the board"}</h2><p>{state.error ? "Reopen BigBoard from the conversation if the connection does not recover." : "Your board will appear here when BigBoard is ready."}</p></div> : <>
       <div className="view-heading"><h1>{activity ? "Activity" : peopleView ? "People" : "Pull requests"}</h1>{hasCollection && <p className="date-scope">{showDates ? `${label(board.scope.since)} – ${label(board.scope.until)}` : `As of ${moment(board.collectedAt!, timezone)}`}{showDates && <span>{timezone}</span>}</p>}</div>
       <section className="toolbar" aria-label={activity ? "Activity controls" : peopleView ? "People controls" : "Pull request controls"}>

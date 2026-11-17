@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { BoardError, BoardStore } from "../src/core";
-import type { ActivityRecord, ConfiguredRepository, GitCollectionResult, GitHubCollectionResult, PullRequestRecord, PullRequestSort } from "../src/shared";
+import type { GitHubCollectionOptions } from "../src/sources/github";
+import type { ActivityRecord, ConfiguredRepository, GitCollectionResult, GitHubCollectionResult, PullRequestRecord, PullRequestSort, RefreshProgress } from "../src/shared";
 
 const DAY = 86_400_000;
 const NOW = new Date("2026-11-17T12:00:00.000Z");
@@ -14,6 +15,11 @@ const repos: ConfiguredRepository[] = [
   { id: "example/other", path: "/example/other", remote: "origin", defaultBranch: "main" },
 ];
 const code = (expected: string) => (error: unknown) => error instanceof BoardError && error.code === expected;
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 function commit(repository: string, index: number, timestamp: string): ActivityRecord {
   const sha = (index + 1).toString(16).padStart(40, "0");
@@ -39,8 +45,9 @@ function fixtures() {
       const selected = records.filter(record => record.repository === repository.id);
       return { repository, revision: "a".repeat(40), ref: `refs/remotes/origin/${repository.defaultBranch}`, shallow: false, partial: false, complete: true, linesComplete: selected.every(record => record.additions !== null && record.deletions !== null), records: selected, error: null };
     },
-    collectGitHub: async (repositories: ConfiguredRepository[]): Promise<GitHubCollectionResult> => {
+    collectGitHub: async (repositories: ConfiguredRepository[], options: GitHubCollectionOptions): Promise<GitHubCollectionResult> => {
       calls.github += 1;
+      options.onProgress?.({ completedRepositories: failure === "auth" ? 0 : repositories.length, totalRepositories: repositories.length, requests: failure === "auth" ? 1 : repositories.length * 2 + 1 });
       return { account: failure === "auth" ? null : { id: "7", login: "fixture-user" }, repositories: repositories.map(repo => ({ id: repo.id, openComplete: failure === null, mergedComplete: failure === null, accessDenied: failure === "denied", error: failure ? "Access could not be verified." : null })), pullRequests: failure ? [] : pullRequests.filter(pr => repositories.some(repo => repo.id === pr.repository)), error: failure === "auth" ? "Authentication is unavailable." : null };
     },
   };
@@ -542,4 +549,123 @@ test("PR sorts cover the full filtered inventory before paging and bind cursors 
   assert.ok(implicit.nextCursor);
   await store.evidence(board.boardId, board.snapshotId, undefined, implicit.nextCursor, { kind: "pull_requests", pullRequestState: "open", pullRequestSort: "updated", sortDirection: "desc" });
   await assert.rejects(store.evidence(board.boardId, board.snapshotId, undefined, implicit.nextCursor, { kind: "pull_requests", pullRequestState: "open", pullRequestSort: "title" }), code("invalid_cursor"));
+});
+
+test("refresh progress is shared across stores without changing an in-flight evidence snapshot", async t => {
+  const { store, data, open } = await installation(t);
+  await store.configure(undefined, true, 0);
+  const gates = repos.map(() => deferred());
+  const githubGate = deferred(), githubEntered = deferred();
+  const collectGit = data.dependencies.collectGitHistory;
+  const collectGitHub = data.dependencies.collectGitHub;
+  let report!: NonNullable<GitHubCollectionOptions["onProgress"]>;
+  data.dependencies.collectGitHistory = async (repository, options) => {
+    await gates[repos.findIndex(repo => repo.id === repository.id)].promise;
+    return collectGit(repository, options);
+  };
+  data.dependencies.collectGitHub = async (repositories, options) => {
+    report = options.onProgress!;
+    report({ completedRepositories: 0, totalRepositories: repositories.length, requests: 1 });
+    githubEntered.resolve();
+    await githubGate.promise;
+    return collectGitHub(repositories, options);
+  };
+  const active = open(), reader = open();
+  const board = await active.open();
+  const notifications: RefreshProgress[] = [];
+  const pending = active.refresh(undefined, progress => {
+    notifications.push(structuredClone(progress));
+    progress.git.completedRepositories = 999;
+    throw new Error("Synthetic observer failure");
+  });
+  t.after(() => { gates.forEach(gate => gate.resolve()); githubGate.resolve(); });
+  await githubEntered.promise;
+  const initial = await reader.read(board.boardId);
+  assert.equal(initial.refresh?.status, "running");
+  assert.equal(initial.refresh?.git.completedRepositories, 0);
+  assert.equal(initial.refresh?.github.requests, 1);
+  assert.equal(initial.collectedAt, null);
+  report({ completedRepositories: 1, totalRepositories: 2, requests: 4 });
+  gates[0].resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  const advancing = await reader.read(board.boardId);
+  assert.equal(advancing.snapshotId, initial.snapshotId);
+  assert.equal(advancing.refresh?.git.completedRepositories, 1);
+  assert.equal(advancing.refresh?.github.completedRepositories, 1);
+  assert.equal(advancing.refresh?.github.requests, 4);
+  assert.equal(advancing.collectedAt, null);
+  report({ completedRepositories: 0, totalRepositories: 2, requests: 1 });
+  assert.deepEqual((await reader.read(board.boardId)).refresh?.github, advancing.refresh?.github);
+  gates[1].resolve();
+  githubGate.resolve();
+  await pending;
+  const finished = await active.read(board.boardId);
+  assert.notEqual(finished.snapshotId, initial.snapshotId);
+  assert.equal(finished.refresh?.status, "complete");
+  assert.deepEqual(finished.refresh?.git, { completedRepositories: 2, totalRepositories: 2 });
+  assert.deepEqual(finished.refresh?.github, { completedRepositories: 2, totalRepositories: 2, requests: 5 });
+  assert.equal(finished.refresh?.finishedAt, NOW.toISOString());
+  assert.equal((await reader.read(board.boardId)).refresh?.id, finished.refresh?.id);
+  assert.equal(notifications[0].status, "running");
+  assert.equal(notifications.at(-1)?.status, "complete");
+  for (let index = 1; index < notifications.length; index += 1) {
+    assert.ok(notifications[index].git.completedRepositories >= notifications[index - 1].git.completedRepositories);
+    assert.ok(notifications[index].github.completedRepositories >= notifications[index - 1].github.completedRepositories);
+    assert.ok(notifications[index].github.requests >= notifications[index - 1].github.requests);
+  }
+});
+
+test("superseded refresh callbacks cannot replace newer progress or source settings", async t => {
+  const { store, data, open } = await installation(t);
+  const configuration = await store.configure([repos[0].path], false, 0);
+  const board = await store.open();
+  const entered = deferred(), gate = deferred();
+  data.delayGit(async () => { entered.resolve(); await gate.promise; });
+  const rejected = assert.rejects(store.refresh(), code("refresh_superseded"));
+  t.after(() => gate.resolve());
+  await entered.promise;
+  const firstId = (await store.read(board.boardId)).refresh!.id;
+  data.delayGit(async () => {});
+  const another = open();
+  await another.refresh();
+  const current = await another.read(board.boardId);
+  assert.notEqual(current.refresh?.id, firstId);
+  assert.equal(current.refresh?.status, "complete");
+  gate.resolve();
+  await rejected;
+  assert.deepEqual((await another.read(board.boardId)).refresh, current.refresh);
+  await another.configure([repos[1].path], false, configuration.revision);
+  assert.equal((await another.read(board.boardId)).refresh, null);
+});
+
+test("cancelled and abandoned refreshes expose terminal progress without replacing collected evidence", async t => {
+  const { store, data, open } = await installation(t);
+  await store.configure([repos[0].path], false, 0);
+  await store.refresh();
+  const board = await store.open();
+  const entered = deferred(), gate = deferred();
+  data.delayGit(async () => { entered.resolve(); await gate.promise; });
+  const abort = new AbortController();
+  const rejected = assert.rejects(store.refresh(abort.signal), code("refresh_cancelled"));
+  t.after(() => gate.resolve());
+  await entered.promise;
+  const reader = open();
+  const running = await reader.read(board.boardId);
+  assert.equal(running.refresh?.status, "running");
+  const advancedClock = new BoardStore(store.directory, { ...data.dependencies, now: () => new Date(NOW.getTime() + 180_000) });
+  t.after(() => advancedClock.close());
+  const abandoned = await advancedClock.read(board.boardId);
+  assert.equal(abandoned.refresh?.status, "failed");
+  assert.match(abandoned.refresh!.message, /interrupted|time limit/);
+  assert.equal(abandoned.snapshotId, running.snapshotId);
+  assert.equal((await reader.read(board.boardId)).refresh?.status, "running");
+  abort.abort();
+  gate.resolve();
+  await rejected;
+  const cancelled = await reader.read(board.boardId);
+  assert.equal(cancelled.refresh?.status, "cancelled");
+  assert.equal(cancelled.refresh?.finishedAt, NOW.toISOString());
+  assert.equal(cancelled.collectedAt, board.collectedAt);
+  assert.equal(cancelled.totals.commits, board.totals.commits);
+  assert.equal(cancelled.totals.openPRs, 0);
 });
