@@ -75,6 +75,15 @@ separate `pullRequestId` is the row whose details are open; it does not replace
 the checkbox selection. Use the explicit batch when the user says “these PRs.”
 Do not expand it to every loaded PR or the whole board.
 
+The PR table shows author, draft/open/merged state, GitHub's review decision,
+pending review, and account relationships. Optional `review` metadata travels
+with each selected PR. A missing review object or `decision:unknown` means the
+review state is unavailable; `decision:none` means GitHub returned no decision.
+Requested users, teams, and assignees have explicit completeness flags. Do not
+turn incomplete empty lists into claims that nobody needs to act. Account
+badges distinguish author, assignee, and direct reviewer; team membership is
+not inferred. Review status is as of collection time and may need a refresh.
+
 Selecting checkboxes updates context without requesting reviews. **Share
 selection** sends the selection for discussion; **Request code reviews** sends
 the user's review request for that exact set. When reviews are requested,

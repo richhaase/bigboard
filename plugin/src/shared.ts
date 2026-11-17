@@ -60,6 +60,16 @@ export interface PullRequestRecord {
   mergedAt: string | null;
   baseBranch: string;
   headSha: string;
+  review?: PullRequestReview;
+}
+
+export interface PullRequestReview {
+  decision: "approved" | "changes_requested" | "review_required" | "none" | "unknown";
+  requestedReviewers: string[];
+  requestedTeams: string[];
+  assignees: string[];
+  reviewRequestsComplete: boolean;
+  assigneesComplete: boolean;
 }
 
 export interface GitCollectionResult {
@@ -76,7 +86,7 @@ export interface GitCollectionResult {
 
 export interface GitHubCollectionResult {
   account: { id: string; login: string } | null;
-  repositories: Array<{ id: string; openComplete: boolean; mergedComplete: boolean; accessDenied: boolean; error: string | null }>;
+  repositories: Array<{ id: string; openComplete: boolean; mergedComplete: boolean; reviewComplete?: boolean; accessDenied: boolean; error: string | null }>;
   pullRequests: PullRequestRecord[];
   error: string | null;
 }
@@ -101,6 +111,7 @@ export interface RepositoryCoverage {
   linesComplete: boolean;
   openPRsComplete: boolean;
   mergedPRsComplete: boolean;
+  reviewComplete?: boolean;
   errors: string[];
 }
 

@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ConfiguredRepository, GitHubCollectionResult, PullRequestRecord } from "../shared";
+import type { ConfiguredRepository, GitHubCollectionResult, PullRequestRecord, PullRequestReview } from "../shared";
 
 const execFileAsync = promisify(execFile);
 const REPOSITORY = /^[a-z0-9](?:[a-z0-9-]{0,38})\/[a-z0-9_.-]{1,100}$/;
 const LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,100})(?:\[bot\])?$/i;
 const MAXIMUM_BYTES = 2 * 1024 * 1024;
 const PAGE_SIZE = 50;
+const REVIEW_QUERY = "query BigBoardReviews($ids:[ID!]!){nodes(ids:$ids){__typename ... on PullRequest{id number headRefOid repository{nameWithOwner} reviewDecision reviewRequests(first:50){totalCount pageInfo{hasNextPage}nodes{requestedReviewer{__typename ... on User{login} ... on Team{slug organization{login}}}}}assignees(first:50){totalCount pageInfo{hasNextPage}nodes{login}}}}}";
 
 export interface GitHubCollectionOptions {
   since: string;
@@ -75,6 +76,52 @@ function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function logins(value: unknown): { values: string[]; complete: boolean } {
+  if (!Array.isArray(value)) return { values: [], complete: false };
+  const values = value.slice(0, 50).flatMap(item => {
+    const row = object(item);
+    const login = row?.login;
+    return (row?.type === undefined || row.type === "User") && typeof login === "string" && LOGIN.test(login) ? [login] : [];
+  });
+  return { values: [...new Set(values)], complete: value.length <= 50 && values.length === value.length && new Set(values.map(login => login.toLowerCase())).size === values.length };
+}
+
+function restReview(row: Record<string, unknown>, repository: ConfiguredRepository): PullRequestReview {
+  const reviewers = logins(row.requested_reviewers);
+  const assignees = logins(row.assignees);
+  const teams = Array.isArray(row.requested_teams) ? row.requested_teams.slice(0, 50).flatMap(value => {
+    const team = object(value);
+    const organization = object(team?.organization)?.login ?? repository.id.split("/")[0];
+    return typeof team?.slug === "string" && /^[a-z0-9][a-z0-9-]{0,99}$/i.test(team.slug) && typeof organization === "string" && LOGIN.test(organization) ? [`${organization}/${team.slug}`] : [];
+  }) : [];
+  return { decision: "unknown", requestedReviewers: reviewers.values, requestedTeams: [...new Set(teams)], assignees: assignees.values, reviewRequestsComplete: reviewers.complete && Array.isArray(row.requested_teams) && row.requested_teams.length <= 50 && teams.length === row.requested_teams.length && new Set(teams.map(team => team.toLowerCase())).size === teams.length, assigneesComplete: assignees.complete };
+}
+
+function graphReview(row: Record<string, unknown>): PullRequestReview {
+  const connection = object(row.reviewRequests);
+  const nodes = Array.isArray(connection?.nodes) ? connection.nodes : [];
+  const reviewers: string[] = [];
+  const teams: string[] = [];
+  for (const value of nodes.slice(0, 50)) {
+    const reviewer = object(object(value)?.requestedReviewer);
+    if (reviewer?.__typename === "User" && typeof reviewer.login === "string" && LOGIN.test(reviewer.login)) reviewers.push(reviewer.login);
+    if (reviewer?.__typename === "Team" && typeof reviewer.slug === "string" && /^[a-z0-9][a-z0-9-]{0,99}$/i.test(reviewer.slug)) {
+      const organization = object(reviewer.organization)?.login;
+      if (typeof organization === "string" && LOGIN.test(organization)) teams.push(`${organization}/${reviewer.slug}`);
+    }
+  }
+  const assigneeConnection = object(row.assignees);
+  const assignees = logins(assigneeConnection?.nodes);
+  const count = reviewers.length + teams.length;
+  const decisions: Record<string, PullRequestReview["decision"]> = { APPROVED: "approved", CHANGES_REQUESTED: "changes_requested", REVIEW_REQUIRED: "review_required" };
+  return {
+    decision: row.reviewDecision === null ? "none" : typeof row.reviewDecision === "string" && Object.hasOwn(decisions, row.reviewDecision) ? decisions[row.reviewDecision] : "unknown",
+    requestedReviewers: [...new Set(reviewers)], requestedTeams: [...new Set(teams)], assignees: assignees.values,
+    reviewRequestsComplete: Array.isArray(connection?.nodes) && nodes.length <= 50 && object(connection?.pageInfo)?.hasNextPage === false && connection?.totalCount === count && count === nodes.length && new Set([...reviewers, ...teams].map(value => value.toLowerCase())).size === count,
+    assigneesComplete: assignees.complete && object(assigneeConnection?.pageInfo)?.hasNextPage === false && assigneeConnection?.totalCount === assignees.values.length,
+  };
+}
+
 function record(value: unknown, repository: ConfiguredRepository, state: "open" | "merged"): PullRequestRecord | null {
   const row = object(value);
   const user = object(row?.user);
@@ -106,6 +153,7 @@ function record(value: unknown, repository: ConfiguredRepository, state: "open" 
     mergedAt: state === "merged" ? mergedAt : null,
     baseBranch: base.ref,
     headSha: head.sha,
+    review: restReview(row, repository),
   };
 }
 
@@ -164,6 +212,12 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       pullRequests: [],
       error: null,
     };
+    const finish = () => {
+      for (const coverage of result.repositories) {
+        coverage.reviewComplete = coverage.openComplete && coverage.mergedComplete && result.pullRequests.filter(record => record.repository === coverage.id).every(record => record.review && record.review.decision !== "unknown" && record.review.reviewRequestsComplete && record.review.assigneesComplete);
+      }
+      return result;
+    };
     let requests = 0;
     let completedRepositories = 0;
     const report = () => {
@@ -178,9 +232,9 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       const message = "GitHub collection requires canonical repository IDs and a valid date interval.";
       result.error = message;
       result.repositories.forEach((repository) => { repository.error = message; });
-      return result;
+      return finish();
     }
-    if (repositories.length === 0) return result;
+    if (repositories.length === 0) return finish();
     const deadline = AbortSignal.timeout(Math.max(1, timeoutMs));
     const collectionSignal = AbortSignal.any([deadline, ...(options.signal ? [options.signal] : [])]);
     let terminal: GitHubFailure | null = null;
@@ -192,7 +246,7 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       if (issue.kind === "auth") authenticationAbort.abort();
       return terminal;
     };
-    const request = async (endpoint: string, query?: Record<string, string>): Promise<{ value: unknown; next: boolean }> => {
+    const request = async (endpoint: string, query?: Record<string, string>, graph?: { query: string; variables: { ids: string[] } }): Promise<{ value: unknown; next: boolean }> => {
       if (terminal) throw terminal;
       if (collectionSignal.aborted) throw halt(abortFailure());
       if (requests >= maximumRequests) throw halt(failure("budget"));
@@ -205,13 +259,15 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       try {
         signal.throwIfAborted();
         const response = await abortable(transport(url, {
-          method: "GET",
+          method: graph ? "POST" : "GET",
           headers: {
             Authorization: `Bearer ${credential}`,
             Accept: "application/vnd.github+json",
             "X-GitHub-Api-Version": "2026-03-10",
             "User-Agent": "BigBoard-MCP",
+            ...(graph ? { "Content-Type": "application/json" } : {}),
           },
+          ...(graph ? { body: JSON.stringify(graph) } : {}),
           redirect: "error",
           signal,
         }), signal);
@@ -244,9 +300,10 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
       const issue = error instanceof GitHubFailure ? error : collectionSignal.aborted ? abortFailure() : failure("auth");
       result.error = issue.message;
       result.repositories.forEach((repository) => { repository.error = issue.message; });
-      return result;
+      return finish();
     }
 
+    const nodeIds = new Map<string, string>();
     const inventory = async (repository: ConfiguredRepository, state: "open" | "merged") => {
       const records: PullRequestRecord[] = [];
       const seen = new Set<string>();
@@ -273,6 +330,7 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
             seen.add(normalized.id);
             if (state === "merged" && (normalized.baseBranch !== repository.defaultBranch || normalized.mergedAt! < since || normalized.mergedAt! >= until)) continue;
             records.push(normalized);
+            if (typeof row?.node_id === "string" && row.node_id.length > 0 && row.node_id.length <= 512 && !row.node_id.includes("\0")) nodeIds.set(normalized.id, row.node_id);
           }
           const lastUpdated = rows.length > 0 ? date(object(rows.at(-1))?.updated_at) : null;
           const validUpdatedDates = rows.every((row) => date(object(row)?.updated_at) !== null);
@@ -290,6 +348,13 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
     };
 
     const recordsByRepository: PullRequestRecord[][] = repositories.map(() => []);
+    const completed = repositories.map(() => false);
+    const completeRepository = (index: number) => {
+      if (completed[index]) return;
+      completed[index] = true;
+      completedRepositories += 1;
+      report();
+    };
     let nextRepository = 0;
     const worker = async () => {
       while (nextRepository < repositories.length && !terminal && !collectionSignal.aborted) {
@@ -298,8 +363,7 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
         const coverage = result.repositories[index];
         if (typeof repository.defaultBranch !== "string" || !repository.defaultBranch.trim()) {
           coverage.error = "The repository's default branch is unavailable; PR collection was skipped.";
-          completedRepositories += 1;
-          report();
+          completeRepository(index);
           continue;
         }
         try {
@@ -315,20 +379,98 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
           coverage.accessDenied = issue.kind === "denied";
           coverage.error = issue.message;
         } finally {
-          completedRepositories += 1;
-          report();
+          if (!recordsByRepository[index].some(record => nodeIds.has(record.id))) completeRepository(index);
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(repositoryConcurrency, repositories.length) }, worker));
+    const metadataError = (repository: string) => {
+      const coverage = result.repositories.find(value => value.id === repository)!;
+      const message = "Review metadata is incomplete for some pull requests.";
+      coverage.error = [...new Set([coverage.error, message].filter((value): value is string => Boolean(value)))].join(" ");
+    };
+    const denyRepository = (repository: string) => {
+      const index = repositories.findIndex(value => value.id === repository);
+      recordsByRepository[index] = [];
+      const coverage = result.repositories[index];
+      coverage.accessDenied = true;
+      coverage.openComplete = false;
+      coverage.mergedComplete = false;
+      coverage.error = failure("denied").message;
+    };
+    const candidates = recordsByRepository.flat().filter(record => nodeIds.has(record.id));
+    const batches = Array.from({ length: Math.ceil(candidates.length / PAGE_SIZE) }, (_, index) => candidates.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE));
+    const remaining = new Map<string, number>();
+    for (const record of candidates) remaining.set(record.repository, (remaining.get(record.repository) ?? 0) + 1);
+    const completeBatch = (batch: PullRequestRecord[]) => {
+      for (const record of batch) {
+        const count = remaining.get(record.repository)! - 1;
+        remaining.set(record.repository, count);
+        if (count === 0) completeRepository(repositories.findIndex(repository => repository.id === record.repository));
+      }
+    };
+    let nextBatch = 0;
+    const enrich = async () => {
+      while (nextBatch < batches.length && !terminal && !collectionSignal.aborted) {
+        const scheduledBatch = batches[nextBatch++];
+        const batch = scheduledBatch.filter(record => !result.repositories.find(value => value.id === record.repository)!.accessDenied);
+        try {
+          if (batch.length === 0) continue;
+          const response = object((await request("graphql", undefined, { query: REVIEW_QUERY, variables: { ids: batch.map(record => nodeIds.get(record.id)!) } })).value);
+          const errors = response?.errors;
+          if (errors !== undefined && !Array.isArray(errors)) throw failure("response");
+          const affected = new Set<number>();
+          for (const value of errors as unknown[] | undefined ?? []) {
+            const error = object(value);
+            const type = typeof error?.type === "string" ? error.type.toUpperCase() : String(object(error?.extensions)?.code ?? "").toUpperCase();
+            if (type === "UNAUTHORIZED" || type === "UNAUTHENTICATED") throw halt(failure("auth"));
+            if (type === "RATE_LIMITED") throw halt(failure("rate"));
+            const path = Array.isArray(error?.path) ? error.path : [];
+            const indices = path[0] === "nodes" && Number.isSafeInteger(path[1]) && Number(path[1]) >= 0 && Number(path[1]) < batch.length ? [Number(path[1])] : batch.map((_, index) => index);
+            for (const index of indices) {
+              affected.add(index);
+              if ((type === "FORBIDDEN" || type === "NOT_FOUND") && path.length <= 2) denyRepository(batch[index].repository);
+              else metadataError(batch[index].repository);
+            }
+          }
+          const nodes = object(response?.data)?.nodes;
+          if (!Array.isArray(nodes) || nodes.length !== batch.length) throw failure("response");
+          for (let index = 0; index < batch.length; index += 1) {
+            const record = batch[index];
+            if (affected.has(index) || result.repositories.find(value => value.id === record.repository)!.accessDenied) continue;
+            const row = object(nodes[index]);
+            if (!row) { denyRepository(record.repository); continue; }
+            const repository = object(row.repository)?.nameWithOwner;
+            if (row.__typename !== "PullRequest" || row.id !== nodeIds.get(record.id) || row.number !== record.number || row.headRefOid !== record.headSha || typeof repository !== "string" || repository.toLowerCase() !== record.repository) {
+              record.review = { decision: "unknown", requestedReviewers: [], requestedTeams: [], assignees: [], reviewRequestsComplete: false, assigneesComplete: false };
+              metadataError(record.repository);
+              continue;
+            }
+            record.review = graphReview(row);
+            if (record.review.decision === "unknown" || !record.review.reviewRequestsComplete || !record.review.assigneesComplete) metadataError(record.repository);
+          }
+        } catch (error) {
+          const issue = error instanceof GitHubFailure ? error : failure("unavailable");
+          if (issue.kind === "auth") halt(issue);
+          for (const record of batch) {
+            if (issue.kind === "denied") denyRepository(record.repository);
+            else metadataError(record.repository);
+          }
+        } finally { completeBatch(scheduledBatch); }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(repositoryConcurrency, batches.length) }, enrich));
+    for (; nextBatch < batches.length; nextBatch += 1) {
+      for (const record of batches[nextBatch]) metadataError(record.repository);
+      completeBatch(batches[nextBatch]);
+    }
     if (collectionSignal.aborted && !terminal) halt(abortFailure());
     if (terminal) {
       const issue = terminal as GitHubFailure;
       result.error = issue.message;
       for (; nextRepository < repositories.length; nextRepository += 1) {
         result.repositories[nextRepository].error = issue.message;
-        completedRepositories += 1;
-        report();
+        completeRepository(nextRepository);
       }
       if (issue.kind === "auth") {
         result.account = null;
@@ -337,11 +479,11 @@ export function createGitHubCollector(dependencies: GitHubDependencies = {}) {
           item.mergedComplete = false;
           item.error = issue.message;
         });
-        return result;
+        return finish();
       }
     }
     result.pullRequests = [...new Map(recordsByRepository.flat().map((row) => [row.id, row])).values()];
-    return result;
+    return finish();
   };
 }
 

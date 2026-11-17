@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityRecord, BoardSnapshot, PullRequestRecord, PullRequestSort, RefreshProgress, SortDirection } from "../shared";
 import type { BoardController } from "./controller";
+import { reviewNeed, reviewStatus, viewerRelationships, viewerRelationshipsUnknown } from "./pr-status";
 
 const count = new Intl.NumberFormat("en-US");
 
@@ -26,18 +27,61 @@ function CommitRow({ record, timezone }: { record: ActivityRecord; timezone: str
   </article>;
 }
 
-function PullRequestDetails({ pr, timezone }: { pr: PullRequestRecord; timezone: string }) {
+function PullRequestDetails({ pr, timezone, account }: { pr: PullRequestRecord; timezone: string; account: string | null }) {
+  const review = reviewStatus(pr);
+  const need = reviewNeed(pr);
+  const relationships = viewerRelationships(pr, account);
   return <>
     <p className="repository-name selected-repository">{pr.repository} · #{pr.number}</p>
     <h3 className="selected-pr-title">{pr.title}</h3>
     <dl className="pr-metadata">
       <dt>Author</dt><dd>{pr.author}</dd><dt>Status</dt><dd>{pr.state === "merged" ? "Merged" : pr.draft ? "Open draft" : "Open"}</dd>
+      <dt>Review</dt><dd>{review.label}</dd><dt>Needs review</dt><dd title={need.title}>{need.label}</dd>
+      <dt>Reviewers</dt><dd>{pr.review?.requestedReviewers.length ? pr.review.requestedReviewers.map(login => `@${login}`).join(", ") : pr.review?.reviewRequestsComplete ? "None requested" : "Unknown"}</dd>
+      <dt>Teams</dt><dd>{pr.review?.requestedTeams.length ? pr.review.requestedTeams.join(", ") : pr.review?.reviewRequestsComplete ? "None requested" : "Unknown"}</dd>
+      {pr.review && !pr.review.reviewRequestsComplete && <><dt>Requests</dt><dd>Review requests are incomplete.</dd></>}
+      <dt>Assignees</dt><dd>{pr.review?.assignees.length ? pr.review.assignees.map(login => `@${login}`).join(", ") : pr.review?.assigneesComplete ? "None assigned" : "Unknown"}</dd>
+      {pr.review && !pr.review.assigneesComplete && <><dt>Assignments</dt><dd>Assignee information is incomplete.</dd></>}
+      <dt>Yours</dt><dd>{relationships.length ? relationships.join(" · ") : viewerRelationshipsUnknown(pr, account) ? "Unknown" : "No direct relationship recorded"}</dd>
       <dt>Created</dt><dd>{moment(pr.createdAt, timezone)}</dd><dt>Updated</dt><dd>{moment(pr.updatedAt, timezone)}</dd>
       {pr.mergedAt && <><dt>Merged</dt><dd>{moment(pr.mergedAt, timezone)}</dd></>}
       <dt>Base branch</dt><dd className="repository-name">{pr.baseBranch}</dd><dt>Head commit</dt><dd className="repository-name">{pr.headSha.slice(0, 12)}</dd>
     </dl>
     <a className="source-link" href={githubLink(pr.url)} target="_blank" rel="noopener noreferrer">Open pull request on GitHub ↗</a>
   </>;
+}
+
+function PullRequestTable({ pullRequests, selectedIds, inspectedId, account, timezone, sort, direction, controller }: {
+  pullRequests: PullRequestRecord[];
+  selectedIds: Set<string>;
+  inspectedId: string | null;
+  account: string | null;
+  timezone: string;
+  sort: PullRequestSort;
+  direction: SortDirection;
+  controller: BoardController;
+}) {
+  const sortHeader = (label: string, field: PullRequestSort) => <th scope="col" aria-sort={sort === field ? direction === "asc" ? "ascending" : "descending" : "none"}><button aria-label={`Sort by ${label}`} onClick={() => void controller.setPullRequestSort(field, sort === field ? direction === "asc" ? "desc" : "asc" : field === "updated" ? "desc" : "asc")}>{label}<span aria-hidden="true">{sort === field ? direction === "asc" ? " ↑" : " ↓" : " ↕"}</span></button></th>;
+  return <div className="pr-table-scroll" role="region" aria-label="Pull request table" tabIndex={0}><table className="pr-table" aria-label="Pull request records">
+    <thead><tr><th scope="col" className="pr-select-cell">Select</th>{sortHeader("PR", "title")}{sortHeader("Author", "author")}<th scope="col">State</th><th scope="col">Review</th><th scope="col">Needs review</th><th scope="col">Yours</th>{sortHeader("Updated", "updated")}</tr></thead>
+    <tbody>{pullRequests.map(pr => {
+      const review = reviewStatus(pr);
+      const need = reviewNeed(pr);
+      const relationships = viewerRelationships(pr, account);
+      const requestCount = (pr.review?.requestedReviewers.length ?? 0) + (pr.review?.requestedTeams.length ?? 0);
+      const inspect = () => void controller.selectPullRequest(inspectedId === pr.id ? null : pr.id);
+      return <tr key={pr.id} className={`${selectedIds.has(pr.id) ? "checked " : ""}${inspectedId === pr.id ? "inspected " : ""}${relationships.length ? "yours" : ""}`} onClick={event => { if (!(event.target as Element).closest("button, input, a")) inspect(); }}>
+        <td className="pr-select-cell"><input type="checkbox" aria-label={`Select ${pr.repository}#${pr.number}`} checked={selectedIds.has(pr.id)} onChange={() => void controller.togglePullRequest(pr.id)} /></td>
+        <td className="pr-title-cell"><button className="pr-title-button" data-pr-id={pr.id} aria-label={`Select pull request #${pr.number}: ${pr.title}`} aria-pressed={inspectedId === pr.id} onClick={inspect}><strong>#{pr.number} {pr.title}</strong><span className="repository-name">{pr.repository}</span></button></td>
+        <td className="pr-author-cell">{pr.author}</td>
+        <td><div className="pr-state-stack"><span className={`pr-state ${pr.state}`}>{pr.state === "merged" ? "Merged" : "Open"}</span>{pr.draft && <span className="pr-draft">Draft</span>}</div></td>
+        <td><span className={`pr-review-status ${review.tone}`}>{review.label}</span>{requestCount > 0 && <span className="pr-request-count">{requestCount}{pr.review?.reviewRequestsComplete ? "" : "+"} requested</span>}</td>
+        <td className={`pr-review-need${need.needed ? " needed" : ""}`} title={need.title}>{need.label}</td>
+        <td className="pr-yours-cell">{relationships.length ? <div className="pr-relationship-list">{relationships.map(relationship => <span key={relationship} className="pr-relationship">{relationship}</span>)}</div> : <span className="pr-unrelated" title="Highlights use authorship, assignments, and direct review requests. Team membership is not inferred.">{viewerRelationshipsUnknown(pr, account) ? "Unknown" : "—"}</span>}</td>
+        <td className="pr-updated-cell"><time dateTime={pr.updatedAt} title={moment(pr.updatedAt, timezone)}>{dateLabel(pr.updatedAt, timezone)}</time></td>
+      </tr>;
+    })}</tbody>
+  </table></div>;
 }
 
 function RefreshStatus({ progress, starting }: { progress: RefreshProgress | null | undefined; starting: boolean }) {
@@ -65,7 +109,7 @@ function SourceStatus({ board, timezone }: { board: BoardSnapshot; timezone: str
       <p>{board.collectedAt ? `Collected ${moment(board.collectedAt, timezone)}` : "No evidence collected yet"}</p>
       {board.account && <p>GitHub account · {board.account.login}</p>}
       <div className="source-coverage">{board.coverage.repositories.map((source) => <article key={source.repository}>
-        <strong>{source.repository}</strong><p>{source.historyComplete ? "Git history available" : "Git history incomplete"} · {source.openPRsComplete ? "Open PRs checked" : "Open PRs incomplete"} · {source.mergedPRsComplete ? "Merged PRs checked" : "Merged PRs incomplete"}</p>
+        <strong>{source.repository}</strong><p>{source.historyComplete ? "Git history available" : "Git history incomplete"} · {source.openPRsComplete ? "Open PRs checked" : "Open PRs incomplete"} · {source.mergedPRsComplete ? "Merged PRs checked" : "Merged PRs incomplete"} · {source.reviewComplete ? "Review details checked" : "Review details incomplete"}</p>
         <p className="repository-name">{source.ref} · {source.revision?.slice(0, 12) ?? "revision unavailable"}{source.shallow ? " · shallow clone" : ""}{source.partial ? " · partial clone" : ""}</p>
         {source.errors.map((error) => <p className="source-error" key={error}>{error}</p>)}
       </article>)}</div>
@@ -133,7 +177,7 @@ export function BoardView({ controller }: { controller: BoardController }) {
         {showDates && <div className="period-control" role="group" aria-label="Date range">{[7, 14].map(days => <button key={days} aria-pressed={board.query.days === days} disabled={state.busy || !hasSources} onClick={() => void controller.changeQuery({ days: days as 7 | 14 })}>{days} days</button>)}</div>}
         {activity && <label className="compare-control"><input type="checkbox" checked={board.query.compare} disabled={state.busy || !hasSources} onChange={(event) => void controller.changeQuery({ compare: event.target.checked })} />Compare previous period</label>}
       </section>
-      {!hasSources ? <section className="setup-state" aria-label="Configure repositories"><h2>Choose the repositories to collect</h2><p>Ask the agent to import your native BigBoard selection, or configure the paths to your Git clones.</p><p>Opening this board does not scan folders or make GitHub requests.</p></section> : !hasCollection ? <section className="setup-state" aria-label="Collect repository evidence"><h2>Sources are ready</h2><p>Refresh sources to collect evidence for your {board.configuration.repositories.length} selected repositories.</p></section> : <div className={`workspace-layout${hasDetails ? " has-details" : ""}`}>
+      {!hasSources ? <section className="setup-state" aria-label="Configure repositories"><h2>Choose the repositories to collect</h2><p>Ask the agent to import your native BigBoard selection, or configure the paths to your Git clones.</p><p>Opening this board does not scan folders or make GitHub requests.</p></section> : !hasCollection ? <section className="setup-state" aria-label="Collect repository evidence"><h2>Sources are ready</h2><p>Refresh sources to collect evidence for your {board.configuration.repositories.length} selected repositories.</p></section> : <div className={`workspace-layout${hasDetails ? " has-details" : ""}${prView ? " pr-workspace" : ""}`}>
         <section className="view-content" aria-label={activity ? "Activity overview" : peopleView ? "People view" : "Pull request view"}>
           {activity ? <>
             <div className="activity-summary" aria-label="Activity totals"><p className="primary-total"><strong>{count.format(board.totals.commits)}{historyComplete ? "" : "+"}</strong><span>commits</span></p><p className="line-total"><span className="additions">+{count.format(board.totals.additions)}</span><span className="deletions">−{count.format(board.totals.deletions)}</span><span>{board.totals.unknownLineCommits ? "known lines · lower bound" : "lines changed"}</span></p>{board.query.compare && <p className="comparison-total">{board.totals.previousCommits === null ? "Previous period unavailable" : `${count.format(board.totals.previousCommits)} in previous period`}</p>}</div>
@@ -147,13 +191,14 @@ export function BoardView({ controller }: { controller: BoardController }) {
             <div className="pr-view-header"><div className="pr-state-control" role="group" aria-label="Pull request state"><button aria-pressed={state.pullRequestState === "open"} onClick={() => void controller.setPullRequestState("open")}>Open</button><button aria-pressed={state.pullRequestState === "merged"} onClick={() => void controller.setPullRequestState("merged")}>Merged</button></div><p className="inventory-count">{state.evidenceLoading && !state.pullRequests.length ? (state.pullRequestState === "open" ? board.totals.openPRs : board.totals.mergedPRs) : state.totalPullRequests}{prComplete ? "" : "+"} {state.pullRequestState === "open" ? "open" : "merged in period"}</p></div>
             <div className="pr-sort-controls"><label>Sort by<select aria-label="PR sort" value={state.pullRequestSort} onChange={event => void controller.setPullRequestSort(event.target.value as PullRequestSort)}><option value="updated">Updated</option><option value="created">Created</option><option value="repository">Repository</option><option value="author">Author</option><option value="title">Title</option><option value="number">Number</option></select></label><label>Order<select aria-label="Sort direction" value={state.sortDirection} onChange={event => void controller.setPullRequestSort(state.pullRequestSort, event.target.value as SortDirection)}><option value="desc">Descending</option><option value="asc">Ascending</option></select></label><button disabled={!state.pullRequests.length || state.evidenceLoading} onClick={() => void controller.selectLoadedPullRequests()}>Select loaded</button></div>
             {state.selectedPullRequests.length > 0 && <section className="pr-selection" aria-label="Selected pull requests"><div className="pr-selection-heading"><strong>{state.selectedPullRequests.length} selected</strong><button onClick={() => void controller.clearPullRequestSelection()}>Clear selection</button></div><div className="selected-pr-list">{state.selectedPullRequests.map(pr => <button key={pr.id} aria-label={`Remove ${pr.repository}#${pr.number} from selection`} onClick={() => void controller.togglePullRequest(pr.id)}><span>{pr.repository}#{pr.number}</span><span aria-hidden="true">×</span></button>)}</div><div className="pr-selection-actions"><button className="explain-button" disabled={state.busy || !state.contextReady} onClick={() => void controller.sharePullRequestSelection(true)}>Request code reviews</button><button disabled={state.busy || !state.contextReady} onClick={() => void controller.sharePullRequestSelection()}>Share selection</button></div><p className="context-status" role="status">{state.contextReady ? "Selection shared. You can also ask the agent to review these PRs." : state.contextFailed ? "Selection could not be shared. Try again above." : "Sharing selected pull requests…"}</p></section>}
-            {state.pullRequests.length === 0 ? <p className="empty-view" role="status">{state.evidenceLoading ? "Loading pull requests…" : prComplete ? `No ${state.pullRequestState} pull requests in this scope.` : "No pull requests are available. Check source coverage before treating this as zero."}</p> : <div className="pr-inventory" aria-label="Pull request records">{state.pullRequests.map(pr => <div className={`pr-selectable-row${state.selectedPullRequests.some(selected => selected.id === pr.id) ? " checked" : ""}`} key={pr.id}><input type="checkbox" aria-label={`Select ${pr.repository}#${pr.number}`} checked={state.selectedPullRequests.some(selected => selected.id === pr.id)} onChange={() => void controller.togglePullRequest(pr.id)} /><button className={`pr-row${selectedPR?.id === pr.id ? " selected" : ""}`} data-pr-id={pr.id} aria-label={`Select pull request #${pr.number}: ${pr.title}`} aria-pressed={selectedPR?.id === pr.id} onClick={() => void controller.selectPullRequest(selectedPR?.id === pr.id ? null : pr.id)}><span className="pr-row-main"><strong>#{pr.number} {pr.title}</strong><span><span className="repository-name">{pr.repository}</span><span>{pr.author}</span></span></span><span className="pr-row-meta"><span className={`pr-state ${pr.state}`}>{pr.state === "merged" ? "Merged" : pr.draft ? "Draft" : "Open"}</span><time dateTime={pr.mergedAt ?? pr.updatedAt}>{label(pr.mergedAt ?? pr.updatedAt)}</time></span></button></div>)}</div>}
+            {state.pullRequests.length > 0 && <p className="pr-table-note">Review details are as of collection. Yours highlights authorship, assignments, and direct review requests.{state.pullRequests.some(pr => !pr.review || pr.review.decision === "unknown" || !pr.review.reviewRequestsComplete || !pr.review.assigneesComplete) && <span> Some review data is unknown or incomplete; refresh sources to check it.</span>}</p>}
+            {state.pullRequests.length === 0 ? <p className="empty-view" role="status">{state.evidenceLoading ? "Loading pull requests…" : prComplete ? `No ${state.pullRequestState} pull requests in this scope.` : "No pull requests are available. Check source coverage before treating this as zero."}</p> : <PullRequestTable pullRequests={state.pullRequests} selectedIds={new Set(state.selectedPullRequests.map(pr => pr.id))} inspectedId={state.selectedPullRequestId} account={board.account?.login ?? null} timezone={timezone} sort={state.pullRequestSort} direction={state.sortDirection} controller={controller} />}
             {state.nextCursor && <div className="load-more"><span>{state.pullRequests.length} of {state.totalPullRequests}</span><button disabled={state.evidenceLoading} onClick={() => void controller.loadMore()}>{state.evidenceLoading ? "Loading…" : "Load more pull requests"}</button></div>}
           </>}
         </section>
         {selected && <aside className="detail-pane" aria-label="Activity evidence"><div className="detail-heading"><div><p className="eyebrow">Selected interval</p><h2>{label(selected.start)}</h2></div><button className="close-detail" aria-label="Close activity evidence" onClick={closeActivity}>×</button></div><p className="selection-interval">{moment(selected.start, timezone)} – {moment(selected.end, timezone)}</p><p className="detail-count">{selected.commits}{historyComplete ? "" : "+"} supporting commits</p>{state.records.length === 0 ? <p className="evidence-empty">{state.evidenceLoading ? "Loading supporting commits…" : historyComplete ? "No commits in this interval." : "No commits are available. Source coverage is incomplete."}</p> : <div className="evidence-list" tabIndex={0} aria-label="Commit records">{state.records.map(record => <CommitRow key={record.id} record={record} timezone={timezone} />)}</div>}{state.nextCursor && <div className="load-more"><span>{state.records.length} of {state.totalRecords}</span><button disabled={state.evidenceLoading} onClick={() => void controller.loadMore()}>{state.evidenceLoading ? "Loading…" : "Load more evidence"}</button></div>}<SelectionAction controller={controller} busy={state.busy} ready={state.contextReady} failed={state.contextFailed} /></aside>}
         {selectedPerson && <aside className="detail-pane" aria-label="People evidence"><div className="detail-heading"><div><p className="eyebrow">{state.peopleSource === "git" ? "Git contributor" : "GitHub author"}</p><h2>{selectedPerson.name}</h2></div><button className="close-detail" aria-label="Close people evidence" onClick={closePerson}>×</button></div><p className="repository-name person-detail-identity">{selectedPerson.identity}</p><p className="detail-count">{selectedPerson.repositories.join(" · ")}</p>{state.records.length === 0 && state.pullRequests.length === 0 ? <p className="evidence-empty">{state.evidenceLoading ? "Loading supporting evidence…" : "No supporting evidence is available in this scope."}</p> : <>{state.records.length > 0 && <div className="evidence-list" tabIndex={0} aria-label="Commit records">{state.records.map(record => <CommitRow key={record.id} record={record} timezone={timezone} />)}</div>}{state.pullRequests.length > 0 && <div className="evidence-list" tabIndex={0} aria-label="Person pull requests">{state.pullRequests.map(pr => <article className="evidence-row" key={pr.id}><div className="record-main"><strong><a href={githubLink(pr.url)} target="_blank" rel="noopener noreferrer">#{pr.number} {pr.title}</a></strong><div><span className="repository-name">{pr.repository}</span><span>{pr.state === "merged" ? "Merged" : pr.draft ? "Draft" : "Open"}</span></div></div></article>)}</div>}</>}{state.nextCursor && <div className="load-more"><span>{state.records.length + state.pullRequests.length} of {state.totalRecords + state.totalPullRequests}</span><button disabled={state.evidenceLoading} onClick={() => void controller.loadMore()}>{state.evidenceLoading ? "Loading…" : "Load more evidence"}</button></div>}<SelectionAction controller={controller} busy={state.busy} ready={state.contextReady} failed={state.contextFailed} /></aside>}
-        {selectedPR && <aside className="detail-pane" aria-label="Pull request details"><div className="detail-heading"><h2>Pull request details</h2><button className="close-detail" aria-label="Close pull request details" onClick={closePR}>×</button></div><PullRequestDetails pr={selectedPR} timezone={timezone} /><SelectionAction controller={controller} busy={state.busy} ready={state.contextReady} failed={state.contextFailed} /></aside>}
+        {selectedPR && <aside className="detail-pane" aria-label="Pull request details"><div className="detail-heading"><h2>Pull request details</h2><button className="close-detail" aria-label="Close pull request details" onClick={closePR}>×</button></div><PullRequestDetails pr={selectedPR} timezone={timezone} account={board.account?.login ?? null} /><SelectionAction controller={controller} busy={state.busy} ready={state.contextReady} failed={state.contextFailed} /></aside>}
       </div>}
     </>}
   </main>;

@@ -189,7 +189,7 @@ export class BoardStore {
       this.verifiedCollection = collection.id;
       this.verifiedEpoch = verification;
       const coverage = this.coverage(configuration.repositories, collection, true);
-      const complete = coverage.every(repo => repo.historyComplete && repo.linesComplete && repo.openPRsComplete && repo.mergedPRsComplete);
+      const complete = coverage.every(repo => repo.historyComplete && repo.linesComplete && repo.openPRsComplete && repo.mergedPRsComplete && repo.reviewComplete);
       finishProgress("complete", complete ? "Sources refreshed." : "Sources refreshed with coverage gaps. Check source coverage for details.");
       return { collectionId: collection.id, collectedAt: collection.generatedAt, configurationRevision: configuration.revision, repositoryCount: configuration.repositories.length, complete, note: complete ? "Git history and GitHub PR collection completed." : "Collection completed with coverage gaps; inspect the board's repository coverage." };
     } catch (error) {
@@ -228,7 +228,7 @@ export class BoardStore {
     return repos.map(repo => {
       const git = collection?.git.find(value => value.repository.id === repo.id);
       const github = collection?.github.repositories.find(value => value.id === repo.id);
-      return { repository: repo.id, revision: git?.revision ?? null, ref: git?.ref ?? `refs/remotes/${repo.remote}/${repo.defaultBranch}`, shallow: git?.shallow ?? false, partial: git?.partial ?? false, historyComplete: git?.complete ?? false, linesComplete: git?.linesComplete ?? false, openPRsComplete: verified && (github?.openComplete ?? false), mergedPRsComplete: verified && (github?.mergedComplete ?? false), errors: [git?.error, verified ? github?.error : collection ? "Refresh sources to verify cached GitHub access in this session." : "Sources have not been collected.", verified ? collection?.github.error : null].filter((value): value is string => Boolean(value)) };
+      return { repository: repo.id, revision: git?.revision ?? null, ref: git?.ref ?? `refs/remotes/${repo.remote}/${repo.defaultBranch}`, shallow: git?.shallow ?? false, partial: git?.partial ?? false, historyComplete: git?.complete ?? false, linesComplete: git?.linesComplete ?? false, openPRsComplete: verified && (github?.openComplete ?? false), mergedPRsComplete: verified && (github?.mergedComplete ?? false), reviewComplete: verified && (github?.reviewComplete ?? false), errors: [git?.error, verified ? github?.error : collection ? "Refresh sources to verify cached GitHub access in this session." : "Sources have not been collected.", verified ? collection?.github.error : null].filter((value): value is string => Boolean(value)) };
     });
   }
   private snapshot(saved: SavedBoard, workspace = this.workspace()): BoardSnapshot {
@@ -247,7 +247,7 @@ export class BoardStore {
     const previous = saved.query.compare && priorCovered ? records.filter(record => record.timestamp >= previousSince && record.timestamp < since) : null;
     const prs = verified ? collection!.github.pullRequests.filter(pr => ids.has(pr.repository)) : [];
     const merged = prs.filter(pr => pr.state === "merged" && pr.mergedAt !== null && pr.mergedAt >= since && pr.mergedAt < until);
-    const complete = Boolean(collection && repos.length && coverage.every(repo => repo.historyComplete && repo.linesComplete && repo.openPRsComplete && repo.mergedPRsComplete));
+    const complete = Boolean(collection && repos.length && coverage.every(repo => repo.historyComplete && repo.linesComplete && repo.openPRsComplete && repo.mergedPRsComplete && repo.reviewComplete));
     const buckets = Array.from({ length: saved.query.days }, (_, index) => {
       const start = new Date(Date.parse(since) + index * DAY).toISOString();
       const end = new Date(Date.parse(start) + DAY).toISOString();

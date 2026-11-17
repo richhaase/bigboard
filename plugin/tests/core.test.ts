@@ -26,7 +26,7 @@ function commit(repository: string, index: number, timestamp: string): ActivityR
   return { id: `${repository}@${sha}`, repository, sha, timestamp, subject: `Change ${index}`, contributor: "Contributor A", email: "a@example.invalid", additions: 10, deletions: 2, files: [{ path: "source.txt", additions: 10, deletions: 2 }], url: `https://github.com/${repository}/commit/${sha}` };
 }
 function pr(repository: string, number: number, state: "open" | "merged", timestamp: string): PullRequestRecord {
-  return { id: `${repository}#${number}`, repository, number, title: `Pull request ${number}`, url: `https://github.com/${repository}/pull/${number}`, author: "fixture-user", state, draft: false, createdAt: "2026-08-01T00:00:00.000Z", updatedAt: timestamp, mergedAt: state === "merged" ? timestamp : null, baseBranch: "main", headSha: number.toString(16).padStart(40, "0") };
+  return { id: `${repository}#${number}`, repository, number, title: `Pull request ${number}`, url: `https://github.com/${repository}/pull/${number}`, author: "fixture-user", state, draft: false, createdAt: "2026-08-01T00:00:00.000Z", updatedAt: timestamp, mergedAt: state === "merged" ? timestamp : null, baseBranch: "main", headSha: number.toString(16).padStart(40, "0"), review: { decision: "none", requestedReviewers: [], requestedTeams: [], assignees: [], reviewRequestsComplete: true, assigneesComplete: true } };
 }
 function fixtures() {
   let records = repos.flatMap((repo, repoIndex) => Array.from({ length: 28 }, (_, day) => commit(repo.id, repoIndex * 100 + day, new Date(NOW.getTime() - (day + 0.5) * DAY).toISOString())));
@@ -48,7 +48,7 @@ function fixtures() {
     collectGitHub: async (repositories: ConfiguredRepository[], options: GitHubCollectionOptions): Promise<GitHubCollectionResult> => {
       calls.github += 1;
       options.onProgress?.({ completedRepositories: failure === "auth" ? 0 : repositories.length, totalRepositories: repositories.length, requests: failure === "auth" ? 1 : repositories.length * 2 + 1 });
-      return { account: failure === "auth" ? null : { id: "7", login: "fixture-user" }, repositories: repositories.map(repo => ({ id: repo.id, openComplete: failure === null, mergedComplete: failure === null, accessDenied: failure === "denied", error: failure ? "Access could not be verified." : null })), pullRequests: failure ? [] : pullRequests.filter(pr => repositories.some(repo => repo.id === pr.repository)), error: failure === "auth" ? "Authentication is unavailable." : null };
+      return { account: failure === "auth" ? null : { id: "7", login: "fixture-user" }, repositories: repositories.map(repo => ({ id: repo.id, openComplete: failure === null, mergedComplete: failure === null, reviewComplete: failure === null && pullRequests.filter(pr => pr.repository === repo.id).every(pr => pr.review && pr.review.decision !== "unknown" && pr.review.reviewRequestsComplete && pr.review.assigneesComplete), accessDenied: failure === "denied", error: failure ? "Access could not be verified." : null })), pullRequests: failure ? [] : pullRequests.filter(pr => repositories.some(repo => repo.id === pr.repository)), error: failure === "auth" ? "Authentication is unavailable." : null };
     },
   };
   return { dependencies, calls, setRecords: (value: ActivityRecord[]) => { records = value; }, setPRs: (value: PullRequestRecord[]) => { pullRequests = value; }, setFailure: (value: typeof failure) => { failure = value; }, delayGit: (value: () => Promise<void>) => { beforeGit = value; } };
@@ -668,4 +668,34 @@ test("cancelled and abandoned refreshes expose terminal progress without replaci
   assert.equal(cancelled.collectedAt, board.collectedAt);
   assert.equal(cancelled.totals.commits, board.totals.commits);
   assert.equal(cancelled.totals.openPRs, 0);
+});
+
+test("review evidence remains exact while missing metadata keeps review coverage incomplete", async t => {
+  const { store, data } = await installation(t);
+  const request = pr(repos[0].id, 1, "open", "2026-11-16T10:00:00.000Z");
+  request.review = { decision: "review_required", requestedReviewers: ["fixture-user"], requestedTeams: ["example/reviewers"], assignees: ["fixture-owner"], reviewRequestsComplete: true, assigneesComplete: true };
+  data.setPRs([request]);
+  await store.configure([repos[0].path], false, 0);
+  await store.refresh();
+  const board = await store.open();
+  const known = await store.evidence(board.boardId, board.snapshotId, undefined, undefined, { kind: "pull_requests", pullRequestState: "open" });
+  assert.deepEqual(known.pullRequests[0].review, request.review);
+  assert.equal(board.coverage.repositories[0].reviewComplete, true);
+  assert.equal(board.coverage.complete, true);
+  data.setPRs([{ ...request, review: undefined }]);
+  await store.refresh();
+  const missing = await store.read(board.boardId);
+  assert.equal(missing.coverage.repositories[0].openPRsComplete, true);
+  assert.equal(missing.coverage.repositories[0].mergedPRsComplete, true);
+  assert.equal(missing.coverage.repositories[0].reviewComplete, false);
+  assert.equal(missing.coverage.complete, false);
+  assert.equal(missing.totals.openPRs, 1);
+  const unknown = await store.evidence(missing.boardId, missing.snapshotId, undefined, undefined, { kind: "pull_requests" });
+  assert.equal(unknown.pullRequests[0].review, undefined);
+  data.setFailure("auth");
+  await store.refresh();
+  const denied = await store.read(board.boardId);
+  assert.equal(denied.account, null);
+  assert.equal(denied.coverage.repositories[0].reviewComplete, false);
+  assert.deepEqual((await store.evidence(denied.boardId, denied.snapshotId, undefined, undefined, { kind: "pull_requests" })).pullRequests, []);
 });

@@ -3,7 +3,7 @@
 Explore real Git history and GitHub pull requests in focused views. Activity
 opens with a chart and a small summary. Select an interval to reveal its
 supporting commits. People groups Git contributors and GitHub authors in
-separate lists. Pull requests has Open and Merged lists, sorting, and checkbox
+separate lists. Pull requests has Open and Merged tables, sorting, and checkbox
 selection. Discuss evidence or request reviews for selected PRs with the agent.
 
 ## Integration branch
@@ -113,12 +113,38 @@ refresh to verify GitHub access before displaying cached PR evidence.
 commit chart, and a compact summary. Commit evidence is requested and shown
 after selecting an interval. Close its detail pane to return to the overview.
 
-**Pull requests** has Open and Merged tabs with their own paged lists. Open
+**Pull requests** has Open and Merged tabs with their own paged tables. Open
 includes older drafts as of collection time; Merged uses the selected date
 range. Sort by update time, creation time, number, title, author, or repository,
 in either direction. Sorting applies to the full collected list before paging.
 Select a row to inspect that exact PR and explain it with the agent.
 Activity's selected interval does not filter this view.
+
+The table includes the PR and repository, author, open/merged and draft state,
+GitHub review decision, whether review is pending, your relationship to the PR,
+and update time. Sortable column headers use the same full-inventory sorting
+as the sort controls. Select a title to inspect details below the table;
+checkboxes keep their independent batch selection.
+
+Review decisions are GitHub's Approved, Changes requested, or Review required
+states. A returned null decision is **No decision**; missing or unavailable
+metadata is **Unknown**. Pending user or team requests count as needing review
+for a ready, open PR. Drafts show Draft, merged PRs have no pending-review
+indicator, and changes requested without a new request indicate author action.
+No decision with a complete empty request list means No request. These states
+describe the collection time. See the [GitHub review API reference](https://docs.github.com/en/graphql/reference/pulls#pullrequestreviewdecision).
+
+**Yours** distinguishes PRs you authored, PRs assigned to you, and direct review
+requests for the verified GitHub account. Team requests are shown separately;
+BigBoard does not infer your team membership. Missing or truncated reviewer and
+assignee lists remain marked incomplete. Existing collections lack the new
+metadata until the next explicit refresh.
+
+Refresh adds batched read-only GraphQL queries for review decisions, requests,
+and assignees, with up to 50 PRs per query and three concurrent requests. These
+share the existing request, body-size, and time budgets. Changed PR heads,
+unavailable fields, or exhausted limits remain unknown or incomplete. Review
+coverage is separate from complete Open/Merged inventory coverage.
 
 Use checkboxes to select several PRs. **Select loaded** adds the currently
 loaded rows; it does not select unseen pages. Select up to 100 PRs per batch;

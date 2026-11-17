@@ -41,13 +41,29 @@ function harness(route: (url: URL, init: RequestInit) => Response | Promise<Resp
     request: async (url, init) => {
       calls.push(url);
       assert.equal(url.origin, "https://api.github.com");
-      assert.equal(init.method, "GET");
+      assert.equal(init.method, url.pathname === "/graphql" ? "POST" : "GET");
       assert.equal(init.redirect, "error");
       assert.equal(new Headers(init.headers).get("Authorization"), "Bearer synthetic-credential");
       return url.pathname === "/user" ? response(viewer) : route(url, init);
     }, ...limits,
   });
   return { calls, collect };
+}
+
+function reviewPull(number: number, overrides: Record<string, unknown> = {}) {
+  return pull(number, { node_id: `${repository.id}#${number}`, requested_reviewers: [], requested_teams: [], assignees: [], ...overrides });
+}
+
+function reviewNode(number: number, overrides: Record<string, unknown> = {}) {
+  return { __typename: "PullRequest", id: `${repository.id}#${number}`, number, headRefOid: "a".repeat(40), repository: { nameWithOwner: repository.id }, reviewDecision: "APPROVED", reviewRequests: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] }, assignees: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] }, ...overrides };
+}
+
+function graphIds(init: RequestInit): string[] {
+  const body = JSON.parse(String(init.body));
+  assert.match(body.query, /^query BigBoardReviews/);
+  assert.ok(!body.query.includes("mutation"));
+  assert.ok(Array.isArray(body.variables.ids) && body.variables.ids.length <= 50);
+  return body.variables.ids;
 }
 
 test("GitHub collection confirms the account and separates current open work from merge-date history", async () => {
@@ -70,7 +86,7 @@ test("GitHub collection confirms the account and separates current open work fro
   assert.equal(result.pullRequests[1].state, "merged");
   assert.equal(result.pullRequests[1].mergedAt, interval.since);
   assert.equal(result.pullRequests[1].url, "https://github.com/example/alpha/pull/2");
-  assert.deepEqual(result.repositories, [{ id: repository.id, openComplete: true, mergedComplete: true, accessDenied: false, error: null }]);
+  assert.deepEqual(result.repositories, [{ id: repository.id, openComplete: true, mergedComplete: true, reviewComplete: false, accessDenied: false, error: null }]);
 });
 
 test("GitHub pagination follows local page numbers and stops the closed inventory at the update boundary", async () => {
@@ -389,4 +405,176 @@ test("cancellation releases active workers without starting queued repositories"
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(calls.length, 4);
   assert.deepEqual(result.pullRequests, []);
+});
+
+test("review metadata is batched with bounded concurrency and repository progress waits for enrichment", async () => {
+  const gate = deferred();
+  let graphRequests = 0;
+  let active = 0;
+  let maximumActive = 0;
+  const progress: GitHubCollectionProgress[] = [];
+  const { calls, collect } = harness(async (url, init) => {
+    if (url.pathname === "/graphql") {
+      graphRequests += 1;
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      const ids = graphIds(init);
+      await gate.promise;
+      active -= 1;
+      return response({ data: { nodes: ids.map(id => reviewNode(Number(id.split("#")[1]))) } });
+    }
+    if (url.searchParams.get("state") === "closed") return response([]);
+    const page = Number(url.searchParams.get("page"));
+    return response(Array.from({ length: page === 1 ? 50 : 11 }, (_, index) => reviewPull((page - 1) * 50 + index + 1)), 200, page === 1 ? { link: '<https://api.github.com/next>; rel="next"' } : {});
+  });
+  const pending = collect([repository], { ...interval, onProgress: value => { progress.push(value); } });
+  await waitFor(() => graphRequests === 2);
+  assert.equal(progress.at(-1)?.completedRepositories, 0);
+  assert.equal(maximumActive, 2);
+  gate.resolve();
+  const result = await pending;
+  assert.equal(calls.length, 6);
+  assert.equal(graphRequests, 2);
+  assert.equal(result.pullRequests.length, 61);
+  assert.deepEqual(result.pullRequests.map(row => row.number), Array.from({ length: 61 }, (_, index) => index + 1));
+  assert.ok(result.pullRequests.every(row => row.review?.decision === "approved" && row.review.reviewRequestsComplete && row.review.assigneesComplete));
+  assert.equal(result.repositories[0].reviewComplete, true);
+  assert.equal(progress.at(-1)?.completedRepositories, 1);
+});
+
+test("review decisions, requested users and teams, assignments, and incomplete connections stay distinct", async () => {
+  const { collect } = harness((url, init) => {
+    if (url.pathname === "/graphql") return response({ data: { nodes: graphIds(init).map(id => {
+      const number = Number(id.split("#")[1]);
+      if (number === 1) return reviewNode(number, { reviewDecision: "REVIEW_REQUIRED", reviewRequests: { totalCount: 2, pageInfo: { hasNextPage: false }, nodes: [{ requestedReviewer: { __typename: "User", login: "fixture-reviewer" } }, { requestedReviewer: { __typename: "Team", slug: "maintainers", organization: { login: "example" } } }] }, assignees: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [{ login: "fixture-owner" }] } });
+      if (number === 2) return reviewNode(number, { reviewDecision: "CHANGES_REQUESTED" });
+      if (number === 3) return reviewNode(number, { reviewDecision: null });
+      if (number === 4) return reviewNode(number, { reviewDecision: "UNSUPPORTED" });
+      if (number === 5) return reviewNode(number, { reviewRequests: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [{ requestedReviewer: { __typename: "Mannequin", login: "fixture-user" } }] } });
+      if (number === 6) return reviewNode(number, { reviewRequests: { totalCount: 51, pageInfo: { hasNextPage: true }, nodes: Array.from({ length: 50 }, (_, index) => ({ requestedReviewer: { __typename: "User", login: `reviewer-${index}` } })) } });
+      return reviewNode(number, { assignees: { totalCount: 2, pageInfo: { hasNextPage: true }, nodes: [{ login: "fixture-owner" }] } });
+    }) } });
+    return response(url.searchParams.get("state") === "open" ? Array.from({ length: 7 }, (_, index) => reviewPull(index + 1)) : []);
+  });
+  const result = await collect([repository], interval);
+  const reviews = result.pullRequests.map(row => row.review!);
+  assert.deepEqual(reviews.map(row => row.decision), ["review_required", "changes_requested", "none", "unknown", "approved", "approved", "approved"]);
+  assert.deepEqual(reviews[0].requestedReviewers, ["fixture-reviewer"]);
+  assert.deepEqual(reviews[0].requestedTeams, ["example/maintainers"]);
+  assert.deepEqual(reviews[0].assignees, ["fixture-owner"]);
+  assert.equal(reviews[0].reviewRequestsComplete, true);
+  assert.deepEqual(reviews[4].requestedReviewers, []);
+  assert.equal(reviews[4].reviewRequestsComplete, false);
+  assert.equal(reviews[5].requestedReviewers.length, 50);
+  assert.equal(reviews[5].reviewRequestsComplete, false);
+  assert.equal(reviews[6].assigneesComplete, false);
+  assert.equal(result.repositories[0].openComplete, true);
+  assert.equal(result.repositories[0].reviewComplete, false);
+  assert.match(result.repositories[0].error!, /Review metadata is incomplete/);
+});
+
+test("REST review request fallback remains explicit when enrichment is unavailable", async () => {
+  const { collect } = harness(url => url.pathname === "/graphql" ? response({}, 503) : response(url.searchParams.get("state") === "open" ? [reviewPull(1, { requested_reviewers: [{ login: "fixture-reviewer" }], requested_teams: [{ slug: "maintainers" }], assignees: [{ login: "fixture-owner" }] })] : []));
+  const result = await collect([repository], interval);
+  assert.deepEqual(result.pullRequests[0].review, { decision: "unknown", requestedReviewers: ["fixture-reviewer"], requestedTeams: ["example/maintainers"], assignees: ["fixture-owner"], reviewRequestsComplete: true, assigneesComplete: true });
+  assert.equal(result.repositories[0].reviewComplete, false);
+  assert.equal(result.repositories[0].openComplete, true);
+});
+
+test("changed heads and mismatched GraphQL identities never attach review decisions", async () => {
+  for (const changed of [{ headRefOid: "b".repeat(40) }, { id: "different-id" }, { number: 99 }, { repository: { nameWithOwner: other.id } }, { __typename: "Issue" }]) {
+    const { collect } = harness(url => url.pathname === "/graphql" ? response({ data: { nodes: [reviewNode(1, changed)] } }) : response(url.searchParams.get("state") === "open" ? [reviewPull(1)] : []));
+    const result = await collect([repository], interval);
+    assert.equal(result.pullRequests.length, 1);
+    assert.equal(result.pullRequests[0].review?.decision, "unknown");
+    assert.equal(result.pullRequests[0].review?.reviewRequestsComplete, false);
+    assert.equal(result.repositories[0].reviewComplete, false);
+  }
+});
+
+test("GraphQL node denial removes the affected repository while field errors retain unknown review metadata", async () => {
+  for (const kind of ["FORBIDDEN", "NOT_FOUND"]) {
+    const { collect } = harness((url, init) => {
+      if (url.pathname === "/graphql") return response({ data: { nodes: graphIds(init).map(id => id.startsWith(other.id) ? null : reviewNode(1)) }, errors: [{ type: kind, path: ["nodes", 1], message: "synthetic-private-diagnostic" }] });
+      return response(url.searchParams.get("state") === "open" ? [reviewPull(1, { node_id: `${url.pathname.includes("/beta/") ? other.id : repository.id}#1` })] : []);
+    });
+    const result = await collect([repository, other], interval);
+    assert.deepEqual(result.pullRequests.map(row => row.repository), [repository.id]);
+    assert.equal(result.repositories[1].accessDenied, true);
+    assert.equal(result.repositories[1].reviewComplete, false);
+    assert.ok(!JSON.stringify(result).includes("synthetic-private-diagnostic"));
+  }
+  const { collect } = harness(url => url.pathname === "/graphql" ? response({ data: { nodes: [reviewNode(1, { reviewDecision: null })] }, errors: [{ type: "FORBIDDEN", path: ["nodes", 0, "reviewDecision"], message: "synthetic-private-diagnostic" }] }) : response(url.searchParams.get("state") === "open" ? [reviewPull(1)] : []));
+  const partial = await collect([repository], interval);
+  assert.equal(partial.pullRequests.length, 1);
+  assert.equal(partial.pullRequests[0].review?.decision, "unknown");
+  assert.equal(partial.repositories[0].accessDenied, false);
+  assert.ok(!JSON.stringify(partial).includes("synthetic-private-diagnostic"));
+});
+
+test("an authentication failure during batched review enrichment purges inventory and ignores late responses", async () => {
+  for (const mode of ["http", "graphql"]) {
+    const denied = deferred();
+    const late = deferred();
+    let graphRequests = 0;
+    let lateReturned = false;
+    const { calls, collect } = harness(async (url, init) => {
+      if (url.pathname === "/graphql") {
+        graphRequests += 1;
+        const ids = graphIds(init);
+        const first = Number(ids[0].split("#")[1]);
+        if (first === 51) {
+          await denied.promise;
+          return mode === "http" ? response({}, 401) : response({ errors: [{ type: "UNAUTHORIZED", message: "synthetic-private-diagnostic" }] });
+        }
+        if (first === 101) { await late.promise; lateReturned = true; }
+        return response({ data: { nodes: ids.map(id => reviewNode(Number(id.split("#")[1]))) } });
+      }
+      if (url.searchParams.get("state") === "closed") return response([]);
+      const page = Number(url.searchParams.get("page"));
+      return response(Array.from({ length: page < 3 ? 50 : 1 }, (_, index) => reviewPull((page - 1) * 50 + index + 1)), 200, page < 3 ? { link: '<https://api.github.com/next>; rel="next"' } : {});
+    });
+    const pending = collect([repository], interval);
+    await waitFor(() => graphRequests === 3);
+    denied.resolve();
+    const result = await pending;
+    assert.equal(result.account, null);
+    assert.deepEqual(result.pullRequests, []);
+    assert.equal(result.repositories[0].reviewComplete, false);
+    assert.equal(lateReturned, false);
+    assert.match(result.error!, /authentication/);
+    assert.ok(!JSON.stringify(result).includes("synthetic-private-diagnostic"));
+    const count = calls.length;
+    late.resolve();
+    await waitFor(() => lateReturned);
+    assert.equal(calls.length, count);
+    assert.deepEqual(result.pullRequests, []);
+  }
+});
+
+test("review enrichment shares request budgets and handles cancellation without claiming metadata completeness", async () => {
+  const budgeted = harness(url => response(url.searchParams.get("state") === "open" ? [reviewPull(1)] : []), { maximumRequests: 3 });
+  const exhausted = await budgeted.collect([repository], interval);
+  assert.equal(budgeted.calls.length, 3);
+  assert.equal(exhausted.pullRequests.length, 1);
+  assert.equal(exhausted.pullRequests[0].review?.decision, "unknown");
+  assert.equal(exhausted.repositories[0].openComplete, true);
+  assert.equal(exhausted.repositories[0].reviewComplete, false);
+  assert.match(exhausted.error!, /request budget/);
+  const entered = deferred(), gate = deferred();
+  const controller = new AbortController();
+  const { collect } = harness(async (url, init) => {
+    if (url.pathname === "/graphql") { entered.resolve(); await gate.promise; return response({ data: { nodes: graphIds(init).map(() => reviewNode(1)) } }); }
+    return response(url.searchParams.get("state") === "open" ? [reviewPull(1)] : []);
+  });
+  const pending = collect([repository], { ...interval, signal: controller.signal });
+  await entered.promise;
+  controller.abort();
+  const cancelled = await pending;
+  assert.match(cancelled.error!, /cancelled/);
+  assert.equal(cancelled.repositories[0].reviewComplete, false);
+  assert.equal(cancelled.pullRequests[0].review?.decision, "unknown");
+  gate.resolve();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(cancelled.pullRequests[0].review?.decision, "unknown");
 });

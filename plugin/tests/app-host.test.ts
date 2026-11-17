@@ -43,6 +43,31 @@ function choose(document: Document, label: string, value: string): void {
   found.dispatchEvent(new document.defaultView!.Event("change", { bubbles: true }));
 }
 
+function review(decision: NonNullable<PullRequestRecord["review"]>["decision"], fields: Partial<NonNullable<PullRequestRecord["review"]>> = {}): NonNullable<PullRequestRecord["review"]> {
+  return { decision, requestedReviewers: [], requestedTeams: [], assignees: [], reviewRequestsComplete: true, assigneesComplete: true, ...fields };
+}
+
+function prTable(document: Document): HTMLTableElement {
+  const found = document.querySelector<HTMLTableElement>('table[aria-label="Pull request records"]');
+  assert.ok(found, "Missing pull request table");
+  return found;
+}
+
+function prRow(document: Document, id: string): HTMLTableRowElement {
+  const found = [...prTable(document).querySelectorAll<HTMLButtonElement>("[data-pr-id]")].find(item => item.dataset.prId === id)?.closest("tr");
+  assert.ok(found, `Missing table row ${id}`);
+  return found;
+}
+
+function prCell(document: Document, id: string, column: string): HTMLTableCellElement {
+  const headers = [...prTable(document).querySelectorAll<HTMLTableCellElement>('thead th[scope="col"]')];
+  const index = headers.findIndex(header => header.textContent?.replace(/[↑↓↕]/g, "").trim() === column);
+  assert.ok(index >= 0, `Missing ${column} column`);
+  const found = prRow(document, id).cells[index];
+  assert.ok(found, `Missing ${column} cell for ${id}`);
+  return found;
+}
+
 function refreshProgress(git: number, github: number, status: RefreshProgress["status"] = "running", message = "Collecting repository evidence."): RefreshProgress {
   return {
     id: "synthetic-refresh", status, startedAt: new Date(END).toISOString(), updatedAt: new Date(END + (git + github) * 1000).toISOString(),
@@ -70,6 +95,7 @@ class Workspace {
   generation = 1;
   configured = true;
   collected = true;
+  account: BoardSnapshot["account"] = { id: "1", login: "sample-user" };
   refresh: RefreshProgress | null = null;
   refreshOperation: (() => Promise<void>) | null = null;
   refreshFailure: string | null = null;
@@ -91,11 +117,11 @@ class Workspace {
     url: `https://github.com/sample/${index % 2 ? "web" : "api"}/commit/${index.toString(16).padStart(40, "0")}`,
   }));
   readonly prs: PullRequestRecord[] = [
-    { id: "sample/api#2", repository: "sample/api", number: 2, title: "Improve activity loading", url: "https://github.com/sample/api/pull/2", author: "contributor-a", state: "merged", draft: false, createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-15T13:00:00Z", mergedAt: "2026-11-15T13:00:00Z", baseBranch: "main", headSha: "a".repeat(40) },
-    { id: "sample/web#9", repository: "sample/web", number: 9, title: "An older draft still open", url: "https://github.com/sample/web/pull/9", author: "contributor-b", state: "open", draft: true, createdAt: "2026-05-01T09:00:00Z", updatedAt: "2026-11-16T10:00:00Z", mergedAt: null, baseBranch: "main", headSha: "b".repeat(40) },
-    { id: "sample/api#10", repository: "sample/api", number: 10, title: "Refine API loading", url: "https://github.com/sample/api/pull/10", author: "contributor-a", state: "open", draft: false, createdAt: "2026-11-10T09:00:00Z", updatedAt: "2026-11-16T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "c".repeat(40) },
-    { id: "sample/web#11", repository: "sample/web", number: 11, title: "Improve keyboard navigation", url: "https://github.com/sample/web/pull/11", author: "contributor-b", state: "open", draft: false, createdAt: "2026-11-12T09:00:00Z", updatedAt: "2026-11-14T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "d".repeat(40) },
-    { id: "sample/api#12", repository: "sample/api", number: 12, title: "Add retry coverage", url: "https://github.com/sample/api/pull/12", author: "contributor-a", state: "open", draft: false, createdAt: "2026-11-12T09:00:00Z", updatedAt: "2026-11-13T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "e".repeat(40) },
+    { id: "sample/api#2", repository: "sample/api", number: 2, title: "Improve activity loading", url: "https://github.com/sample/api/pull/2", author: "contributor-a", state: "merged", draft: false, createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-15T13:00:00Z", mergedAt: "2026-11-15T13:00:00Z", baseBranch: "main", headSha: "a".repeat(40), review: review("approved") },
+    { id: "sample/web#9", repository: "sample/web", number: 9, title: "An older draft still open", url: "https://github.com/sample/web/pull/9", author: "contributor-b", state: "open", draft: true, createdAt: "2026-05-01T09:00:00Z", updatedAt: "2026-11-16T10:00:00Z", mergedAt: null, baseBranch: "main", headSha: "b".repeat(40), review: review("review_required", { requestedTeams: ["sample/reviewers"] }) },
+    { id: "sample/api#10", repository: "sample/api", number: 10, title: "Refine API loading", url: "https://github.com/sample/api/pull/10", author: "contributor-a", state: "open", draft: false, createdAt: "2026-11-10T09:00:00Z", updatedAt: "2026-11-16T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "c".repeat(40), review: review("review_required", { requestedReviewers: ["sample-user"] }) },
+    { id: "sample/web#11", repository: "sample/web", number: 11, title: "Improve keyboard navigation", url: "https://github.com/sample/web/pull/11", author: "contributor-b", state: "open", draft: false, createdAt: "2026-11-12T09:00:00Z", updatedAt: "2026-11-14T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "d".repeat(40), review: review("changes_requested") },
+    { id: "sample/api#12", repository: "sample/api", number: 12, title: "Add retry coverage", url: "https://github.com/sample/api/pull/12", author: "contributor-a", state: "open", draft: false, createdAt: "2026-11-12T09:00:00Z", updatedAt: "2026-11-13T11:00:00Z", mergedAt: null, baseBranch: "main", headSha: "e".repeat(40), review: review("none", { assignees: ["sample-user"] }) },
     { id: "sample/web#13", repository: "sample/web", number: 13, title: "Update source status", url: "https://github.com/sample/web/pull/13", author: "contributor-b", state: "merged", draft: false, createdAt: "2026-11-11T09:00:00Z", updatedAt: "2026-11-13T15:00:00Z", mergedAt: "2026-11-13T15:00:00Z", baseBranch: "main", headSha: "f".repeat(40) },
     { id: "sample/api#1", repository: "sample/api", number: 1, title: "An older merged change", url: "https://github.com/sample/api/pull/1", author: "contributor-a", state: "merged", draft: false, createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-25T13:00:00Z", mergedAt: "2026-10-25T13:00:00Z", baseBranch: "main", headSha: "1".repeat(40) },
   ];
@@ -133,7 +159,7 @@ class Workspace {
       scope: { since: new Date(since).toISOString(), until: new Date(END).toISOString(), timezone: "UTC" },
       coverage: { source: "git+github", complete: false, note: this.collected ? "Some line evidence is unavailable. Git remote-tracking refs were read without fetching." : "Refresh sources to collect evidence.", repositories: this.configured ? ["sample/api", "sample/web"].map(repository => ({ repository, revision: "a".repeat(40), ref: "refs/remotes/origin/main", shallow: false, partial: true, historyComplete: true, linesComplete: false, openPRsComplete: true, mergedPRsComplete: true, errors: ["Line evidence is incomplete."] })) : [] },
       configuration: { revision: 1, repositories: this.configured ? ["sample/api", "sample/web"] : [], needsRefresh: !this.collected },
-      account: { id: "1", login: "sample-user" }, collectedAt: this.collected ? new Date(END + this.generation * 1000).toISOString() : null, buckets,
+      account: this.account, collectedAt: this.collected ? new Date(END + this.generation * 1000).toISOString() : null, buckets,
       totals: { commits: current.length, additions: buckets.reduce((sum, item) => sum + item.additions, 0), deletions: buckets.reduce((sum, item) => sum + item.deletions, 0), unknownLineCommits: buckets.reduce((sum, item) => sum + item.unknownLineCommits, 0), previousCommits: query.compare ? previous.length : null, mergedPRs: prs.filter(pr => pr.mergedAt && Date.parse(pr.mergedAt) >= since && Date.parse(pr.mergedAt) < END).length, openPRs: prs.filter(pr => pr.state === "open").length },
     };
   }
@@ -342,7 +368,7 @@ test("Pull requests has separate Open and Merged inventories and exact selected 
   dailyButtons(first.document)[0].click();
   await waitFor(() => Boolean(first.selectedContext()?.bucketStart), "retained Activity selection");
   button(first.document, "Pull requests").click();
-  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] button').length === 3, "Open PR inventory");
+  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 3, "Open PR inventory");
   assert.equal(first.document.querySelector('[aria-label="Daily commits"]'), null);
   assert.equal(first.document.querySelector('[aria-label="Activity evidence"]'), null);
   assert.equal(first.selectedContext().view, "pullRequests");
@@ -369,7 +395,7 @@ test("Pull requests has separate Open and Merged inventories and exact selected 
   button(first.document, "Close pull request details").click();
   await waitFor(() => first.document.querySelector('[aria-label="Pull request details"]') === null, "dismissed PR detail");
   button(first.document, "Load more pull requests").click();
-  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] button').length === 4, "Open PR next page");
+  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 4, "Open PR next page");
   button(first.document, "Merged").click();
   await waitFor(() => first.document.querySelector('[aria-label="Pull request records"]')?.textContent?.includes("Improve activity loading") ?? false, "Merged PR inventory");
   assert.equal(first.selectedContext().pullRequestState, "merged");
@@ -400,14 +426,14 @@ test("late Activity evidence cannot replace a newer PR view or reuse its cursor"
   dailyButtons(first.document)[0].click();
   await waitFor(() => first.calls.some(call => call.name === "query_evidence" && call.arguments?.kind === "activity"), "delayed Activity query");
   button(first.document, "Pull requests").click();
-  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] button').length === 3, "newer PR inventory");
+  await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 3, "newer PR inventory");
   release();
   await waitFor(() => workspace.completedEvidence.some(args => args.kind === "activity"), "late Activity completion");
   assert.equal(first.document.querySelector('[aria-label="Activity evidence"]'), null);
   assert.equal(first.document.querySelector('[aria-label="Commit records"]'), null);
-  assert.equal(first.document.querySelectorAll('[aria-label="Pull request records"] button').length, 3);
+  assert.equal(first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length, 3);
   button(first.document, "Merged").click();
-  await waitFor(() => first.selectedContext()?.pullRequestState === "merged" && first.document.querySelectorAll('[aria-label="Pull request records"] button').length === 2, "Merged state after late reply");
+  await waitFor(() => first.selectedContext()?.pullRequestState === "merged" && first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 2, "Merged state after late reply");
   const mergedCalls = first.calls.filter(call => call.name === "query_evidence" && call.arguments?.pull_request_state === "merged");
   assert.ok(mergedCalls.length > 0);
   assert.ok(mergedCalls.every(call => call.arguments?.cursor === undefined));
@@ -841,5 +867,115 @@ test("a delayed pre-refresh board read cannot replace the completed snapshot or 
   assert.equal(checkbox(first.document, "Select sample/api#10").checked, true);
   assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
   assert.equal(first.calls.filter(call => call.name === "query_evidence").length, evidenceCalls);
+  assert.deepEqual(first.errors, []);
+});
+
+test("Pull requests renders a semantic table with review decisions, readiness, drafts, and merged state", async t => {
+  const workspace = new Workspace();
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelectorAll('table[aria-label="Pull request records"] tbody tr').length === 3, "PR table first page");
+  const table = prTable(first.document);
+  assert.deepEqual([...table.querySelectorAll('thead th[scope="col"]')].map(header => header.textContent?.replace(/[↑↓↕]/g, "").trim()), ["Select", "PR", "Author", "State", "Review", "Needs review", "Yours", "Updated"]);
+  for (const label of ["Sort by PR", "Sort by Author", "Sort by Updated"]) assert.ok(button(first.document, label));
+  assert.ok(prCell(first.document, "sample/api#10", "PR").textContent?.includes("sample/api"));
+  assert.equal(prCell(first.document, "sample/api#10", "Author").textContent?.trim(), "contributor-a");
+  assert.ok(prCell(first.document, "sample/api#10", "Review").textContent?.includes("Review required"));
+  assert.equal(prCell(first.document, "sample/api#10", "Needs review").textContent?.trim(), "Yes");
+  assert.ok(prCell(first.document, "sample/web#9", "State").textContent?.includes("Draft"));
+  assert.equal(prCell(first.document, "sample/web#9", "Needs review").textContent?.trim(), "Draft");
+  assert.ok(prCell(first.document, "sample/web#11", "Review").textContent?.includes("Changes requested"));
+  assert.equal(prCell(first.document, "sample/web#11", "Needs review").textContent?.trim(), "Author action");
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => prTable(first.document).tBodies[0].rows.length === 4, "PR table next page");
+  assert.ok(prCell(first.document, "sample/api#12", "Review").textContent?.includes("No decision"));
+  assert.equal(prCell(first.document, "sample/api#12", "Needs review").textContent?.trim(), "No request");
+  button(first.document, "Merged").click();
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#2"]') !== null, "merged PR table");
+  assert.ok(prCell(first.document, "sample/api#2", "Review").textContent?.includes("Approved"));
+  assert.ok(prCell(first.document, "sample/api#2", "State").textContent?.includes("Merged"));
+  assert.equal(prCell(first.document, "sample/api#2", "Needs review").textContent?.trim(), "—");
+  assert.ok(prCell(first.document, "sample/web#13", "Review").textContent?.includes("Unknown"));
+  assert.deepEqual(first.errors, []);
+});
+
+test("PR ownership distinguishes authorship, assignment, and direct review requests without inferring team membership", async t => {
+  const workspace = new Workspace();
+  workspace.prs.find(pr => pr.id === "sample/api#10")!.review = review("review_required", { requestedReviewers: ["SAMPLE-USER"], requestedTeams: ["sample/reviewers"] });
+  workspace.prs.find(pr => pr.id === "sample/web#11")!.author = "SAMPLE-USER";
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#10"]') !== null, "owned PR table");
+  assert.ok(prCell(first.document, "sample/api#10", "Yours").textContent?.includes("Your review requested"));
+  assert.ok(!prCell(first.document, "sample/api#10", "Yours").textContent?.includes("You authored"));
+  assert.ok(prCell(first.document, "sample/web#11", "Yours").textContent?.includes("You authored"));
+  assert.equal(prCell(first.document, "sample/web#9", "Yours").textContent?.trim(), "—");
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#12"]') !== null, "assigned PR on next page");
+  assert.ok(prCell(first.document, "sample/api#12", "Yours").textContent?.includes("Assigned to you"));
+  button(first.document, "Select pull request #10: Refine API loading").click();
+  await waitFor(() => first.document.querySelector('[aria-label="Pull request details"]') !== null, "review metadata inspector");
+  const details = first.document.querySelector('[aria-label="Pull request details"]')!;
+  assert.ok(details.textContent?.includes("SAMPLE-USER"));
+  assert.ok(details.textContent?.includes("sample/reviewers"));
+  assert.ok(details.textContent?.includes("Review required"));
+  assert.deepEqual(first.errors, []);
+});
+
+test("legacy and incomplete PR review data stay unknown and viewer highlighting requires an authenticated identity", async t => {
+  const workspace = new Workspace();
+  workspace.prs.find(pr => pr.id === "sample/api#10")!.review = undefined;
+  workspace.prs.find(pr => pr.id === "sample/web#11")!.review = review("unknown", { reviewRequestsComplete: false, assigneesComplete: false });
+  workspace.prs.find(pr => pr.id === "sample/api#12")!.review = review("none", { reviewRequestsComplete: false, assigneesComplete: false });
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#10"]') !== null, "legacy review table");
+  for (const id of ["sample/api#10", "sample/web#11"]) {
+    assert.ok(prCell(first.document, id, "Review").textContent?.includes("Unknown"));
+    assert.equal(prCell(first.document, id, "Needs review").textContent?.trim(), "Unknown");
+    assert.equal(prCell(first.document, id, "Yours").textContent?.trim(), "Unknown");
+  }
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#12"]') !== null, "incomplete reviewer list");
+  assert.equal(prCell(first.document, "sample/api#12", "Needs review").textContent?.trim(), "Unknown");
+  assert.equal(prCell(first.document, "sample/api#12", "Yours").textContent?.trim(), "Unknown");
+  const unauthenticated = new Workspace();
+  unauthenticated.account = null;
+  unauthenticated.prs.find(pr => pr.id === "sample/api#10")!.author = "sample-user";
+  const second = await panel(unauthenticated, { ...unauthenticated.open(), initialView: "pullRequests" });
+  t.after(second.close);
+  await waitFor(() => second.document.querySelector('[data-pr-id="sample/api#10"]') !== null, "unknown viewer table");
+  assert.equal(prCell(second.document, "sample/api#10", "Yours").textContent?.trim(), "Unknown");
+  assert.ok(!prTable(second.document).textContent?.includes("You authored"));
+  assert.ok(!prTable(second.document).textContent?.includes("Your review requested"));
+  assert.deepEqual([...first.errors, ...second.errors], []);
+});
+
+test("table header sorting covers the inventory while selected PR review metadata stays exact", async t => {
+  const workspace = new Workspace();
+  workspace.prs.find(pr => pr.id === "sample/api#12")!.author = "zz-contributor";
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#10"]') !== null, "review selection table");
+  checkbox(first.document, "Select sample/api#10").click();
+  button(first.document, "Load more pull requests").click();
+  await waitFor(() => first.document.querySelector('[data-pr-id="sample/api#12"]') !== null, "later selectable review metadata");
+  checkbox(first.document, "Select sample/api#12").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 2, "full review records shared");
+  const selected = workspace.prs.filter(pr => ["sample/api#10", "sample/api#12"].includes(pr.id));
+  for (const pr of selected) assert.deepEqual(first.selectedContext().selectedPullRequests?.find(item => item.id === pr.id)?.review, pr.review);
+  button(first.document, "Sort by Author").click();
+  await waitFor(() => first.selectedContext()?.pullRequestSort === "author", "header author sort");
+  choose(first.document, "Sort direction", "desc");
+  await waitFor(() => first.document.querySelector<HTMLButtonElement>('table[aria-label="Pull request records"] [data-pr-id]')?.dataset.prId === "sample/api#12", "global header sort pulls later row into first page");
+  assert.ok(first.calls.some(call => call.name === "query_evidence" && call.arguments?.pull_request_sort === "author" && call.arguments?.cursor === undefined));
+  assert.equal(button(first.document, "Sort by Author").closest("th")?.getAttribute("aria-sort"), "descending");
+  assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id).sort(), selected.map(pr => pr.id).sort());
+  button(first.document, "Request code reviews").click();
+  await waitFor(() => first.messages.length === 1, "review request from table selection");
+  const message = JSON.stringify(first.messages[0].content);
+  assert.ok(message.includes("requestedReviewers"));
+  for (const pr of selected) assert.ok(message.includes(pr.url));
+  assert.ok(!message.includes("https://github.com/sample/web/pull/11"));
   assert.deepEqual(first.errors, []);
 });
