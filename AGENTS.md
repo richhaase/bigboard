@@ -30,7 +30,8 @@ does not require a compiler, dependency download, or install script.
 The plugin uses real local Git history and GitHub PR data. Source settings,
 collected evidence, and boards live separately from native data. Importing the
 native repository selection is read-only. Collection never fetches or modifies
-clones. Source refresh is explicit; viewing filters and polling read completed
+clones. Activating the Pull requests view refreshes sources automatically;
+other views use manual refresh. Viewing filters and polling read completed
 snapshots. Preserve per-repository coverage, account access invalidation, and
 snapshot-bound evidence paging. Verify protocol and rendered UI with plugin
 tests; record desktop-host interaction separately with the guide's checklist.

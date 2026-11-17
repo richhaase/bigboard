@@ -42,7 +42,7 @@ export function createBigboardServer(html: string, store: BoardStore): McpServer
     { description: "Git Activity, Pull requests, and People views", _meta: resourceMeta },
     async () => ({ contents: [{ uri: BOARD_RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html, _meta: resourceMeta }] }));
   registerAppTool(server, "open_board", {
-    title: "Open BigBoard", description: "Open a Git/GitHub board in the activity (default), pull_requests, or people view. These are views of the same board. Omit board_id for an independent board or provide an existing ID to reopen its saved filters in a chosen view. Opening and viewing never collect data. If unconfigured, use configure_sources then refresh_sources.",
+    title: "Open BigBoard", description: "Open a Git/GitHub board in the activity (default), people, or pull_requests view. These are views of the same board. Omit board_id for an independent board or provide an existing ID to reopen its saved filters in a chosen view. The rendered Pull requests view refreshes sources on activation; Activity and People read saved data. If unconfigured, use list_sources then configure_sources to select local clone paths or import native BigBoard sources.",
     inputSchema: { board_id: boardId.optional(), view: z.enum(["activity", "pull_requests", "people"]).optional() }, annotations: { ...annotations, readOnlyHint: false }, _meta: { ui: { resourceUri: BOARD_RESOURCE_URI, visibility: ["model", "app"] } },
   }, ({ board_id,view }) => result(async () => ({ ...await store.open(board_id), initialView: view === "pull_requests" ? "pullRequests" : view ?? "activity" })));
   server.registerTool("read_board", {

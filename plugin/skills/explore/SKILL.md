@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Open and discuss BigBoard Activity, People, and Pull requests views, inspect supporting evidence, discuss or review selected PRs, configure collection sources, or change viewing filters.
+description: Open and discuss BigBoard Activity, People, and Pull requests views, inspect supporting evidence, discuss or review selected PRs, or explore repository filters and comparisons.
 ---
 
 # BigBoard exploration
@@ -11,15 +11,17 @@ PRs describe different events. Merged does not establish deployed.
 
 ## Sources and freshness
 
-Call `list_sources` before changing collection settings. Use
-`configure_sources` with either explicit absolute clone `paths` or
-`import_native:true` when the user asks to reuse native BigBoard selection.
-Pass the current `expected_revision`. This replaces saved sources and clears
-collected evidence; filtering a board is a separate operation.
+Use `list_sources` to inspect the saved collection. For configuration requests,
+use the [BigBoard Configure skill](../configure/SKILL.md).
+It handles shared source selection and per-board viewing settings, including
+natural requests to change BigBoard's configuration.
 
-Call `refresh_sources` when current evidence is requested or no collection
-exists. It can take up to 150 seconds; allow sufficient tool timeout. It reads
-existing remote-tracking default branches without fetching or modifying the
+The rendered Pull requests view calls `refresh_sources` automatically when it
+becomes active, including direct opening. It reuses an in-flight refresh. Do
+not start a second refresh just to open that view. Activity and People read
+saved data; call `refresh_sources` when fresh data is requested there or no
+collection exists. It can take up to 150 seconds; allow sufficient tool timeout.
+It reads existing remote-tracking default branches without fetching or modifying the
 clones and collects GitHub open and merged PRs with GitHub CLI authentication.
 Review its coverage result before describing findings as complete. Do not
 repair authentication or modify clones as a recovery step.
@@ -31,9 +33,10 @@ GitHub repository counts. Counts describe work processed, including failures;
 inspect coverage before claiming collection is complete. Polling progress does
 not start another refresh. A stale running status expires after three minutes.
 
-After server restart, refresh explicitly to revalidate GitHub access before
-using cached PR evidence. Displayed Git activity still comes from the saved
-local scan. Collection time and scanned revisions are part of the answer.
+After server restart, a refresh must revalidate GitHub access before using
+cached PR evidence. Activating the PR view does this automatically. Displayed
+Git activity still comes from the saved local scan. Collection time and scanned
+revisions are part of the answer.
 
 ## Open, inspect, and discuss
 

@@ -52,9 +52,21 @@ Alternatively, provide absolute existing clone paths through
 and its revision. Pass that revision when changing sources. Source settings
 are shared by boards; viewing filters remain independent for each board.
 
-Use **Refresh sources**, or ask the agent to call `refresh_sources`, to collect
-28 days of history and GitHub PR evidence. Opening, polling, and filtering a
-board read the last completed collection without starting collection.
+Use the **BigBoard Configure** skill, or ask naturally: “Change BigBoard's
+configuration,” “Add this local clone to BigBoard,” or “Show two weeks on this
+board.” The skill inspects current settings, clarifies unspecified choices,
+and updates shared sources or this board's viewing filters through the
+existing tools. Explicit choices can be applied directly. Source details and
+the empty state point to this workflow; configuration stays in the agent.
+
+Activating **Pull requests**, including opening directly into that view,
+automatically refreshes the saved sources. It uses the same collection and
+progress display as **Refresh sources** and joins an already-running refresh
+instead of starting a duplicate. Leaving and returning activates another
+refresh. Ordinary sorting, filtering, selection, and polling do not collect.
+Activity and People read the completed collection until you use **Refresh
+sources** or ask the agent to call `refresh_sources`. A refresh collects 28
+days of local Git history and GitHub PR evidence.
 
 GitHub collection processes up to three repositories concurrently. Each
 repository's Open and Merged inventories and their pages stay in order; the
@@ -104,7 +116,8 @@ refresh to verify GitHub access before displaying cached PR evidence.
   visible. Incomplete count totals carry a `+` marker and are lower bounds.
   A zero with incomplete coverage does not prove no activity.
 - After a server restart, cached Git history is available; GitHub PR evidence
-  stays hidden until an explicit refresh verifies access for the new session.
+  stays hidden until a refresh verifies access for the new session. Activating
+  Pull requests starts that refresh automatically.
   Failed or denied refreshes do not keep old PRs under a different account.
 
 ## Views and supporting evidence
@@ -138,7 +151,7 @@ describe the collection time. See the [GitHub review API reference](https://docs
 requests for the verified GitHub account. Team requests are shown separately;
 BigBoard does not infer your team membership. Missing or truncated reviewer and
 assignee lists remain marked incomplete. Existing collections lack the new
-metadata until the next explicit refresh.
+metadata until the next refresh.
 
 Refresh adds batched read-only GraphQL queries for review decisions, requests,
 and assignees, with up to 50 PRs per query and three concurrent requests. These
@@ -182,7 +195,8 @@ or omit it for a new independent board. The view argument chooses the opening
 tab; subsequent reads do not reset the user's active tab.
 
 The compact source-status control exposes collection time, scanned refs,
-coverage gaps, and board/snapshot details. Refresh remains explicit. The
+coverage gaps, and board/snapshot details. Pull requests refreshes on activation;
+the Refresh sources action is also available in every view. The
 agent receives the active view and selection, including selected PR records
 and a separate inspected PR ID. Changing views does not change collected sources.
 
@@ -200,8 +214,10 @@ interval. Shortened record-ID and file lists remain explicitly marked.
 2. Select an interval. Its supporting commits should appear in a detail pane;
    **Explain selection** should send that interval's exact context to the
    agent. Close the pane and confirm the overview becomes quiet again.
-3. Switch to Pull requests. Open should include older drafts without the
-   Activity interval filter. Switch to Merged and check its date range.
+3. Switch to Pull requests and watch the automatic source refresh. Open should
+   include older drafts without the Activity interval filter. Switch to Merged
+   and check its date range. Returning from another view starts a new refresh;
+   sorting or selecting rows must not start another collection.
 4. Select a PR row. Its details and explanation should identify that exact PR
    and snapshot. Check several PRs, sort, and load more. The selected count and
    agent context must preserve that exact set. Share the selection or request
@@ -221,6 +237,9 @@ interval. Shortened record-ID and file lists remain explicitly marked.
    request completes. Check a refresh started by the agent too. Coverage gaps,
    cancellation, and interruption must show an honest final outcome. Progress
    updates alone must not reset evidence paging or checkbox selections.
+10. Check source details and an empty board for guidance to BigBoard Configure.
+    Ask the agent to change source selection or board filters, and verify the
+    skill distinguishes shared collection settings from per-board viewing.
 
 Automated checks cover actual Git repositories in temporary test folders,
 mocked GitHub responses, the packaged stdio server, saved state, and the

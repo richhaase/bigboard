@@ -1,0 +1,4 @@
+interface:
+  display_name: "BigBoard Configure"
+  short_description: "Inspect and change BigBoard configuration"
+  default_prompt: "Use $configure to help me change BigBoard configuration."

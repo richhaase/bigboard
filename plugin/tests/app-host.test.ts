@@ -276,7 +276,7 @@ class Workspace {
   }
 }
 
-async function panel(workspace: Workspace, initial: BoardSnapshot, contextSupport: ContextSupport = "structured") {
+async function panel(workspace: Workspace, initial: BoardSnapshot, contextSupport: ContextSupport = "structured", options: { waitForInitialContext?: boolean; initialResult?: Promise<void> } = {}) {
   const html = await readFile(new URL("../bundle/board.html", import.meta.url), "utf8");
   const host = new JSDOM("<!doctype html><html><body></body></html>");
   const contexts: ContextUpdate[] = [];
@@ -312,7 +312,7 @@ async function panel(workspace: Workspace, initial: BoardSnapshot, contextSuppor
     messages.push(params);
     return {};
   };
-  bridge.oninitialized = () => { initialized = true; void bridge.sendToolInput({ arguments: {} }).then(() => bridge.sendToolResult({ content: [], structuredContent: { ...initial } })).catch((error) => errors.push(String(error))); };
+  bridge.oninitialized = () => { initialized = true; void bridge.sendToolInput({ arguments: {} }).then(() => options.initialResult ? options.initialResult.then(() => bridge.sendToolResult({ content: [], structuredContent: { ...initial } })) : bridge.sendToolResult({ content: [], structuredContent: { ...initial } })).catch((error) => errors.push(String(error))); };
   await bridge.connect(transport);
   guest = new JSDOM(html, { url: "https://bigboard.test/activity", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VirtualConsole(), beforeParse(window) {
     Object.defineProperty(window, "parent", { value: host.window });
@@ -320,7 +320,7 @@ async function panel(workspace: Workspace, initial: BoardSnapshot, contextSuppor
     Object.defineProperty(window, "ResizeObserver", { value: class { observe() {} unobserve() {} disconnect() {} } });
     window.addEventListener("error", (event) => errors.push(String(event.error ?? event.message)));
   } });
-  await waitFor(() => initialized && (contexts.length > 0 || contextSupport === "none" && Boolean(guest?.window.document.querySelector('[role="alert"]'))), "MCP Apps handshake and initial context");
+  await waitFor(() => initialized && (options.waitForInitialContext === false ? Boolean(guest?.window.document.querySelector('nav[aria-label="Board views"]')) : contexts.length > 0 || contextSupport === "none" && Boolean(guest?.window.document.querySelector('[role="alert"]'))), "MCP Apps handshake and initial context");
   const document = guest.window.document;
   const selectedContext = (): SelectionContext => {
     const context = contexts.at(-1);
@@ -346,6 +346,7 @@ test("Activity stays quiet until a bucket is selected, then shares only its supp
   const first = await panel(workspace, initial);
   t.after(first.close);
   await waitFor(() => dailyButtons(first.document).length === 7, "Activity chart");
+  assert.deepEqual([...first.document.querySelectorAll('nav[aria-label="Board views"] button')].map(item => item.textContent), ["Activity", "People", "Pull requests"]);
   assert.equal(first.calls.filter(call => call.name === "query_evidence").length, 0);
   assert.equal(first.document.querySelector('[aria-label="Commit records"]'), null);
   assert.equal(first.document.querySelector('[aria-label="Pull request records"]'), null);
@@ -392,6 +393,7 @@ test("Pull requests has separate Open and Merged inventories and exact selected 
   await waitFor(() => Boolean(first.selectedContext()?.bucketStart), "retained Activity selection");
   button(first.document, "Pull requests").click();
   await waitFor(() => first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 3, "Open PR inventory");
+  const refreshedSnapshot = first.selectedContext().snapshotId;
   assert.equal(first.document.querySelector('[aria-label="Daily commits"]'), null);
   assert.equal(first.document.querySelector('[aria-label="Activity evidence"]'), null);
   assert.equal(first.selectedContext().view, "pullRequests");
@@ -413,7 +415,7 @@ test("Pull requests has separate Open and Merged inventories and exact selected 
   await waitFor(() => first.messages.length === 1, "PR follow-up");
   assert.match(humanMessage(first.messages[0], first.selectedContext()), /pull request|PR/i);
   assert.equal(first.selectedContext().pullRequestId, "sample/web#9");
-  assert.equal(first.selectedContext().snapshotId, initial.snapshotId);
+  assert.equal(first.selectedContext().snapshotId, refreshedSnapshot);
   assert.equal(first.selectedContext().bucketStart, null);
   button(first.document, "Close pull request details").click();
   await waitFor(() => first.document.querySelector('[aria-label="Pull request details"]') === null, "dismissed PR detail");
@@ -787,6 +789,7 @@ test("same-snapshot refresh progress keeps PR pages and selections while externa
   await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1 && first.document.querySelectorAll('[aria-label="Pull request records"] [data-pr-id]').length === 4, "paged PR selection");
   const originalSnapshot = first.selectedContext().snapshotId;
   const evidenceCalls = first.calls.filter(call => call.name === "query_evidence").length;
+  const sourceCalls = first.calls.filter(call => call.name === "refresh_sources").length;
   workspace.refresh = refreshProgress(1, 0);
   await waitFor(() => processed(first.document, "Git") === 1, "external refresh progress");
   assert.equal(refreshButton(first.document).disabled, true);
@@ -802,7 +805,7 @@ test("same-snapshot refresh progress keeps PR pages and selections while externa
   await waitFor(() => refreshSection(first.document)?.textContent?.includes("was cancelled") === true && !refreshButton(first.document).disabled, "cancelled refresh progress");
   assert.equal(refreshSection(first.document)?.querySelector("progress"), null);
   assert.deepEqual(first.selectedContext().selectedPullRequests?.map(pr => pr.id), ["sample/api#10"]);
-  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, sourceCalls);
   assert.equal(first.calls.filter(call => call.name === "query_evidence").length, evidenceCalls);
   assert.deepEqual(first.errors, []);
 });
@@ -1058,7 +1061,7 @@ test("text-only context hosts receive assistant-only background data and human a
     }
   }
   const pr = workspace.prs.find(item => item.id === "sample/api#10")!;
-  assert.equal(first.selectedContext().snapshotId, initial.snapshotId);
+  assert.equal(first.selectedContext().snapshotId, workspace.snapshot(initial.boardId).snapshotId);
   assert.deepEqual(first.selectedContext().selectedPullRequests, [pr]);
   button(first.document, "Request code reviews").click();
   await waitFor(() => first.messages.length === 1, "text-only host review action");
@@ -1077,6 +1080,223 @@ test("unsupported background context never falls back to posting selection data 
   assert.equal(button(first.document, "Share selection").disabled, true);
   button(first.document, "Request code reviews").click();
   assert.equal(first.contexts.length, 0);
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("activating PRs refreshes source data with progress and coalesces re-entry during collection", async t => {
+  const workspace = new Workspace();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let attempts = 0;
+  workspace.refreshOperation = async () => {
+    attempts += 1;
+    workspace.refresh = { ...refreshProgress(1, 0), id: `activation-${attempts}` };
+    await gate;
+    workspace.prs.find(pr => pr.id === "sample/api#10")!.title = `Source refresh ${attempts}`;
+    workspace.refresh = { ...refreshProgress(2, 2, "complete", "Source refresh completed."), id: `activation-${attempts}` };
+  };
+  const first = await panel(workspace, workspace.open());
+  t.after(async () => { release(); await first.close(); });
+  const initialSnapshot = first.selectedContext().snapshotId;
+  assert.equal(first.calls.some(call => call.name === "refresh_sources"), false);
+  button(first.document, "Pull requests").click();
+  await waitFor(() => attempts === 1 && first.calls.filter(call => call.name === "refresh_sources").length === 1, "automatic PR collection");
+  await waitFor(() => processed(first.document, "Git") === 1, "automatic refresh progress");
+  assert.equal(refreshButton(first.document).disabled, true);
+  button(first.document, "Pull requests").click();
+  button(first.document, "People").click();
+  button(first.document, "Pull requests").click();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(attempts, 1);
+  release();
+  await waitFor(() => first.document.querySelector('[aria-label="Pull request records"]')?.textContent?.includes("Source refresh 1") === true && !refreshButton(first.document).disabled, "fresh PR inventory after activation");
+  assert.notEqual(first.selectedContext().snapshotId, initialSnapshot);
+  assert.equal(first.messages.length, 0);
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  button(first.document, "Activity").click();
+  button(first.document, "Pull requests").click();
+  await waitFor(() => attempts === 2 && first.document.querySelector('[aria-label="Pull request records"]')?.textContent?.includes("Source refresh 2") === true, "new refresh on later PR activation");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 2);
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("opening directly into PRs collects once while rows, filters, sorting, and polls remain read-only", async t => {
+  const workspace = new Workspace();
+  workspace.collected = false;
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null && !refreshButton(first.document).disabled, "direct PR opening collected sources");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  checkbox(first.document, "Select sample/api#10").click();
+  button(first.document, "Select pull request #9: An older draft still open").click();
+  await waitFor(() => first.selectedContext()?.selectedPullRequests?.length === 1 && first.selectedContext()?.pullRequestId === "sample/web#9", "PR interaction after auto collection");
+  button(first.document, "Sort by Author").click();
+  await waitFor(() => first.selectedContext()?.pullRequestSort === "author", "PR sort after auto collection");
+  choose(first.document, "Repository", "sample/api");
+  await waitFor(() => first.selectedContext()?.query.repository === "sample/api" && !refreshButton(first.document).disabled, "PR filter after auto collection");
+  button(first.document, "Merged").click();
+  await waitFor(() => first.selectedContext()?.pullRequestState === "merged", "merged inventory");
+  button(first.document, "Open").click();
+  await waitFor(() => first.selectedContext()?.pullRequestState === "open" && first.document.querySelector('[aria-label="Select sample/api#10"]') !== null, "open inventory");
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("a PR activation reuses an external refresh without queuing another after it finishes", async t => {
+  const workspace = new Workspace();
+  workspace.refresh = refreshProgress(1, 0);
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => processed(first.document, "Git") === 1, "external source refresh on PR opening");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  button(first.document, "People").click();
+  button(first.document, "Pull requests").click();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  workspace.refresh = refreshProgress(2, 2, "complete", "External source refresh completed.");
+  await waitFor(() => refreshSection(first.document)?.textContent?.includes("External source refresh completed.") === true && !refreshButton(first.document).disabled, "external refresh completion");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  button(first.document, "Activity").click();
+  button(first.document, "Pull requests").click();
+  await waitFor(() => first.calls.filter(call => call.name === "refresh_sources").length === 1, "new activation after external completion");
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("PR activation without configured repositories stays passive", async t => {
+  const workspace = new Workspace();
+  workspace.configured = false;
+  workspace.collected = false;
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[aria-label="Configure repositories"]') !== null, "PR setup view");
+  assert.match(first.document.querySelector('[aria-label="Configure repositories"]')?.textContent ?? "", /BigBoard Configure/);
+  assert.equal(first.document.querySelector("button.configure-sources"), null);
+  button(first.document, "People").click();
+  button(first.document, "Pull requests").click();
+  await waitFor(() => first.selectedContext()?.view === "pullRequests", "unconfigured PR reactivation");
+  assert.equal(first.calls.some(call => ["refresh_sources", "configure_sources"].includes(call.name)), false);
+  workspace.configured = true;
+  workspace.generation += 1;
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null && !refreshButton(first.document).disabled, "first configured PR collection");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("failed automatic PR refreshes stop once and allow manual or later activation retry", async t => {
+  const workspace = new Workspace();
+  workspace.refreshFailure = "Source refresh failed. Try again.";
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
+  t.after(first.close);
+  await waitFor(() => first.document.querySelector('[role="alert"]')?.textContent?.includes("Source refresh failed") === true && !refreshButton(first.document).disabled, "automatic source failure");
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  workspace.refreshFailure = null;
+  const failedSnapshot = first.selectedContext().snapshotId;
+  refreshButton(first.document).click();
+  await waitFor(() => first.selectedContext()?.snapshotId !== failedSnapshot && first.document.querySelector('[aria-label="Select sample/api#10"]') !== null && !refreshButton(first.document).disabled, "manual retry after automatic failure");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 2);
+  button(first.document, "Activity").click();
+  button(first.document, "Pull requests").click();
+  await waitFor(() => first.calls.filter(call => call.name === "refresh_sources").length === 3 && !refreshButton(first.document).disabled, "later automatic retry");
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("choosing Activity before the initial PR snapshot arrives cancels automatic collection", async t => {
+  const workspace = new Workspace();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" }, "structured", { waitForInitialContext: false, initialResult: gate });
+  t.after(async () => { release(); await first.close(); });
+  button(first.document, "Activity").click();
+  release();
+  await waitFor(() => first.selectedContext()?.view === "activity" && dailyButtons(first.document).length === 7, "Activity selected during PR startup");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("entering PRs during a viewing-filter update waits for the latest scope before refreshing", async t => {
+  const workspace = new Workspace();
+  const originalTool = workspace.tool.bind(workspace);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let updating = false;
+  workspace.tool = async params => {
+    const result = await originalTool(params);
+    if (params.name === "update_board") {
+      updating = true;
+      await gate;
+    }
+    return result;
+  };
+  const first = await panel(workspace, workspace.open());
+  t.after(async () => { release(); await first.close(); });
+  choose(first.document, "Repository", "sample/api");
+  await waitFor(() => updating, "pending viewing-filter update");
+  button(first.document, "Pull requests").click();
+  await waitFor(() => first.selectedContext()?.view === "pullRequests", "PR view selected during update");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 0);
+  assert.equal(first.calls.filter(call => call.name === "query_evidence").length, 0);
+  release();
+  await waitFor(() => first.document.querySelector('[aria-label="Select sample/api#10"]') !== null && !refreshButton(first.document).disabled, "PR collection after filter update");
+  assert.equal(first.selectedContext().query.repository, "sample/api");
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
+  assert.ok(!prTable(first.document).textContent?.includes("sample/web"));
+  assert.equal(first.messages.length, 0);
+  assert.deepEqual(first.errors, []);
+});
+
+test("a newer poll superseding the refresh completion read delays PR evidence until the fresh snapshot arrives", async t => {
+  const workspace = new Workspace();
+  const originalTool = workspace.tool.bind(workspace);
+  let releaseFinal!: () => void;
+  let releasePoll!: () => void;
+  const finalGate = new Promise<void>(resolve => { releaseFinal = resolve; });
+  const pollGate = new Promise<void>(resolve => { releasePoll = resolve; });
+  let holdReads = false;
+  let heldReads = 0;
+  let finalReturned = false;
+  workspace.refreshOperation = async () => {
+    workspace.prs.find(pr => pr.id === "sample/api#10")!.title = "Current source snapshot";
+    workspace.refresh = refreshProgress(2, 2, "complete", "Source refresh completed.");
+    holdReads = true;
+  };
+  workspace.tool = async params => {
+    const result = await originalTool(params);
+    if (params.name === "read_board" && holdReads) {
+      heldReads += 1;
+      if (heldReads === 1) {
+        await finalGate;
+        finalReturned = true;
+      } else if (heldReads === 2) await pollGate;
+    }
+    return result;
+  };
+  const first = await panel(workspace, workspace.open());
+  t.after(async () => { releaseFinal(); releasePoll(); await first.close(); });
+  const oldSnapshot = first.selectedContext().snapshotId;
+  button(first.document, "Pull requests").click();
+  await waitFor(() => heldReads === 1, "held refresh completion read");
+  await waitFor(() => heldReads === 2, "newer poll overtook the completion read");
+  releaseFinal();
+  await waitFor(() => finalReturned && !refreshButton(first.document).disabled, "older completion read discarded");
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(first.calls.filter(call => call.name === "query_evidence").length, 0);
+  assert.equal(first.document.querySelector('[role="alert"]'), null);
+  releasePoll();
+  await waitFor(() => first.selectedContext()?.snapshotId !== oldSnapshot && first.document.querySelector('[aria-label="Pull request records"]')?.textContent?.includes("Current source snapshot") === true, "fresh PR evidence after pending poll");
+  const evidence = first.calls.filter(call => call.name === "query_evidence");
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].arguments?.snapshot_id, first.selectedContext().snapshotId);
+  assert.equal(first.calls.filter(call => call.name === "refresh_sources").length, 1);
   assert.equal(first.messages.length, 0);
   assert.deepEqual(first.errors, []);
 });

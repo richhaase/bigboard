@@ -92,9 +92,15 @@ export class BoardController {
   };
   private listeners = new Set<() => void>();
   private connected = false;
+  private viewReady = false;
+  private viewChosen = false;
+  private viewActivation = 0;
+  private pendingPullRequestActivation: number | null = null;
+  private pendingPullRequestLoad = false;
   private destroyed = false;
   private syncing = false;
   private boardReadSequence = 0;
+  private appliedBoardReadSequence = 0;
   private evidenceSequence = 0;
   private peopleSequence = 0;
   private contextSequence = 0;
@@ -113,8 +119,14 @@ export class BoardController {
 
   private setState(patch: Partial<BoardViewState>): void {
     if (this.destroyed) return;
+    const wasBusy = this.state.busy;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((listener) => listener());
+    if (wasBusy && !this.state.busy && this.pendingPullRequestActivation !== null) {
+      const activation = this.pendingPullRequestActivation;
+      this.pendingPullRequestActivation = null;
+      void Promise.resolve().then(() => this.activateView(activation));
+    }
   }
 
   private clearEvidence(patch: Partial<BoardViewState> = {}): void {
@@ -147,9 +159,13 @@ export class BoardController {
       this.connected = true;
       if (this.state.snapshot) {
         await this.refresh();
-        void this.loadView();
-        void this.shareSelection();
-      } else this.setState({ phase: "waiting" });
+        if (this.destroyed) return;
+        this.viewReady = true;
+        void this.activateView(this.viewActivation);
+      } else {
+        this.viewReady = true;
+        this.setState({ phase: "waiting" });
+      }
       if (this.pollMilliseconds > 0) {
         this.poll = setInterval(() => {
           if (typeof document === "undefined" || document.visibilityState !== "hidden") void this.refresh();
@@ -172,7 +188,7 @@ export class BoardController {
           incoming.git.completedRepositories < prior.git.completedRepositories ||
           incoming.github.completedRepositories < prior.github.completedRepositories || incoming.github.requests < prior.github.requests))) return;
     }
-    const openingView = ["activity", "pullRequests", "people"].includes(snapshot.initialView ?? "") ? snapshot.initialView : undefined;
+    const openingView = (!previous && this.viewChosen) || !["activity", "pullRequests", "people"].includes(snapshot.initialView ?? "") ? undefined : snapshot.initialView;
     if (previous?.snapshotId === snapshot.snapshotId) {
       if (JSON.stringify(previous.refresh ?? null) !== JSON.stringify(snapshot.refresh ?? null)) this.setState({ snapshot });
       if (openingView && openingView !== this.state.view) void this.setView(openingView);
@@ -180,34 +196,69 @@ export class BoardController {
     }
     const selectedBucket = snapshot.buckets.some((bucket) => bucket.start === this.state.selectedBucket) ? this.state.selectedBucket : null;
     const view = openingView ?? this.state.view;
+    const sourcesBecameAvailable = view === "pullRequests" && previous?.configuration.repositories.length === 0 && snapshot.configuration.repositories.length > 0;
+    const activated = !previous || view !== this.state.view || sourcesBecameAvailable;
+    if (activated) {
+      this.viewActivation += 1;
+      this.pendingPullRequestActivation = null;
+    }
     const clearedSelection = this.state.selectedPullRequests.length > 0;
     this.clearPeople();
     this.clearEvidence({ snapshot, view, selectedBucket, selectedPullRequestId: null, selectedPullRequests: [], phase: "ready", contextReady: false, contextFailed: false, ...(clearedSelection ? { notice: "PR selection cleared because the board snapshot changed." } : {}) });
-    if (this.connected) {
-      void this.loadView();
-      void this.shareSelection();
+    if (this.connected && this.viewReady) {
+      if (activated) void this.activateView(this.viewActivation);
+      else {
+        void this.loadView();
+        void this.shareSelection();
+      }
     }
+  }
+
+  private async activateView(activation: number): Promise<void> {
+    if (!this.connected || !this.viewReady || this.destroyed || activation !== this.viewActivation) return;
+    const sharing = this.shareSelection();
+    if (this.state.view === "pullRequests" && this.state.snapshot?.configuration.repositories.length) {
+      if (!this.state.sourceRefreshing && this.state.snapshot.refresh?.status !== "running") {
+        if (this.state.busy) {
+          this.pendingPullRequestActivation = activation;
+          await sharing;
+        } else await Promise.all([this.refreshSources(), sharing]);
+        return;
+      }
+    }
+    await Promise.all([this.loadView(), sharing]);
   }
 
   async refresh(): Promise<void> {
     const snapshot = this.state.snapshot;
     if (!this.connected || !snapshot || this.syncing || this.destroyed) return;
     this.syncing = true;
+    let readSucceeded = false;
     try {
       await this.readLatestBoard(snapshot.boardId);
+      readSucceeded = true;
       if (this.state.error === this.refreshError) this.setState({ error: null });
       this.refreshError = null;
     } catch {
       this.refreshError = "The board could not refresh. Your last view is still here. Try again.";
       this.setState({ error: this.refreshError });
-    } finally { this.syncing = false; }
+    } finally {
+      this.syncing = false;
+      if (readSucceeded && this.appliedBoardReadSequence === this.boardReadSequence && this.pendingPullRequestLoad && !this.state.sourceRefreshing && this.state.view === "pullRequests") {
+        this.pendingPullRequestLoad = false;
+        if (!this.state.pullRequests.length && !this.state.evidenceLoading) await Promise.all([this.loadView(), this.shareSelection()]);
+      }
+    }
   }
 
   private async readLatestBoard(boardId: string): Promise<void> {
     const sequence = ++this.boardReadSequence;
     try {
       const snapshot = snapshotFromResult(await this.bridge.callTool("read_board", { board_id: boardId }));
-      if (sequence === this.boardReadSequence && !this.destroyed) this.acceptSnapshot(snapshot);
+      if (sequence === this.boardReadSequence && !this.destroyed) {
+        this.acceptSnapshot(snapshot);
+        this.appliedBoardReadSequence = sequence;
+      }
     } catch (error) {
       if (sequence === this.boardReadSequence && !this.destroyed) throw error;
     }
@@ -215,8 +266,11 @@ export class BoardController {
 
   async refreshSources(): Promise<void> {
     if (!this.connected || this.state.busy || this.destroyed || this.state.snapshot?.refresh?.status === "running") return;
+    this.pendingPullRequestActivation = null;
+    this.pendingPullRequestLoad = false;
     this.boardReadSequence += 1;
-    this.setState({ busy: true, sourceRefreshing: true, sourceRefreshPreviousId: this.state.snapshot?.refresh?.id ?? null, error: null, notice: null });
+    if (this.state.view === "pullRequests") this.evidenceSequence += 1;
+    this.setState({ busy: true, sourceRefreshing: true, sourceRefreshPreviousId: this.state.snapshot?.refresh?.id ?? null, error: null, notice: null, ...(this.state.view === "pullRequests" ? { evidenceLoading: false } : {}) });
     try {
       toolError(await this.bridge.callTool("refresh_sources", {}));
       const snapshot = this.state.snapshot;
@@ -224,8 +278,18 @@ export class BoardController {
       this.setState({ notice: this.state.snapshot?.refresh ? null : "Sources refreshed." });
     } catch (error) {
       this.setState({ error: this.errorMessage(error) });
-      await this.refresh();
-    } finally { this.setState({ busy: false, sourceRefreshing: false }); }
+      const snapshot = this.state.snapshot;
+      if (snapshot) {
+        try { await this.readLatestBoard(snapshot.boardId); }
+        catch {}
+      }
+    } finally {
+      this.setState({ busy: false, sourceRefreshing: false });
+      if (this.state.view === "pullRequests" && !this.state.pullRequests.length && !this.state.evidenceLoading) {
+        if (this.appliedBoardReadSequence !== this.boardReadSequence) this.pendingPullRequestLoad = true;
+        else await Promise.all([this.loadView(), this.shareSelection()]);
+      }
+    }
   }
 
   async retry(): Promise<void> {
@@ -256,10 +320,15 @@ export class BoardController {
   }
 
   async setView(view: BoardViewMode): Promise<void> {
-    if (view === this.state.view || this.destroyed) return;
+    if (this.destroyed) return;
+    this.viewChosen = true;
+    if (view === this.state.view) return;
+    const activation = ++this.viewActivation;
+    this.pendingPullRequestActivation = null;
+    this.pendingPullRequestLoad = false;
     this.clearPeople();
     this.clearEvidence({ view, selectedPullRequestId: null, selectedPullRequests: [], contextReady: false, contextFailed: false, error: null, notice: null });
-    await Promise.all([this.loadView(), this.shareSelection()]);
+    await this.activateView(activation);
   }
 
   async setPeopleSource(peopleSource: PeopleSource): Promise<void> {
@@ -370,7 +439,7 @@ export class BoardController {
     const pullRequestSort = this.state.pullRequestSort;
     const sortDirection = this.state.sortDirection;
     const kind = view === "activity" || (view === "people" && this.state.peopleSource === "git") ? "activity" : "pull_requests";
-    if (!snapshot || !this.connected || this.destroyed || !snapshot.collectedAt || !snapshot.configuration.repositories.length || (view === "activity" && !bucketStart) || (view === "people" && !personId)) return;
+    if (!snapshot || !this.connected || this.destroyed || !snapshot.collectedAt || !snapshot.configuration.repositories.length || (view === "pullRequests" && (this.state.sourceRefreshing || this.pendingPullRequestActivation !== null)) || (view === "activity" && !bucketStart) || (view === "people" && !personId)) return;
     const cursor = append ? this.state.nextCursor : null;
     const sequence = ++this.evidenceSequence;
     this.setState({ evidenceLoading: true });
@@ -445,6 +514,10 @@ export class BoardController {
   async destroy(closeBridge = true): Promise<void> {
     this.destroyed = true;
     this.connected = false;
+    this.viewReady = false;
+    this.viewActivation += 1;
+    this.pendingPullRequestActivation = null;
+    this.pendingPullRequestLoad = false;
     this.boardReadSequence += 1;
     this.evidenceSequence += 1;
     this.peopleSequence += 1;
