@@ -5,6 +5,9 @@ description: Inspect and update BigBoard configuration when the user asks to set
 
 # BigBoard Configure
 
+Invoke this workflow as `bigboard:configure`, or ask naturally to change
+BigBoard configuration.
+
 Use the bundled BigBoard tools to turn the user's requested configuration change
 into saved settings. Inspect the relevant current state first. If the request is
 general, explain what is configured and ask which change they want. When the

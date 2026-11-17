@@ -1,4 +1,4 @@
-# BigBoard MCP app
+# BigBoard plugin
 
 Explore real Git history and GitHub pull requests in focused views. Activity
 opens with a chart and a small summary. Select an interval to reveal its
@@ -21,19 +21,35 @@ needs no `npm install` or build step when installed from the marketplace.
 
 ```sh
 codex plugin marketplace add richhaase/bigboard --ref codex/bigboard-mcp-app
-codex plugin add bigboard-mcp-app@bigboard-mcp
+codex plugin add bigboard@bigboard-mcp
 ```
 
 For later pushed versions:
 
 ```sh
 codex plugin marketplace upgrade bigboard-mcp
-codex plugin add bigboard-mcp-app@bigboard-mcp
+codex plugin add bigboard@bigboard-mcp
 ```
 
-Start a new local chat after upgrading and select **BigBoard MCP**, so its
-server and skill use the installed version. Check that version with
-`codex plugin list --marketplace bigboard-mcp`.
+If the older `bigboard-mcp-app` plugin is installed, run the update commands
+above first, then verify that `bigboard@bigboard-mcp` is installed and enabled:
+
+```sh
+codex plugin list --marketplace bigboard-mcp
+```
+
+After verifying the new installation, remove the old plugin to avoid duplicate
+tools and skills:
+
+```sh
+codex plugin remove bigboard-mcp-app@bigboard-mcp
+```
+
+Saved source settings, evidence, and boards remain in the existing state
+directory outside the plugin cache, so this rename does not move or reset them.
+Start a new local chat after upgrading and select **BigBoard**, so its server
+and skills use the installed version. The skill IDs are `bigboard:explore` and
+`bigboard:configure`, with no custom title override.
 
 ## Configure and collect
 
@@ -52,7 +68,7 @@ Alternatively, provide absolute existing clone paths through
 and its revision. Pass that revision when changing sources. Source settings
 are shared by boards; viewing filters remain independent for each board.
 
-Use the **BigBoard Configure** skill, or ask naturally: “Change BigBoard's
+Use the `bigboard:configure` skill, or ask naturally: “Change BigBoard's
 configuration,” “Add this local clone to BigBoard,” or “Show two weeks on this
 board.” The skill inspects current settings, clarifies unspecified choices,
 and updates shared sources or this board's viewing filters through the
@@ -237,7 +253,7 @@ interval. Shortened record-ID and file lists remain explicitly marked.
    request completes. Check a refresh started by the agent too. Coverage gaps,
    cancellation, and interruption must show an honest final outcome. Progress
    updates alone must not reset evidence paging or checkbox selections.
-10. Check source details and an empty board for guidance to BigBoard Configure.
+10. Check source details and an empty board for guidance to `bigboard:configure`.
     Ask the agent to change source selection or board filters, and verify the
     skill distinguishes shared collection settings from per-board viewing.
 
@@ -261,8 +277,10 @@ pinned to MCP SDK 1.32.2 and MCP Apps 1.7.5.
 
 The server launches with `node bundle/server.cjs`. Its SQLite state is under
 `$XDG_STATE_HOME/bigboard-mcp-app`, or `~/.local/state/bigboard-mcp-app` when
-unset. `BIGBOARD_STATE_DIR` overrides it for isolated tests. It stores source
-settings, collected evidence, and board queries, separately from native data.
+unset. This legacy directory name is retained across the plugin rename to
+preserve existing data. `BIGBOARD_STATE_DIR` overrides it for isolated tests.
+It stores source settings, collected evidence, and board queries, separately
+from native data.
 The native settings import honors `BIGBOARD_CONFIG_ROOT` or the usual
 `$XDG_CONFIG_HOME/bigboard/config.json`. Tokens are never persisted.
 

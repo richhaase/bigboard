@@ -5,6 +5,9 @@ description: Open and discuss BigBoard Activity, People, and Pull requests views
 
 # BigBoard exploration
 
+Invoke this workflow as `bigboard:explore`, or ask naturally to open or discuss
+BigBoard.
+
 Use the bundled BigBoard tools. The collection selection is shared; each board
 keeps independent viewing filters. Git activity, PR merges, and current open
 PRs describe different events. Merged does not establish deployed.
@@ -12,7 +15,7 @@ PRs describe different events. Merged does not establish deployed.
 ## Sources and freshness
 
 Use `list_sources` to inspect the saved collection. For configuration requests,
-use the [BigBoard Configure skill](../configure/SKILL.md).
+use [`bigboard:configure`](../configure/SKILL.md).
 It handles shared source selection and per-board viewing settings, including
 natural requests to change BigBoard's configuration.
 

@@ -1175,7 +1175,7 @@ test("PR activation without configured repositories stays passive", async t => {
   const first = await panel(workspace, { ...workspace.open(), initialView: "pullRequests" });
   t.after(first.close);
   await waitFor(() => first.document.querySelector('[aria-label="Configure repositories"]') !== null, "PR setup view");
-  assert.match(first.document.querySelector('[aria-label="Configure repositories"]')?.textContent ?? "", /BigBoard Configure/);
+  assert.match(first.document.querySelector('[aria-label="Configure repositories"]')?.textContent ?? "", /bigboard:configure/);
   assert.equal(first.document.querySelector("button.configure-sources"), null);
   button(first.document, "People").click();
   button(first.document, "Pull requests").click();

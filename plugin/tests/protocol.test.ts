@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -8,7 +8,7 @@ import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { BOARD_RESOURCE_URI, type BoardSnapshot, type EvidenceResult, type PeopleResult, type SourceConfiguration } from "../src/shared";
+import { APP_VERSION, BOARD_RESOURCE_URI, type BoardSnapshot, type EvidenceResult, type PeopleResult, type SourceConfiguration } from "../src/shared";
 
 const exec = promisify(execFile);
 type ToolResult = Awaited<ReturnType<Client["callTool"]>>;
@@ -52,11 +52,13 @@ async function installation(t: TestContext) {
     paths.push(path);
   }
   const clients = new Set<Client>();
+  const stateRoot = join(root, "state");
+  const stateDirectory = join(stateRoot, "bigboard-mcp-app");
   t.after(async () => { await Promise.all([...clients].map(client => client.close())); await rm(root, { recursive: true, force: true }); });
   const start = async () => {
     const client = new Client({ name: "real-source-protocol-test", version: "1.0.0" });
     const transport = new StdioClientTransport({ command: process.execPath, args: [join(installed, "server.cjs")], cwd: installed,
-      env: { ...getDefaultEnvironment(), PATH: bin + delimiter + (process.env.PATH ?? ""), BIGBOARD_STATE_DIR: join(root, "state") }, stderr: "pipe" });
+      env: { ...getDefaultEnvironment(), PATH: bin + delimiter + (process.env.PATH ?? ""), XDG_STATE_HOME: stateRoot, BIGBOARD_STATE_DIR: "" }, stderr: "pipe" });
     let stderr = "";
     transport.stderr?.on("data", data => { stderr += String(data); });
     clients.add(client);
@@ -66,12 +68,14 @@ async function installation(t: TestContext) {
   };
   const stop = async (client: Client) => { await client.close(); clients.delete(client); };
   const configure = async (client: Client) => value<SourceConfiguration>(await client.callTool({ name: "configure_sources", arguments: { paths, expected_revision: 0 } }));
-  return { paths, start, stop, configure };
+  return { paths, start, stop, configure, stateDirectory };
 }
 
 test("clean installed bundle exposes source tools and keeps polling calls headless", async t => {
-  const { start, configure } = await installation(t);
+  const { start, configure, stateDirectory } = await installation(t);
   const client = await start();
+  assert.equal(client.getServerVersion()?.name, "bigboard");
+  assert.equal(client.getServerVersion()?.version, APP_VERSION);
   const inventory = await client.listTools();
   assert.deepEqual(inventory.tools.map(tool => tool.name).sort(), ["configure_sources", "list_sources", "open_board", "query_evidence", "query_people", "read_board", "refresh_sources", "update_board"]);
   const opener = inventory.tools.find(tool => tool.name === "open_board");
@@ -100,6 +104,7 @@ test("clean installed bundle exposes source tools and keeps polling calls headle
   assert.equal(before.configuration.repositories.length, 0);
   assert.equal(before.coverage.complete, false);
   const configured = await configure(client);
+  await access(join(stateDirectory, "boards.sqlite"));
   assert.equal(configured.revision, 1);
   assert.equal(configured.repositories.length, 2);
   assert.deepEqual(value<SourceConfiguration>(await client.callTool({ name: "list_sources", arguments: {} })), configured);
@@ -189,6 +194,8 @@ test("server restart preserves selected sources and board query while requiring 
   const updated = board(await original.callTool({ name: "update_board", arguments: { board_id: initial.boardId, expected_revision: initial.revision, repository: "example/other", days: 14 } }));
   await stop(original);
   const restarted = await start();
+  assert.equal(restarted.getServerVersion()?.name, "bigboard");
+  assert.equal(restarted.getServerVersion()?.version, APP_VERSION);
   const reopened = board(await restarted.callTool({ name: "open_board", arguments: { board_id: initial.boardId } }));
   assert.equal(reopened.boardId, updated.boardId);
   assert.equal(reopened.revision, updated.revision);

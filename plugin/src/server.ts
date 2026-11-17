@@ -36,7 +36,7 @@ async function result(operation: () => Promise<unknown>): Promise<CallToolResult
   }
 }
 export function createBigboardServer(html: string, store: BoardStore): McpServer {
-  const server = new McpServer({ name: "bigboard-mcp-app", version: APP_VERSION });
+  const server = new McpServer({ name: "bigboard", version: APP_VERSION });
   const resourceMeta = { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } };
   registerAppResource(server, "BigBoard", BOARD_RESOURCE_URI,
     { description: "Git Activity, Pull requests, and People views", _meta: resourceMeta },

@@ -21,7 +21,10 @@ branch and preserve its history with follow-up commits. Keep `main` as the
 native app baseline until Rich requests a merge.
 
 The `bigboard-mcp` repo marketplace tracks this branch when installed with the
-guide's commands. For each installable change, bump `plugin/plugin.json` and
+guide's commands. The plugin is `bigboard`, exposing `bigboard:explore` and
+`bigboard:configure`. Keep its existing `bigboard-mcp-app` state directory so
+renaming the plugin does not reset saved sources or boards. For each installable
+change, bump `plugin/plugin.json` and
 `plugin/package.json` together, refresh the lockfile and bundles, and run the
 plugin checks before pushing. Run Node commands from `plugin/` with `fnm exec`
 to use its `.node-version`. Bundles are committed so installing the plugin
