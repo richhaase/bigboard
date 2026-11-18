@@ -1,5 +1,12 @@
 # Bigboard
 
+## Archived repository
+
+Future BigBoard development lives in the
+[BigBoard plugin in toolshed](https://github.com/richhaase/toolshed/tree/main/plugins/bigboard).
+This repository is an archived record of the native macOS app. Make future
+BigBoard changes in toolshed; the instructions below describe the archived code.
+
 Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Charts.
 
 ## Layout

@@ -1,4 +1,12 @@
-# Bigboard
+# Bigboard (archived)
+
+> [!IMPORTANT]
+> BigBoard development has moved to the
+> [BigBoard MCP app plugin in toolshed](https://github.com/richhaase/toolshed/tree/main/plugins/bigboard).
+> This repository is archived, and the native macOS app is no longer maintained.
+> Use toolshed for current installation instructions and future BigBoard development.
+
+The documentation below is retained for the original native macOS app.
 
 A native macOS app for understanding activity across your GitHub repositories:
 where change happened, who contributed, and which pull requests need attention.
