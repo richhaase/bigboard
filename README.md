@@ -4,11 +4,10 @@ A native macOS app for understanding activity across your GitHub repositories:
 where change happened, who contributed, and which pull requests need attention.
 Inspired by Hiro Protagonist’s Big Board in Neal Stephenson’s *Snow Crash*.
 
-An experimental [MCP app plugin](plugin/README.md) is being rebuilt on
-`codex/bigboard-mcp-app`. It now connects real local Git history and GitHub
-pull requests to focused Activity and Pull requests views with selected
-supporting evidence and agent discussion. The native app below remains
-available during that work.
+The [BigBoard MCP app plugin](https://github.com/richhaase/toolshed/tree/main/plugins/bigboard)
+lives in the toolshed marketplace as `bigboard@toolshed`. It provides Activity,
+People, and Pull requests views with supporting evidence and agent discussion.
+This repository maintains the native macOS app below.
 
 ## Install
 

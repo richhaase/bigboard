@@ -10,34 +10,18 @@ Native Swift 6 app for macOS 26 Tahoe or later, using SwiftUI, AppKit, and Chart
 - `Sources/BigboardCLI`: the `bigboard` command, dispatched from the app executable.
 - `Sources/BigboardCore`: GitHub, authentication, Git history, analysis, and storage.
 - `Tests`: native tests; `scripts`: app packaging and release checks.
-- `plugin/`: Git/GitHub MCP server, web app, packaged skill, and committed
-  installable bundles. See [the plugin guide](plugin/README.md).
 
-## MCP app integration branch
+## MCP app plugin
 
-`codex/bigboard-mcp-app` is the integration baseline for the MCP rebuild, with
-the managed worktree named `bigboard-mcp-app`. Base follow-up MCP work on this
-branch and preserve its history with follow-up commits. Keep `main` as the
-native app baseline until Rich requests a merge.
+The MCP server, web app, and `bigboard:explore` and `bigboard:configure` skills
+have moved to [toolshed](https://github.com/richhaase/toolshed/tree/main/plugins/bigboard).
+Make plugin changes in `plugins/bigboard/` in that repository, following its
+instructions. The marketplace identity is `bigboard@toolshed`; the existing
+`bigboard-mcp-app` state directory remains unchanged to preserve saved sources
+and boards. This repository owns the native macOS app.
 
-The `bigboard-mcp` repo marketplace tracks this branch when installed with the
-guide's commands. The plugin is `bigboard`, exposing `bigboard:explore` and
-`bigboard:configure`. Keep its existing `bigboard-mcp-app` state directory so
-renaming the plugin does not reset saved sources or boards. For each installable
-change, bump `plugin/plugin.json` and
-`plugin/package.json` together, refresh the lockfile and bundles, and run the
-plugin checks before pushing. Run Node commands from `plugin/` with `fnm exec`
-to use its `.node-version`. Bundles are committed so installing the plugin
-does not require a compiler, dependency download, or install script.
-
-The plugin uses real local Git history and GitHub PR data. Source settings,
-collected evidence, and boards live separately from native data. Importing the
-native repository selection is read-only. Collection never fetches or modifies
-clones. Activating the Pull requests view refreshes sources automatically;
-other views use manual refresh. Viewing filters and polling read completed
-snapshots. Preserve per-repository coverage, account access invalidation, and
-snapshot-bound evidence paging. Verify protocol and rendered UI with plugin
-tests; record desktop-host interaction separately with the guide's checklist.
+`codex/bigboard-mcp-app` retains the rebuild's development history. Keep `main`
+as the native app baseline until Rich requests a merge.
 
 ## Working rules
 

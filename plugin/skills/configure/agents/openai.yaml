@@ -1,3 +1,0 @@
-interface:
-  short_description: "Inspect and change BigBoard configuration"
-  default_prompt: "Use $bigboard:configure to help me change BigBoard configuration."
